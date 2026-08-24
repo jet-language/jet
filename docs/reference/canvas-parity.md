@@ -130,7 +130,7 @@ Vocabulary: [Jet vocabulary](../spec/vocabulary.md).
 - [Expr::Tainted] status=readonly taint marker, source edits.
 - [Expr::Present] status=graph optional present node.
 - [Expr::Absent] status=graph optional absent node.
-- [Expr::Todo] status=readonly typed hole, source edits.
+- [Expr::Todo] status=readonly typed goal, source edits.
 - [Expr::ReduceMarker] status=readonly SIMD marker, source edits.
 - [Expr::PatternTest] status=graph pattern-test node.
 - [Expr::Ok] status=graph fallible ok node.

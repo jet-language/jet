@@ -17,6 +17,7 @@ use jet_foundation::JetTrace::{
 };
 use jet_foundation::ExitCodes;
 use jet_foundation::PerformanceBudget::CanonicalJson;
+use jet_foundation::Report::render_status_json;
 use jet_foundation::SHA256;
 use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1767,7 +1768,7 @@ fn view(args: &[String]) -> i32 {
             ExitCodes::OK
         }
         ViewMode::JSON => {
-            print!("{}", String::from_utf8_lossy(&view_json(&trace, frames).bytes()));
+            print!("{}", render_perf_json("perf.view", view_json(&trace, frames)));
             ExitCodes::OK
         }
         ViewMode::HTML => {
@@ -1955,9 +1956,14 @@ fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
             ),
         ),
         ("trace".into(), trace.clone()),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
     .expect("view json keys are unique")
+}
+
+fn render_perf_json(action: &str, value: CanonicalJson) -> String {
+    let payload = String::from_utf8(value.bytes()).expect("canonical JSON is UTF-8");
+    render_status_json("ok", true, action, &format!(",\"perf\":{payload}"))
 }
 
 fn view_html(trace: &CanonicalJson, frames: FramesMode) -> String {
@@ -2279,6 +2285,7 @@ fn export(args: &[String]) -> i32 {
             return ExitCodes::USAGE;
         }
     };
+    let machine_json = matches!(mode, ExportMode::JSON);
     let projection = match mode {
         ExportMode::JSON => export_json_envelope(&trace),
         ExportMode::Pprof => export_pprof_projection(&trace),
@@ -2286,7 +2293,11 @@ fn export(args: &[String]) -> i32 {
         ExportMode::Chrome => export_chrome_projection(&trace),
         ExportMode::ProfileMap => export_profile_map_projection(&trace),
     };
-    print!("{}", String::from_utf8_lossy(&projection.bytes()));
+    if machine_json {
+        print!("{}", render_perf_json("perf.export", projection));
+    } else {
+        print!("{}", String::from_utf8_lossy(&projection.bytes()));
+    }
     ExitCodes::OK
 }
 
@@ -2317,7 +2328,7 @@ fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
         ("loss".into(), CanonicalJson::String(loss.into())),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("trace".into(), trace.clone()),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
     .expect("projection keys are unique")
 }
@@ -2348,7 +2359,7 @@ fn export_pprof_projection(trace: &CanonicalJson) -> CanonicalJson {
         ("samples".into(), CanonicalJson::Array(samples)),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
     .expect("pprof projection keys are unique")
 }
@@ -2379,7 +2390,7 @@ fn export_otel_projection(trace: &CanonicalJson) -> CanonicalJson {
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("spans".into(), CanonicalJson::Array(spans)),
         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
     .expect("otel projection keys are unique")
 }
@@ -2547,7 +2558,7 @@ fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("traceEvents".into(), CanonicalJson::Array(events)),
         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
     .expect("chrome projection keys are unique")
 }
@@ -2727,7 +2738,7 @@ fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {
         ("source_identity".into(), CanonicalJson::Array(symbols)),
         ("source_maps".into(), CanonicalJson::Array(maps)),
         ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
-        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.to_string())),
     ])
     .expect("profile-map projection keys are unique")
 }

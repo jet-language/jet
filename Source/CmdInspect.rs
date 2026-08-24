@@ -11,6 +11,7 @@ use jet::Sema::GateLedger::{GateKind, GateLedger};
 use jet_foundation::JSON::json_escape;
 use jet_foundation::Policy::{AppliedRule, PolicyScope, RuleResolution, RuleStatus};
 use jet_foundation::Registry;
+use jet_foundation::Report::render_status_json;
 
 /// One checked source projection shared by inspect and compile handlers.
 ///
@@ -216,7 +217,15 @@ pub(crate) fn run_digest(args: &[String], json: bool) {
                 .map(|slice| format!("\"{}\"", json_escape(&slice.topic)))
                 .collect::<Vec<_>>()
                 .join(",");
-            println!("{{\"schema_version\":1,\"topics\":[{topics}]}}");
+            println!(
+                "{}",
+                render_status_json(
+                    "ok",
+                    true,
+                    "inspect.digest",
+                    &format!(",\"digest\":{{\"topics\":[{topics}]}}"),
+                )
+            );
         } else {
             for slice in &slices {
                 println!("{}", slice.topic);
@@ -299,10 +308,19 @@ pub(crate) fn run_env(args: &[String], json: bool) {
             })
             .collect::<Vec<_>>()
             .join(",");
-        println!(
-            "{{\"schema_version\":1,\"file\":\"{}\",\"reads\":[{}]}}",
+        let payload = format!(
+            "{{\"file\":\"{}\",\"reads\":[{}]}}",
             json_escape(&file),
             reads
+        );
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.env",
+                &format!(",\"env\":{payload}"),
+            )
         );
     } else {
         println!("environment");
@@ -321,8 +339,13 @@ pub(crate) fn run_env(args: &[String], json: bool) {
 fn emit_digest(digest: &str, json: bool) {
     if json {
         println!(
-            "{{\"schema_version\":1,\"digest\":\"{}\"}}",
-            json_escape(digest)
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.digest",
+                &format!(",\"digest\":{{\"value\":\"{}\"}}", json_escape(digest)),
+            )
         );
     } else {
         print!("{digest}");
@@ -852,10 +875,19 @@ fn render_provenance_json(
         .map(render_provenance_json_package)
         .collect::<Vec<_>>()
         .join(",");
-    println!(
-        "{{\"schema_version\":1,\"require\":\"{}\",\"packages\":[{}]}}",
+    let payload = format!(
+        "{{\"require\":\"{}\",\"packages\":[{}]}}",
         json_escape(requirement.label()),
         packages
+    );
+    println!(
+        "{}",
+        render_status_json(
+            "ok",
+            true,
+            "inspect.provenance",
+            &format!(",\"provenance\":{payload}"),
+        )
     );
 }
 
@@ -1011,5 +1043,14 @@ fn render_json(report: &jet::Driver::GuaranteeReport, check: &CheckResult) {
         write!(document, "\"{}\"", json_escape(note)).expect("write guarantee JSON");
     }
     document.push_str("]}");
-    println!("{}", with_check_json(document, check));
+    let document = with_check_json(document, check);
+    println!(
+        "{}",
+        render_status_json(
+            "ok",
+            true,
+            "inspect.guarantees",
+            &format!(",\"guarantees\":{document}"),
+        )
+    );
 }

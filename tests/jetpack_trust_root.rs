@@ -9,7 +9,7 @@ use jetpack::SHA256;
 use jetpack::TrustRoot::{
     canonical_root, canonical_snapshot, canonical_targets, fixture_threshold_root, sign_root,
     sign_snapshot, sign_targets, sign_timestamp, BoundIdentity, CacheProvenance,
-    CacheReceipt, FixedClock, IdentityKind,
+    allow_cache_witness, is_cache_witness_allowed, CacheReceipt, FixedClock, IdentityKind,
     PublisherIdentity, RootBootstrap, SnapshotMetaEntry, SnapshotMetadata, TargetMeta,
     TargetsMetadata, TimestampMetadata, TrustEngine, TrustError, TrustKey, TrustPolicy,
 };
@@ -163,6 +163,16 @@ fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {
 #[test]
 fn jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed() {
     let now = 1_710_100_000u64;
+    // The cache-witness assertions below need a scratch root; follow this
+    // file's existing convention. `temp_dir()` honours TMPDIR, which the agent
+    // scripts point at disk because /tmp is RAM-backed on this host.
+    let dir = std::env::temp_dir().join(format!(
+        "jetpack-trust-root-jp6b-{}-{}",
+        std::process::id(),
+        now
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
     let (root, keyring, keys) = fixture_threshold_root(1, now + 86_400).unwrap();
     let signed_root = sign_root(&root, &[&keys[0], &keys[1]]).unwrap();
     let pin = SHA256::sha256_hex(canonical_root(&root).as_bytes());
@@ -354,6 +364,21 @@ fn jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed() {
     };
     let receipt = CacheReceipt::issue("public", provenance, 1, now, now + 60, &cache_key).unwrap();
     receipt.verify(&cache_key, &FixedClock(now)).unwrap();
+    assert!(!receipt.witness.is_empty());
+    allow_cache_witness(&dir, "public", &receipt.witness).unwrap();
+    assert!(is_cache_witness_allowed(&dir, "public", &receipt.witness).unwrap());
+    let untrusted_witness = if receipt.witness == "stranger" {
+        "other-stranger"
+    } else {
+        "stranger"
+    };
+    assert!(!is_cache_witness_allowed(&dir, "public", untrusted_witness).unwrap());
+    let mut tampered_witness = receipt.clone();
+    tampered_witness.witness = untrusted_witness.into();
+    assert!(matches!(
+        tampered_witness.verify(&cache_key, &FixedClock(now)),
+        Err(TrustError::CacheReceiptInvalid { .. })
+    ));
     let mut tampered_receipt = receipt.clone();
     tampered_receipt.provenance.output = "sha256:attacker".into();
     assert!(matches!(

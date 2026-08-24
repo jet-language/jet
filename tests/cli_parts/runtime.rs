@@ -116,6 +116,47 @@ fn jet_fix_reports_one_print_family_migration_per_retired_spelling() {
     );
 }
 
+#[test]
+fn jet_fix_apply_writes_replay_log_and_undo_restores_source() {
+    let dir = isolated_cwd("fix_replay");
+    let file = dir.join("run.jet");
+    let original = "use core.term as io\n\nfn run() {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n";
+    fs::write(&file, original).unwrap();
+
+    let applied = Command::new(jet())
+        .args(["fix", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        applied.status.success(),
+        "jet fix failed: {}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let log = String::from_utf8_lossy(&applied.stdout)
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("log: "))
+        .map(PathBuf::from)
+        .expect("jet fix must print replay log path");
+    assert!(log.is_file(), "replay log missing: {}", log.display());
+    assert!(String::from_utf8_lossy(&fs::read(&log).unwrap()).contains("\"operation\": \"fix\""));
+    assert!(fs::read_to_string(&file).unwrap().contains("io.print(\"line\")"));
+
+    let undone = Command::new(jet())
+        .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        undone.status.success(),
+        "fix undo failed: {}",
+        String::from_utf8_lossy(&undone.stderr)
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), original);
+}
+
 /// #1659 criterion 4: `jet perf` and `jet diff`/`jet merge` route every exit
 /// through the `jet_foundation::ExitCodes` table, never a raw literal. This
 /// guards the two files migrated for #1659; it is not a repo-wide sweep.

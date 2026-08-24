@@ -10,6 +10,7 @@ use std::sync::mpsc::{self, Receiver};
 
 use jet::Diagnostics::{json_str as json_string, ColorChoice};
 use jet::ExitCodes;
+use jet_foundation::Report::render_status_json;
 
 use crate::CmdCompile::{build, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
@@ -1848,7 +1849,10 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
         if mode.json {
-            println!("{{\"web_app\": null}}");
+            println!(
+                "{}",
+                render_status_json("ok", true, "inspect.web", ",\"web_app\":null")
+            );
         } else {
             println!("(none)");
         }
@@ -1873,14 +1877,21 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
         if mode.json {
-            println!("{{\"web_app\": null}}");
+            println!(
+                "{}",
+                render_status_json("ok", true, "inspect.web", ",\"web_app\":null")
+            );
         } else {
             println!("(none)");
         }
         return;
     }
     if mode.json {
-        println!("{}", graph.to_json());
+        let payload = graph.to_json();
+        println!(
+            "{}",
+            render_status_json("ok", true, "inspect.web", &format!(",\"web_app\":{payload}"))
+        );
     } else {
         for line in graph.explain_lines() {
             println!("{line}");
@@ -3126,7 +3137,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             // value, in the order the program produced it.
             if mode.json {
                 eprint!("{printed}");
-                println!("{}", value.to_json());
+                println!("{}", render_eval_json(&value));
             } else {
                 print!("{printed}");
                 println!("{}", value.render_pretty());
@@ -3145,6 +3156,15 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
 /// Label diagnostics carry when the evaluated source came from the command
 /// line rather than a file, so a caret can point into the argument text.
 const EVAL_EXPRESSION_LABEL: &str = "<eval>";
+
+fn render_eval_json(value: &jet::CtValue) -> String {
+    jet::Diagnostics::render_status_json(
+        "ok",
+        true,
+        "eval",
+        &format!(",\"value\":{}", value.to_json()),
+    )
+}
 
 /// S60 / D-PURE1: `jet eval "<expression>"` — the expression form of the same
 /// verb (#2068). Before this, an expression fell through to the file reader
@@ -3171,7 +3191,7 @@ pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
             let value = evaluated.value.unwrap_or(jet::CtValue::Unit);
             if mode.json {
                 eprint!("{}{}", evaluated.stdout, evaluated.stderr);
-                println!("{}", value.to_json());
+                println!("{}", render_eval_json(&value));
             } else {
                 print!("{}", evaluated.stdout);
                 eprint!("{}", evaluated.stderr);

@@ -101,7 +101,12 @@
   function normalizeDiagnostic(diag, i, payload, source) {
     const diagnosticRevision = payload.checked_revision || payload.diagnostic_revision || payload.revision || (latestDoc && latestDoc.revision) || "unknown";
     const baseRevision = payload.revision || (latestDoc && latestDoc.revision) || diagnosticRevision;
-    const span = diag.source_span || null;
+    const span = diag.source_span || (diag.span ? {
+      start: diag.span.start,
+      end: diag.span.end,
+      line: diag.line,
+      column: diag.col
+    } : null);
     const severity = diag.severity === "warning" || String(diag.code || "").startsWith("L") ? "warning" : "error";
     return {
       id: diagnosticKey(diag, i, diagnosticRevision),
@@ -113,7 +118,7 @@
       what: diag.what || diag.message || "Jet diagnostic",
       why: diag.why || "",
       fix: diag.fix || "",
-      rendered: diag.rendered || "",
+      rendered: diag.rendered || `Error [${diag.code || "diagnostic"}]: ${diag.what || "Jet diagnostic"}\n Why: ${diag.why || ""}\n Fix: ${diag.fix || ""}`,
       source_span: span,
       line: span && span.line,
       column: span && span.column

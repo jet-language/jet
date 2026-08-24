@@ -33,7 +33,16 @@ fn ordering_cmp(value: &CtValue, span: Span) -> Result<std::cmp::Ordering, Diagn
 
 fn progress_parts(
     value: &CtValue,
-) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
+) -> Option<(
+    Vec<CtValue>,
+    String,
+    String,
+    f64,
+    Vec<usize>,
+    usize,
+    usize,
+    bool,
+)> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
@@ -141,7 +150,10 @@ fn progress_value(
             ("items".to_string(), CtValue::List(items)),
             ("description".to_string(), CtValue::Str(description)),
             ("format".to_string(), CtValue::Str(format)),
-            ("started_at".to_string(), CtValue::Float(crate::AST::CtFloat::f64(started_at))),
+            (
+                "started_at".to_string(),
+                CtValue::Float(crate::AST::CtFloat::f64(started_at)),
+            ),
             (
                 "pulls".to_string(),
                 CtValue::List(pulls.into_iter().map(|n| CtValue::Int(n as i64)).collect()),
@@ -182,7 +194,16 @@ fn emit_progress_raw(
 }
 
 fn progress_passthrough(
-    progress: &Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)>,
+    progress: &Option<(
+        Vec<CtValue>,
+        String,
+        String,
+        f64,
+        Vec<usize>,
+        usize,
+        usize,
+        bool,
+    )>,
     output_len: usize,
 ) -> (Vec<usize>, usize) {
     let Some((_, _, _, _, pulls, tail, _, _)) = progress else {
@@ -192,7 +213,16 @@ fn progress_passthrough(
 }
 
 fn emit_progress_next(
-    progress: &Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)>,
+    progress: &Option<(
+        Vec<CtValue>,
+        String,
+        String,
+        f64,
+        Vec<usize>,
+        usize,
+        usize,
+        bool,
+    )>,
     sink: Option<&std::sync::Arc<std::sync::Mutex<crate::Comptime::DevSink>>>,
     cursor: &mut usize,
     count: &mut usize,
@@ -215,12 +245,22 @@ fn emit_progress_next(
 }
 
 fn emit_progress_finish(
-    progress: &Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)>,
+    progress: &Option<(
+        Vec<CtValue>,
+        String,
+        String,
+        f64,
+        Vec<usize>,
+        usize,
+        usize,
+        bool,
+    )>,
     sink: Option<&std::sync::Arc<std::sync::Mutex<crate::Comptime::DevSink>>>,
     cursor: usize,
     count: &mut usize,
 ) {
-    let Some((_, description, format, started_at, pulls, tail, total, known_total)) = progress else {
+    let Some((_, description, format, started_at, pulls, tail, total, known_total)) = progress
+    else {
         return;
     };
     let raw = pulls[cursor..].iter().sum::<usize>() + *tail;
@@ -325,18 +365,16 @@ impl<'a> EvalCtx<'a> {
             recv_v = CtValue::List(items.clone());
         }
         let wrap_list = |items: Vec<CtValue>, pulls: Vec<usize>, tail: usize| match &progress {
-            Some((_, description, format, started_at, _, _, total, known_total)) => {
-                progress_value(
-                    items,
-                    description.clone(),
-                    format.clone(),
-                    *started_at,
-                    pulls,
-                    tail,
-                    *total,
-                    *known_total,
-                )
-            }
+            Some((_, description, format, started_at, _, _, total, known_total)) => progress_value(
+                items,
+                description.clone(),
+                format.clone(),
+                *started_at,
+                pulls,
+                tail,
+                *total,
+                *known_total,
+            ),
             None => match &iter {
                 Some(_) => progress_iter_value(items, false),
                 None => CtValue::List(items),
@@ -365,7 +403,9 @@ impl<'a> EvalCtx<'a> {
                 | TClosureOp::Position
         );
         if !lazy && !short_circuit {
-            if let Some((_, description, format, started_at, pulls, tail, total, known_total)) = &progress {
+            if let Some((_, description, format, started_at, pulls, tail, total, known_total)) =
+                &progress
+            {
                 if matches!(&recv_v, CtValue::List(_)) {
                     let raw_pulls = pulls.iter().sum::<usize>() + *tail;
                     let mut count = 0;
@@ -383,11 +423,7 @@ impl<'a> EvalCtx<'a> {
             }
         }
         // ViewMut place-window → inclusive List for read-only map/fold.
-        if let CtValue::Struct {
-            type_name,
-            fields,
-        } = &recv_v
-        {
+        if let CtValue::Struct { type_name, fields } = &recv_v {
             if type_name == "__JetViewMut"
                 && matches!(op, TClosureOp::ViewMap | TClosureOp::ViewFold)
             {
@@ -491,7 +527,8 @@ impl<'a> EvalCtx<'a> {
                 let items = match recv_v {
                     CtValue::List(items) => items,
                     CtValue::Struct { type_name, fields }
-                        if type_name == crate::Syntax::TYPE_TALLY || type_name.ends_with(crate::Syntax::TYPE_TALLY) =>
+                        if type_name == crate::Syntax::TYPE_TALLY
+                            || type_name.ends_with(crate::Syntax::TYPE_TALLY) =>
                     {
                         fields
                             .into_iter()
@@ -714,7 +751,8 @@ impl<'a> EvalCtx<'a> {
                             out_pulls.push(pending);
                             pending = 0;
                         }
-                        CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_)) => {}
+                        CtValue::Failed(CtReport::Clean(_))
+                        | CtValue::Failed(CtReport::Told(_)) => {}
                         other => {
                             out.push(other);
                             out_pulls.push(pending);
@@ -748,7 +786,9 @@ impl<'a> EvalCtx<'a> {
                 Ok(CtValue::absent(crate::AST::Type::Int))
             }
             TClosureOp::OptionMap => match recv_v {
-                CtValue::Present(inner) => Ok(CtValue::Present(Box::new(calln(self, vec![*inner])?))),
+                CtValue::Present(inner) => {
+                    Ok(CtValue::Present(Box::new(calln(self, vec![*inner])?)))
+                }
                 CtValue::Failed(CtReport::Clean(t)) => Ok(CtValue::Failed(CtReport::Clean(t))),
                 _ => Err(unsupported("option map receiver", self.span())),
             },
@@ -873,7 +913,10 @@ impl<'a> EvalCtx<'a> {
                 };
                 let mut out = std::collections::BTreeMap::new();
                 for (key, value) in entries {
-                    if as_bool(&calln(self, vec![key.to_value(), value.clone()])?, self.span())? {
+                    if as_bool(
+                        &calln(self, vec![key.to_value(), value.clone()])?,
+                        self.span(),
+                    )? {
                         out.insert(key, value);
                     }
                 }
@@ -913,7 +956,9 @@ impl<'a> EvalCtx<'a> {
                     let CtValue::Map(part) = part else {
                         return Err(unsupported("map flat_map must return map", self.span()));
                     };
-                    for (k, v) in part { out.insert(k, v); }
+                    for (k, v) in part {
+                        out.insert(k, v);
+                    }
                 }
                 Ok(CtValue::Map(out))
             }
@@ -942,8 +987,14 @@ impl<'a> EvalCtx<'a> {
                 let mut max_key = min_key.clone();
                 for item in items.into_iter().skip(1) {
                     let key = calln(self, vec![item.clone()])?.jet_show();
-                    if key < min_key { min_key = key.clone(); min_item = item.clone(); }
-                    if key > max_key { max_key = key; max_item = item; }
+                    if key < min_key {
+                        min_key = key.clone();
+                        min_item = item.clone();
+                    }
+                    if key > max_key {
+                        max_key = key;
+                        max_item = item;
+                    }
                 }
                 Ok(CtValue::Present(Box::new(CtValue::Struct {
                     type_name: String::new(),
@@ -1056,10 +1107,7 @@ impl<'a> EvalCtx<'a> {
                     let start_new = match chunks.last() {
                         Some(chunk) => {
                             let last = chunk.last().cloned().unwrap();
-                            !as_bool(
-                                &calln(self, vec![last, item.clone()])?,
-                                self.span(),
-                            )?
+                            !as_bool(&calln(self, vec![last, item.clone()])?, self.span())?
                         }
                         None => true,
                     };
@@ -1134,10 +1182,7 @@ impl<'a> EvalCtx<'a> {
         let param_names: std::collections::HashSet<String> =
             lam.source_params.iter().cloned().collect();
         for (i, name) in lam.source_params.iter().enumerate() {
-            child.insert(
-                name.clone(),
-                argv.get(i).cloned().unwrap_or(CtValue::Unit),
-            );
+            child.insert(name.clone(), argv.get(i).cloned().unwrap_or(CtValue::Unit));
         }
         let result = match &lam.executable {
             TLambdaBody::Expr(e) => self.eval_expr(e, &mut child)?,

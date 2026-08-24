@@ -46,9 +46,7 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Tool(message) | Error::Cache(message) => {
-                formatter.write_str(message)
-            }
+            Error::Tool(message) | Error::Cache(message) => formatter.write_str(message),
         }
     }
 }
@@ -113,13 +111,7 @@ pub fn prepare(
     rustc_flags: &[OsString],
     rustc_env: &[(OsString, OsString)],
 ) -> Result<PreparedRuntime, Error> {
-    prepare_at(
-        &cache_root(),
-        rustc,
-        generated,
-        rustc_flags,
-        rustc_env,
-    )
+    prepare_at(&cache_root(), rustc, generated, rustc_flags, rustc_env)
 }
 
 /// The directory holding cached runtime rlibs. Public so a provider that
@@ -146,7 +138,10 @@ pub fn cache_root() -> PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cache").join("jet").join("runtime")
+    PathBuf::from(home)
+        .join(".cache")
+        .join("jet")
+        .join("runtime")
 }
 
 /// Logical bytes occupied by regular files below [`cache_root`]. Symlinks are
@@ -227,7 +222,8 @@ fn prepare_at_uncounted(
         rustc,
         rustc_flags,
         rustc_env,
-    )? else {
+    )?
+    else {
         return Ok(PreparedRuntime::inline(generated));
     };
 
@@ -323,8 +319,9 @@ fn compile_artifact(
     // safe if another process eventually reaps a stale lock.
     let temporary_id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
     let staging = entry.join(format!(".build.{}.{temporary_id}", std::process::id()));
-    fs::create_dir_all(&staging)
-        .map_err(|error| Error::Cache(format!("could not create {}: {error}", staging.display())))?;
+    fs::create_dir_all(&staging).map_err(|error| {
+        Error::Cache(format!("could not create {}: {error}", staging.display()))
+    })?;
     let source = staging.join("runtime.rs");
     let staged_rlib = staging.join(format!("lib{crate_name}.rlib"));
     fs::write(&source, format!("{crate_prefix}{exported}")).map_err(|error| {
@@ -334,7 +331,14 @@ fn compile_artifact(
 
     let mut command = Command::new(rustc);
     command
-        .args(["--edition", "2021", "--crate-name", crate_name, "--crate-type", "rlib"])
+        .args([
+            "--edition",
+            "2021",
+            "--crate-name",
+            crate_name,
+            "--crate-type",
+            "rlib",
+        ])
         .args(rustc_flags);
     if let Some((dependency_name, dependency_path)) = dependency {
         command
@@ -372,7 +376,10 @@ fn compile_artifact(
         Error::Cache(format!("could not publish {}: {error}", rlib.display()))
     })?;
     let _ = fs::remove_dir_all(&staging);
-    publish(&entry.join("artifact.sha256"), format!("{digest}\n").as_bytes())?;
+    publish(
+        &entry.join("artifact.sha256"),
+        format!("{digest}\n").as_bytes(),
+    )?;
     publish(
         &entry.join("runtime.rs"),
         format!("{crate_prefix}{exported}").as_bytes(),
@@ -395,29 +402,38 @@ fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, Error> {
         ));
     }
     let runtime_start = begin + BEGIN.len();
-    let relative_end = generated[runtime_start..]
-        .find(END)
-        .ok_or_else(|| Error::Cache("generated Rust has an unterminated runtime block".to_string()))?;
+    let relative_end = generated[runtime_start..].find(END).ok_or_else(|| {
+        Error::Cache("generated Rust has an unterminated runtime block".to_string())
+    })?;
     let runtime_end = runtime_start + relative_end;
     let after_runtime = runtime_end + END.len();
     let runtime = generated[runtime_start..runtime_end].to_string();
     let core_begin = generated.find(CORE_BEGIN);
     if core_begin.is_none() && generated.matches(CORE_END).count() != 0 {
-        return Err(Error::Cache("generated Rust has an invalid core marker pair".to_string()));
+        return Err(Error::Cache(
+            "generated Rust has an invalid core marker pair".to_string(),
+        ));
     }
     if generated.matches(CORE_BEGIN).count() > 1 || generated.matches(CORE_END).count() > 1 {
-        return Err(Error::Cache("generated Rust has an invalid core marker pair".to_string()));
+        return Err(Error::Cache(
+            "generated Rust has an invalid core marker pair".to_string(),
+        ));
     }
     let core = if let Some(core_begin) = core_begin {
         if core_begin < after_runtime {
-            return Err(Error::Cache("generated Rust has nested runtime/core markers".to_string()));
+            return Err(Error::Cache(
+                "generated Rust has nested runtime/core markers".to_string(),
+            ));
         }
         let core_start = core_begin + CORE_BEGIN.len();
         let core_end = core_start
-            + generated[core_start..]
-                .find(CORE_END)
-                .ok_or_else(|| Error::Cache("generated Rust has an unterminated core block".to_string()))?;
-        Some((generated[core_start..core_end].to_string(), core_end + CORE_END.len()))
+            + generated[core_start..].find(CORE_END).ok_or_else(|| {
+                Error::Cache("generated Rust has an unterminated core block".to_string())
+            })?;
+        Some((
+            generated[core_start..core_end].to_string(),
+            core_end + CORE_END.len(),
+        ))
     } else {
         None
     };
@@ -499,17 +515,11 @@ fn os_bytes(value: &OsStr) -> Vec<u8> {
     value.to_string_lossy().as_bytes().to_vec()
 }
 
-fn rustc_identity(
-    rustc: &OsStr,
-    rustc_env: &[(OsString, OsString)],
-) -> Result<String, Error> {
+fn rustc_identity(rustc: &OsStr, rustc_env: &[(OsString, OsString)]) -> Result<String, Error> {
     static IDENTITIES: OnceLock<Mutex<HashMap<Vec<u8>, String>>> = OnceLock::new();
     let mut identity_key = Vec::new();
     push_bytes(&mut identity_key, &os_bytes(rustc));
-    push_bytes(
-        &mut identity_key,
-        &(rustc_env.len() as u64).to_be_bytes(),
-    );
+    push_bytes(&mut identity_key, &(rustc_env.len() as u64).to_be_bytes());
     for (name, value) in rustc_env {
         push_bytes(&mut identity_key, &os_bytes(name));
         push_bytes(&mut identity_key, &os_bytes(value));
@@ -599,9 +609,15 @@ fn verified_artifact(path: &Path) -> bool {
 
 fn publish(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     let Some(parent) = path.parent() else {
-        return Err(Error::Cache(format!("invalid cache path {}", path.display())));
+        return Err(Error::Cache(format!(
+            "invalid cache path {}",
+            path.display()
+        )));
     };
-    let name = path.file_name().and_then(OsStr::to_str).unwrap_or("artifact");
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("artifact");
     let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
     let temporary = parent.join(format!(".{name}.{}.{id}.tmp", std::process::id()));
     let result = (|| {
@@ -618,9 +634,8 @@ fn publish(path: &Path, bytes: &[u8]) -> Result<(), Error> {
         file.sync_all().map_err(|error| {
             Error::Cache(format!("could not flush {}: {error}", path.display()))
         })?;
-        fs::rename(&temporary, path).map_err(|error| {
-            Error::Cache(format!("could not publish {}: {error}", path.display()))
-        })
+        fs::rename(&temporary, path)
+            .map_err(|error| Error::Cache(format!("could not publish {}: {error}", path.display())))
     })();
     if result.is_err() {
         let _ = fs::remove_file(temporary);
@@ -662,12 +677,16 @@ fn is_cache_entry(path: &Path) -> bool {
 /// successful publish, so cache hits do not reorder victims or make pruning
 /// depend on directory-lock churn.
 fn entry_age(path: &Path) -> SystemTime {
-    ["artifact.sha256", "libjet_runtime.rlib", "libjet_runtime_core.rlib"]
-        .iter()
-        .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
-        .filter_map(|metadata| metadata.modified().ok())
-        .min()
-        .unwrap_or(UNIX_EPOCH)
+    [
+        "artifact.sha256",
+        "libjet_runtime.rlib",
+        "libjet_runtime_core.rlib",
+    ]
+    .iter()
+    .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
+    .filter_map(|metadata| metadata.modified().ok())
+    .min()
+    .unwrap_or(UNIX_EPOCH)
 }
 
 fn prune_cache(root: &Path) -> Result<(), Error> {
@@ -690,11 +709,7 @@ fn prune_cache(root: &Path) -> Result<(), Error> {
             (entry_age(&path), key, path)
         })
         .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then_with(|| left.1.cmp(&right.1))
-    });
+    candidates.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
 
     for (_, _, entry) in candidates {
         if footprint <= RUNTIME_CACHE_LIMIT_BYTES {
@@ -813,7 +828,10 @@ fn export_runtime_source(source: &str) -> String {
         while scopes.last().is_some_and(|(_, level)| *level > depth) {
             scopes.pop();
         }
-        let scope = scopes.last().map(|(scope, _)| *scope).unwrap_or(Scope::Other);
+        let scope = scopes
+            .last()
+            .map(|(scope, _)| *scope)
+            .unwrap_or(Scope::Other);
         let direct = scopes.last().is_some_and(|(_, level)| *level == depth);
         // `pending` is non-empty only while an item header is still open — a
         // multi-line generic parameter list or `where` clause. Those rows are
@@ -946,9 +964,11 @@ fn strip_visibility(code: &str) -> &str {
 
 fn starts_exportable_item(code: &str) -> bool {
     let code = strip_visibility(code);
-    ["fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod "]
-        .iter()
-        .any(|prefix| code.starts_with(prefix))
+    [
+        "fn ", "struct ", "enum ", "union ", "trait ", "type ", "const ", "static ", "mod ",
+    ]
+    .iter()
+    .any(|prefix| code.starts_with(prefix))
         || ["unsafe fn ", "async fn ", "const fn ", "async unsafe fn "]
             .iter()
             .any(|prefix| code.starts_with(prefix))
@@ -958,9 +978,16 @@ fn starts_exportable_item(code: &str) -> bool {
 
 fn starts_impl_member(code: &str) -> bool {
     let code = strip_visibility(code);
-    ["fn ", "const ", "type ", "unsafe fn ", "async fn ", "const fn "]
-        .iter()
-        .any(|prefix| code.starts_with(prefix))
+    [
+        "fn ",
+        "const ",
+        "type ",
+        "unsafe fn ",
+        "async fn ",
+        "const fn ",
+    ]
+    .iter()
+    .any(|prefix| code.starts_with(prefix))
 }
 
 fn looks_like_struct_field(code: &str) -> bool {
@@ -974,7 +1001,9 @@ fn looks_like_struct_field(code: &str) -> bool {
     let name = code[..colon].trim();
     !name.is_empty()
         && !name.chars().any(char::is_whitespace)
-        && name.bytes().all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+        && name
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
 }
 
 fn starts_item_header(code: &str, scope: Scope) -> bool {
@@ -1239,7 +1268,10 @@ mod tests {
                 OsStr::new("rustc"),
                 "rustc 1",
                 &[],
-                &[(OsString::from("RUSTFLAGS"), OsString::from("-Ctarget-cpu=native"))]
+                &[(
+                    OsString::from("RUSTFLAGS"),
+                    OsString::from("-Ctarget-cpu=native")
+                )]
             )
         );
     }
@@ -1440,12 +1472,16 @@ use std::fmt::Debug;
 
         // The user program is not part of the reusable stdlib object. A
         // program edit with the same runtime must stay on the warm rlib.
-        let program_changed = format!(
-            "{BEGIN}fn runtime() {{}}\n{END}fn main() {{ println!(\"changed\"); }}\n"
-        );
-        let program_hit =
-            prepare_at(&root.join("cache"), rustc.as_os_str(), &program_changed, &[], &[])
-                .unwrap();
+        let program_changed =
+            format!("{BEGIN}fn runtime() {{}}\n{END}fn main() {{ println!(\"changed\"); }}\n");
+        let program_hit = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &program_changed,
+            &[],
+            &[],
+        )
+        .unwrap();
         assert!(program_hit.cache_hit());
         assert_eq!(fs::read(&count).unwrap(), b"x");
         drop(program_hit);
@@ -1485,7 +1521,10 @@ use std::fmt::Debug;
         assert!(entry.is_dir(), "live build entry must not be evicted");
         drop(lock);
         prune_cache(&cache).unwrap();
-        assert!(!entry.exists(), "unlocked oversized entry should be evicted");
+        assert!(
+            !entry.exists(),
+            "unlocked oversized entry should be evicted"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1515,9 +1554,15 @@ use std::fmt::Debug;
         let generated = format!("{BEGIN}fn runtime() {{}}\n{END}fn main() {{}}\n");
         let prepared = prepare_at(&cache, OsStr::new("rustc"), &generated, &[], &[]).unwrap();
         let after = directory_size(&cache);
-        assert!(prepared.is_split(), "bounded cache build must still prepare a split runtime");
+        assert!(
+            prepared.is_split(),
+            "bounded cache build must still prepare a split runtime"
+        );
         assert!(after < before, "pruning must reduce cache footprint");
-        assert!(after <= RUNTIME_CACHE_LIMIT_BYTES, "cache must stay under its bound");
+        assert!(
+            after <= RUNTIME_CACHE_LIMIT_BYTES,
+            "cache must stay under its bound"
+        );
         assert!(prepared.runtime_rlib.as_ref().unwrap().is_file());
 
         let source = root.join("main.rs");
@@ -1562,8 +1607,8 @@ use std::fmt::Debug;
         fs::set_permissions(&rustc, permissions).unwrap();
 
         let generated = format!("prefix\n{BEGIN}fn runtime() {{}}\n{END}suffix\n");
-        let prepared = prepare_at(&root.join("cache"), rustc.as_os_str(), &generated, &[], &[])
-            .unwrap();
+        let prepared =
+            prepare_at(&root.join("cache"), rustc.as_os_str(), &generated, &[], &[]).unwrap();
         assert_eq!(prepared.rust(), generated);
         assert!(!prepared.cache_hit());
         let _ = fs::remove_dir_all(root);

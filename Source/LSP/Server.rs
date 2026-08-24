@@ -15,7 +15,7 @@ use super::Completion::compute_completions;
 use super::EnvironmentResources::{self, ReadError};
 use super::Features::{
     compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
-    compute_references, compute_refactor_actions, compute_rename, encode_semantic_tokens,
+    compute_refactor_actions, compute_references, compute_rename, encode_semantic_tokens,
     encode_semantic_tokens_in_span, format_inlay_hints, RefactorAction,
 };
 use super::Position::{
@@ -56,12 +56,7 @@ impl Document {
         self.text = text;
     }
 
-    fn apply_range_edit(
-        &mut self,
-        range: LspRange,
-        range_length: Option<u32>,
-        text: &str,
-    ) -> bool {
+    fn apply_range_edit(&mut self, range: LspRange, range_length: Option<u32>, text: &str) -> bool {
         let Some(text) = apply_lsp_edit(&self.text, range, range_length, text) else {
             return false;
         };
@@ -113,11 +108,8 @@ impl Server {
     }
 
     fn lex(&self, doc: &Document) -> Arc<Vec<Token>> {
-        self.queries
-            .borrow_mut()
-            .lex_text(&doc.path, &doc.text)
+        self.queries.borrow_mut().lex_text(&doc.path, &doc.text)
     }
-
 }
 
 // ── JSON-RPC main loop ────────────────────────────────────────────────────────
@@ -811,12 +803,7 @@ fn publish_diagnostics(
             items.push(',');
         }
         items.push_str(&diagnostic_json_with_clears(
-            d,
-            file,
-            src,
-            clears[i],
-            uri,
-            diags,
+            d, file, src, clears[i], uri, diags,
         ));
     }
     format!(
@@ -961,12 +948,7 @@ fn code_action_response(
         if !fixes.is_empty() || n > 0 {
             actions.push(',');
         }
-        actions.push_str(&refactor_action_json(
-            uri,
-            doc.version,
-            &doc.text,
-            action,
-        ));
+        actions.push_str(&refactor_action_json(uri, doc.version, &doc.text, action));
     }
     Some(response(id, &format!("[{}]", actions)))
 }
@@ -982,20 +964,8 @@ fn code_action_json(uri: &str, version: i32, src: &str, fix: &Fix) -> String {
     )
 }
 
-fn refactor_action_json(
-    uri: &str,
-    version: i32,
-    src: &str,
-    action: &RefactorAction,
-) -> String {
-    action_json(
-        uri,
-        version,
-        src,
-        &action.title,
-        action.kind,
-        &action.edits,
-    )
+fn refactor_action_json(uri: &str, version: i32, src: &str, action: &RefactorAction) -> String {
+    action_json(uri, version, src, &action.title, action.kind, &action.edits)
 }
 
 fn action_json(
@@ -1080,10 +1050,7 @@ fn format_requested_lines(src: &str, requested: LspRange) -> Option<(LspRange, S
     }
     let source_start = line_boundary(src, start_line)?;
     let source_end = line_boundary(src, end_line).unwrap_or(src.len());
-    let range = byte_span_to_range(
-        src,
-        crate::Diagnostics::Span::new(source_start, source_end),
-    );
+    let range = byte_span_to_range(src, crate::Diagnostics::Span::new(source_start, source_end));
     let selected = &src[source_start..source_end];
     let formatted = crate::format_source(selected).ok()?;
     let indent = selected
@@ -1220,11 +1187,8 @@ fn signature_help_response(
             effect_via,
             ..
         } => {
-            let parts = jet_semindex::function_parameter_parts(
-                params,
-                param_contract,
-                param_variadic,
-            );
+            let parts =
+                jet_semindex::function_parameter_parts(params, param_contract, param_variadic);
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
             if let Some((param, _)) = effect_via {
                 label.push_str(" =[via ");
@@ -1232,7 +1196,13 @@ fn signature_help_response(
                 label.push_str("]=>");
             } else if let Some(effects) = effects {
                 label.push_str(" =[");
-                label.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+                label.push_str(
+                    &effects
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 label.push_str("]=>");
             } else if ret.is_some() {
                 label.push_str(" =>");
@@ -1828,17 +1798,49 @@ fn execute_command_response(
     if command == "jet.budgetReports" {
         let args = match json_get(params, "arguments") {
             Some(JSONValue::Array(args)) => args,
-            _ => return Some(error_response(id, -32602, "jet.budgetReports expects arguments [uri]")),
+            _ => {
+                return Some(error_response(
+                    id,
+                    -32602,
+                    "jet.budgetReports expects arguments [uri]",
+                ))
+            }
         };
-        let Some(uri) = args.first().and_then(|value| match value { JSONValue::String(value) => Some(value.as_str()), _ => None }) else {
-            return Some(error_response(id, -32602, "jet.budgetReports expects arguments [uri]"));
+        let Some(uri) = args.first().and_then(|value| match value {
+            JSONValue::String(value) => Some(value.as_str()),
+            _ => None,
+        }) else {
+            return Some(error_response(
+                id,
+                -32602,
+                "jet.budgetReports expects arguments [uri]",
+            ));
         };
-        let Some(doc) = server.docs.get(uri) else { return Some(error_response(id, -32602, "document not open in LSP session")) };
-        let root = workspace_root_for_path(server, &doc.path).unwrap_or_else(|| normalize_path_buf(std::path::Path::new(&doc.path).parent().unwrap_or(std::path::Path::new("."))));
-        let sources = workspace_sources(server, Some(&doc.path)).into_iter().map(|(path, source)| {
-            let path = std::path::Path::new(&path).strip_prefix(&root).unwrap_or(std::path::Path::new(&path)).to_string_lossy().replace('\\', "/");
-            (path, crate::SHA256::sha256_hex(source.as_bytes()))
-        }).collect::<Vec<_>>();
+        let Some(doc) = server.docs.get(uri) else {
+            return Some(error_response(
+                id,
+                -32602,
+                "document not open in LSP session",
+            ));
+        };
+        let root = workspace_root_for_path(server, &doc.path).unwrap_or_else(|| {
+            normalize_path_buf(
+                std::path::Path::new(&doc.path)
+                    .parent()
+                    .unwrap_or(std::path::Path::new(".")),
+            )
+        });
+        let sources = workspace_sources(server, Some(&doc.path))
+            .into_iter()
+            .map(|(path, source)| {
+                let path = std::path::Path::new(&path)
+                    .strip_prefix(&root)
+                    .unwrap_or(std::path::Path::new(&path))
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                (path, crate::SHA256::sha256_hex(source.as_bytes()))
+            })
+            .collect::<Vec<_>>();
         let projection = crate::BudgetView::read_compatible(std::path::Path::new(&root), &sources);
         return Some(response(id, &projection.to_json()));
     }
@@ -2379,9 +2381,7 @@ fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, S
         let in_workspace = roots
             .iter()
             .any(|root| std::path::Path::new(&doc.path).starts_with(root));
-        if (root_hint.is_some()
-            || (!server.workspace_folders && roots.is_empty())
-            || in_workspace)
+        if (root_hint.is_some() || (!server.workspace_folders && roots.is_empty()) || in_workspace)
             && seen.insert(doc.path.clone())
         {
             out.push((doc.path.clone(), doc.text.clone()));
@@ -2432,9 +2432,7 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         };
         if file_type.is_dir() {
             collect_jet_files(&path, out);
-        } else if file_type.is_file()
-            && path.extension().and_then(|s| s.to_str()) == Some("jet")
-        {
+        } else if file_type.is_file() && path.extension().and_then(|s| s.to_str()) == Some("jet") {
             out.push(path);
         }
     }
@@ -2444,13 +2442,7 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 mod project_part_tests {
     use super::*;
 
-    fn code_actions_for(
-        server: &Server,
-        uri: &str,
-        src: &str,
-        start: usize,
-        end: usize,
-    ) -> String {
+    fn code_actions_for(server: &Server, uri: &str, src: &str, start: usize, end: usize) -> String {
         let start = byte_offset_to_lsp(src, start);
         let end = byte_offset_to_lsp(src, end);
         let params = parse_json(&format!(
@@ -2469,10 +2461,8 @@ mod project_part_tests {
     fn code_actions_extract_binding_function_and_inline_with_versioned_edits() {
         let src =
             "fn run(left: Bool, right: Bool) {\n    total :: left && right\n    print(total)\n}\n";
-        let root = std::env::temp_dir().join(format!(
-            "jet-lsp-refactor-actions-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-lsp-refactor-actions-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
@@ -2483,10 +2473,9 @@ mod project_part_tests {
         server
             .workspace_roots
             .push(root.to_string_lossy().into_owned());
-        server.docs.insert(
-            uri.clone(),
-            Document::new(path, src.to_string(), 7),
-        );
+        server
+            .docs
+            .insert(uri.clone(), Document::new(path, src.to_string(), 7));
 
         let expr_start = src.find("left && right").unwrap();
         let extracted = code_actions_for(
@@ -2496,9 +2485,18 @@ mod project_part_tests {
             expr_start,
             expr_start + "left && right".len(),
         );
-        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
-        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
-        assert!(extracted.contains("\"kind\":\"refactor.extract\""), "{extracted}");
+        assert!(
+            extracted.contains("\"title\":\"Extract binding\""),
+            "{extracted}"
+        );
+        assert!(
+            extracted.contains("\"title\":\"Extract function\""),
+            "{extracted}"
+        );
+        assert!(
+            extracted.contains("\"kind\":\"refactor.extract\""),
+            "{extracted}"
+        );
         assert!(
             extracted.contains(&format!(
                 r#""textDocument":{{"uri":"{}","version":7}}"#,
@@ -2508,25 +2506,23 @@ mod project_part_tests {
         );
 
         let use_start = src.rfind("total").unwrap();
-        let inlined = code_actions_for(
-            &server,
-            &uri,
-            src,
-            use_start,
-            use_start + "total".len(),
+        let inlined = code_actions_for(&server, &uri, src, use_start, use_start + "total".len());
+        assert!(
+            inlined.contains("\"title\":\"Inline `total`\""),
+            "{inlined}"
         );
-        assert!(inlined.contains("\"title\":\"Inline `total`\""), "{inlined}");
-        assert!(inlined.contains("\"kind\":\"refactor.inline\""), "{inlined}");
+        assert!(
+            inlined.contains("\"kind\":\"refactor.inline\""),
+            "{inlined}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn code_actions_reject_effects_reordering_and_possible_traps() {
         let effectful = "fn next() Int { print(\"effect\"); return 1 }\nfn run() {\n    value :: next()\n    print(\"between\")\n    print(value)\n}\n";
-        let effect_root = std::env::temp_dir().join(format!(
-            "jet-lsp-effect-refactor-{}",
-            std::process::id()
-        ));
+        let effect_root =
+            std::env::temp_dir().join(format!("jet-lsp-effect-refactor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&effect_root);
         std::fs::create_dir_all(&effect_root).unwrap();
         let effect_path = effect_root.join("main.jet").to_string_lossy().into_owned();
@@ -2564,10 +2560,8 @@ mod project_part_tests {
 
         let partial =
             "fn run(left: Int, right: Int) {\n    value :: left / right\n    print(value)\n}\n";
-        let partial_root = std::env::temp_dir().join(format!(
-            "jet-lsp-partial-refactor-{}",
-            std::process::id()
-        ));
+        let partial_root =
+            std::env::temp_dir().join(format!("jet-lsp-partial-refactor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&partial_root);
         std::fs::create_dir_all(&partial_root).unwrap();
         let partial_path = partial_root.join("main.jet").to_string_lossy().into_owned();
@@ -2608,10 +2602,8 @@ mod project_part_tests {
         // The semantic index does not prove `Clock` parameters are Copy.
         let clock =
             "fn run(left: Clock, right: Clock) {\n    same :: left == right\n    print(same)\n}\n";
-        let clock_root = std::env::temp_dir().join(format!(
-            "jet-lsp-clock-refactor-{}",
-            std::process::id()
-        ));
+        let clock_root =
+            std::env::temp_dir().join(format!("jet-lsp-clock-refactor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&clock_root);
         std::fs::create_dir_all(&clock_root).unwrap();
         let clock_path = clock_root.join("main.jet").to_string_lossy().into_owned();
@@ -2649,12 +2641,9 @@ mod project_part_tests {
 
     #[test]
     fn code_actions_extract_from_call_arg_and_scalar_equality() {
-        let call_src =
-            "fn run(left: Bool, right: Bool) {\n    print(left && right)\n}\n";
-        let call_root = std::env::temp_dir().join(format!(
-            "jet-lsp-call-extract-{}",
-            std::process::id()
-        ));
+        let call_src = "fn run(left: Bool, right: Bool) {\n    print(left && right)\n}\n";
+        let call_root =
+            std::env::temp_dir().join(format!("jet-lsp-call-extract-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&call_root);
         std::fs::create_dir_all(&call_root).unwrap();
         let call_path = call_root.join("main.jet").to_string_lossy().into_owned();
@@ -2676,8 +2665,14 @@ mod project_part_tests {
             expr,
             expr + "left && right".len(),
         );
-        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
-        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(
+            extracted.contains("\"title\":\"Extract binding\""),
+            "{extracted}"
+        );
+        assert!(
+            extracted.contains("\"title\":\"Extract function\""),
+            "{extracted}"
+        );
         assert!(
             extracted.contains(&format!(
                 r#""textDocument":{{"uri":"{}","version":4}}"#,
@@ -2689,10 +2684,8 @@ mod project_part_tests {
 
         let bool_src =
             "fn run(left: Bool, right: Bool) {\n    same :: left == right\n    print(same)\n}\n";
-        let bool_root = std::env::temp_dir().join(format!(
-            "jet-lsp-bool-eq-refactor-{}",
-            std::process::id()
-        ));
+        let bool_root =
+            std::env::temp_dir().join(format!("jet-lsp-bool-eq-refactor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&bool_root);
         std::fs::create_dir_all(&bool_root).unwrap();
         let bool_path = bool_root.join("main.jet").to_string_lossy().into_owned();
@@ -2714,8 +2707,14 @@ mod project_part_tests {
             bool_eq,
             bool_eq + "left == right".len(),
         );
-        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
-        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(
+            extracted.contains("\"title\":\"Extract binding\""),
+            "{extracted}"
+        );
+        assert!(
+            extracted.contains("\"title\":\"Extract function\""),
+            "{extracted}"
+        );
         let use_site = bool_src.rfind("same").unwrap();
         let inlined = code_actions_for(
             &bool_server,
@@ -2731,10 +2730,8 @@ mod project_part_tests {
         // arithmetic out of the code-action coverage slice.
         let int_src =
             "fn run(left: Int, right: Int) {\n    same :: left == right\n    print(same)\n}\n";
-        let int_root = std::env::temp_dir().join(format!(
-            "jet-lsp-int-eq-refactor-{}",
-            std::process::id()
-        ));
+        let int_root =
+            std::env::temp_dir().join(format!("jet-lsp-int-eq-refactor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&int_root);
         std::fs::create_dir_all(&int_root).unwrap();
         let int_path = int_root.join("main.jet").to_string_lossy().into_owned();
@@ -2756,8 +2753,14 @@ mod project_part_tests {
             int_eq,
             int_eq + "left == right".len(),
         );
-        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
-        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(
+            extracted.contains("\"title\":\"Extract binding\""),
+            "{extracted}"
+        );
+        assert!(
+            extracted.contains("\"title\":\"Extract function\""),
+            "{extracted}"
+        );
         assert!(extracted.contains("=> Bool"), "{extracted}");
         let use_site = int_src.rfind("same").unwrap();
         let inlined = code_actions_for(
@@ -2773,10 +2776,8 @@ mod project_part_tests {
         // Int + remains outside this code-action coverage slice.
         let add_src =
             "fn run(left: Int, right: Int) {\n    total :: left + right\n    print(total)\n}\n";
-        let add_root = std::env::temp_dir().join(format!(
-            "jet-lsp-int-add-refactor-{}",
-            std::process::id()
-        ));
+        let add_root =
+            std::env::temp_dir().join(format!("jet-lsp-int-add-refactor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&add_root);
         std::fs::create_dir_all(&add_root).unwrap();
         let add_path = add_root.join("main.jet").to_string_lossy().into_owned();
@@ -2815,10 +2816,8 @@ mod project_part_tests {
     #[test]
     fn code_actions_multi_use_pure_inline_and_paren_extract() {
         let multi_src = "fn run(left: Bool, right: Bool) {\n    flag :: left && right\n    print(flag)\n    print(flag)\n}\n";
-        let multi_root = std::env::temp_dir().join(format!(
-            "jet-lsp-multi-inline-{}",
-            std::process::id()
-        ));
+        let multi_root =
+            std::env::temp_dir().join(format!("jet-lsp-multi-inline-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&multi_root);
         std::fs::create_dir_all(&multi_root).unwrap();
         let multi_path = multi_root.join("main.jet").to_string_lossy().into_owned();
@@ -2861,12 +2860,9 @@ mod project_part_tests {
         );
         let _ = std::fs::remove_dir_all(multi_root);
 
-        let paren_src =
-            "fn run(left: Bool, right: Bool) {\n    print((left && right))\n}\n";
-        let paren_root = std::env::temp_dir().join(format!(
-            "jet-lsp-paren-extract-{}",
-            std::process::id()
-        ));
+        let paren_src = "fn run(left: Bool, right: Bool) {\n    print((left && right))\n}\n";
+        let paren_root =
+            std::env::temp_dir().join(format!("jet-lsp-paren-extract-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&paren_root);
         std::fs::create_dir_all(&paren_root).unwrap();
         let paren_path = paren_root.join("main.jet").to_string_lossy().into_owned();
@@ -2888,17 +2884,21 @@ mod project_part_tests {
             grouped,
             grouped + "(left && right)".len(),
         );
-        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
-        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(
+            extracted.contains("\"title\":\"Extract binding\""),
+            "{extracted}"
+        );
+        assert!(
+            extracted.contains("\"title\":\"Extract function\""),
+            "{extracted}"
+        );
         let _ = std::fs::remove_dir_all(paren_root);
     }
 
     #[test]
     fn code_action_imports_one_unique_workspace_symbol() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-lsp-import-action-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-lsp-import-action-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
@@ -2913,19 +2913,15 @@ mod project_part_tests {
         server
             .workspace_roots
             .push(root.to_string_lossy().into_owned());
-        server.docs.insert(
-            uri.clone(),
-            Document::new(path, src.to_string(), 3),
-        );
+        server
+            .docs
+            .insert(uri.clone(), Document::new(path, src.to_string(), 3));
         let start = src.find("answer").unwrap();
-        let actions = code_actions_for(
-            &server,
-            &uri,
-            src,
-            start,
-            start + "answer".len(),
+        let actions = code_actions_for(&server, &uri, src, start, start + "answer".len());
+        assert!(
+            actions.contains("\"title\":\"Import `helper`\""),
+            "{actions}"
         );
-        assert!(actions.contains("\"title\":\"Import `helper`\""), "{actions}");
         assert!(actions.contains(r#""newText":"use helper\n""#), "{actions}");
         assert!(actions.contains("\"kind\":\"quickfix\""), "{actions}");
         let _ = std::fs::remove_dir_all(root);
@@ -2963,13 +2959,7 @@ mod project_part_tests {
             Document::new(helper_path, unsaved_helper.to_string(), 2),
         );
         let start = src.find("answer").unwrap();
-        let actions = code_actions_for(
-            &server,
-            &uri,
-            src,
-            start,
-            start + "answer".len(),
-        );
+        let actions = code_actions_for(&server, &uri, src, start, start + "answer".len());
         assert!(!actions.contains("Import `helper`"), "{actions}");
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3011,7 +3001,10 @@ mod project_part_tests {
             "",
         );
         assert_eq!(json, expected);
-        assert!(json.ends_with(&format!(",\"data\":{compiler_data}}}")), "{json}");
+        assert!(
+            json.ends_with(&format!(",\"data\":{compiler_data}}}")),
+            "{json}"
+        );
         assert!(!json.contains("backend"), "{json}");
     }
 
@@ -3031,12 +3024,18 @@ mod project_part_tests {
         let file = ReportPath::from_process("src/main.jet");
         let json = diagnostic_json(&diagnostic, &file, "#[Codable]\n");
 
-        assert!(json.contains(r#""message":"one marker is written without brackets""#), "{json}");
+        assert!(
+            json.contains(r#""message":"one marker is written without brackets""#),
+            "{json}"
+        );
         assert!(
             json.contains(r#""codeDescription":{"href":"jet://explain/E0999"}"#),
             "{json}"
         );
-        assert!(json.contains(r#""data":{"schema":"jet.report/v1""#), "{json}");
+        assert!(
+            json.contains(r#""data":{"schema":"jet.report/v1""#),
+            "{json}"
+        );
         assert!(
             json.contains(r#""why":"brackets group two or more markers; one marker stays bare""#),
             "{json}"
@@ -3052,11 +3051,7 @@ mod project_part_tests {
     fn lsp_uses_registry_fix_for_report_and_action() {
         let src = "fn run() {\n    loop item; [1, 2, 3] { print(item) }\n}\n";
         let start = src.find(';').expect("loop separator");
-        let diagnostic = Diagnostic::from_row(
-            "E0373",
-            &[],
-            Some(Span::new(start, start + 1)),
-        );
+        let diagnostic = Diagnostic::from_row("E0373", &[], Some(Span::new(start, start + 1)));
         let edit = diagnostic
             .edit
             .clone()
@@ -3080,12 +3075,7 @@ mod project_part_tests {
         assert_eq!(fixes[0].edit, edit);
         assert_eq!(fixes[0].title, "use the canonical loop separator");
 
-        let action = code_action_json(
-            "file:///workspace/main.jet",
-            1,
-            src,
-            &fixes[0],
-        );
+        let action = code_action_json("file:///workspace/main.jet", 1, src, &fixes[0]);
         assert!(action.contains("\"newText\":\",\""), "{action}");
     }
 
@@ -3163,8 +3153,14 @@ mod project_part_tests {
             &diagnostics,
         );
 
-        assert!(json.contains(r#""message":"selected repeated root""#), "{json}");
-        assert!(!json.contains(r#""message":"first repeated root""#), "{json}");
+        assert!(
+            json.contains(r#""message":"selected repeated root""#),
+            "{json}"
+        );
+        assert!(
+            !json.contains(r#""message":"first repeated root""#),
+            "{json}"
+        );
         assert!(
             json.contains(
                 r#""range":{"start":{"line":1,"character":0},"end":{"line":1,"character":2}}"#,
@@ -3192,10 +3188,11 @@ mod project_part_tests {
 
     #[test]
     fn e2702_lsp_uses_a_resolvable_path_without_a_workspace_root() {
-        let file = ReportPath::from_process(
-            "/private/attacker-controlled/project/src/main.jet",
+        let file = ReportPath::from_process("/private/attacker-controlled/project/src/main.jet");
+        assert_eq!(
+            file.as_str(),
+            "/private/attacker-controlled/project/src/main.jet"
         );
-        assert_eq!(file.as_str(), "/private/attacker-controlled/project/src/main.jet");
         let relative = ReportPath::from_process("src/main.jet");
         assert!(relative.as_str().ends_with("/src/main.jet"));
     }
@@ -3325,10 +3322,10 @@ mod project_part_tests {
 
     #[test]
     fn json_rpc_envelope_rejects_malformed_or_ambiguous_requests() {
-        assert!(parse_rpc_message(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#
-        )
-        .is_ok());
+        assert!(
+            parse_rpc_message(r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
+                .is_ok()
+        );
         for (raw, code) in [
             (r#"{"jsonrpc":"2.0","method":"x","method":"y"}"#, -32700),
             (r#"{"jsonrpc":"1.0","method":"x"}"#, -32600),
@@ -3361,8 +3358,7 @@ mod project_part_tests {
         configure_workspace_roots(&mut server, Some(&params));
         assert_eq!(server.workspace_roots, vec![normalize_path("/tmp/folder")]);
 
-        let params = parse_json(r#"{"rootUri":"file:///tmp/uri","rootPath":"/tmp/path"}"#)
-            .unwrap();
+        let params = parse_json(r#"{"rootUri":"file:///tmp/uri","rootPath":"/tmp/path"}"#).unwrap();
         configure_workspace_roots(&mut server, Some(&params));
         assert_eq!(server.workspace_roots, vec![normalize_path("/tmp/uri")]);
     }
@@ -3372,7 +3368,11 @@ mod project_part_tests {
         assert_eq!(uri_to_path("file:///tmp/a%20b"), "/tmp/a b");
         assert_eq!(path_to_uri("/tmp/a b#c%"), "file:///tmp/a%20b%23c%25");
         for uri in ["file:///tmp/%", "file:///tmp/%GG", "file:///tmp/%FF"] {
-            assert_eq!(uri_to_path(uri), "", "malformed URI must be rejected: {uri}");
+            assert_eq!(
+                uri_to_path(uri),
+                "",
+                "malformed URI must be rejected: {uri}"
+            );
         }
     }
 
@@ -3402,10 +3402,7 @@ mod project_part_tests {
         assert_eq!(stats.live_memos, 2);
         assert_eq!(stats.live_query_counters, 2);
         assert_eq!(
-            queries.recompute_count(&QueryKey::for_file(
-                "checked.lsp",
-                FileKey::new(b_path)
-            )),
+            queries.recompute_count(&QueryKey::for_file("checked.lsp", FileKey::new(b_path))),
             1,
             "an unrelated root must remain warm"
         );
@@ -3427,7 +3424,11 @@ mod project_part_tests {
         let mut server = Server::new();
         server.docs.insert(
             main_uri.clone(),
-            Document::new(main_path.to_string_lossy().into_owned(), main_source.into(), 1),
+            Document::new(
+                main_path.to_string_lossy().into_owned(),
+                main_source.into(),
+                1,
+            ),
         );
         server.docs.insert(
             dependency_uri.clone(),
@@ -3439,7 +3440,10 @@ mod project_part_tests {
         );
 
         let broken = server.check(server.docs.get(&main_uri).unwrap());
-        assert!(!broken.is_empty(), "the importer must see the unsaved dependency");
+        assert!(
+            !broken.is_empty(),
+            "the importer must see the unsaved dependency"
+        );
         server
             .docs
             .get_mut(&dependency_uri)
@@ -3488,8 +3492,7 @@ mod project_part_tests {
         .expect("failed to reserve short Unix socket test directory");
         let source = root.0.join("main.jet");
         std::fs::write(&source, "fn run() {}\n").unwrap();
-        let socket =
-            std::os::unix::net::UnixListener::bind(root.0.join("blocked.jet")).unwrap();
+        let socket = std::os::unix::net::UnixListener::bind(root.0.join("blocked.jet")).unwrap();
 
         let mut files = Vec::new();
         collect_jet_files(&root.0, &mut files);
@@ -3500,10 +3503,8 @@ mod project_part_tests {
 
     #[test]
     fn workspace_index_skips_internal_parts_until_explicit_import() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-lsp-project-parts-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-lsp-project-parts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");

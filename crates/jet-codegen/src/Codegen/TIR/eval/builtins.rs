@@ -1,13 +1,13 @@
 //! Exhaustive TBuiltinOp dispatch (#777).
-use crate::AST::{CtFloat, Type};
-use crate::AST::CtKey;
+use super::unsupported;
+use crate::Codegen::TIR::TBuiltinOp;
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
 use crate::Comptime::CollectionEval;
 use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Codegen::TIR::TBuiltinOp;
 use crate::Syntax;
-use super::unsupported;
+use crate::AST::CtKey;
+use crate::AST::{CtFloat, Type};
 
 fn eval_zip_source(value: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     if let Some((items, _)) = super::progress_iter_parts(value) {
@@ -68,7 +68,9 @@ fn eval_zip_family(
     }
     let fill_args = &args[input_count.saturating_sub(1)..];
     if mode == crate::Codegen::TIR::TZipMode::Strict
-        && columns.iter().any(|column| column.len() != columns[0].len())
+        && columns
+            .iter()
+            .any(|column| column.len() != columns[0].len())
     {
         return Err(crate::Sema::Diagnostics::render_registered(
             "E0128",
@@ -92,32 +94,27 @@ fn eval_zip_family(
                     .map(zip_none_type)
                     .unwrap_or(Type::Int),
             ),
-            crate::Codegen::TIR::TZipFillMode::Common => {
-                fill_args
-                    .first()
-                    .cloned()
-                    .map(|value| {
-                        coerce_zip_fill(
-                            value,
-                            field_types.get(index).unwrap_or(&Type::Int),
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        CtValue::absent(
-                            field_types
-                                .get(index)
-                                .map(zip_none_type)
-                                .unwrap_or(Type::Int),
-                        )
-                    })
-            }
+            crate::Codegen::TIR::TZipFillMode::Common => fill_args
+                .first()
+                .cloned()
+                .map(|value| coerce_zip_fill(value, field_types.get(index).unwrap_or(&Type::Int)))
+                .unwrap_or_else(|| {
+                    CtValue::absent(
+                        field_types
+                            .get(index)
+                            .map(zip_none_type)
+                            .unwrap_or(Type::Int),
+                    )
+                }),
             crate::Codegen::TIR::TZipFillMode::Columns => {
                 let field = fields.get(index).map(String::as_str).unwrap_or("");
                 match fill_args.first() {
                     Some(CtValue::Struct { fields, .. }) => fields
                         .iter()
                         .find(|(name, _)| {
-                            name == field || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field)
+                            name == field
+                                || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    == Some(field)
                         })
                         .map(|(_, value)| {
                             coerce_zip_fill(
@@ -148,20 +145,11 @@ fn eval_zip_family(
         let values = columns
             .iter()
             .enumerate()
-            .map(|(index, column)| {
-                column
-                    .get(row)
-                    .cloned()
-                    .unwrap_or_else(|| fills_for(index))
-            })
+            .map(|(index, column)| column.get(row).cloned().unwrap_or_else(|| fills_for(index)))
             .collect::<Vec<_>>();
         rows.push(CtValue::Struct {
             type_name: tuple_struct.to_string(),
-            fields: fields
-                .iter()
-                .cloned()
-                .zip(values)
-                .collect(),
+            fields: fields.iter().cloned().zip(values).collect(),
         });
     }
     Ok(super::progress_iter_value(rows, true))
@@ -171,7 +159,10 @@ fn alloc_error_value(error: jet_foundation::Outcome::AllocError) -> CtValue {
     CtValue::Struct {
         type_name: Syntax::TYPE_ALLOC_ERROR.to_string(),
         fields: vec![
-            ("requested_bytes".to_string(), CtValue::Int(error.requested_bytes)),
+            (
+                "requested_bytes".to_string(),
+                CtValue::Int(error.requested_bytes),
+            ),
             ("allocator".to_string(), CtValue::Str(error.allocator)),
         ],
     }
@@ -241,9 +232,9 @@ pub(super) fn eval_builtin(
                 return Err(unsupported("Map.try_insert receiver", span));
             };
             match CollectionEval::try_map_insert(map, key, value) {
-                Ok(Some(previous)) => Ok(CtValue::Present(Box::new(CtValue::Present(
-                    Box::new(previous),
-                )))),
+                Ok(Some(previous)) => Ok(CtValue::Present(Box::new(CtValue::Present(Box::new(
+                    previous,
+                ))))),
                 Ok(None) => Ok(CtValue::Present(Box::new(CtValue::absent(value_ty)))),
                 Err(error) => Ok(alloc_failure(error)),
             }
@@ -264,9 +255,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::PriorityQueuePop => apply_mutating(recv, "pop", args, span),
         TBuiltinOp::InsertMap => apply_mutating(recv, "add", args, span),
         TBuiltinOp::AddNewMap => apply_mutating(recv, "add_new", args, span),
-        TBuiltinOp::MapMerge | TBuiltinOp::MapMergeWith => {
-            apply_method(recv, "merge", args, span)
-        }
+        TBuiltinOp::MapMerge | TBuiltinOp::MapMergeWith => apply_method(recv, "merge", args, span),
         TBuiltinOp::InsertList => apply_mutating(recv, "insert", args, span),
         TBuiltinOp::RemoveMap => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::RemoveList { .. } => apply_mutating(recv, "remove", args, span),
@@ -277,8 +266,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::GetList => apply_method(recv, "get", args, span),
         TBuiltinOp::First => apply_method(recv, "first", args, span),
         TBuiltinOp::Last => apply_method(recv, "last", args, span),
-        TBuiltinOp::Contains
-            if matches!(recv, CtValue::Struct { type_name, .. } if type_name == Syntax::TYPE_RANGE) =>
+        TBuiltinOp::Contains if matches!(recv, CtValue::Struct { type_name, .. } if type_name == Syntax::TYPE_RANGE) =>
         {
             let needle = args.first().unwrap_or(&CtValue::Int(0));
             super::range_contains(recv, needle, span).map(CtValue::Bool)
@@ -430,7 +418,9 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SetUnion => apply_method(recv, "union", args, span),
         TBuiltinOp::SetIntersection => apply_method(recv, "intersection", args, span),
         TBuiltinOp::SetDifference => apply_method(recv, "difference", args, span),
-        TBuiltinOp::SetSymmetricDifference => apply_method(recv, "symmetric_difference", args, span),
+        TBuiltinOp::SetSymmetricDifference => {
+            apply_method(recv, "symmetric_difference", args, span)
+        }
         TBuiltinOp::SetIsSubset => apply_method(recv, "is_subset", args, span),
         TBuiltinOp::SetIsSuperset => apply_method(recv, "is_superset", args, span),
         TBuiltinOp::SetIsDisjoint => apply_method(recv, "is_disjoint", args, span),
@@ -444,16 +434,16 @@ pub(super) fn eval_builtin(
         // D-SET-DECLINE1=C: `sort`/`shuffle` — non-mutating, return a fresh List.
         TBuiltinOp::SetSort => apply_method(recv, "sort", args, span),
         TBuiltinOp::SetShuffle => apply_method(recv, "shuffle", args, span),
-        TBuiltinOp::SortedSetFrom => {
-            CollectionEval::from_list(Syntax::TYPE_RANK, recv, span)
-        }
+        TBuiltinOp::SortedSetFrom => CollectionEval::from_list(Syntax::TYPE_RANK, recv, span),
         TBuiltinOp::SortedSetInsert => apply_mutating(recv, "add", args, span),
         TBuiltinOp::SortedSetRemove => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::SortedSetToList => apply_method(recv, "to_list", args, span),
         TBuiltinOp::SortedSetUnion => apply_method(recv, "union", args, span),
         TBuiltinOp::SortedSetIntersection => apply_method(recv, "intersection", args, span),
         TBuiltinOp::SortedSetDifference => apply_method(recv, "difference", args, span),
-        TBuiltinOp::SortedSetSymmetricDifference => apply_method(recv, "symmetric_difference", args, span),
+        TBuiltinOp::SortedSetSymmetricDifference => {
+            apply_method(recv, "symmetric_difference", args, span)
+        }
         TBuiltinOp::SortedSetIsSubset => apply_method(recv, "is_subset", args, span),
         TBuiltinOp::SortedSetIsSuperset => apply_method(recv, "is_superset", args, span),
         TBuiltinOp::SortedSetIsDisjoint => apply_method(recv, "is_disjoint", args, span),
@@ -482,9 +472,7 @@ pub(super) fn eval_builtin(
                 .unwrap_or_else(|| Err(unsupported("Bytes.with_capacity", span)))
         }
         TBuiltinOp::ByteBufferFrom => CollectionEval::byte_buffer_from(recv, span),
-        TBuiltinOp::ByteBufferWrite { method } => {
-            apply_mutating(recv, method.as_str(), args, span)
-        }
+        TBuiltinOp::ByteBufferWrite { method } => apply_mutating(recv, method.as_str(), args, span),
         TBuiltinOp::ByteBufferToBytes => apply_method(recv, "to_bytes", args, span),
         TBuiltinOp::ByteBufferMethod { method } => {
             if crate::Collections::builtin_method_mutates(

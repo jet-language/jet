@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use jet_driver::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
+use jet_driver::Diagnostics::{Diagnostic, Span, TextEdit};
 use jet_driver::AST::{self, Expr};
 use jet_semindex::{SemIndex, SourceSpan, SymbolKind};
 
@@ -597,43 +597,12 @@ pub(super) fn query_diagnostics_error(path: &Path, src: &str, diags: &[Diagnosti
 }
 
 pub(super) fn diagnostics_json(path: &Path, src: &str, diags: &[Diagnostic]) -> String {
-    diags
-        .iter()
-        .map(|d| diagnostic_payload_json(path, src, d))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn diagnostic_payload_json(path: &Path, src: &str, d: &Diagnostic) -> String {
-    let severity = match d.severity {
-        Severity::Error => "error",
-        Severity::Lint => "warning",
-    };
-    let span_json = match d.span {
-        Some(span) => {
-            let (line, column) = jet_driver::Diagnostics::span_line_col(src, span.start);
-            format!(
-                "{{\"start\":{},\"end\":{},\"line\":{},\"column\":{}}}",
-                span.start, span.end, line, column
-            )
-        }
-        None => "null".to_string(),
-    };
-    let rendered = jet_driver::Diagnostics::render_all(
-        &path.display().to_string(),
+    jet_driver::Diagnostics::render_all_json(
+        &jet_driver::Diagnostics::ReportPath::from_path(path),
         src,
-        std::slice::from_ref(d),
-    );
-    format!(
-        "{{\"code\":{},\"severity\":{},\"what\":{},\"why\":{},\"fix\":{},\"message\":{},\"rendered\":{},\"source_span\":{},\"source_path\":{}}}",
-        json_str(&d.code),
-        json_str(severity),
-        json_str(&d.what),
-        json_str(&d.why),
-        json_str(&d.fix),
-        json_str(&d.what),
-        json_str(&rendered),
-        span_json,
-        json_str(&path.display().to_string())
+        diags,
     )
+    .lines()
+    .collect::<Vec<_>>()
+    .join(",")
 }

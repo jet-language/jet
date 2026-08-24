@@ -1,8 +1,8 @@
 //! Completion: keyword/type tables + completion assembly.
 
-use jetpack::Discovery::Index as DiscoveryIndex;
 use crate::Syntax;
 use crate::AST;
+use jetpack::Discovery::Index as DiscoveryIndex;
 
 use super::SymbolDB::{SymKind, SymbolDB};
 use jet_foundation::JSON::json_escape;
@@ -212,10 +212,7 @@ fn context_allows_keyword(src: &str, offset: usize, kw: &str) -> bool {
     if context_is_binding_start(src, offset) {
         return true;
     }
-    matches!(
-        kw,
-        "return" | "if" | "else" | "true" | "false" | "break"
-    )
+    matches!(kw, "return" | "if" | "else" | "true" | "false" | "break")
 }
 
 fn semantic_owner(ty: &AST::Type) -> Option<String> {
@@ -368,13 +365,16 @@ pub(crate) fn compute_completions(
         {
             Some(receiver_name.clone())
         } else {
-            db.defs.iter().find(|def| def.name == receiver_name).and_then(|def| {
-                match &def.kind {
+            db.defs
+                .iter()
+                .find(|def| def.name == receiver_name)
+                .and_then(|def| match &def.kind {
                     SymKind::Struct { .. } | SymKind::Type { .. } => Some(def.name.clone()),
-                    SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => semantic_owner(ty),
+                    SymKind::Local { ty: Some(ty), .. } | SymKind::Param { ty } => {
+                        semantic_owner(ty)
+                    }
                     _ => None,
-                }
-            })
+                })
         };
         if let Some(owner) = owner {
             for symbol in db.symbols.complete_visible_at(
@@ -385,8 +385,7 @@ pub(crate) fn compute_completions(
                     offset: Some(offset),
                     session_top_level: false,
                 },
-            )
-            {
+            ) {
                 if seen.insert(symbol.identity.clone()) {
                     items.push(CompletionItem {
                         label: symbol.name.clone(),
@@ -469,7 +468,11 @@ pub(crate) fn compute_completions(
                 insert_text_format: 1,
                 auto_import: match symbol.provenance {
                     jet_semindex::SemanticProvenance::Source { .. }
-                        if !matches!(symbol.kind, jet_semindex::SemanticSymbolKind::Local | jet_semindex::SemanticSymbolKind::Parameter) =>
+                        if !matches!(
+                            symbol.kind,
+                            jet_semindex::SemanticSymbolKind::Local
+                                | jet_semindex::SemanticSymbolKind::Parameter
+                        ) =>
                     {
                         auto_import_for(&symbol.module_path)
                     }
@@ -493,16 +496,8 @@ pub(crate) fn compute_completions(
             });
         }
         for (label, detail, insert) in [
-            (
-                "bind immut",
-                "name :: value",
-                "${1:name} :: ${2:value}",
-            ),
-            (
-                "bind mut",
-                "name := value",
-                "${1:name} := ${2:value}",
-            ),
+            ("bind immut", "name :: value", "${1:name} :: ${2:value}"),
+            ("bind mut", "name := value", "${1:name} := ${2:value}"),
         ] {
             if seen.insert(format!("bind:{}", label)) {
                 items.push(CompletionItem {

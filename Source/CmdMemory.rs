@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::Report::render_status_json;
 
 use crate::OutputMode;
 
@@ -143,11 +144,15 @@ pub(crate) fn fix(args: &[String], mode: OutputMode) {
             })
             .collect::<Vec<_>>()
             .join(",");
-        println!(
-            "{{\"schema\":\"jet.memory.fix\",\"version\":1,\"dry_run\":{},\"applied\":[{}],\"options\":{}}}",
+        let payload = format!(
+            "{{\"dry_run\":{},\"applied\":[{}],\"options\":{}}}",
             dry_run,
             applied_json,
             options.len(),
+        );
+        println!(
+            "{}",
+            render_status_json("ok", true, "fix.memory", &format!(",\"memory\":{payload}"))
         );
         return;
     }
@@ -421,10 +426,16 @@ fn render_audit_json(rows: &[Row]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!(
-        "{{\"schema\":\"jet.memory.audit\",\"version\":1,\"coverage\":\"exercised runs only\",\"witnesses\":{},\"rows\":[{}]}}",
+    let payload = format!(
+        "{{\"coverage\":\"exercised runs only\",\"witnesses\":{},\"rows\":[{}]}}",
         count,
         rows,
+    );
+    render_status_json(
+        "ok",
+        true,
+        "audit.memory",
+        &format!(",\"memory\":{payload}"),
     )
 }
 

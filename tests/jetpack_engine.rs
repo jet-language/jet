@@ -333,6 +333,8 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert_eq!(verified.output_hash, entry.envelope.output_hash);
     assert_eq!(verified.builder, published.builder);
     assert_eq!(verified.provenance, published.provenance);
+    assert!(published.witness.as_deref().is_some_and(|witness| !witness.is_empty()));
+    assert_eq!(verified.witness, published.witness);
     assert_eq!(published.receipt_version, Some(1));
     assert!(published.receipt_expires_unix.is_some());
     assert_eq!(verified.receipt_version, Some(1));
@@ -343,6 +345,7 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert!(report_json.contains("\"signed_fingerprint\":"));
     assert!(report_json.contains("\"builder\":"));
     assert!(report_json.contains("\"provenance\":"));
+    assert!(report_json.contains("\"witness\":"));
     assert!(report_json.contains("\"receipt_version\":1"));
     assert!(report_json.contains("\"receipt_expires_unix\":"));
 
@@ -788,8 +791,9 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
     };
     let receipt_text = |receipt: &jetpack::TrustRoot::CacheReceipt| {
         format!(
-            "jet-cache-receipt-v1\nrole={}\nversion={}\nissued={}\nexpires={}\nreference={}\nsource={}\nbuilder={}\naction={}\noutput={}\nplatform={}\nsandbox={}\npolicy={}\nsignature_key={}\nsignature_algorithm={}\nsignature={}\n",
+            "jet-cache-receipt-v1\nrole={}\nwitness={}\nversion={}\nissued={}\nexpires={}\nreference={}\nsource={}\nbuilder={}\naction={}\noutput={}\nplatform={}\nsandbox={}\npolicy={}\nsignature_key={}\nsignature_algorithm={}\nsignature={}\n",
             receipt.role,
+            receipt.witness,
             receipt.version,
             receipt.issued_unix,
             receipt.expires_unix,
@@ -856,6 +860,35 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
         &key,
     )
     .unwrap();
+    fs::write(&receipt_path, receipt_text(&v2)).unwrap();
+    jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
+
+    // A signature from an unknown producer is not enough. The receipt's
+    // witness must also be named by this host's role policy.
+    let untrusted_witness = if field("witness") == "stranger" {
+        "other-stranger"
+    } else {
+        "stranger"
+    };
+    let untrusted = jetpack::TrustRoot::CacheReceipt::issue_with_witness(
+        "public",
+        untrusted_witness,
+        provenance.clone(),
+        3,
+        now.saturating_sub(1),
+        now.saturating_add(600),
+        &key,
+    )
+    .unwrap();
+    fs::write(&receipt_path, receipt_text(&untrusted)).unwrap();
+    let witness_error = jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public")
+        .unwrap_err()
+        .to_string();
+    assert!(witness_error.contains(untrusted_witness), "{witness_error}");
+    assert!(
+        witness_error.contains("trust policy 'cache-witnesses/public.allow'"),
+        "{witness_error}"
+    );
     fs::write(&receipt_path, receipt_text(&v2)).unwrap();
     jetpack::Store::verify_cache_transfer(&roots, &entry.id, "public").unwrap();
 
@@ -2907,7 +2940,9 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
     let receipt_path = root.join("hangar/receipts").join(&entry.receipt);
     let receipt = fs::read(&receipt_path).unwrap();
     let receipt_text = String::from_utf8(receipt.clone()).unwrap();
-    assert!(receipt_text.starts_with("jet-hangar-receipt-v1\n"));
+    assert!(receipt_text.starts_with("jet-development-receipt-v1\n"));
+    assert!(receipt_text.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\t"));
+    assert!(receipt_text.contains("closure\t\t7368613235362d"));
     for field in [
         "input\t",
         "action\t",
@@ -2920,6 +2955,8 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
             "missing {field:?}: {receipt_text}"
         );
     }
+    assert!(receipt_text.contains("witness\t\t"));
+    assert!(receipt_text.contains("outcome\t\t706173736564\t"));
     let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
     assert!(
         lock.contains(&format!("receipt = \"{}\"", entry.receipt)),

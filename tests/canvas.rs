@@ -1071,6 +1071,19 @@ fn canvas_edit_transactions_write_source_and_reproject() {
     assert!(renamed.contains("score := square(limit)"));
     assert!(renamed.contains("if score > 10"));
     assert!(!renamed.contains("total"));
+    let receipts = path.parent().unwrap().join(".jet/codemods");
+    let receipt = fs::read_dir(receipts)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|candidate| candidate.extension().and_then(|value| value.to_str()) == Some("json"))
+        .expect("Canvas rename receipt");
+    let receipt = fs::read_to_string(receipt).unwrap();
+    assert!(receipt.contains("\"kind\":\"rename\""), "{receipt}");
+    assert!(receipt.contains("\"from\":\"total\""), "{receipt}");
+    assert!(receipt.contains("\"to\":\"score\""), "{receipt}");
+    let scm = jet::Canvas::source_control_json_for_file(&path);
+    assert!(scm.contains("\"semantic_ops\":[{\"kind\":\"rename\""), "{scm}");
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after rename");
     assert!(graph.contains("\"title\":\"score\""));
@@ -2605,6 +2618,18 @@ fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
     assert!(committed.contains("\"writes\":\"source_transaction\""), "{committed}");
     assert!(fs::read_to_string(&entry).unwrap().contains("compute()"));
     assert!(fs::read_to_string(&other).unwrap().contains("compute()"));
+    let receipt = fs::read_dir(dir.join(".jet/codemods"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
+            name.starts_with("CanvasProjectRename-") && name.ends_with(".log.json")
+        }))
+        .expect("project rename receipt");
+    let receipt = fs::read_to_string(receipt).unwrap();
+    assert!(receipt.contains("\"kind\":\"rename\""), "{receipt}");
+    assert!(receipt.contains("\"from\":\"helper\""), "{receipt}");
+    assert!(receipt.contains("\"to\":\"compute\""), "{receipt}");
 
     let stale = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect_err("old project rename must be rejected");

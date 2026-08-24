@@ -13,8 +13,7 @@ use crate::AST::{AccessConvention, Type};
 /// docs/spec/diagnostics.md (E3211) and docs/spec/spec.md (C FFI section).
 const NUL_PANIC: &str =
     "a String with an embedded NUL byte can't cross into a C function (C strings are NUL-terminated, not length-prefixed)";
-const NULL_RETURN_PANIC: &str =
-    "a C function declared to return String returned a null pointer";
+const NULL_RETURN_PANIC: &str = "a C function declared to return String returned a null pointer";
 const UTF8_RETURN_PANIC: &str =
     "a C function declared to return String returned bytes that are not valid UTF-8";
 const UTF8_WRITE_PANIC: &str =
@@ -195,11 +194,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
         // the call. These bind the `c{i}` temporaries that `call_args` reference;
         // without them the wrapper references an undeclared variable (I2 bug).
         let body = if ef.return_type.is_some() {
-            format!(
-                "{}\n{}\n    result",
-                call_body,
-                post_lines.join("\n")
-            )
+            format!("{}\n{}\n    result", call_body, post_lines.join("\n"))
         } else if post_lines.is_empty() {
             call_body
         } else {
@@ -231,9 +226,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
 /// which is ABI-identical to the C shape sema verified.
 fn c_abi_rust_type(ty: &Type, cx: &Cx, span: crate::Diagnostics::Span) -> String {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => {
-            c_scalar_rust_type(ty)
-        }
+        Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => c_scalar_rust_type(ty),
         Type::IntN { .. } | Type::InlineRange { .. } | Type::Float32 => cx.rust_type(ty),
         Type::Named(_) => qualify_named_rust_type(cx, ty),
         Type::Fn { params, ret, .. } => {

@@ -638,7 +638,7 @@ pub enum Expr {
     Present(Box<Expr>, Span),
     /// S32: bare `null` — absent optional.
     Absent(Span),
-    /// D-TOOL2 (E2-M11; D-CASING1): `#Todo` typed hole. Compiles anywhere; panics at
+    /// D-TOOL2 (E2-M11; D-CASING1): `#Todo` typed goal. Compiles anywhere; panics at
     /// runtime with file, line, and the expected type (filled in by sema).
     Todo {
         span: Span,

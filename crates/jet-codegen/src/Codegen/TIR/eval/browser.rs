@@ -39,26 +39,28 @@ pub(super) fn handle(
     ) {
         return None;
     }
-    Some(if matches!(
-        kind.as_str(),
-        "BrowserEvent"
-            | "BrowserTrace"
-            | "BrowserReceipt"
-            | "BrowserPrivacy"
-            | "BrowserAbilities"
-            | "BrowserLocked"
-    ) {
-        crate::BrowserHost::eval_value_method(kind, method, recv, span).and_then(|value| {
-            value.ok_or_else(|| {
-                crate::Sema::Diagnostics::browser_tier0_unsupported(
-                    &format!("method `{method}`"),
-                    span,
-                )
+    Some(
+        if matches!(
+            kind.as_str(),
+            "BrowserEvent"
+                | "BrowserTrace"
+                | "BrowserReceipt"
+                | "BrowserPrivacy"
+                | "BrowserAbilities"
+                | "BrowserLocked"
+        ) {
+            crate::BrowserHost::eval_value_method(kind, method, recv, span).and_then(|value| {
+                value.ok_or_else(|| {
+                    crate::Sema::Diagnostics::browser_tier0_unsupported(
+                        &format!("method `{method}`"),
+                        span,
+                    )
+                })
             })
-        })
-    } else {
-        crate::BrowserHost::eval_method(kind, method, recv, args, span)
-    })
+        } else {
+            crate::BrowserHost::eval_method(kind, method, recv, args, span)
+        },
+    )
 }
 
 pub(super) struct SessionGuard;

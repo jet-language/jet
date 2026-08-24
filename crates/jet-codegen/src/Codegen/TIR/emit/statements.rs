@@ -1,9 +1,9 @@
 use crate::jet_generated_format as jet_format;
-use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_let_ty_clause;
 use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
@@ -48,19 +48,13 @@ fn prelude_compound_call(
         BinOp::Add if matches!(ty, Type::String) => {
             format!("jet_string_concat(&({place}), &({value}))")
         }
-        BinOp::Add
-            if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) =>
-        {
+        BinOp::Add if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) => {
             format!("{root_prefix}jet_decimal_add(&({place}), &({value}))")
         }
-        BinOp::Sub
-            if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) =>
-        {
+        BinOp::Sub if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) => {
             format!("{root_prefix}jet_decimal_sub(&({place}), &({value}))")
         }
-        BinOp::Mul
-            if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) =>
-        {
+        BinOp::Mul if matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_DECIMAL) => {
             format!("{root_prefix}jet_decimal_mul(&({place}), &({value}))")
         }
         BinOp::Add if matches!(ty, Type::Int) => {
@@ -185,18 +179,13 @@ fn emit_sparse_branch_tree(
         }
         return;
     };
-    let (equals, _) = coverage_condition(
-        jet_format!("*{jet_prefix}switch_subject == {pivot}"),
-        cx,
-    );
+    let (equals, _) = coverage_condition(jet_format!("*{jet_prefix}switch_subject == {pivot}"), cx);
     out.push_str(&format!("{pad}if {equals} {{\n"));
     emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
     let middle = arms.len() / 2;
     if middle > 0 {
-        let (less_than, _) = coverage_condition(
-            jet_format!("*{jet_prefix}switch_subject < {pivot}"),
-            cx,
-        );
+        let (less_than, _) =
+            coverage_condition(jet_format!("*{jet_prefix}switch_subject < {pivot}"), cx);
         out.push_str(&format!("{pad}}} else if {less_than} {{\n"));
         emit_sparse_branch_tree(
             &arms[..middle],
@@ -224,7 +213,11 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
     for cleanup in cleanups.iter().rev() {
         match cleanup {
             ActiveCleanup::Deferred(id) => {
-                out.push_str(&jet_format!("{}{jet_prefix}deferred_close_{}.run();\n", pad, id));
+                out.push_str(&jet_format!(
+                    "{}{jet_prefix}deferred_close_{}.run();\n",
+                    pad,
+                    id
+                ));
             }
             ActiveCleanup::Resource(name) => {
                 out.push_str(&format!("{}{}.close();\n", pad, name));
@@ -233,7 +226,11 @@ fn emit_cleanups_now(cleanups: &[ActiveCleanup], out: &mut String, indent: usize
     }
 }
 
-fn emit_expr_with_cleanups(e: &crate::Codegen::TIR::TExpr, cx: &Cx, cleanups: &[ActiveCleanup]) -> String {
+fn emit_expr_with_cleanups(
+    e: &crate::Codegen::TIR::TExpr,
+    cx: &Cx,
+    cleanups: &[ActiveCleanup],
+) -> String {
     let rendered = emit_tir_expr(e, cx);
     if !rendered.contains(crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER) {
         return rendered;
@@ -312,11 +309,7 @@ pub(super) fn emit_mut_list_place(
         TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
             emit_mut_list_place(place, cx, cleanups)
         }
-        TExprKind::Field {
-            recv,
-            field,
-            boxed,
-        } => {
+        TExprKind::Field { recv, field, boxed } => {
             let recv_ty = &recv.ty;
             let recv = emit_mut_list_place(recv, cx, cleanups);
             let field = emit_field_rust(cx, recv_ty, field);
@@ -336,12 +329,7 @@ pub(super) fn emit_mut_list_place(
 /// final expression is its value and must remain a Rust tail expression. A final
 /// non-expression statement (including an explicit return) keeps normal emission,
 /// which also preserves unit-returning closures.
-pub(crate) fn emit_tir_lambda_block(
-    stmts: &[TStmt],
-    cx: &Cx,
-    out: &mut String,
-    indent: usize,
-) {
+pub(crate) fn emit_tir_lambda_block(stmts: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     let Some((last, prefix)) = stmts.split_last() else {
         return;
     };
@@ -600,7 +588,16 @@ fn emit_tir_stmt(
             post,
             ret,
         } => {
-            emit_contract_scope(pre, body, post, ret, cx, out, indent, active_deferred_closes);
+            emit_contract_scope(
+                pre,
+                body,
+                post,
+                ret,
+                cx,
+                out,
+                indent,
+                active_deferred_closes,
+            );
         }
         TStmt::Let {
             name,
@@ -634,14 +631,19 @@ fn emit_tir_stmt(
                     pad, backing, bytes
                 ));
                 let ctor = format!("jet_mem::JetFixed::over_uninit(&mut {})", backing);
-                let value = if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_)) {
+                let value = if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_))
+                {
                     format!("JetResource::new({ctor})")
                 } else {
                     ctor
                 };
                 out.push_str(&format!(
                     "{}{} {}{} = {};\n",
-                    pad, kw, mangle(name), ty_clause, value
+                    pad,
+                    kw,
+                    mangle(name),
+                    ty_clause,
+                    value
                 ));
                 if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_)) {
                     active_deferred_closes.push(ActiveCleanup::Resource(mangle(name)));
@@ -722,13 +724,7 @@ fn emit_tir_stmt(
                 emit_expr_with_cleanups(init, cx, active_deferred_closes),
             ));
             let mut fallback_cleanups = active_deferred_closes.clone();
-            emit_tir_stmts_nested(
-                fallback,
-                cx,
-                out,
-                indent + 1,
-                &mut fallback_cleanups,
-            );
+            emit_tir_stmts_nested(fallback, cx, out, indent + 1, &mut fallback_cleanups);
             out.push_str(&format!("{}}};\n", pad));
         }
         TStmt::GcEdit {
@@ -823,12 +819,7 @@ fn emit_tir_stmt(
                     segment
                 ));
             } else if *single {
-                out.push_str(&format!(
-                    "{}let {} = &{}[0];\n",
-                    pad,
-                    mangle(name),
-                    segment
-                ));
+                out.push_str(&format!("{}let {} = &{}[0];\n", pad, mangle(name), segment));
             } else if *write {
                 out.push_str(&format!("{}let {} = {};\n", pad, mangle(name), segment));
             } else {
@@ -855,7 +846,8 @@ fn emit_tir_stmt(
                             .map(|fields| {
                                 (
                                     emit_tir_expr(recv, cx),
-                                    fields.iter()
+                                    fields
+                                        .iter()
                                         .map(|field| crate::Syntax::memo_storage_name(field))
                                         .collect::<Vec<_>>(),
                                 )
@@ -892,7 +884,9 @@ fn emit_tir_stmt(
                             &cx.file,
                             *line,
                         )
-                            .unwrap_or_else(|| format!("({read}) {} {v}", op.rust_spell().expect(PRELUDE_CARRIED))),
+                        .unwrap_or_else(|| {
+                            format!("({read}) {} {v}", op.rust_spell().expect(PRELUDE_CARRIED))
+                        }),
                         None => v,
                     };
                     out.push_str(&format!(
@@ -926,10 +920,9 @@ fn emit_tir_stmt(
                         Some(_) if prelude_of(&read).is_some() => {
                             prelude_of(&read).expect("checked just above")
                         }
-                        Some(op) => format!(
-                            "({read}) {} {v}",
-                            op.rust_spell().expect(PRELUDE_CARRIED)
-                        ),
+                        Some(op) => {
+                            format!("({read}) {} {v}", op.rust_spell().expect(PRELUDE_CARRIED))
+                        }
                         None => v,
                     };
                     out.push_str(&format!("{}({cell}).set({next});\n", pad));
@@ -959,7 +952,10 @@ fn emit_tir_stmt(
                 }
                 if local.uninit_fixed {
                     let place = local.rust_place();
-                    debug_assert!(op.is_none(), "fixed-list compound assignment is unsupported");
+                    debug_assert!(
+                        op.is_none(),
+                        "fixed-list compound assignment is unsupported"
+                    );
                     out.push_str(&format!("{}{}.write_array({});\n", pad, place, v));
                     return;
                 }
@@ -970,7 +966,13 @@ fn emit_tir_stmt(
                     let call = prelude_of(&place).expect("checked just above");
                     out.push_str(&format!("{}{} = {};\n", pad, place, call));
                 }
-                Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.rust_spell().expect(PRELUDE_CARRIED), v)),
+                Some(op) => out.push_str(&format!(
+                    "{}{} {}= {};\n",
+                    pad,
+                    place,
+                    op.rust_spell().expect(PRELUDE_CARRIED),
+                    v
+                )),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
             }
             let (memo_receiver, memo_storages) = memo_invalidations;
@@ -1076,7 +1078,11 @@ fn emit_tir_stmt(
             }
         }
         TStmt::Return(Some(e)) => {
-            out.push_str(&format!("{}return {};\n", pad, emit_expr_with_cleanups(e, cx, active_deferred_closes)));
+            out.push_str(&format!(
+                "{}return {};\n",
+                pad,
+                emit_expr_with_cleanups(e, cx, active_deferred_closes)
+            ));
         }
         TStmt::Return(None) => {
             out.push_str(&format!("{}return;\n", pad));
@@ -1166,7 +1172,10 @@ fn emit_tir_stmt(
             emit_tir_stmt(init, cx, out, indent + 1, &mut counted_deferred);
             let inner_pad = "    ".repeat(indent + 1);
             if step.is_some() {
-                out.push_str(&jet_format!("{}let mut {jet_prefix}loop_first = true;\n", inner_pad));
+                out.push_str(&jet_format!(
+                    "{}let mut {jet_prefix}loop_first = true;\n",
+                    inner_pad
+                ));
             }
             out.push_str(&format!(
                 "{}{}loop {{\n",
@@ -1179,7 +1188,10 @@ fn emit_tir_stmt(
             // thereafter run it before retesting. Break/return/failure/panic leave
             // the loop and therefore never execute it.
             if let Some(step) = step {
-                out.push_str(&jet_format!("{}if {jet_prefix}loop_first {{ {jet_prefix}loop_first = false; }} else {{\n", body_pad));
+                out.push_str(&jet_format!(
+                    "{}if {jet_prefix}loop_first {{ {jet_prefix}loop_first = false; }} else {{\n",
+                    body_pad
+                ));
                 emit_tir_stmt(step, cx, out, indent + 3, &mut counted_deferred);
                 out.push_str(&format!("{}}}\n", body_pad));
             }
@@ -1209,16 +1221,21 @@ fn emit_tir_stmt(
             let lbl = tir_label_prefix(label);
             if let Some(source) = source {
                 let source = emit_expr_with_cleanups(source, cx, active_deferred_closes);
-                out.push_str(&jet_format!("{}{{ let {jet_prefix}range = {};\n", pad, source));
+                out.push_str(&jet_format!(
+                    "{}{{ let {jet_prefix}range = {};\n",
+                    pad,
+                    source
+                ));
                 let range_pad = "    ".repeat(indent + 1);
                 let body_pad = "    ".repeat(indent + 2);
-                let stride = step.as_ref().map(|step| {
-                    emit_expr_with_cleanups(step, cx, active_deferred_closes)
-                });
+                let stride = step
+                    .as_ref()
+                    .map(|step| emit_expr_with_cleanups(step, cx, active_deferred_closes));
                 if let Some(stride) = &stride {
                     out.push_str(&jet_format!(
                         "{}let {jet_prefix}loop_stride = {};\n",
-                        range_pad, stride
+                        range_pad,
+                        stride
                     ));
                     out.push_str(&jet_format!(
                         "{}if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n",
@@ -1256,9 +1273,21 @@ fn emit_tir_stmt(
             match step {
                 Some(step) => {
                     let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                    out.push_str(&jet_format!("{}{{ let {jet_prefix}loop_start = {};\n", pad, s));
-                    out.push_str(&jet_format!("{}    let {jet_prefix}loop_end = {};\n", pad, e));
-                    out.push_str(&jet_format!("{}    let {jet_prefix}loop_stride = {};\n", pad, st));
+                    out.push_str(&jet_format!(
+                        "{}{{ let {jet_prefix}loop_start = {};\n",
+                        pad,
+                        s
+                    ));
+                    out.push_str(&jet_format!(
+                        "{}    let {jet_prefix}loop_end = {};\n",
+                        pad,
+                        e
+                    ));
+                    out.push_str(&jet_format!(
+                        "{}    let {jet_prefix}loop_stride = {};\n",
+                        pad,
+                        st
+                    ));
                     out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n", pad, cx.root_prefix, cx.file));
                     out.push_str(&jet_format!(
                         "{}{}for {} in ({jet_prefix}loop_start{range_op}{jet_prefix}loop_end).step_by({jet_prefix}loop_stride as usize) {{\n",
@@ -1280,36 +1309,23 @@ fn emit_tir_stmt(
             }
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
-            if step.is_some() { out.push_str(&format!("{}}}\n", pad)); }
+            if step.is_some() {
+                out.push_str(&format!("{}}}\n", pad));
+            }
         }
         TStmt::Break(label) => match label {
-            Some(name) => out.push_str(&format!(
-                "{}break '{};\n",
-                pad,
-                mangle(name)
-            )),
+            Some(name) => out.push_str(&format!("{}break '{};\n", pad, mangle(name))),
             None => out.push_str(&format!("{}break;\n", pad)),
         },
         TStmt::BreakValue { label, value } => {
             let value = emit_expr_with_cleanups(value, cx, active_deferred_closes);
             match label {
-                Some(name) => {
-                    out.push_str(&format!(
-                        "{}break '{} {};\n",
-                        pad,
-                        mangle(name),
-                        value
-                    ))
-                }
+                Some(name) => out.push_str(&format!("{}break '{} {};\n", pad, mangle(name), value)),
                 None => out.push_str(&format!("{}break {};\n", pad, value)),
             }
         }
         TStmt::Continue(label) => match label {
-            Some(name) => out.push_str(&format!(
-                "{}continue '{};\n",
-                pad,
-                mangle(name)
-            )),
+            Some(name) => out.push_str(&format!("{}continue '{};\n", pad, mangle(name))),
             None => out.push_str(&format!("{}continue;\n", pad)),
         },
         // c109 Phase 4: an exhaustive enum match. Mirrors `emit_pattern_match_switch`
@@ -1338,25 +1354,13 @@ fn emit_tir_stmt(
                     }
                     None => out.push_str(&format!("{}    {} => {{\n", pad, pattern)),
                 }
-                emit_tir_stmts_nested(
-                    &arm.body,
-                    cx,
-                    out,
-                    indent + 2,
-                    active_deferred_closes,
-                );
+                emit_tir_stmts_nested(&arm.body, cx, out, indent + 2, active_deferred_closes);
                 out.push_str(&format!("{}    }}\n", pad));
             }
             match else_body {
                 Some(body) => {
                     out.push_str(&format!("{}    _ => {{\n", pad));
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        indent + 2,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
                     out.push_str(&format!("{}    }}\n", pad));
                 }
                 None if *fallthrough => {
@@ -1384,7 +1388,8 @@ fn emit_tir_stmt(
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&jet_format!(
                 "{}let {jet_prefix}switch_subject = &({});\n",
-                inner_pad, subject_str
+                inner_pad,
+                subject_str
             ));
             for (i, (lo, hi, body)) in arms.iter().enumerate() {
                 let kw = if i == 0 { "if" } else { "} else if" };
@@ -1392,26 +1397,11 @@ fn emit_tir_stmt(
                     format!("({} >= {} && {} <= {})", subject_str, lo, subject_str, hi),
                     cx,
                 );
-                out.push_str(&format!(
-                    "{}{} {} {{\n",
-                    inner_pad, kw, condition
-                ));
-                emit_tir_stmts_nested(
-                    body,
-                    cx,
-                    out,
-                    indent + 2,
-                    active_deferred_closes,
-                );
+                out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, condition));
+                emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
             }
             out.push_str(&format!("{}}} else {{\n", inner_pad));
-            emit_tir_stmts_nested(
-                else_body,
-                cx,
-                out,
-                indent + 2,
-                active_deferred_closes,
-            );
+            emit_tir_stmts_nested(else_body, cx, out, indent + 2, active_deferred_closes);
             out.push_str(&format!("{}}}\n", inner_pad));
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -1472,8 +1462,7 @@ fn emit_tir_stmt(
         TStmt::IndexFieldAssign(assign) => {
             let b = emit_expr_with_cleanups(&assign.base, cx, active_deferred_closes);
             let i = emit_expr_with_cleanups(&assign.index, cx, active_deferred_closes);
-            let mut v =
-                emit_expr_with_cleanups(&assign.value, cx, active_deferred_closes);
+            let mut v = emit_expr_with_cleanups(&assign.value, cx, active_deferred_closes);
             if assign.clone_value {
                 v = format!("({v}).clone()");
             }
@@ -1497,9 +1486,9 @@ fn emit_tir_stmt(
                         jet_format!("let {jet_prefix}t = &mut {place}; *{jet_prefix}t = {call};")
                     }
                     None => {
-                        let operator = assign
-                            .op
-                            .map_or("=".to_string(), |op| format!("{}=", op.rust_spell().expect(PRELUDE_CARRIED)));
+                        let operator = assign.op.map_or("=".to_string(), |op| {
+                            format!("{}=", op.rust_spell().expect(PRELUDE_CARRIED))
+                        });
                         jet_format!("{place} {operator} {jet_prefix}v;")
                     }
                 }
@@ -1584,8 +1573,16 @@ fn emit_tir_stmt(
             let collection_str = if let Some(step) = step {
                 stride_wrapper = true;
                 let stride = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                out.push_str(&jet_format!("{}{{ let {jet_prefix}loop_source = {};\n", pad, source_rust));
-                out.push_str(&jet_format!("{}    let {jet_prefix}loop_stride = {};\n", pad, stride));
+                out.push_str(&jet_format!(
+                    "{}{{ let {jet_prefix}loop_source = {};\n",
+                    pad,
+                    source_rust
+                ));
+                out.push_str(&jet_format!(
+                    "{}    let {jet_prefix}loop_stride = {};\n",
+                    pad,
+                    stride
+                ));
                 out.push_str(&jet_format!("{}    if {jet_prefix}loop_stride <= 0 {{ {}jet_panic({:?}, 0, jet_loop_stride_message()); }}\n", pad, cx.root_prefix, cx.file));
                 source_storage = mangle_generated("loop_source");
                 stride_suffix = jet_format!(".step_by({jet_prefix}loop_stride as usize)");
@@ -1627,7 +1624,8 @@ fn emit_tir_stmt(
                 Some(TForInMethod::LinesStdin) => {
                     out.push_str(&jet_format!(
                         "{}{{ let mut {jet_prefix}stdin_h = {};\n",
-                        pad, collection_str
+                        pad,
+                        collection_str
                     ));
                     needs_extra_close = true;
                     out.push_str(&jet_format!(
@@ -1774,7 +1772,10 @@ fn emit_tir_stmt(
                         } else {
                             out.push_str(&jet_format!(
                                 "{}{}for ({jet_prefix}k, {jet_prefix}v) in ({}).iter(){} {{\n",
-                                pad, lbl, collection_str, stride_suffix
+                                pad,
+                                lbl,
+                                collection_str,
+                                stride_suffix
                             ));
                             out.push_str(&jet_format!(
                                 "{}    let {} = {jet_prefix}k.clone();\n",
@@ -1797,7 +1798,10 @@ fn emit_tir_stmt(
                             let tuple = crate::Codegen::Tuples::tuple_struct_name(&fields);
                             out.push_str(&jet_format!(
                                 "{}{}for ({jet_prefix}k, {jet_prefix}v) in ({}).iter(){} {{\n",
-                                pad, lbl, collection_str, stride_suffix
+                                pad,
+                                lbl,
+                                collection_str,
+                                stride_suffix
                             ));
                             out.push_str(&jet_format!(
                                 "{}    let {} = {} {{ {}: {jet_prefix}k.clone(), {}: {jet_prefix}v.clone() }};\n",
@@ -1807,9 +1811,17 @@ fn emit_tir_stmt(
                                 mangle("key"),
                                 mangle("value")
                             ));
-                            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
+                            emit_tir_stmts_nested(
+                                body,
+                                cx,
+                                out,
+                                indent + 1,
+                                active_deferred_closes,
+                            );
                             out.push_str(&format!("{}}}\n", pad));
-                            if stride_wrapper { out.push_str(&format!("{}}}\n", pad)); }
+                            if stride_wrapper {
+                                out.push_str(&format!("{}}}\n", pad));
+                            }
                             return;
                         }
                         // D-SOA1: a columnar list iterates `iter_aos()` (owned records
@@ -1887,10 +1899,7 @@ fn emit_tir_stmt(
             };
             let gate_guard = format!(
                 "{}jet_mem::{scope}({}, {:?}, {}, \"\")",
-                cx.root_prefix,
-                gate.enabled,
-                gate.file,
-                gate.line,
+                cx.root_prefix, gate.enabled, gate.file, gate.line,
             );
             out.push_str(&format!("{}unsafe {{\n", pad));
             out.push_str(&format!("{}    let _jet_sentry = {};\n", pad, gate_guard));
@@ -1977,13 +1986,7 @@ fn emit_tir_stmt(
                         "{}let __ef = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<(), String> {{\n",
                         ip
                     ));
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        inner + 1,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, inner + 1, active_deferred_closes);
                     out.push_str(&format!("{}Ok(())\n", ip2));
                     out.push_str(&format!("{}}}));\n", ip));
                     out.push_str(&format!(
@@ -2060,7 +2063,12 @@ fn emit_tir_stmt(
                     )
                 },
             );
-            out.push_str(&format!("{}    let {} = {};\n", pad, group.rust_place(), constructor));
+            out.push_str(&format!(
+                "{}    let {} = {};\n",
+                pad,
+                group.rust_place(),
+                constructor
+            ));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
@@ -2208,7 +2216,8 @@ fn emit_tir_stmt(
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&jet_format!(
                 "{}let {jet_prefix}switch_subject = &({});\n",
-                inner_pad, subject_str
+                inner_pad,
+                subject_str
             ));
             if matches!(class, crate::Codegen::TIR::BranchClass::Bool2) {
                 out.push_str(&format!("{}// jet:branch bool-two-way\n", inner_pad));
@@ -2222,26 +2231,12 @@ fn emit_tir_stmt(
                     .find(|(cond, _)| !branch_bool_literal(cond))
                     .map(|(_, body)| body.as_slice())
                     .expect("classified bool branch has false arm");
-                let (condition, _) = coverage_condition(
-                    jet_format!("*{jet_prefix}switch_subject"),
-                    cx,
-                );
+                let (condition, _) =
+                    coverage_condition(jet_format!("*{jet_prefix}switch_subject"), cx);
                 out.push_str(&format!("{}if {condition} {{\n", inner_pad));
-                emit_tir_stmts_nested(
-                    true_body,
-                    cx,
-                    out,
-                    indent + 2,
-                    active_deferred_closes,
-                );
+                emit_tir_stmts_nested(true_body, cx, out, indent + 2, active_deferred_closes);
                 out.push_str(&format!("{}}} else {{\n", inner_pad));
-                emit_tir_stmts_nested(
-                    false_body,
-                    cx,
-                    out,
-                    indent + 2,
-                    active_deferred_closes,
-                );
+                emit_tir_stmts_nested(false_body, cx, out, indent + 2, active_deferred_closes);
                 out.push_str(&format!("{}}}\n", inner_pad));
                 out.push_str(&format!("{}}}\n", pad));
                 return;
@@ -2251,13 +2246,13 @@ fn emit_tir_stmt(
                 if cx.coverage {
                     for (i, (cond, body)) in arms.iter().enumerate() {
                         let literal = match &cond.kind {
-                            crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => {
-                                match &rhs.kind {
-                                    crate::Codegen::TIR::TExprKind::IntLit(value, _) => value.to_string(),
-                                    crate::Codegen::TIR::TExprKind::BoolLit(value) => value.to_string(),
-                                    _ => unreachable!("classified literal branch"),
+                            crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match &rhs.kind {
+                                crate::Codegen::TIR::TExprKind::IntLit(value, _) => {
+                                    value.to_string()
                                 }
-                            }
+                                crate::Codegen::TIR::TExprKind::BoolLit(value) => value.to_string(),
+                                _ => unreachable!("classified literal branch"),
+                            },
                             _ => unreachable!("classified literal branch"),
                         };
                         let (condition, _) = coverage_condition(
@@ -2266,13 +2261,7 @@ fn emit_tir_stmt(
                         );
                         let kw = if i == 0 { "if" } else { "} else if" };
                         out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, condition));
-                        emit_tir_stmts_nested(
-                            body,
-                            cx,
-                            out,
-                            indent + 2,
-                            active_deferred_closes,
-                        );
+                        emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
                     }
                     match else_body {
                         Some(body) => {
@@ -2290,7 +2279,10 @@ fn emit_tir_stmt(
                     out.push_str(&format!("{}}}\n", pad));
                     return;
                 }
-                out.push_str(&jet_format!("{}match *{jet_prefix}switch_subject {{\n", inner_pad));
+                out.push_str(&jet_format!(
+                    "{}match *{jet_prefix}switch_subject {{\n",
+                    inner_pad
+                ));
                 for (cond, body) in arms {
                     let literal = match &cond.kind {
                         crate::Codegen::TIR::TExprKind::Binary { rhs, .. } => match &rhs.kind {
@@ -2301,24 +2293,12 @@ fn emit_tir_stmt(
                         _ => unreachable!("classified literal branch"),
                     };
                     out.push_str(&format!("{}    {} => {{\n", inner_pad, literal));
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        indent + 3,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
                     out.push_str(&format!("{}    }}\n", inner_pad));
                 }
                 out.push_str(&format!("{}    _ => {{\n", inner_pad));
                 if let Some(body) = else_body {
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        indent + 3,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
                 }
                 out.push_str(&format!("{}    }}\n", inner_pad));
                 out.push_str(&format!("{}}}\n", inner_pad));
@@ -2358,19 +2338,8 @@ fn emit_tir_stmt(
                     emit_expr_with_cleanups(cond, cx, active_deferred_closes),
                     cx,
                 );
-                out.push_str(&format!(
-                    "{}{} {} {{\n",
-                    inner_pad,
-                    kw,
-                    condition
-                ));
-                emit_tir_stmts_nested(
-                    body,
-                    cx,
-                    out,
-                    indent + 2,
-                    active_deferred_closes,
-                );
+                out.push_str(&format!("{}{} {} {{\n", inner_pad, kw, condition));
+                emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
             }
             // The `else`/fallthrough, byte-for-byte `emit_mixed_switch`: with arms and no
             // else → close the chain (`}`); with an else → `} else { … }`. (An empty
@@ -2381,23 +2350,11 @@ fn emit_tir_stmt(
                 }
                 None => {}
                 Some(body) if arms.is_empty() => {
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        indent + 1,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
                 }
                 Some(body) => {
                     out.push_str(&format!("{}}} else {{\n", inner_pad));
-                    emit_tir_stmts_nested(
-                        body,
-                        cx,
-                        out,
-                        indent + 2,
-                        active_deferred_closes,
-                    );
+                    emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
                     out.push_str(&format!("{}}}\n", inner_pad));
                 }
             }

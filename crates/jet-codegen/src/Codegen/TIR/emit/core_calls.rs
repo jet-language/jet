@@ -1,10 +1,10 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{AccessConvention, Type};
 use crate::Codegen::escape_rust_str;
-use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::enc_arg_is_json;
 use crate::Codegen::TIR::enc_arg_is_string_rows;
@@ -12,8 +12,8 @@ use crate::Codegen::TIR::enc_ok_is_json;
 use crate::Codegen::TIR::enc_row_target_rust;
 use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::struct_field_type;
-use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::TExpr;
+use crate::AST::{AccessConvention, Type};
 
 fn reflect_field_type(cx: &Cx, owner_ty: &Type, declared: &Type) -> Type {
     crate::Codegen::TIR::substitute_reflect_field_type(
@@ -125,8 +125,7 @@ fn compute_result_type<'a>(ret_ty: &'a Type, transform: bool) -> Option<&'a Type
     }
     match ret_ty {
         Type::Fn {
-            ret: Some(result),
-            ..
+            ret: Some(result), ..
         } => Some(result),
         _ => None,
     }
@@ -176,11 +175,7 @@ fn compute_transform_kind(method: &str) -> &'static str {
 
 fn compute_result_shape(base_ret: &Type) -> String {
     match base_ret {
-        Type::Tuple(fields)
-            if fields
-                .iter()
-                .all(|(_, ty)| ty.is_compute_tensor_family()) =>
-        {
+        Type::Tuple(fields) if fields.iter().all(|(_, ty)| ty.is_compute_tensor_family()) => {
             format!("JetComputeResultShape::TensorTuple({})", fields.len())
         }
         _ => "JetComputeResultShape::Tensor".to_string(),
@@ -189,18 +184,14 @@ fn compute_result_shape(base_ret: &Type) -> String {
 
 fn compute_base_result(base_ret: &Type, value: &str) -> String {
     match base_ret {
-        Type::Tuple(fields)
-            if fields
+        Type::Tuple(fields) if fields.iter().all(|(_, ty)| ty.is_compute_tensor_family()) => {
+            let values = fields
                 .iter()
-                .all(|(_, ty)| ty.is_compute_tensor_family()) =>
-        {
-                let values = fields
-                    .iter()
-                    .map(|(field, _)| format!("({value}).{}.clone()", mangle(field)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("JetComputeBaseResult::TensorTuple(vec![{values}])")
-            }
+                .map(|(field, _)| format!("({value}).{}.clone()", mangle(field)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("JetComputeBaseResult::TensorTuple(vec![{values}])")
+        }
         _ => format!("JetComputeBaseResult::Tensor({value})"),
     }
 }
@@ -412,9 +403,7 @@ fn emit_compute_transform_call(
     ret_ty: &Type,
     cx: &Cx,
 ) -> Option<String> {
-    if !matches!(method, "gradient" | "value_and_gradient" | "vjp" | "jvp")
-        || args.len() < 2
-    {
+    if !matches!(method, "gradient" | "value_and_gradient" | "vjp" | "jvp") || args.len() < 2 {
         return None;
     }
     let Type::Fn {
@@ -435,11 +424,14 @@ fn emit_compute_transform_call(
     } else {
         base_params.len()
     };
-    if !transform && value_count != if method == "jvp" {
-        primal_count.saturating_mul(2)
-    } else {
-        primal_count
-    } {
+    if !transform
+        && value_count
+            != if method == "jvp" {
+                primal_count.saturating_mul(2)
+            } else {
+                primal_count
+            }
+    {
         return None;
     }
     if transform {
@@ -472,7 +464,11 @@ fn emit_compute_transform_call(
     let gradient_ty = compute_gradient_type(method, result_ty);
     let nested_gradient = method == "gradient"
         && matches!(base_ret.as_ref(), Type::Tuple(fields) if fields.iter().all(|(_, ty)| ty.is_compute_tensor_family()));
-    let result_body = |output: &str, state: &str, tape: &str, target_expr: &str| -> Option<String> {
+    let result_body = |output: &str,
+                       state: &str,
+                       tape: &str,
+                       target_expr: &str|
+     -> Option<String> {
         match method {
             "gradient" => {
                 let gradient_ty = gradient_ty.as_ref()?;
@@ -669,7 +665,10 @@ fn emit_plain_core_call(
     cx: &Cx,
 ) -> Option<String> {
     if module == "core.time" && method == "sleep" {
-        let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
+        let duration = args
+            .first()
+            .map(|arg| emit_tir_expr(arg, cx))
+            .unwrap_or_default();
         return Some(format!(
             "{}jet_std_time_sleep_duration_ns(({}).ns)",
             helper(""),
@@ -677,7 +676,10 @@ fn emit_plain_core_call(
         ));
     }
     if module == "core.task" && method == "timeout" {
-        let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
+        let duration = args
+            .first()
+            .map(|arg| emit_tir_expr(arg, cx))
+            .unwrap_or_default();
         return Some(format!(
             "{}jet_task_timeout_duration_ns(({}).ns)",
             helper(""),
@@ -685,7 +687,10 @@ fn emit_plain_core_call(
         ));
     }
     if module == "core.tasks" && method == "interval" {
-        let duration = args.first().map(|arg| emit_tir_expr(arg, cx)).unwrap_or_default();
+        let duration = args
+            .first()
+            .map(|arg| emit_tir_expr(arg, cx))
+            .unwrap_or_default();
         return Some(format!(
             "{}jet_std::interval({}jet_std_time_duration_to_millis(({}).ns))",
             helper(""),
@@ -714,15 +719,19 @@ fn emit_plain_core_call(
         .map(|(idx, borrow)| {
             let a = arg(idx);
             let a = if row.path_arg(idx)
-                && args.get(idx).is_some_and(|arg| {
-                    matches!(&arg.ty, Type::Named(name) if name == "Path")
-                })
+                && args
+                    .get(idx)
+                    .is_some_and(|arg| matches!(&arg.ty, Type::Named(name) if name == "Path"))
             {
                 format!("({a}).jet_show()")
             } else {
                 a
             };
-            if *borrow { format!("&({a})") } else { a }
+            if *borrow {
+                format!("&({a})")
+            } else {
+                a
+            }
         })
         .collect();
     let sym = match row.symbol {
@@ -741,7 +750,8 @@ pub(crate) fn emit_tir_core_call(
     cx: &Cx,
 ) -> String {
     let arg = |i: usize| {
-        let rendered = args.get(i)
+        let rendered = args
+            .get(i)
             .map(|e| emit_tir_expr(e, cx))
             .unwrap_or_default();
         if widen_to_vec.get(i).copied().unwrap_or(false) {
@@ -759,7 +769,11 @@ pub(crate) fn emit_tir_core_call(
     };
     let workflow_run_id = |index: usize| {
         if args.get(index).is_some_and(|expr| is_workflow_id(&expr.ty)) {
-            format!("{}(&({}))", helper("jet_services_workflow_run_id"), arg(index))
+            format!(
+                "{}(&({}))",
+                helper("jet_services_workflow_run_id"),
+                arg(index)
+            )
         } else {
             arg(index)
         }
@@ -768,7 +782,8 @@ pub(crate) fn emit_tir_core_call(
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         format!("{}::{}", crate_name, name)
     };
-    let email_runtime = || format!(
+    let email_runtime = || {
+        format!(
         "{}jet_email::RuntimeFns {{ tls_begin: {}, tls_begin_ca: {}, tls_handshake_step: {}, tls_set_poll_timeout: {}, tls_read: {}, tls_write_all: {}, tls_close: {}, wipe: {}, sha256: {}, ed25519_sign: {}, cancelled: jet_scheduler_task_cancelled, remaining_ms: jet_deadline_remaining_ms, accepted_at: {}jet_email::runtime_now }}",
         cx.root_prefix,
         regex_fn("jet_net_tls_begin_impl"),
@@ -782,7 +797,8 @@ pub(crate) fn emit_tir_core_call(
         regex_fn("jet_crypto_email_sha256_impl"),
         regex_fn("jet_crypto_email_ed25519_sign_impl"),
         cx.root_prefix,
-    );
+    )
+    };
     if module == "core.encoding" && method == "__published_schema_empty" {
         return format!("{}jet_std::DataTree::Object(Vec::new())", cx.root_prefix);
     }
@@ -801,11 +817,13 @@ pub(crate) fn emit_tir_core_call(
     }
     // D-INTBIG1: every whole-number core.math operation uses the exact Int
     // Prelude carrier. Fixed-width rows remain available for explicit IntN.
-    if module == "core.math"
-        && matches!(args.first().map(|arg| &arg.ty), Some(Type::Int))
-    {
+    if module == "core.math" && matches!(args.first().map(|arg| &arg.ty), Some(Type::Int)) {
         let exact = match method {
-            "abs" => Some(format!("{}jet_std::jet_int_abs({})", cx.root_prefix, arg(0))),
+            "abs" => Some(format!(
+                "{}jet_std::jet_int_abs({})",
+                cx.root_prefix,
+                arg(0)
+            )),
             "factorial" => Some(format!(
                 "{}jet_std::jet_int_factorial({})",
                 cx.root_prefix,
@@ -840,9 +858,8 @@ pub(crate) fn emit_tir_core_call(
                 method,
                 arg(0)
             )),
-            "checked_add" | "checked_sub" | "checked_mul" | "saturating_add"
-            | "saturating_sub" | "saturating_mul" | "wrapping_add" | "wrapping_sub"
-            | "wrapping_mul" => Some(format!(
+            "checked_add" | "checked_sub" | "checked_mul" | "saturating_add" | "saturating_sub"
+            | "saturating_mul" | "wrapping_add" | "wrapping_sub" | "wrapping_mul" => Some(format!(
                 "{}jet_std::jet_int_{}({}, {})",
                 cx.root_prefix,
                 method,
@@ -911,7 +928,9 @@ pub(crate) fn emit_tir_core_call(
     }
     fn vault_key_type(ty: &Type) -> Option<&str> {
         match ty {
-            Type::Named(name) if matches!(name.as_str(), "SigningKey" | "X25519SecretKey") => Some(name),
+            Type::Named(name) if matches!(name.as_str(), "SigningKey" | "X25519SecretKey") => {
+                Some(name)
+            }
             Type::Tagged { inner, .. } => vault_key_type(inner),
             Type::Apply { args, .. } => args.iter().find_map(vault_key_type),
             Type::Option(inner) | Type::List(inner) => vault_key_type(inner),
@@ -920,8 +939,14 @@ pub(crate) fn emit_tir_core_call(
         }
     }
     let vault_rust = || match vault_key_type(ret_ty) {
-        Some("SigningKey") => format!("{}::JetSigningKey", cx.ffi_crate.as_deref().unwrap_or("jet_ffi")),
-        Some("X25519SecretKey") => format!("{}::JetX25519SecretKey", cx.ffi_crate.as_deref().unwrap_or("jet_ffi")),
+        Some("SigningKey") => format!(
+            "{}::JetSigningKey",
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi")
+        ),
+        Some("X25519SecretKey") => format!(
+            "{}::JetX25519SecretKey",
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi")
+        ),
         _ => "_".to_string(),
     };
     // #1635: every arm below stays bespoke because it needs at least one thing

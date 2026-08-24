@@ -1,7 +1,5 @@
+use crate::local_cell::{JetCell, JetCellEditGuard, JetCellOptionLike, JetCellReadGuard};
 use crate::Comptime::{CtReport, CtValue};
-use crate::local_cell::{
-    JetCell, JetCellEditGuard, JetCellOptionLike, JetCellReadGuard,
-};
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -95,10 +93,7 @@ impl EvalLocalCells {
         index
     }
 
-    pub(super) fn read_guard(
-        &self,
-        index: usize,
-    ) -> Option<Rc<JetCellReadGuard<CtValue>>> {
+    pub(super) fn read_guard(&self, index: usize) -> Option<Rc<JetCellReadGuard<CtValue>>> {
         self.read_guards.get(index)?.guard.as_ref().cloned()
     }
 
@@ -137,10 +132,7 @@ impl EvalLocalCells {
         index
     }
 
-    pub(super) fn edit_guard(
-        &self,
-        index: usize,
-    ) -> Option<Rc<JetCellEditGuard<CtValue>>> {
+    pub(super) fn edit_guard(&self, index: usize) -> Option<Rc<JetCellEditGuard<CtValue>>> {
         self.edit_guards.get(index)?.guard.as_ref().cloned()
     }
 
@@ -179,11 +171,7 @@ impl JetCellOptionLike for CtValue {
     }
 }
 
-fn collect_guard_handles(
-    value: &CtValue,
-    reads: &mut HashSet<usize>,
-    edits: &mut HashSet<usize>,
-) {
+fn collect_guard_handles(value: &CtValue, reads: &mut HashSet<usize>, edits: &mut HashSet<usize>) {
     match value {
         CtValue::Struct { type_name, fields } => {
             if type_name == "__JetTirCellReadGuard" {
@@ -236,16 +224,15 @@ fn collect_guard_handles(
 }
 
 pub(super) fn internal_index(fields: &[(String, CtValue)]) -> Option<usize> {
-    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
-        _ => None,
-    })
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })
 }
 
-pub(super) fn project_ref<'a>(
-    value: &'a CtValue,
-    path: &[String],
-) -> Option<&'a CtValue> {
+pub(super) fn project_ref<'a>(value: &'a CtValue, path: &[String]) -> Option<&'a CtValue> {
     let Some((field, rest)) = path.split_first() else {
         return Some(value);
     };
@@ -258,10 +245,7 @@ pub(super) fn project_ref<'a>(
     project_ref(next, rest)
 }
 
-pub(super) fn project_mut<'a>(
-    value: &'a mut CtValue,
-    path: &[String],
-) -> Option<&'a mut CtValue> {
+pub(super) fn project_mut<'a>(value: &'a mut CtValue, path: &[String]) -> Option<&'a mut CtValue> {
     let Some((field, rest)) = path.split_first() else {
         return Some(value);
     };
@@ -295,12 +279,8 @@ pub(super) fn project_pair_mut<'a>(
         return project_pair_mut(next, first_rest, second_rest);
     }
 
-    let first_index = fields
-        .iter()
-        .position(|(name, _)| name == first_field)?;
-    let second_index = fields
-        .iter()
-        .position(|(name, _)| name == second_field)?;
+    let first_index = fields.iter().position(|(name, _)| name == first_field)?;
+    let second_index = fields.iter().position(|(name, _)| name == second_field)?;
     let (first_value, second_value) = if first_index < second_index {
         let (left, right) = fields.split_at_mut(second_index);
         (&mut left[first_index].1, &mut right[0].1)

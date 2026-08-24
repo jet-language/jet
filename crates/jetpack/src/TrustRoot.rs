@@ -39,6 +39,11 @@ pub const DEFAULT_MAX_CLOCK_SKEW: Duration = Duration::from_secs(5 * 60);
 /// Algorithm id recorded on every signature (crypto-agility seam).
 pub const ALG_HMAC_SHA256: &str = "hmac-sha256";
 
+/// Optional explicit witness identity for cache receipts. CI uses the same
+/// receipt path as a local producer; its standard `CI` environment is only a
+/// default identity source when this override is absent (D-DEVR-WITNESS1=A).
+pub const RECEIPT_WITNESS_ENV: &str = "JET_RECEIPT_WITNESS";
+
 /// Read key material only from the platform OS CSPRNG. Trust material must
 /// not fall back to predictable process, path, or wall-clock data.
 pub(crate) fn os_random_bytes<const N: usize>() -> io::Result<[u8; N]> {
@@ -355,9 +360,16 @@ impl CacheProvenance {
         Ok(())
     }
 
-    fn canonical(&self, role: &str, version: u64, issued_unix: u64, expires_unix: u64) -> String {
+    fn canonical(
+        &self,
+        role: &str,
+        witness: &str,
+        version: u64,
+        issued_unix: u64,
+        expires_unix: u64,
+    ) -> String {
         format!(
-            "jet-slsa-cache-v1\nrole={role}\nversion={version}\nissued={issued_unix}\nexpires={expires_unix}\nreference={}\nsource={}\nbuilder={}\naction={}\noutput={}\nplatform={}\nsandbox={}\npolicy={}\n",
+            "jet-slsa-cache-v1\nrole={role}\nwitness={witness}\nversion={version}\nissued={issued_unix}\nexpires={expires_unix}\nreference={}\nsource={}\nbuilder={}\naction={}\noutput={}\nplatform={}\nsandbox={}\npolicy={}\n",
             self.reference,
             self.source,
             self.builder,
@@ -374,6 +386,9 @@ impl CacheProvenance {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheReceipt {
     pub role: String,
+    /// Stable identity of the process or service that produced this receipt.
+    /// It is part of the signed canonical payload, not merely report text.
+    pub witness: String,
     pub provenance: CacheProvenance,
     pub version: u64,
     pub issued_unix: u64,
@@ -382,8 +397,34 @@ pub struct CacheReceipt {
 }
 
 impl CacheReceipt {
+    /// Issue a receipt for the current producer. CI and local publication use
+    /// this same method and therefore the same cache transport and verifier.
     pub fn issue(
         role: &str,
+        provenance: CacheProvenance,
+        version: u64,
+        issued_unix: u64,
+        expires_unix: u64,
+        key: &TrustKey,
+    ) -> Result<Self, TrustError> {
+        let witness = current_receipt_witness()?;
+        Self::issue_with_witness(
+            role,
+            &witness,
+            provenance,
+            version,
+            issued_unix,
+            expires_unix,
+            key,
+        )
+    }
+
+    /// Issue a receipt with an explicit witness identity. The explicit form is
+    /// used by importers and focused trust tests; normal publication uses
+    /// [`Self::issue`] so CI and local producers share one path.
+    pub fn issue_with_witness(
+        role: &str,
+        witness: &str,
         provenance: CacheProvenance,
         version: u64,
         issued_unix: u64,
@@ -395,6 +436,7 @@ impl CacheReceipt {
                 detail: "cache receipt role is empty or contains a newline".into(),
             });
         }
+        validate_receipt_witness(witness)?;
         if expires_unix <= issued_unix {
             return Err(TrustError::CacheReceiptInvalid {
                 detail: "cache receipt expiry must be after its issue time".into(),
@@ -406,9 +448,14 @@ impl CacheReceipt {
             });
         }
         provenance.validate()?;
-        let signature = key.sign(provenance.canonical(role, version, issued_unix, expires_unix).as_bytes());
+        let signature = key.sign(
+            provenance
+                .canonical(role, witness, version, issued_unix, expires_unix)
+                .as_bytes(),
+        );
         Ok(Self {
             role: role.to_string(),
+            witness: witness.to_string(),
             provenance,
             version,
             issued_unix,
@@ -423,6 +470,7 @@ impl CacheReceipt {
                 detail: "cache receipt role is empty or contains a newline".into(),
             });
         }
+        validate_receipt_witness(&self.witness)?;
         if self.version == 0 || self.expires_unix <= self.issued_unix {
             return Err(TrustError::CacheReceiptInvalid {
                 detail: "cache receipt version or expiry is invalid".into(),
@@ -443,7 +491,13 @@ impl CacheReceipt {
         }
         let expected = key.sign(
             self.provenance
-                .canonical(&self.role, self.version, self.issued_unix, self.expires_unix)
+                .canonical(
+                    &self.role,
+                    &self.witness,
+                    self.version,
+                    self.issued_unix,
+                    self.expires_unix,
+                )
                 .as_bytes(),
         );
         if self.signature != expected {
@@ -453,6 +507,38 @@ impl CacheReceipt {
         }
         Ok(())
     }
+}
+
+/// Select the identity recorded in newly issued cache receipts. An explicit
+/// value wins so a deployment can name its witness. Otherwise CI is the
+/// conventional shared witness and local work is attributed to its account.
+pub fn current_receipt_witness() -> Result<String, TrustError> {
+    let witness = match std::env::var(RECEIPT_WITNESS_ENV) {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) if std::env::var_os("CI").is_some() => "ci".to_string(),
+        Err(std::env::VarError::NotPresent) => {
+            let account = std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_else(|_| "unknown".to_string());
+            format!("local:{account}")
+        }
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(TrustError::CacheReceiptInvalid {
+                detail: format!("{RECEIPT_WITNESS_ENV} is not valid Unicode"),
+            });
+        }
+    };
+    validate_receipt_witness(&witness)?;
+    Ok(witness)
+}
+
+fn validate_receipt_witness(witness: &str) -> Result<(), TrustError> {
+    if witness.trim().is_empty() || witness.chars().any(char::is_control) {
+        return Err(TrustError::CacheReceiptInvalid {
+            detail: "cache receipt witness is empty or contains control characters".into(),
+        });
+    }
+    Ok(())
 }
 
 /// Stable host-owned identity for one cache builder input domain.
@@ -658,38 +744,41 @@ pub fn is_cache_builder_revoked(roots_dir: &Path, builder: &str) -> Result<bool,
     Ok(text.lines().any(|line| line == builder))
 }
 
-fn cache_builder_allowlist_path(roots_dir: &Path, role: &str) -> Result<PathBuf, TrustError> {
+fn cache_identity_allowlist_path(
+    roots_dir: &Path,
+    directory: &str,
+    role: &str,
+) -> Result<PathBuf, TrustError> {
     cache_role_component(role)?;
     Ok(roots_dir
         .join("trust")
-        .join("cache-builders")
+        .join(directory)
         .join(format!("{role}.allow")))
 }
 
-/// Add one immutable builder identity to a shared cache role's host allowlist.
-/// The first publication is the explicit write-grant boundary; later reads
-/// accept only identities already recorded here.
-pub fn allow_cache_builder(
+fn allow_cache_identity(
     roots_dir: &Path,
+    directory: &str,
     role: &str,
-    builder: &str,
+    identity: &str,
+    label: &str,
 ) -> Result<(), TrustError> {
-    if builder.trim().is_empty() || builder.contains(['\n', '\r']) {
+    if identity.trim().is_empty() || identity.contains(['\n', '\r']) {
         return Err(TrustError::CacheReceiptInvalid {
-            detail: "cache builder identity is empty or contains a newline".into(),
+            detail: format!("{label} identity is empty or contains a newline"),
         });
     }
-    let path = cache_builder_allowlist_path(roots_dir, role)?;
+    let path = cache_identity_allowlist_path(roots_dir, directory, role)?;
     let parent = path.parent().ok_or_else(|| TrustError::IO {
-        detail: "cache builder allowlist has no parent directory".into(),
+        detail: format!("{label} allowlist has no parent directory"),
     })?;
     std::fs::create_dir_all(parent).map_err(|error| TrustError::IO {
         detail: error.to_string(),
     })?;
-    let mut builders = match std::fs::symlink_metadata(&path) {
+    let mut identities = match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err(TrustError::IO {
-                detail: "cache builder allowlist is not a regular file".into(),
+                detail: format!("{label} allowlist is not a regular file"),
             });
         }
         Ok(_) => std::fs::read_to_string(&path)
@@ -707,26 +796,28 @@ pub fn allow_cache_builder(
             });
         }
     };
-    builders.insert(builder.to_string());
-    let body = builders.into_iter().collect::<Vec<_>>().join("\n") + "\n";
+    identities.insert(identity.to_string());
+    let body = identities.into_iter().collect::<Vec<_>>().join("\n") + "\n";
     atomic_trust_write(&path, body.as_bytes())
 }
 
-pub fn is_cache_builder_allowed(
+fn is_cache_identity_allowed(
     roots_dir: &Path,
+    directory: &str,
     role: &str,
-    builder: &str,
+    identity: &str,
+    label: &str,
 ) -> Result<bool, TrustError> {
-    if builder.trim().is_empty() || builder.contains(['\n', '\r']) {
+    if identity.trim().is_empty() || identity.contains(['\n', '\r']) {
         return Err(TrustError::CacheReceiptInvalid {
-            detail: "cache builder identity is empty or contains a newline".into(),
+            detail: format!("{label} identity is empty or contains a newline"),
         });
     }
-    let path = cache_builder_allowlist_path(roots_dir, role)?;
+    let path = cache_identity_allowlist_path(roots_dir, directory, role)?;
     let text = match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err(TrustError::IO {
-                detail: "cache builder allowlist is not a regular file".into(),
+                detail: format!("{label} allowlist is not a regular file"),
             });
         }
         Ok(_) => std::fs::read_to_string(&path).map_err(|error| TrustError::IO {
@@ -739,7 +830,51 @@ pub fn is_cache_builder_allowed(
             });
         }
     };
-    Ok(text.lines().any(|line| line == builder))
+    Ok(text.lines().any(|line| line == identity))
+}
+
+/// Add one immutable builder identity to a shared cache role's host allowlist.
+/// The first publication is the explicit write-grant boundary; later reads
+/// accept only identities already recorded here.
+pub fn allow_cache_builder(roots_dir: &Path, role: &str, builder: &str) -> Result<(), TrustError> {
+    allow_cache_identity(roots_dir, "cache-builders", role, builder, "cache builder")
+}
+
+pub fn is_cache_builder_allowed(
+    roots_dir: &Path,
+    role: &str,
+    builder: &str,
+) -> Result<bool, TrustError> {
+    is_cache_identity_allowed(roots_dir, "cache-builders", role, builder, "cache builder")
+}
+
+/// Add a producer witness to the host policy for one shared cache role.
+/// Witness policy is separate from builder identity: the bytes may be built
+/// by one identity and attested by another.
+pub fn allow_cache_witness(roots_dir: &Path, role: &str, witness: &str) -> Result<(), TrustError> {
+    validate_receipt_witness(witness)?;
+    allow_cache_identity(
+        roots_dir,
+        "cache-witnesses",
+        role,
+        witness,
+        "cache receipt witness",
+    )
+}
+
+pub fn is_cache_witness_allowed(
+    roots_dir: &Path,
+    role: &str,
+    witness: &str,
+) -> Result<bool, TrustError> {
+    validate_receipt_witness(witness)?;
+    is_cache_identity_allowed(
+        roots_dir,
+        "cache-witnesses",
+        role,
+        witness,
+        "cache receipt witness",
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

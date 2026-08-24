@@ -1026,7 +1026,7 @@ pub fn jet_missing_map_key_value(key: impl std::fmt::Display) -> String {
     jet_missing_map_key_message(Some(&key.to_string()))
 }
 
-/// Shared wording for a reached typed hole.
+/// Shared wording for a reached typed goal.
 pub fn jet_todo_message(file: &str, line: u32, expected_type: &str) -> String {
     format!("#Todo at {file}:{line} — expected {expected_type}")
 }

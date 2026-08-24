@@ -96,6 +96,10 @@ fn codemod_rename_dry_run_apply_and_undo() {
     assert!(log_text.contains("inverse_from"));
     assert!(log_text.contains("after_hash"));
     assert!(log_text.contains("inverse_edits"));
+    assert!(log_text.contains("\"semantic_ops\""));
+    assert!(log_text.contains("\"kind\":\"rename\""));
+    assert!(log_text.contains("\"from\":\"report\""));
+    assert!(log_text.contains("\"to\":\"summarize\""));
 
     let undo = Command::new(jet())
         .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
@@ -253,6 +257,10 @@ fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     assert_eq!(fs::read(&fixture_stderr).unwrap(), stderr_after);
 
     let log = project.join(".jet/codemods/ReportV2.log.json");
+    let log_text = fs::read_to_string(&log).unwrap();
+    assert!(log_text.contains("\"kind\":\"rename\""), "{log_text}");
+    assert!(log_text.contains("\"kind\":\"ast_rewrite\""), "{log_text}");
+    assert!(log_text.contains("\"rule_id\":\"rename-report\""), "{log_text}");
     let undo = Command::new(jet())
         .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
         .output()

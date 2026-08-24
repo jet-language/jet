@@ -31,9 +31,9 @@ pub mod Policy;
 mod Registry;
 mod Resolve;
 mod SBOM;
+pub mod SemVer;
 pub mod Tier;
 mod Tuf;
-pub mod SemVer;
 // c146 (D-PKGSIGN1): Ed25519 author signing via the hidden crypto bridge helper.
 pub mod Sign;
 mod Vendor;
@@ -49,11 +49,11 @@ pub(crate) use Registry::{
 };
 pub use Resolve::*;
 pub use SemVer::*;
+pub use Tier::*;
+pub use Tuf::*;
 pub use Vendor::*;
 pub use API::*;
 pub use SBOM::*;
-pub use Tuf::*;
-pub use Tier::*;
 
 // ──────────────────────────────────────────────
 // Unit tests
@@ -189,7 +189,10 @@ mod tests {
             "~>",
             "~>1.2",
         ] {
-            assert!(VersionReq::parse(range).is_none(), "accepted hostile range: {range}");
+            assert!(
+                VersionReq::parse(range).is_none(),
+                "accepted hostile range: {range}"
+            );
         }
     }
 
@@ -553,11 +556,7 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::create_dir_all(source.join(".jet")).unwrap();
         std::fs::write(source.join("package.jet"), "package bytes\n").unwrap();
-        let lock = make_lock(vec![make_lock_pkg(
-            "helpers",
-            "1.0.0",
-            "sha256-abcd1234",
-        )]);
+        let lock = make_lock(vec![make_lock_pkg("helpers", "1.0.0", "sha256-abcd1234")]);
         std::fs::write(source.join(".jet").join("lock"), crate::Lock::write(&lock)).unwrap();
 
         let content_hash = crate::SHA256::tree_hash(&source);

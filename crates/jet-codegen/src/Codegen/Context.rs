@@ -1,12 +1,12 @@
-use crate::jet_generated_format as jet_format;
 use super::*;
+use crate::jet_generated_format as jet_format;
 use crate::Diagnostics::Span;
 use crate::Generics;
 use crate::Syntax;
 use crate::AST::FfiLink;
 use crate::AST::{
-    AccessConvention, ContractClause, CtValue, EnumDef, Expr, Func, Item, Program, ProgramBundle, StructDef, Type,
-    VariantField, VariantPayload,
+    AccessConvention, ContractClause, CtValue, EnumDef, Expr, Func, Item, Program, ProgramBundle,
+    StructDef, Type, VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -108,8 +108,7 @@ pub(crate) struct Cx {
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
     /// Method-owned type parameters in declaration order. Owner parameters are
     /// kept separately in `struct_type_param_order`.
-    pub(crate) method_type_params:
-        HashMap<(String, String), Vec<crate::AST::TypeParam>>,
+    pub(crate) method_type_params: HashMap<(String, String), Vec<crate::AST::TypeParam>>,
     pub(crate) method_self_convs: HashMap<(String, String), AccessConvention>,
     /// c109 Phase 6 (TIR): `(TypeName, method)` -> resolved return type (or `None`
     /// for a unit-returning method). Used by TIR lowering to give a method-call
@@ -151,8 +150,7 @@ pub(crate) struct Cx {
     /// D-METAREFLECT1: the registered field rows shared by comptime and
     /// runtime reflection. Layout consumers keep their own ABI map, while
     /// reflection reads this metadata-bearing model.
-    pub(crate) reflection_fields:
-        HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
+    pub(crate) reflection_fields: HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
     /// D-BOUND-EVOLVE1=A: published records carry one compiler-owned wire
     /// holder. The holder is not part of the Jet source schema.
     pub(crate) published_schemas: HashSet<String>,
@@ -256,8 +254,7 @@ pub(crate) struct Cx {
     /// D-NAME-WALK1=A: per-inline-function unqualified import scopes. The key
     /// is the emitted mangled function name (`module__function`).
     pub(crate) inline_unqualified: HashMap<String, HashMap<String, String>>,
-    pub(crate) inline_unqualified_file:
-        HashMap<String, HashMap<String, (String, String)>>,
+    pub(crate) inline_unqualified_file: HashMap<String, HashMap<String, (String, String)>>,
     /// D-NAME-WALK1=A: per-inline-function Core import scopes. The key is the
     /// emitted mangled function name (`module__function`).
     pub(crate) inline_core_imports: HashMap<String, HashMap<String, String>>,
@@ -270,14 +267,12 @@ pub(crate) struct Cx {
     /// name from overwriting one another.
     pub(crate) inline_foreign_sigs:
         HashMap<String, HashMap<(String, String), Vec<(AccessConvention, Type)>>>,
-    pub(crate) inline_foreign_rets:
-        HashMap<String, HashMap<(String, String), Option<Type>>>,
+    pub(crate) inline_foreign_rets: HashMap<String, HashMap<(String, String), Option<Type>>>,
     /// Signature facts for foreign namespaces re-exported by an inline
     /// module, keyed by `(inline module, exported alias, method)`.
     pub(crate) inline_foreign_reexport_sigs:
         HashMap<(String, String, String), Vec<(AccessConvention, Type)>>,
-    pub(crate) inline_foreign_reexport_rets:
-        HashMap<(String, String, String), Option<Type>>,
+    pub(crate) inline_foreign_reexport_rets: HashMap<(String, String, String), Option<Type>>,
     /// Names from inline scopes used by the conservative TIR coverage gate.
     /// Lowering still reads the exact per-function map.
     pub(crate) inline_import_names: HashSet<String>,
@@ -443,7 +438,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-
 
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
@@ -853,12 +847,10 @@ impl Cx {
             self.module_alias.as_str()
         };
         let id = format!("{module}::{function}#branch{next}");
-        self.coverage_branches
-            .borrow_mut()
-            .push(CoverageBranch {
-                id: id.clone(),
-                function,
-            });
+        self.coverage_branches.borrow_mut().push(CoverageBranch {
+            id: id.clone(),
+            function,
+        });
         id
     }
 
@@ -944,8 +936,7 @@ impl Cx {
             || self
                 .imported_type_metadata_name(name)
                 .is_some_and(|canonical| {
-                    self.auto_debug.contains(&canonical)
-                        || self.debug_types.contains(&canonical)
+                    self.auto_debug.contains(&canonical) || self.debug_types.contains(&canonical)
                 })
     }
 
@@ -1025,11 +1016,7 @@ impl Cx {
             .map(String::as_str)
     }
 
-    pub(crate) fn import_module_for_function(
-        &self,
-        fn_name: &str,
-        alias: &str,
-    ) -> Option<&str> {
+    pub(crate) fn import_module_for_function(&self, fn_name: &str, alias: &str) -> Option<&str> {
         self.inline_foreign_imports
             .get(fn_name)
             .and_then(|scope| scope.get(alias))
@@ -1047,7 +1034,11 @@ impl Cx {
             .get(fn_name)
             .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
             .cloned()
-            .or_else(|| self.import_sigs.get(&(alias.to_string(), method.to_string())).cloned())
+            .or_else(|| {
+                self.import_sigs
+                    .get(&(alias.to_string(), method.to_string()))
+                    .cloned()
+            })
     }
 
     pub(crate) fn import_return_for_function(
@@ -1060,7 +1051,11 @@ impl Cx {
             .get(fn_name)
             .and_then(|scope| scope.get(&(alias.to_string(), method.to_string())))
             .cloned()
-            .or_else(|| self.import_rets.get(&(alias.to_string(), method.to_string())).cloned())
+            .or_else(|| {
+                self.import_rets
+                    .get(&(alias.to_string(), method.to_string()))
+                    .cloned()
+            })
     }
 
     /// Resolve a Core alias without a function-specific scope. TIR coverage
@@ -1177,7 +1172,9 @@ impl Cx {
                         return false;
                     }
                     let found = cx.struct_fields.get(name).is_some_and(|fields| {
-                        fields.iter().any(|(_, field_ty)| contains(cx, field_ty, seen))
+                        fields
+                            .iter()
+                            .any(|(_, field_ty)| contains(cx, field_ty, seen))
                     });
                     seen.remove(name);
                     found
@@ -1191,9 +1188,11 @@ impl Cx {
                 | Type::Option(inner)
                 | Type::Tagged { inner, .. }
                 | Type::InlineRange { base: inner, .. } => contains(cx, inner, seen),
-                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                    contains(cx, key, seen) || contains(cx, value, seen)
-                }
+                Type::Map { key, value, .. }
+                | Type::Result {
+                    ok: key,
+                    err: value,
+                } => contains(cx, key, seen) || contains(cx, value, seen),
                 Type::Tuple(fields) => fields
                     .iter()
                     .any(|(_, field_ty)| contains(cx, field_ty, seen)),
@@ -1216,17 +1215,13 @@ impl Cx {
     /// source-lowering path when a struct or enum payload contains a shape
     /// that serialization cannot preserve.
     pub(crate) fn type_contains_typed_literal_edge(&self, ty: &Type) -> bool {
-        fn payload_contains(
-            cx: &Cx,
-            payload: &VariantPayload,
-            seen: &mut HashSet<String>,
-        ) -> bool {
+        fn payload_contains(cx: &Cx, payload: &VariantPayload, seen: &mut HashSet<String>) -> bool {
             match payload {
                 VariantPayload::Unit => false,
                 VariantPayload::Single(ty, _) => contains(cx, ty, seen),
-                VariantPayload::Named(fields) => fields
-                    .iter()
-                    .any(|field| contains(cx, &field.ty, seen)),
+                VariantPayload::Named(fields) => {
+                    fields.iter().any(|field| contains(cx, &field.ty, seen))
+                }
             }
         }
 
@@ -1238,7 +1233,9 @@ impl Cx {
                         return false;
                     }
                     let found = cx.struct_fields.get(name).is_some_and(|fields| {
-                        fields.iter().any(|(_, field_ty)| contains(cx, field_ty, seen))
+                        fields
+                            .iter()
+                            .any(|(_, field_ty)| contains(cx, field_ty, seen))
                     }) || cx.enum_variants.get(name).is_some_and(|variants| {
                         variants
                             .iter()
@@ -1255,9 +1252,11 @@ impl Cx {
                 | Type::Shared(inner)
                 | Type::Option(inner)
                 | Type::Tagged { inner, .. } => contains(cx, inner, seen),
-                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                    contains(cx, key, seen) || contains(cx, value, seen)
-                }
+                Type::Map { key, value, .. }
+                | Type::Result {
+                    ok: key,
+                    err: value,
+                } => contains(cx, key, seen) || contains(cx, value, seen),
                 Type::Tuple(fields) => fields
                     .iter()
                     .any(|(_, field_ty)| contains(cx, field_ty, seen)),
@@ -1288,11 +1287,9 @@ impl Cx {
             match payload {
                 VariantPayload::Unit => false,
                 VariantPayload::Single(ty, _) => contains(cx, ty, seen, mutable_only),
-                VariantPayload::Named(fields) => {
-                    fields
-                        .iter()
-                        .any(|field| contains(cx, &field.ty, seen, mutable_only))
-                }
+                VariantPayload::Named(fields) => fields
+                    .iter()
+                    .any(|field| contains(cx, &field.ty, seen, mutable_only)),
             }
         }
 
@@ -1318,19 +1315,16 @@ impl Cx {
             found
         }
 
-        fn contains(
-            cx: &Cx,
-            ty: &Type,
-            seen: &mut HashSet<String>,
-            mutable_only: bool,
-        ) -> bool {
+        fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>, mutable_only: bool) -> bool {
             match ty {
                 // D-PIN1=A: `Pin<T>` is a borrowed window like `View`/`ViewMut`,
                 // so it needs the same hidden Rust lifetime everywhere it is
                 // stored or returned. It is always a write window.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN)
-                        && args.len() == 1 =>
+                    if matches!(
+                        name.as_str(),
+                        "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN
+                    ) && args.len() == 1 =>
                 {
                     !mutable_only
                         || matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
@@ -1338,33 +1332,34 @@ impl Cx {
                 }
                 Type::Named(name) => named_contains(cx, name, seen, mutable_only),
                 Type::Apply { name, args } => {
-                    args.iter()
-                        .any(|arg| contains(cx, arg, seen, mutable_only))
+                    args.iter().any(|arg| contains(cx, arg, seen, mutable_only))
                         || named_contains(cx, name, seen, mutable_only)
                 }
                 Type::Tagged { marker, .. }
                     if matches!(
                         marker,
-                        crate::AST::TagMarker::Internal(
-                            crate::AST::InternalTag::AllocatorView
-                        )
-                    ) => true,
+                        crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
+                    ) =>
+                {
+                    true
+                }
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
                 | Type::Tagged { inner, .. } => contains(cx, inner, seen, mutable_only),
-                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                    contains(cx, key, seen, mutable_only)
-                        || contains(cx, value, seen, mutable_only)
+                Type::Map { key, value, .. }
+                | Type::Result {
+                    ok: key,
+                    err: value,
+                } => {
+                    contains(cx, key, seen, mutable_only) || contains(cx, value, seen, mutable_only)
                 }
                 Type::Tuple(fields) => fields
                     .iter()
                     .any(|(_, ty)| contains(cx, ty, seen, mutable_only)),
                 Type::FixedList { elem, .. } => contains(cx, elem, seen, mutable_only),
                 Type::Fn { params, ret, .. } => {
-                    params
-                        .iter()
-                        .any(|ty| contains(cx, ty, seen, mutable_only))
+                    params.iter().any(|ty| contains(cx, ty, seen, mutable_only))
                         || ret
                             .as_deref()
                             .is_some_and(|ty| contains(cx, ty, seen, mutable_only))
@@ -1382,11 +1377,7 @@ impl Cx {
     }
 
     pub(crate) fn type_contains_shared_guard(&self, ty: &Type) -> bool {
-        fn payload_contains(
-            cx: &Cx,
-            payload: &VariantPayload,
-            seen: &mut HashSet<String>,
-        ) -> bool {
+        fn payload_contains(cx: &Cx, payload: &VariantPayload, seen: &mut HashSet<String>) -> bool {
             match payload {
                 VariantPayload::Unit => false,
                 VariantPayload::Single(ty, _) => contains(cx, ty, seen),
@@ -1415,16 +1406,17 @@ impl Cx {
                 Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => true,
                 Type::Named(name) => named_contains(cx, name, seen),
                 Type::Apply { name, args } => {
-                    args.iter().any(|arg| contains(cx, arg, seen))
-                        || named_contains(cx, name, seen)
+                    args.iter().any(|arg| contains(cx, arg, seen)) || named_contains(cx, name, seen)
                 }
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
                 | Type::Tagged { inner, .. } => contains(cx, inner, seen),
-                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                    contains(cx, key, seen) || contains(cx, value, seen)
-                }
+                Type::Map { key, value, .. }
+                | Type::Result {
+                    ok: key,
+                    err: value,
+                } => contains(cx, key, seen) || contains(cx, value, seen),
                 Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
                 Type::Union(members) => members.iter().any(|ty| contains(cx, ty, seen)),
                 Type::FixedList { elem, .. } => contains(cx, elem, seen),
@@ -1443,11 +1435,7 @@ impl Cx {
     /// Rust `Debug` or `Clone`. Do not let a containing user record derive
     /// either backend trait; its Jet debug path already honors `#Redact`.
     pub(crate) fn type_contains_secret(&self, ty: &Type) -> bool {
-        fn payload_contains(
-            cx: &Cx,
-            payload: &VariantPayload,
-            seen: &mut HashSet<String>,
-        ) -> bool {
+        fn payload_contains(cx: &Cx, payload: &VariantPayload, seen: &mut HashSet<String>) -> bool {
             match payload {
                 VariantPayload::Unit => false,
                 VariantPayload::Single(ty, _) => contains(cx, ty, seen),
@@ -1461,13 +1449,15 @@ impl Cx {
             if !seen.insert(name.to_string()) {
                 return false;
             }
-            let found = cx.struct_fields.get(name).is_some_and(|fields| {
-                fields.iter().any(|(_, ty)| contains(cx, ty, seen))
-            }) || cx.enum_variants.get(name).is_some_and(|variants| {
-                variants
-                    .iter()
-                    .any(|(_, payload)| payload_contains(cx, payload, seen))
-            });
+            let found = cx
+                .struct_fields
+                .get(name)
+                .is_some_and(|fields| fields.iter().any(|(_, ty)| contains(cx, ty, seen)))
+                || cx.enum_variants.get(name).is_some_and(|variants| {
+                    variants
+                        .iter()
+                        .any(|(_, payload)| payload_contains(cx, payload, seen))
+                });
             seen.remove(name);
             found
         }
@@ -1475,23 +1465,23 @@ impl Cx {
         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
             match ty {
                 Type::Tagged {
-                    marker: crate::AST::TagMarker::Internal(
-                        crate::AST::InternalTag::CoreCryptoNominal,
-                    ),
+                    marker:
+                        crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
                     ..
                 } => true,
                 Type::Named(name) => named_contains(cx, name, seen),
                 Type::Apply { name, args } => {
-                    args.iter().any(|arg| contains(cx, arg, seen))
-                        || named_contains(cx, name, seen)
+                    args.iter().any(|arg| contains(cx, arg, seen)) || named_contains(cx, name, seen)
                 }
                 Type::List(inner)
                 | Type::Shared(inner)
                 | Type::Option(inner)
                 | Type::Tagged { inner, .. } => contains(cx, inner, seen),
-                Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                    contains(cx, key, seen) || contains(cx, value, seen)
-                }
+                Type::Map { key, value, .. }
+                | Type::Result {
+                    ok: key,
+                    err: value,
+                } => contains(cx, key, seen) || contains(cx, value, seen),
                 Type::Tuple(fields) => fields.iter().any(|(_, ty)| contains(cx, ty, seen)),
                 Type::Union(members) => members.iter().any(|ty| contains(cx, ty, seen)),
                 Type::FixedList { elem, .. }
@@ -1568,18 +1558,21 @@ impl Cx {
         fn render(cx: &Cx, ty: &Type, base: &impl Fn(&Type) -> String) -> String {
             match ty {
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN)
-                        && args.len() == 1 =>
+                    if matches!(
+                        name.as_str(),
+                        "View" | "ViewMut" | "ComputeViewMut" | Syntax::TYPE_PIN
+                    ) && args.len() == 1 =>
                 {
                     add_reference_lifetime(base(ty))
                 }
                 Type::Tagged { marker, .. }
                     if matches!(
                         marker,
-                        crate::AST::TagMarker::Internal(
-                            crate::AST::InternalTag::AllocatorView
-                        )
-                    ) => add_reference_lifetime(base(ty)),
+                        crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
+                    ) =>
+                {
+                    add_reference_lifetime(base(ty))
+                }
                 Type::List(inner) if cx.type_contains_view(inner) => {
                     format!("Vec<{}>", render(cx, inner, base))
                 }
@@ -1800,7 +1793,10 @@ impl Cx {
                 hi: *hi,
             },
             Type::Union(members) => crate::AST::canonicalize_union(
-                members.iter().map(|m| self.expand_type_aliases(m)).collect(),
+                members
+                    .iter()
+                    .map(|m| self.expand_type_aliases(m))
+                    .collect(),
             ),
             other => other.clone(),
         }
@@ -1886,9 +1882,7 @@ impl Cx {
                 let leaf = nominal_leaf(&identity);
                 format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
             }
-            Type::Named(name)
-                if (name == "Unit") && !self.type_names.contains(name) =>
-            {
+            Type::Named(name) if (name == "Unit") && !self.type_names.contains(name) => {
                 "()".to_string()
             }
             Type::Named(name)
@@ -1961,7 +1955,11 @@ impl Cx {
             }
             Type::Named(name) if matches!(name.as_str(), "KeyStatus" | "VaultError") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                let rust = if name == "KeyStatus" { "JetVaultKeyStatus" } else { "JetVaultError" };
+                let rust = if name == "KeyStatus" {
+                    "JetVaultKeyStatus"
+                } else {
+                    "JetVaultError"
+                };
                 format!("{ffi}::{rust}")
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
@@ -1987,15 +1985,32 @@ impl Cx {
             Type::Named(name) if name == "Mime" => {
                 format!("{}jet_std::JetMIME", self.root_prefix)
             }
-            Type::Named(name) if matches!(name.as_str(),
-                "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
-                | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
-            ) && !self.type_names.contains(name) => {
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "Address"
+                        | "Message"
+                        | "Attachment"
+                        | "Envelope"
+                        | "SMTPSecurity"
+                        | "RecipientPolicy"
+                        | "RecipientReport"
+                        | "SendReport"
+                        | "EmailError"
+                        | "Limits"
+                ) && !self.type_names.contains(name) =>
+            {
                 let rust = match name.as_str() {
-                    "Address" => "Address", "Message" => "Message", "Attachment" => "Attachment",
-                    "Envelope" => "Envelope", "SMTPSecurity" => "SMTPSecurity",
-                    "RecipientPolicy" => "RecipientPolicy", "RecipientReport" => "RecipientReport",
-                    "SendReport" => "SendReport", "Limits" => "Limits", _ => "Error",
+                    "Address" => "Address",
+                    "Message" => "Message",
+                    "Attachment" => "Attachment",
+                    "Envelope" => "Envelope",
+                    "SMTPSecurity" => "SMTPSecurity",
+                    "RecipientPolicy" => "RecipientPolicy",
+                    "RecipientReport" => "RecipientReport",
+                    "SendReport" => "SendReport",
+                    "Limits" => "Limits",
+                    _ => "Error",
                 };
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
@@ -2005,13 +2020,15 @@ impl Cx {
             }
             Type::Named(name)
                 if matches!(name.as_str(), "DkimConfig" | "SMTPConfig")
-                    && !self.type_names.contains(name) => {
+                    && !self.type_names.contains(name) =>
+            {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
             }
             Type::Named(name)
                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
-                    && !self.type_names.contains(name) => {
+                    && !self.type_names.contains(name) =>
+            {
                 format!("{}jet_email::{}", self.root_prefix, name)
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
@@ -2019,12 +2036,16 @@ impl Cx {
             Type::Named(name) if name == "HTTPResponse" => "JetHTTPResponse".to_string(),
             Type::Named(name) if name == "HTTPClient" => "JetHTTPClient".to_string(),
             Type::Named(name) if name == "HTTPProxy" => "JetHTTPProxy".to_string(),
-            Type::Named(name) if name == "HTTPRedirectPolicy" => "JetHTTPRedirectPolicy".to_string(),
+            Type::Named(name) if name == "HTTPRedirectPolicy" => {
+                "JetHTTPRedirectPolicy".to_string()
+            }
             Type::Named(name) if name == "HTTPRetryPolicy" => "JetHTTPRetryPolicy".to_string(),
             Type::Named(name) if name == "HTTPCookieJar" => "JetHTTPCookieJar".to_string(),
             Type::Named(name) if name == "HTTPCorsPolicy" => "JetHTTPCorsPolicy".to_string(),
             Type::Named(name) if name == "HTTPCorsOrigins" => "JetHTTPCorsOrigins".to_string(),
-            Type::Named(name) if name == "HTTPCompressEncoding" => "JetHTTPCompressEncoding".to_string(),
+            Type::Named(name) if name == "HTTPCompressEncoding" => {
+                "JetHTTPCompressEncoding".to_string()
+            }
             Type::Named(name) if name == "HTTPMethod" => "JetHTTPMethod".to_string(),
             Type::Named(name) if name == "HTTPStatus" => "JetHTTPStatus".to_string(),
             Type::Named(name) if name == "HTTPVersion" => "JetHTTPVersion".to_string(),
@@ -2038,7 +2059,9 @@ impl Cx {
             Type::Named(name) if name == "HTTPMux" => "JetHTTPMux".to_string(),
             Type::Named(name) if name == "HTTPHandler" => "JetHTTPHandler".to_string(),
             Type::Named(name) if name == "HTTPServer" => "JetHTTPServer".to_string(),
-            Type::Named(name) if name == "HTTPShutdownReport" => "JetHTTPShutdownReport".to_string(),
+            Type::Named(name) if name == "HTTPShutdownReport" => {
+                "JetHTTPShutdownReport".to_string()
+            }
             Type::Named(name) if name == "HTTPRequest" => "JetHTTPRequest".to_string(),
             Type::Named(name) if name == "HTTPResponse" => "JetHTTPResponse".to_string(),
             Type::Named(name) if name == "HTTPServerTls" => "JetHTTPServerTls".to_string(),
@@ -2058,9 +2081,7 @@ impl Cx {
             Type::Named(name) if name == "BrowserReceipt" => "JetBrowserReceipt".to_string(),
             Type::Named(name) if name == "BrowserPrivacy" => "JetBrowserPrivacy".to_string(),
             Type::Named(name) if name == "BrowserError" => "JetBrowserError".to_string(),
-            Type::Named(name) if name == "BrowserAbilities" => {
-                "JetBrowserAbilities".to_string()
-            }
+            Type::Named(name) if name == "BrowserAbilities" => "JetBrowserAbilities".to_string(),
             Type::Named(name) if name == "BrowserProfile" => "JetBrowserProfile".to_string(),
             Type::Named(name) if name == "BrowserTimeout" => "JetBrowserTimeout".to_string(),
             Type::Named(name) if name == "BrowserProtocol" => "JetBrowserProtocol".to_string(),
@@ -2130,9 +2151,7 @@ impl Cx {
             Type::Named(name) if name == "LiveQuery" && !self.type_names.contains(name) => {
                 format!("{}JetLiveQuery", self.root_prefix)
             }
-            Type::Named(name)
-                if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) =>
-            {
+            Type::Named(name) if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) => {
                 format!("{}JetRange", self.root_prefix)
             }
             Type::Named(name) if name == "DimensionAxis" && !self.type_names.contains(name) => {
@@ -2153,9 +2172,7 @@ impl Cx {
             Type::Named(name) if name == "TrackOriginInfo" && !self.type_names.contains(name) => {
                 format!("{}JetTrackOriginInfo", self.root_prefix)
             }
-            Type::Named(name)
-                if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
-            {
+            Type::Named(name) if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) => {
                 format!("{}jet_std::JetReactiveEffect", self.root_prefix)
             }
             Type::Named(name)
@@ -2239,7 +2256,11 @@ impl Cx {
                 format!("{}JetTensor", self.root_prefix)
             }
             Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => {
-                format!("{}JetComputeVjpRun<{}>", self.root_prefix, self.rust_type(&args[0]))
+                format!(
+                    "{}JetComputeVjpRun<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
@@ -2329,7 +2350,10 @@ impl Cx {
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
-                if resolved == "Claims" || resolved == "AuthError" || resolved == "Session" || resolved == "Auth"
+                if resolved == "Claims"
+                    || resolved == "AuthError"
+                    || resolved == "Session"
+                    || resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
@@ -2357,25 +2381,37 @@ impl Cx {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     return format!("{ffi}::{rust}");
                 }
-                if matches!(resolved,
-                    "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
-                    | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
+                if matches!(
+                    resolved,
+                    "Address"
+                        | "Message"
+                        | "Attachment"
+                        | "Envelope"
+                        | "SMTPSecurity"
+                        | "RecipientPolicy"
+                        | "RecipientReport"
+                        | "SendReport"
+                        | "EmailError"
+                        | "Limits"
                 ) {
-                    let rust = if resolved == "EmailError" { "Error" } else { resolved };
+                    let rust = if resolved == "EmailError" {
+                        "Error"
+                    } else {
+                        resolved
+                    };
                     return format!("{}jet_email::{rust}", self.root_prefix);
                 }
                 if matches!(resolved, "SMTPAuth" | "DkimConfig" | "SMTPConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    return format!("{}jet_email::{}<{}::Secret>", self.root_prefix, resolved, ffi);
+                    return format!(
+                        "{}jet_email::{}<{}::Secret>",
+                        self.root_prefix, resolved, ffi
+                    );
                 }
                 if resolved == "TLSTrust" || resolved == "Mailer" {
                     return format!("{}jet_email::{}", self.root_prefix, resolved);
                 }
-                format!(
-                    "{}jet_std::{}",
-                    self.root_prefix,
-                    resolved
-                )
+                format!("{}jet_std::{}", self.root_prefix, resolved)
             }
             Type::Named(name) if self.trait_names.contains(name) => {
                 format!("Box<dyn {}>", crate::Codegen::mangle(name))
@@ -2388,12 +2424,9 @@ impl Cx {
             Type::Named(name) if name.contains('.') => {
                 let (alias, leaf) = name.split_once('.').unwrap();
                 match self.import_mods.get(alias) {
-                    Some(rust_mod) => format!(
-                        "{}{}::{}",
-                        self.root_prefix,
-                        rust_mod,
-                        mangle_path(leaf)
-                    ),
+                    Some(rust_mod) => {
+                        format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
+                    }
                     None => mangle_path(name),
                 }
             }
@@ -2407,13 +2440,17 @@ impl Cx {
                 )
             }
             Type::Apply { name, args }
-                if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan")
-                    && args.len() == 1 =>
+                if matches!(
+                    name.as_str(),
+                    "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+                ) && args.len() == 1 =>
             {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 let rust = match name.as_str() {
-                    "KeyRef" => "JetVaultKeyRef", "MutationPlan" => "JetVaultMutationPlan",
-                    "VaultWrite" => "JetVaultWrite", "Rotation" => "JetVaultRotation",
+                    "KeyRef" => "JetVaultKeyRef",
+                    "MutationPlan" => "JetVaultMutationPlan",
+                    "VaultWrite" => "JetVaultWrite",
+                    "Rotation" => "JetVaultRotation",
                     _ => "JetVaultWrappedImportPlan",
                 };
                 format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]))
@@ -2457,18 +2494,14 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args }
-                if name == "CellReadGuard" && !args.is_empty() =>
-            {
+            Type::Apply { name, args } if name == "CellReadGuard" && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetCellReadGuard<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args }
-                if name == "CellEditGuard" && !args.is_empty() =>
-            {
+            Type::Apply { name, args } if name == "CellEditGuard" && !args.is_empty() => {
                 format!(
                     "{}jet_std::JetCellEditGuard<{}>",
                     self.root_prefix,
@@ -2519,14 +2552,18 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
-            Type::Apply { name, args } if name == Syntax::TYPE_DISPATCH_REPORT && !args.is_empty() => {
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_DISPATCH_REPORT && !args.is_empty() =>
+            {
                 format!(
                     "{}jet_std::JetDispatchReport<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args } if name == Syntax::TYPE_DISPATCH_FAILURE && !args.is_empty() => {
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_DISPATCH_FAILURE && !args.is_empty() =>
+            {
                 format!(
                     "{}jet_std::JetDispatchFailure<{}>",
                     self.root_prefix,
@@ -2618,18 +2655,14 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args }
-                if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 =>
-            {
+            Type::Apply { name, args } if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 => {
                 format!(
                     "{}jet_std::JetSharedGuard<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
             }
-            Type::Apply { name, args }
-                if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 =>
-            {
+            Type::Apply { name, args } if name == Syntax::TYPE_SHARED_WEAK && args.len() == 1 => {
                 format!(
                     "{}jet_std::JetSharedWeak<{}>",
                     self.root_prefix,
@@ -2672,9 +2705,7 @@ impl Cx {
                 format!("&mut {}", self.rust_type(&args[0]))
             }
             // D-ITERTOOLS1=A: Iter<T> → JetIter<T> (must-use move-only lazy view).
-            Type::Apply { name, args }
-                if name == Syntax::TYPE_ITER && args.len() == 1 =>
-            {
+            Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
                 format!("JetIter<{}>", self.rust_type(&args[0]))
             }
             // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
@@ -2727,12 +2758,7 @@ impl Cx {
                     self.import_mods.get(alias).map_or_else(
                         || mangle_path(name),
                         |rust_mod| {
-                            format!(
-                                "{}{}::{}",
-                                self.root_prefix,
-                                rust_mod,
-                                mangle_path(leaf)
-                            )
+                            format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
                         },
                     )
                 } else {
@@ -2782,7 +2808,10 @@ impl Cx {
                 if matches!(
                     marker,
                     crate::AST::TagMarker::Internal(crate::AST::InternalTag::AllocatorView)
-                ) => format!("&mut {}", self.rust_type(inner)),
+                ) =>
+            {
+                format!("&mut {}", self.rust_type(inner))
+            }
             Type::Tagged { inner, .. } => self.rust_type(inner),
             // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
             Type::Union(members) => {
@@ -2794,7 +2823,9 @@ impl Cx {
             // A compile-time measure only ever appears as a `Vec`/`Matrix`
             // shape arg, intercepted by name above before reaching the
             // generic `Type::Apply` args recursion that would call here.
-            Type::Measure(_) => unreachable!("type measure handled by the Vec/Matrix Apply arm above"),
+            Type::Measure(_) => {
+                unreachable!("type measure handled by the Vec/Matrix Apply arm above")
+            }
         }
     }
 
@@ -2911,12 +2942,7 @@ impl Cx {
     pub(crate) fn type_prefix(&self, type_name: &str) -> String {
         if let Some(rust_mod) = self.foreign_types.get(type_name) {
             let leaf = nominal_leaf(type_name);
-            return format!(
-                "{}{}::{}",
-                self.root_prefix,
-                rust_mod,
-                mangle_path(leaf)
-            );
+            return format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf));
         }
         if let Some(identity) = self.foreign_type_identity("", type_name) {
             let rust_mod = self
@@ -2924,12 +2950,7 @@ impl Cx {
                 .get(&identity)
                 .expect("foreign identity must have a Rust module");
             let leaf = nominal_leaf(&identity);
-            return format!(
-                "{}{}::{}",
-                self.root_prefix,
-                rust_mod,
-                mangle_path(leaf)
-            );
+            return format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf));
         }
         mangle_path(type_name)
     }
@@ -2948,7 +2969,10 @@ impl Cx {
 
 pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) -> String {
     if let Type::Tagged { marker, inner } = ty {
-        if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)) {
+        if matches!(
+            marker,
+            crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)
+        ) {
             if let Type::Fn { params, ret, .. } = inner.as_ref() {
                 let params = params
                     .iter()
@@ -2990,9 +3014,7 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
         };
     }
     match convention {
-        AccessConvention::Read if ty.is_scalar() => {
-            base
-        }
+        AccessConvention::Read if ty.is_scalar() => base,
         AccessConvention::Read => format!("&{}", base),
         AccessConvention::Write => format!("&mut {}", base),
         AccessConvention::Move => base,
@@ -3121,10 +3143,9 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Ext
             for item in &module.items {
                 if let Item::Impl(def) = item {
                     for method in def.methods.iter().filter(|method| {
-                        bundle.name_ledger.exported(
-                            module_idx,
-                            &format!("{}.{}", def.type_name, method.name),
-                        )
+                        bundle
+                            .name_ledger
+                            .exported(module_idx, &format!("{}.{}", def.type_name, method.name))
                     }) {
                         map.insert(
                             foreign_binding_method_key(&def.type_name, &method.name),
@@ -3227,21 +3248,24 @@ pub(crate) fn register_bundle_unit_metadata(
                 );
                 let base = qualifier.as_ref().map_or_else(
                     || definition.base.clone(),
-                    |_| super::Imports::qualify_imported_call_type(
-                        bundle,
-                        target,
-                        "",
-                        &definition.base,
-                    ),
+                    |_| {
+                        super::Imports::qualify_imported_call_type(
+                            bundle,
+                            target,
+                            "",
+                            &definition.base,
+                        )
+                    },
                 );
                 cx.type_names.insert(name.clone());
                 cx.distinct_types.insert(
                     name,
                     (
                         base,
-                        definition.derives.iter().any(|(derive, _)| {
-                            derive == crate::Syntax::MARKER_NUMERIC
-                        }),
+                        definition
+                            .derives
+                            .iter()
+                            .any(|(derive, _)| derive == crate::Syntax::MARKER_NUMERIC),
                     ),
                 );
                 continue;
@@ -3259,30 +3283,31 @@ pub(crate) fn register_bundle_unit_metadata(
                         |qualifier| format!("{qualifier}::{}", member.name),
                     );
                     cx.type_names.insert(name.clone());
-                    cx.distinct_types
-                        .insert(
-                            name.clone(),
-                            (
-                                qualifier.as_ref().map_or_else(
-                                    || member.base.clone(),
-                                    |_| super::Imports::qualify_imported_call_type(
+                    cx.distinct_types.insert(
+                        name.clone(),
+                        (
+                            qualifier.as_ref().map_or_else(
+                                || member.base.clone(),
+                                |_| {
+                                    super::Imports::qualify_imported_call_type(
                                         bundle,
                                         target,
                                         "",
                                         &member.base,
-                                    ),
-                                ),
-                                member.derives.iter().any(|(derive, _)| {
-                                    derive == crate::Syntax::MARKER_NUMERIC
-                                }),
+                                    )
+                                },
                             ),
-                        );
+                            member
+                                .derives
+                                .iter()
+                                .any(|(derive, _)| derive == crate::Syntax::MARKER_NUMERIC),
+                        ),
+                    );
                     let kind = member
                         .quantity
                         .map(|(_, kind)| kind)
                         .unwrap_or(crate::AST::QuantityKind::Linear);
-                    let Some(source) =
-                        unit_family_member_for_type(family, &member.name, kind)
+                    let Some(source) = unit_family_member_for_type(family, &member.name, kind)
                     else {
                         continue;
                     };
@@ -3317,10 +3342,9 @@ pub(crate) fn register_bundle_unit_metadata(
 pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
     use super::Imports::{
         core_import_map, foreign_type_map, import_mod_map, import_ret_map, import_sig_map,
-        inline_core_import_maps, inline_foreign_import_maps,
-        inline_foreign_import_signature_maps, inline_foreign_reexport_maps,
-        inline_foreign_reexport_signature_maps, inline_import_maps,
-        register_foreign_enum_variants, reexport_call_map, unqualified_import_maps,
+        inline_core_import_maps, inline_foreign_import_maps, inline_foreign_import_signature_maps,
+        inline_foreign_reexport_maps, inline_foreign_reexport_signature_maps, inline_import_maps,
+        reexport_call_map, register_foreign_enum_variants, unqualified_import_maps,
         update_cloneability_with_foreign_types,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
@@ -3374,17 +3398,9 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
 /// package-only guarantee facts into one codegen context. The name ledger owns
 /// declarations because loaded dependency items may also be present in a
 /// module's merged item list. Dependency ownership uses sema's longest-root rule.
-pub(crate) fn populate_cx_module_facts(
-    cx: &mut Cx,
-    bundle: &ProgramBundle,
-    module_idx: usize,
-) {
-    cx.local_type_names.retain(|name| {
-        bundle
-            .name_ledger
-            .declaration(module_idx, name)
-            .is_some()
-    });
+pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+    cx.local_type_names
+        .retain(|name| bundle.name_ledger.declaration(module_idx, name).is_some());
     register_imported_methods(cx, bundle, module_idx);
     cx.package_hardened = bundle.package_guarantees.harden;
     let Some(module) = bundle.modules.get(module_idx) else {
@@ -3398,12 +3414,15 @@ pub(crate) fn populate_cx_module_facts(
         .max_by_key(|(_, root)| root.components().count())
         .map(|(name, _)| name);
     cx.dependency_fenced = dependency.is_some_and(|name| {
-        bundle.package_guarantees.harden
-            || bundle.package_guarantees.contain.contains(name)
+        bundle.package_guarantees.harden || bundle.package_guarantees.contain.contains(name)
     });
 }
 
-pub(crate) fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+pub(crate) fn register_bundle_reflect_paths(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) {
     let paths = bundle.name_ledger.canonical_paths(module_idx);
     for (name, path) in &paths {
         cx.reflect_paths.insert(name.clone(), path.clone());
@@ -3422,8 +3441,12 @@ pub(crate) fn register_bundle_reflect_paths(cx: &mut Cx, bundle: &ProgramBundle,
                     return None;
                 };
                 declaration.text.as_ref()?;
-                let path = bundle.name_ledger.declaration_path(owner, &declaration.name)?;
-                let identity = bundle.name_ledger.nominal_identity(owner, &declaration.name)?;
+                let path = bundle
+                    .name_ledger
+                    .declaration_path(owner, &declaration.name)?;
+                let identity = bundle
+                    .name_ledger
+                    .nominal_identity(owner, &declaration.name)?;
                 Some((path.to_string(), identity))
             })
         })
@@ -3559,8 +3582,7 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                             .insert((rust_mod.clone(), trait_name.to_string()));
                     }
                 }
-                if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF)
-                {
+                if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF) {
                     cx.method_self_convs
                         .entry(key.clone())
                         .or_insert(self_param.convention);
@@ -3571,12 +3593,7 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                         .map(|(convention, ty)| {
                             (
                                 convention,
-                                super::Imports::qualify_imported_call_type(
-                                    bundle,
-                                    target,
-                                    "",
-                                    &ty,
-                                ),
+                                super::Imports::qualify_imported_call_type(bundle, target, "", &ty),
                             )
                         })
                         .collect()
@@ -3586,15 +3603,18 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                     .or_insert_with(|| (method.pre.clone(), method.post.clone()));
                 cx.fn_param_names
                     .entry(format!("{}::{}", owner, method.name))
-                    .or_insert_with(|| method.params.iter().map(|param| param.name.clone()).collect());
-                cx.method_rets
-                    .entry(key)
                     .or_insert_with(|| {
                         method
-                            .return_type
-                            .as_ref()
-                            .map(|ty| super::Imports::qualify_imported_call_type(bundle, target, "", ty))
+                            .params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect()
                     });
+                cx.method_rets.entry(key).or_insert_with(|| {
+                    method.return_type.as_ref().map(|ty| {
+                        super::Imports::qualify_imported_call_type(bundle, target, "", ty)
+                    })
+                });
             }
         }
     }
@@ -3624,7 +3644,8 @@ fn register_core_close_types(cx: &mut Cx) {
         );
     }
     if imports("core.db") {
-        cx.close_types.extend(["DBConnection", "DBScope"].into_iter().map(str::to_string));
+        cx.close_types
+            .extend(["DBConnection", "DBScope"].into_iter().map(str::to_string));
     }
 }
 
@@ -3637,8 +3658,14 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
     {
         let zero = Span::new(0, 0);
         let variants = vec![
-            ("Enqueued".to_string(), VariantPayload::Single(Type::String, zero)),
-            ("Executed".to_string(), VariantPayload::Single(Type::String, zero)),
+            (
+                "Enqueued".to_string(),
+                VariantPayload::Single(Type::String, zero),
+            ),
+            (
+                "Executed".to_string(),
+                VariantPayload::Single(Type::String, zero),
+            ),
             (
                 "Retained".to_string(),
                 VariantPayload::Named(vec![
@@ -3656,9 +3683,18 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
                     },
                 ]),
             ),
-            ("DeadLettered".to_string(), VariantPayload::Single(Type::String, zero)),
-            ("Rejected".to_string(), VariantPayload::Single(Type::String, zero)),
-            ("Unavailable".to_string(), VariantPayload::Single(Type::String, zero)),
+            (
+                "DeadLettered".to_string(),
+                VariantPayload::Single(Type::String, zero),
+            ),
+            (
+                "Rejected".to_string(),
+                VariantPayload::Single(Type::String, zero),
+            ),
+            (
+                "Unavailable".to_string(),
+                VariantPayload::Single(Type::String, zero),
+            ),
         ];
         for (variant, _) in &variants {
             cx.variant_owner
@@ -3669,7 +3705,10 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.cloneable.insert("ServiceReceipt".to_string());
         let workflow_outcomes = vec![
             ("Finished".to_string(), VariantPayload::Unit),
-            ("Panicked".to_string(), VariantPayload::Single(Type::String, zero)),
+            (
+                "Panicked".to_string(),
+                VariantPayload::Single(Type::String, zero),
+            ),
             ("Cancelled".to_string(), VariantPayload::Unit),
             ("DeadlineBlown".to_string(), VariantPayload::Unit),
         ];
@@ -3728,9 +3767,14 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
             ("TokenExpired".to_string(), VariantPayload::Unit),
         ];
         variants.extend(
-            ["MalformedToken", "UnsupportedToken", "MissingClaim", "DecodeError"]
-                .into_iter()
-                .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
+            [
+                "MalformedToken",
+                "UnsupportedToken",
+                "MissingClaim",
+                "DecodeError",
+            ]
+            .into_iter()
+            .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
         );
         variants.push((
             "WrongAudience".to_string(),
@@ -3750,27 +3794,44 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         // variant to the canonical AuthError surface.
         variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
         for (variant, _) in &variants {
-            cx.variant_owner.insert(variant.clone(), "AuthError".to_string());
+            cx.variant_owner
+                .insert(variant.clone(), "AuthError".to_string());
         }
         cx.enum_variants.insert("AuthError".to_string(), variants);
         cx.cloneable.insert("AuthError".to_string());
     }
-    if cx.core_imports.values().any(|module| module == "core.net.tls") {
+    if cx
+        .core_imports
+        .values()
+        .any(|module| module == "core.net.tls")
+    {
         let zero = Span::new(0, 0);
         let versions = vec![
             ("Tls12".to_string(), VariantPayload::Unit),
             ("Tls13".to_string(), VariantPayload::Unit),
         ];
-        for (variant, _) in &versions { cx.variant_owner.insert(variant.clone(), "TLSVersion".to_string()); }
+        for (variant, _) in &versions {
+            cx.variant_owner
+                .insert(variant.clone(), "TLSVersion".to_string());
+        }
         cx.enum_variants.insert("TLSVersion".to_string(), versions);
         cx.cloneable.insert("TLSVersion".to_string());
         let roots = Type::Named("TLSRootCertificates".to_string());
         let trust = vec![
             ("System".to_string(), VariantPayload::Unit),
-            ("SystemPlus".to_string(), VariantPayload::Single(roots.clone(), zero)),
-            ("CustomOnly".to_string(), VariantPayload::Single(roots, zero)),
+            (
+                "SystemPlus".to_string(),
+                VariantPayload::Single(roots.clone(), zero),
+            ),
+            (
+                "CustomOnly".to_string(),
+                VariantPayload::Single(roots, zero),
+            ),
         ];
-        for (variant, _) in &trust { cx.variant_owner.insert(variant.clone(), "TLSClientTrust".to_string()); }
+        for (variant, _) in &trust {
+            cx.variant_owner
+                .insert(variant.clone(), "TLSClientTrust".to_string());
+        }
         cx.enum_variants.insert("TLSClientTrust".to_string(), trust);
         cx.cloneable.insert("TLSClientTrust".to_string());
     }
@@ -3805,95 +3866,207 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
             cx.cloneable.insert(name.to_string());
         }
     }
-    if !cx.core_imports.values().any(|module| module == Syntax::CORE_EMAIL_MODULE) {
+    if !cx
+        .core_imports
+        .values()
+        .any(|module| module == Syntax::CORE_EMAIL_MODULE)
+    {
         return;
     }
     let zero = Span::new(0, 0);
     for (name, variants) in [
-        ("SMTPSecurity", vec![("StartTls".to_string(), VariantPayload::Unit), ("TLS".to_string(), VariantPayload::Unit)]),
-        ("RecipientPolicy", vec![("RequireAll".to_string(), VariantPayload::Unit), ("DeliverAccepted".to_string(), VariantPayload::Unit)]),
-        ("SMTPAuth", vec![
-            ("None".to_string(), VariantPayload::Unit),
-            ("Password".to_string(), VariantPayload::Named(vec![
-                VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
-                VariantField { name: "password".to_string(), name_span: zero, ty: Type::Named("Secret".to_string()), ty_span: zero },
-            ])),
-        ]),
-        ("TLSTrust", vec![
-            ("System".to_string(), VariantPayload::Unit),
-            ("SystemPlusCa".to_string(), VariantPayload::Named(vec![
-                VariantField { name: "pem".to_string(), name_span: zero,
-                    ty: Type::List(Box::new(Type::IntN { signed: false, bits: 8 })), ty_span: zero },
-            ])),
-        ]),
+        (
+            "SMTPSecurity",
+            vec![
+                ("StartTls".to_string(), VariantPayload::Unit),
+                ("TLS".to_string(), VariantPayload::Unit),
+            ],
+        ),
+        (
+            "RecipientPolicy",
+            vec![
+                ("RequireAll".to_string(), VariantPayload::Unit),
+                ("DeliverAccepted".to_string(), VariantPayload::Unit),
+            ],
+        ),
+        (
+            "SMTPAuth",
+            vec![
+                ("None".to_string(), VariantPayload::Unit),
+                (
+                    "Password".to_string(),
+                    VariantPayload::Named(vec![
+                        VariantField {
+                            name: "username".to_string(),
+                            name_span: zero,
+                            ty: Type::String,
+                            ty_span: zero,
+                        },
+                        VariantField {
+                            name: "password".to_string(),
+                            name_span: zero,
+                            ty: Type::Named("Secret".to_string()),
+                            ty_span: zero,
+                        },
+                    ]),
+                ),
+            ],
+        ),
+        (
+            "TLSTrust",
+            vec![
+                ("System".to_string(), VariantPayload::Unit),
+                (
+                    "SystemPlusCa".to_string(),
+                    VariantPayload::Named(vec![VariantField {
+                        name: "pem".to_string(),
+                        name_span: zero,
+                        ty: Type::List(Box::new(Type::IntN {
+                            signed: false,
+                            bits: 8,
+                        })),
+                        ty_span: zero,
+                    }]),
+                ),
+            ],
+        ),
     ] {
-        for (variant, _) in &variants { cx.variant_owner.insert(variant.clone(), name.to_string()); }
+        for (variant, _) in &variants {
+            cx.variant_owner.insert(variant.clone(), name.to_string());
+        }
         cx.enum_variants.insert(name.to_string(), variants);
         cx.cloneable.insert(name.to_string());
     }
-    let error_fields = || [
-        ("operation", Type::String),
-        ("server", Type::Option(Box::new(Type::String))),
-        ("code", Type::Option(Box::new(Type::Int))),
-        ("reason", Type::String),
-    ].into_iter().map(|(field, ty)| VariantField {
-        name: field.to_string(), name_span: zero, ty, ty_span: zero,
-    }).collect();
+    let error_fields = || {
+        [
+            ("operation", Type::String),
+            ("server", Type::Option(Box::new(Type::String))),
+            ("code", Type::Option(Box::new(Type::Int))),
+            ("reason", Type::String),
+        ]
+        .into_iter()
+        .map(|(field, ty)| VariantField {
+            name: field.to_string(),
+            name_span: zero,
+            ty,
+            ty_span: zero,
+        })
+        .collect()
+    };
     let errors = [
-        "Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected",
-        "Transient", "TimedOut", "Cancelled", "DeliveryUnknown",
-    ].into_iter().map(|variant| (variant.to_string(), VariantPayload::Named(error_fields()))).collect::<Vec<_>>();
-    for (variant, _) in &errors { cx.variant_owner.insert(variant.clone(), "EmailError".to_string()); }
+        "Configuration",
+        "DNS",
+        "Connect",
+        "TLS",
+        "Auth",
+        "Protocol",
+        "Rejected",
+        "Transient",
+        "TimedOut",
+        "Cancelled",
+        "DeliveryUnknown",
+    ]
+    .into_iter()
+    .map(|variant| (variant.to_string(), VariantPayload::Named(error_fields())))
+    .collect::<Vec<_>>();
+    for (variant, _) in &errors {
+        cx.variant_owner
+            .insert(variant.clone(), "EmailError".to_string());
+    }
     cx.enum_variants.insert("EmailError".to_string(), errors);
     cx.cloneable.insert("EmailError".to_string());
-    cx.struct_fields.insert("Envelope".to_string(), vec![
-        ("from".to_string(), Type::Named("Address".to_string())),
-        ("recipients".to_string(), Type::List(Box::new(Type::Named("Address".to_string())))),
+    cx.struct_fields.insert(
+        "Envelope".to_string(),
+        vec![
+            ("from".to_string(), Type::Named("Address".to_string())),
+            (
+                "recipients".to_string(),
+                Type::List(Box::new(Type::Named("Address".to_string()))),
+            ),
+        ],
+    );
+    cx.struct_fields.insert(
+        "RecipientReport".to_string(),
+        vec![
+            ("address".to_string(), Type::Named("Address".to_string())),
+            ("accepted".to_string(), Type::Bool),
+            ("code".to_string(), Type::Int),
+            ("message".to_string(), Type::String),
+        ],
+    );
+    cx.struct_fields.insert(
+        "SendReport".to_string(),
+        vec![
+            ("server".to_string(), Type::String),
+            (
+                "accepted".to_string(),
+                Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
+            ),
+            (
+                "rejected".to_string(),
+                Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
+            ),
+            ("response_code".to_string(), Type::Int),
+            ("response".to_string(), Type::String),
+            ("accepted_at".to_string(), Type::String),
+        ],
+    );
+    cx.struct_fields.insert(
+        "Limits".to_string(),
+        vec![
+            ("max_reply_line_bytes".to_string(), Type::Int),
+            ("max_reply_lines".to_string(), Type::Int),
+            ("max_capabilities".to_string(), Type::Int),
+            ("max_recipients".to_string(), Type::Int),
+            ("max_message_bytes".to_string(), Type::Int),
+            ("max_auth_challenge_bytes".to_string(), Type::Int),
+        ],
+    );
+    cx.struct_fields.insert(
+        "SMTPConfig".to_string(),
+        vec![
+            ("host".to_string(), Type::String),
+            ("port".to_string(), Type::Int),
+            (
+                "security".to_string(),
+                Type::Named("SMTPSecurity".to_string()),
+            ),
+            ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
+            (
+                "recipient_policy".to_string(),
+                Type::Named("RecipientPolicy".to_string()),
+            ),
+            ("trust".to_string(), Type::Named("TLSTrust".to_string())),
+            ("limits".to_string(), Type::Named("Limits".to_string())),
+            (
+                "dkim".to_string(),
+                Type::Option(Box::new(Type::Named("DkimConfig".to_string()))),
+            ),
+        ],
+    );
+    cx.struct_fields.insert(
+        "DkimConfig".to_string(),
+        vec![
+            ("domain".to_string(), Type::String),
+            ("selector".to_string(), Type::String),
+            ("private_key".to_string(), Type::Named("Secret".to_string())),
+            (
+                "signed_headers".to_string(),
+                Type::List(Box::new(Type::String)),
+            ),
+        ],
+    );
+    cx.cloneable.extend([
+        "Envelope".to_string(),
+        "RecipientReport".to_string(),
+        "SendReport".to_string(),
+        "Limits".to_string(),
     ]);
-    cx.struct_fields.insert("RecipientReport".to_string(), vec![
-        ("address".to_string(), Type::Named("Address".to_string())),
-        ("accepted".to_string(), Type::Bool), ("code".to_string(), Type::Int),
-        ("message".to_string(), Type::String),
-    ]);
-    cx.struct_fields.insert("SendReport".to_string(), vec![
-        ("server".to_string(), Type::String),
-        ("accepted".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
-        ("rejected".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
-        ("response_code".to_string(), Type::Int), ("response".to_string(), Type::String),
-        ("accepted_at".to_string(), Type::String),
-    ]);
-    cx.struct_fields.insert("Limits".to_string(), vec![
-        ("max_reply_line_bytes".to_string(), Type::Int),
-        ("max_reply_lines".to_string(), Type::Int),
-        ("max_capabilities".to_string(), Type::Int),
-        ("max_recipients".to_string(), Type::Int),
-        ("max_message_bytes".to_string(), Type::Int),
-        ("max_auth_challenge_bytes".to_string(), Type::Int),
-    ]);
-    cx.struct_fields.insert("SMTPConfig".to_string(), vec![
-        ("host".to_string(), Type::String), ("port".to_string(), Type::Int),
-        ("security".to_string(), Type::Named("SMTPSecurity".to_string())),
-        ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
-        ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
-        ("trust".to_string(), Type::Named("TLSTrust".to_string())),
-        ("limits".to_string(), Type::Named("Limits".to_string())),
-        ("dkim".to_string(), Type::Option(Box::new(Type::Named("DkimConfig".to_string())))),
-    ]);
-    cx.struct_fields.insert("DkimConfig".to_string(), vec![
-        ("domain".to_string(), Type::String),
-        ("selector".to_string(), Type::String),
-        ("private_key".to_string(), Type::Named("Secret".to_string())),
-        ("signed_headers".to_string(), Type::List(Box::new(Type::String))),
-    ]);
-    cx.cloneable.extend(["Envelope".to_string(), "RecipientReport".to_string(), "SendReport".to_string(), "Limits".to_string()]);
 }
 
 pub(crate) fn memo_facts_for_struct(
     structure: &StructDef,
-) -> (
-    HashMap<String, Type>,
-    HashMap<String, HashSet<String>>,
-) {
+) -> (HashMap<String, Type>, HashMap<String, HashSet<String>>) {
     let computed: HashSet<String> = structure
         .fields
         .iter()
@@ -3957,13 +4130,7 @@ pub(crate) fn memo_facts_for_struct(
         .map(|field| field.name.as_str())
     {
         for memo in memo_fields.keys() {
-            if depends_on(
-                memo,
-                source,
-                &direct,
-                &computed,
-                &mut HashSet::new(),
-            ) {
+            if depends_on(memo, source, &direct, &computed, &mut HashSet::new()) {
                 dependencies
                     .entry(source.to_string())
                     .or_default()
@@ -4120,12 +4287,18 @@ pub(crate) fn build_cx_items(
             },
         );
     }
-    cx.struct_fields.insert(Syntax::TYPE_IO_CONTEXT.to_string(), vec![
-        ("operation".to_string(), Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
-        ("resource".to_string(), Type::Option(Box::new(Type::String))),
-        ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
-        ("cause".to_string(), Type::Option(Box::new(Type::String))),
-    ]);
+    cx.struct_fields.insert(
+        Syntax::TYPE_IO_CONTEXT.to_string(),
+        vec![
+            (
+                "operation".to_string(),
+                Type::Named(Syntax::TYPE_IO_OPERATION.to_string()),
+            ),
+            ("resource".to_string(), Type::Option(Box::new(Type::String))),
+            ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+            ("cause".to_string(), Type::Option(Box::new(Type::String))),
+        ],
+    );
     cx.cloneable.insert(Syntax::TYPE_IO_CONTEXT.to_string());
     cx.enum_variants.insert(
         Syntax::TYPE_IO_ERROR.to_string(),
@@ -4141,7 +4314,13 @@ pub(crate) fn build_cx_items(
             })
             .collect(),
     );
-    cx.enum_variants.insert(Syntax::TYPE_IO_OPERATION.to_string(), Syntax::IO_OPERATION_VARIANTS.iter().map(|name| ((*name).to_string(), VariantPayload::Unit)).collect());
+    cx.enum_variants.insert(
+        Syntax::TYPE_IO_OPERATION.to_string(),
+        Syntax::IO_OPERATION_VARIANTS
+            .iter()
+            .map(|name| ((*name).to_string(), VariantPayload::Unit))
+            .collect(),
+    );
     cx.enum_variants.insert(
         Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
         Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
@@ -4149,12 +4328,24 @@ pub(crate) fn build_cx_items(
             .map(|name| ((*name).to_string(), VariantPayload::Unit))
             .collect(),
     );
-    for name in Syntax::IO_ERROR_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_ERROR.to_string()); }
-    for name in Syntax::IO_OPERATION_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string()); }
-    for name in Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string()); }
+    for name in Syntax::IO_ERROR_VARIANTS {
+        cx.variant_owner
+            .insert((*name).to_string(), Syntax::TYPE_IO_ERROR.to_string());
+    }
+    for name in Syntax::IO_OPERATION_VARIANTS {
+        cx.variant_owner
+            .insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string());
+    }
+    for name in Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS {
+        cx.variant_owner.insert(
+            (*name).to_string(),
+            Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string(),
+        );
+    }
     cx.cloneable.insert(Syntax::TYPE_IO_ERROR.to_string());
     cx.cloneable.insert(Syntax::TYPE_IO_OPERATION.to_string());
-    cx.cloneable.insert(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string());
+    cx.cloneable
+        .insert(Syntax::TYPE_PROCESS_RESOURCE_LIMIT.to_string());
     let zero = Span::new(0, 0);
     let http_operations = ["ClientConnect", "ServerBind", "ServeListener"];
     cx.enum_variants.insert(
@@ -4171,7 +4362,10 @@ pub(crate) fn build_cx_items(
     let http_proxy = vec![
         ("FromEnvironment".to_string(), VariantPayload::Unit),
         ("None".to_string(), VariantPayload::Unit),
-        ("Url".to_string(), VariantPayload::Single(Type::String, zero)),
+        (
+            "Url".to_string(),
+            VariantPayload::Single(Type::String, zero),
+        ),
     ];
     for (variant, _) in &http_proxy {
         cx.variant_owner
@@ -4928,8 +5122,7 @@ pub(crate) fn build_cx_items(
                             s.auto_derive_default,
                         ) && !items.iter().any(|item| match item {
                             Item::Impl(i) => {
-                                i.type_name == s.name
-                                    && i.trait_name.as_deref() == Some(trait_name)
+                                i.type_name == s.name && i.trait_name.as_deref() == Some(trait_name)
                             }
                             _ => false,
                         }) && !s
@@ -4949,10 +5142,7 @@ pub(crate) fn build_cx_items(
                         register_method(&mut cx, &s.name, m, true);
                     }
                 }
-                if s.derives
-                    .iter()
-                    .any(|(t, _)| t == Syntax::MARKER_PATCHABLE)
-                {
+                if s.derives.iter().any(|(t, _)| t == Syntax::MARKER_PATCHABLE) {
                     cx.patchable.insert(s.name.clone());
                     let patch = format!("{}.Patch", s.name);
                     let base_ty = Type::Named(s.name.clone());
@@ -4999,8 +5189,7 @@ pub(crate) fn build_cx_items(
                             e.auto_derive_default,
                         ) && !items.iter().any(|item| match item {
                             Item::Impl(i) => {
-                                i.type_name == e.name
-                                    && i.trait_name.as_deref() == Some(trait_name)
+                                i.type_name == e.name && i.trait_name.as_deref() == Some(trait_name)
                             }
                             _ => false,
                         }) && !e
@@ -5115,10 +5304,7 @@ pub(crate) fn build_cx_items(
     cx
 }
 
-pub(crate) fn apply_auto_derives(
-    cx: &mut Cx,
-    auto_derives: &crate::Traits::TraitRegistry,
-) {
+pub(crate) fn apply_auto_derives(cx: &mut Cx, auto_derives: &crate::Traits::TraitRegistry) {
     cx.auto_printable = auto_derives.auto_printable.clone();
     cx.auto_debug = auto_derives.auto_debug.clone();
     cx.auto_equatable = auto_derives.auto_equatable.clone();
@@ -5145,12 +5331,14 @@ fn register_core_event_enums(cx: &mut Cx) {
         ),
     ];
     for (enum_name, variants) in ENUMS {
-        cx.enum_variants.entry((*enum_name).to_string()).or_insert_with(|| {
-            variants
-                .iter()
-                .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
-                .collect()
-        });
+        cx.enum_variants
+            .entry((*enum_name).to_string())
+            .or_insert_with(|| {
+                variants
+                    .iter()
+                    .map(|variant| ((*variant).to_string(), VariantPayload::Unit))
+                    .collect()
+            });
         for variant in *variants {
             // User/imported variants keep their owner. Pattern lowering resolves
             // the subject type first, so a same-named core variant remains exact.
@@ -5304,7 +5492,8 @@ fn register_method(cx: &mut Cx, owner: &str, method: &Func, is_trait: bool) {
         .iter()
         .find(|param| param.name == Syntax::KW_SELF)
     {
-        cx.method_self_convs.insert(key.clone(), self_param.convention);
+        cx.method_self_convs
+            .insert(key.clone(), self_param.convention);
     }
     cx.method_sigs
         .insert(key.clone(), method_sig_params(method));
@@ -5318,7 +5507,11 @@ fn register_method(cx: &mut Cx, owner: &str, method: &Func, is_trait: bool) {
     );
     cx.fn_param_names.insert(
         format!("{}::{}", owner, method.name),
-        method.params.iter().map(|param| param.name.clone()).collect(),
+        method
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
     );
     // S62: track trait-impl methods so call sites know not to mangle.
     if is_trait {
@@ -5393,8 +5586,10 @@ pub(crate) fn field_type_cloneable(
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
         // than `ViewMut` — duplicating it would hand out a second no-move claim.
         Type::Apply { name, .. }
-            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut" | "Task" | Syntax::TYPE_PIN)
-                || name == Syntax::TYPE_SHARED_GUARD =>
+            if matches!(
+                name.as_str(),
+                "ViewMut" | "ComputeViewMut" | "Task" | Syntax::TYPE_PIN
+            ) || name == Syntax::TYPE_SHARED_GUARD =>
         {
             false
         }
@@ -5582,9 +5777,7 @@ pub(crate) fn field_type_map_key(ty: &Type, cx: &Cx) -> bool {
         match &ty {
             Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => true,
             Type::Tagged { inner, .. } => visit(inner, cx, active),
-            Type::Tuple(fields) => fields
-                .iter()
-                .all(|(_, field)| visit(field, cx, active)),
+            Type::Tuple(fields) => fields.iter().all(|(_, field)| visit(field, cx, active)),
             Type::Named(name) => {
                 if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
                     return matches!(numeric, Type::Int | Type::IntN { .. });
@@ -5593,9 +5786,7 @@ pub(crate) fn field_type_map_key(ty: &Type, cx: &Cx) -> bool {
                     return false;
                 }
                 let eligible = if let Some(fields) = cx.struct_fields.get(name) {
-                    fields
-                        .iter()
-                        .all(|(_, field)| visit(field, cx, active))
+                    fields.iter().all(|(_, field)| visit(field, cx, active))
                 } else if let Some(variants) = cx.enum_variants.get(name) {
                     variants
                         .iter()
@@ -5703,7 +5894,11 @@ fn walk_type_edge(
         Type::Option(inner) | Type::List(inner) => {
             walk_type_edge(owner, edge, inner, stack, cx, boxed);
         }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             walk_type_edge(owner, edge, key, stack, cx, boxed);
             walk_type_edge(owner, edge, value, stack, cx, boxed);
         }
@@ -5739,7 +5934,6 @@ mod tests {
         );
         assert_eq!(core_rust_type_name(Syntax::TYPE_MEMO_STATS), None);
     }
-
 
     #[test]
     fn type_alias_expansion_preserves_function_parameter_contract() {

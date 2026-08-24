@@ -8,9 +8,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use jet_foundation::Report::REPORT_SCHEMA;
+
 pub const ROW_LIMIT: usize = 4096;
 const ENVELOPE_LIMIT: usize = 512;
-const SCHEMA: &str = "jet.browser.relay.v1";
+const SCHEMA: &str = REPORT_SCHEMA;
 const REQUEST_SCHEMA: &str = "jet.browser.request.v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -508,6 +510,8 @@ mod tests {
     fn relay_maps_payload_free_rows_and_rejects_extra_fields() {
         let _guard = TEST_LOCK.lock().unwrap();
         let relay = Relay::new(&manifest()).unwrap();
+        let header = fs::read_to_string(relay_path(std::process::id())).unwrap();
+        assert!(header.starts_with(&format!("{REPORT_SCHEMA}\t")), "{header}");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

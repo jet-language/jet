@@ -263,7 +263,11 @@ fn check_registry() -> Check {
     if registry.url.starts_with("file://") {
         let path = registry.url.trim_start_matches("file://");
         return if PathBuf::from(path).exists() {
-            Check::ok("registry", registry.name, format!("{safe_url} (local index reachable)"))
+            Check::ok(
+                "registry",
+                registry.name,
+                format!("{safe_url} (local index reachable)"),
+            )
         } else {
             Check::problem(
                 "registry",
@@ -380,7 +384,11 @@ fn check_ffi() -> Vec<Check> {
         Err(error) => out.push(Check::problem(
             "c-ffi",
             "hangar",
-            format!("{} cannot be inspected ({})", hangar.display(), error.kind()),
+            format!(
+                "{} cannot be inspected ({})",
+                hangar.display(),
+                error.kind()
+            ),
             "restore access to the resolved user Hangar path",
             false,
         )),
@@ -491,7 +499,10 @@ fn check_cross_target(triple: &str) -> Check {
             );
         }
         let description = if triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
-            format!("Jet WASI Preview 2 server Component target ({})", target_lib.display())
+            format!(
+                "Jet WASI Preview 2 server Component target ({})",
+                target_lib.display()
+            )
         } else {
             format!("installed ({})", target_lib.display())
         };

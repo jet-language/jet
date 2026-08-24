@@ -3777,7 +3777,7 @@ impl<'a> Checker<'a> {
             // `(Some(then), None)` arm lets the pattern arms' type win.
             Expr::NoElse(_) => None,
             Expr::Todo { expected_type, .. } => {
-                // D-TOOL2 (E2-M11): `todo` is a typed hole — valid in any
+                // D-TOOL2 (E2-M11): `todo` is a typed goal — valid in any
                 // position. Fill the expected-type field so codegen can print
                 // it in the panic message, then return that type (or the
                 // fallback Unit so callers that require Some(…) are satisfied).

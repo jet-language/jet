@@ -39,12 +39,14 @@
 //! are follow-ups, not silently pretended here.
 
 use jet_foundation::Names::mangle;
-use jet_foundation::Syntax;
-use std::io::{Read, Seek, SeekFrom, Write};
+use jet_foundation::{Syntax, SHA256};
+use std::io::{self, Read, Seek, SeekFrom, Write};
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 /// Bogus command sent after every real one. lldb echoes then rejects it
 /// (`error: '<sentinel>' is not a valid command.`, to stderr, which we null —
 /// see the module doc point 1); its echo appearing on stdout is the ONLY
@@ -71,6 +73,17 @@ pub(crate) struct RawFrame {
     pub rust_line: usize,
 }
 
+pub(crate) struct Breakpoint {
+    pub id: usize,
+    pub resolved: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ThreadInfo {
+    pub id: u32,
+    pub name: String,
+}
+
 /// What a resuming command (`run`/`continue`/a step) settled into — see the
 /// module doc point 2 for why this is derived from a follow-up `bt`, never
 /// from the resume command's own text.
@@ -79,19 +92,43 @@ pub(crate) enum ResumeResult {
     /// [`Inferior::parse_top_frame`]/[`Inferior::parse_frames`]).
     Stopped(String),
     /// The debuggee ran to completion.
-    Exited,
+    Exited {
+        status: Option<i32>,
+        signal: Option<String>,
+    },
 }
+
+/// Identity held across the attach handshake. A PID alone is not an
+/// authority: it can be reused, point at a replaced executable, or belong to
+/// another session. Linux's open `/proc/<pid>` directory keeps the post-attach
+/// checks anchored to the process that passed preflight.
+#[cfg(target_os = "linux")]
+struct TargetIdentity {
+    pid: u32,
+    proc_dir: std::fs::File,
+    executable: PathBuf,
+    executable_hash: String,
+    uid: u32,
+    session: u64,
+    start_time: u64,
+}
+
+#[cfg(not(target_os = "linux"))]
+struct TargetIdentity;
 
 pub(crate) struct Inferior {
     child: Child,
     stdin: ChildStdin,
     rx: Receiver<u8>,
-    _reader: std::thread::JoinHandle<()>,
+    _reader: Option<std::thread::JoinHandle<()>>,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
     /// Bytes already drained from each redirected file (see module doc point 3).
     stdout_pos: u64,
     stderr_pos: u64,
+    attached: Option<TargetIdentity>,
+    detached: bool,
+    closed: bool,
 }
 
 impl Inferior {
@@ -121,13 +158,21 @@ impl Inferior {
     /// `type summary add ... --category Rust` + `type category enable Rust`
     /// lines are what actually turn them on.
     pub(crate) fn spawn(binary: &Path) -> std::io::Result<Inferior> {
+        if !binary.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("debug binary does not exist: {}", binary.display()),
+            ));
+        }
         let mut cmd = Command::new("lldb");
         cmd.arg("--no-lldbinit");
         if let Some((script, commands)) = rust_pretty_printer_files() {
-            cmd.arg("--one-line-before-file")
-                .arg(format!("command script import \"{}\"", script.display()))
-                .arg("--source-before-file")
-                .arg(commands);
+            if let Ok(script) = checked_lldb_quote(&script.to_string_lossy()) {
+                cmd.arg("--one-line-before-file")
+                    .arg(format!("command script import {script}"))
+                    .arg("--source-before-file")
+                    .arg(commands);
+            }
         }
         let mut child = cmd
             .arg("--")
@@ -172,29 +217,185 @@ impl Inferior {
             std::process::id(),
             n
         ));
-        std::fs::write(&stdout_path, b"")?;
-        std::fs::write(&stderr_path, b"")?;
+        if let Err(error) = std::fs::write(&stdout_path, b"") {
+            cleanup_failed_start(
+                child,
+                stdin,
+                rx,
+                reader,
+                [stdout_path.as_path(), stderr_path.as_path()].as_slice(),
+            );
+            return Err(error);
+        }
+        if let Err(error) = std::fs::write(&stderr_path, b"") {
+            cleanup_failed_start(
+                child,
+                stdin,
+                rx,
+                reader,
+                [stdout_path.as_path(), stderr_path.as_path()].as_slice(),
+            );
+            return Err(error);
+        }
 
         let mut inf = Inferior {
             child,
             stdin,
             rx,
-            _reader: reader,
+            _reader: Some(reader),
             stdout_path,
             stderr_path,
             stdout_pos: 0,
             stderr_pos: 0,
+            attached: None,
+            detached: false,
+            closed: false,
         };
         inf.write_lines(&[])?;
+        let out_path = match checked_lldb_quote(&inf.stdout_path.to_string_lossy()) {
+            Ok(path) => path,
+            Err(error) => {
+                inf.shutdown();
+                return Err(error);
+            }
+        };
+        let err_path = match checked_lldb_quote(&inf.stderr_path.to_string_lossy()) {
+            Ok(path) => path,
+            Err(error) => {
+                inf.shutdown();
+                return Err(error);
+            }
+        };
+        let out_setting = format!("settings set target.output-path {out_path}");
+        let err_setting = format!("settings set target.error-path {err_path}");
+        inf.write_lines(&[&out_setting, &err_setting])?;
+        Ok(inf)
+    }
+
+    /// Attach only to a local same-user process running the requested binary.
+    /// Remote and cross-executable attach stay outside the local DAP profile.
+    pub(crate) fn attach(binary: &Path, pid: u32) -> std::io::Result<Inferior> {
+        if pid == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "attach processId must be positive",
+            ));
+        }
+        let identity = verify_attach_target(binary, pid)?;
+        let mut cmd = Command::new("lldb");
+        cmd.arg("--no-lldbinit");
+        if let Some((script, commands)) = rust_pretty_printer_files() {
+            if let Ok(script) = checked_lldb_quote(&script.to_string_lossy()) {
+                cmd.arg("--one-line-before-file")
+                    .arg(format!("command script import {script}"))
+                    .arg("--source-before-file")
+                    .arg(commands);
+            }
+        }
+        let mut child = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let stdin = child.stdin.take().expect("piped stdin");
+        let mut stdout: ChildStdout = child.stdout.take().expect("piped stdout");
+        let (tx, rx) = std::sync::mpsc::channel::<u8>();
+        let reader = std::thread::spawn(move || {
+            let mut byte = [0u8; 1];
+            loop {
+                match stdout.read(&mut byte) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) if tx.send(byte[0]).is_err() => break,
+                    Ok(_) => {}
+                }
+            }
+        });
+        static SESSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = std::env::temp_dir();
+        let stdout_path = tmp.join(format!(
+            "jet_debug_native_{}_{}.stdout",
+            std::process::id(),
+            n
+        ));
+        let stderr_path = tmp.join(format!(
+            "jet_debug_native_{}_{}.stderr",
+            std::process::id(),
+            n
+        ));
+        if let Err(error) = std::fs::write(&stdout_path, b"") {
+            cleanup_failed_start(
+                child,
+                stdin,
+                rx,
+                reader,
+                [stdout_path.as_path(), stderr_path.as_path()].as_slice(),
+            );
+            return Err(error);
+        }
+        if let Err(error) = std::fs::write(&stderr_path, b"") {
+            cleanup_failed_start(
+                child,
+                stdin,
+                rx,
+                reader,
+                [stdout_path.as_path(), stderr_path.as_path()].as_slice(),
+            );
+            return Err(error);
+        }
+        let mut inf = Inferior {
+            child,
+            stdin,
+            rx,
+            _reader: Some(reader),
+            stdout_path,
+            stderr_path,
+            stdout_pos: 0,
+            stderr_pos: 0,
+            attached: Some(identity),
+            detached: false,
+            closed: false,
+        };
+        if let Err(error) = inf.write_lines(&[]) {
+            inf.shutdown();
+            return Err(error);
+        }
         let out_setting = format!(
             "settings set target.output-path {}",
-            inf.stdout_path.display()
+            checked_lldb_quote(&inf.stdout_path.to_string_lossy())?
         );
         let err_setting = format!(
             "settings set target.error-path {}",
-            inf.stderr_path.display()
+            checked_lldb_quote(&inf.stderr_path.to_string_lossy())?
         );
-        inf.write_lines(&[&out_setting, &err_setting])?;
+        if let Err(error) = inf.write_lines(&[&out_setting, &err_setting]) {
+            inf.shutdown();
+            return Err(error);
+        }
+        let output = match inf.cmd(&format!("process attach --pid {pid}")) {
+            Ok(output) => output,
+            Err(error) => {
+                inf.shutdown();
+                return Err(error);
+            }
+        };
+        if output.contains("error:") || output.contains("cannot attach") {
+            let error = io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                clean_lldb_error(&output, "process attach was denied"),
+            );
+            inf.shutdown();
+            return Err(error);
+        }
+        if let Err(error) = inf
+            .attached
+            .as_ref()
+            .map(TargetIdentity::verify)
+            .transpose()
+        {
+            inf.shutdown();
+            return Err(error);
+        }
         Ok(inf)
     }
 
@@ -235,10 +436,29 @@ impl Inferior {
         self.stdin.flush()?;
         let marker = SENTINEL.as_bytes();
         let mut buf: Vec<u8> = Vec::new();
+        let deadline = Instant::now() + READ_TIMEOUT;
         loop {
-            let byte = match self.rx.recv_timeout(READ_TIMEOUT) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "lldb did not finish the debugger command before timeout",
+                ));
+            }
+            let byte = match self.rx.recv_timeout(remaining) {
                 Ok(b) => b,
-                Err(_) => break, // EOF or a genuine stall — return what we have.
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "lldb did not finish the debugger command before timeout",
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "lldb closed the debugger control channel",
+                    ));
+                }
             };
             buf.push(byte);
             if buf.len() >= marker.len() && &buf[buf.len() - marker.len()..] == marker {
@@ -290,8 +510,11 @@ impl Inferior {
     pub(crate) fn resume_and_locate(&mut self, resume_cmd: &str) -> std::io::Result<ResumeResult> {
         let mut full = self.write_lines(&[resume_cmd, "bt"])?;
         full.push_str(&self.drain_grace_window());
-        if full.contains("exited with status") {
-            return Ok(ResumeResult::Exited);
+        if full.contains("exited with") {
+            return Ok(ResumeResult::Exited {
+                status: parse_exit_status(&full),
+                signal: parse_exit_signal(&full),
+            });
         }
         // Everything after the LAST `(lldb) bt` echo is `bt`'s own reply —
         // guaranteed to run (and thus print) only once the resume has fully
@@ -310,13 +533,66 @@ impl Inferior {
         &mut self,
         rust_file: &str,
         rust_line: usize,
+    ) -> std::io::Result<Breakpoint> {
+        let out = self.cmd(&format!(
+            "breakpoint set -f {} -l {}",
+            checked_lldb_quote(rust_file)?,
+            rust_line
+        ))?;
+        parse_breakpoint(&out).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "lldb did not return a breakpoint id",
+            )
+        })
+    }
+
+    pub(crate) fn delete_breakpoint(&mut self, id: usize) -> std::io::Result<()> {
+        self.cmd(&format!("breakpoint delete {}", id))?;
+        Ok(())
+    }
+
+    pub(crate) fn configure_launch(
+        &mut self,
+        args: &[String],
+        cwd: Option<&str>,
+        env: &[(String, String)],
     ) -> std::io::Result<()> {
-        self.cmd(&format!("breakpoint set -f {} -l {}", rust_file, rust_line))?;
+        if !args.is_empty() {
+            let rendered = args
+                .iter()
+                .map(|arg| checked_lldb_quote(arg))
+                .collect::<io::Result<Vec<_>>>()?
+                .join(" ");
+            self.cmd(&format!("settings set target.run-args {rendered}"))?;
+        }
+        if let Some(cwd) = cwd {
+            self.cmd(&format!(
+                "settings set target.process.cwd {}",
+                checked_lldb_quote(cwd)?
+            ))?;
+        }
+        let mut assignments = Vec::with_capacity(env.len());
+        for (key, value) in env {
+            if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid launch environment key `{key}`"),
+                ));
+            }
+            assignments.push(checked_lldb_quote(&format!("{key}={value}"))?);
+        }
+        if !assignments.is_empty() {
+            self.cmd(&format!(
+                "settings set target.env-vars {}",
+                assignments.join(" ")
+            ))?;
+        }
         Ok(())
     }
 
     /// `frame variable` — every local in the current frame, `(type) name = value`
-    /// per line (parsed by [`Self::parse_locals`]).
+    /// per line (parsed by [`Self::parse_typed_locals`]).
     pub(crate) fn locals(&mut self) -> std::io::Result<String> {
         self.cmd("frame variable")
     }
@@ -324,10 +600,17 @@ impl Inferior {
     /// `frame variable <name>` — a single local by its JET name (translated to
     /// the mangled Rust name lldb needs — see [`jet_local_to_rust`]).
     pub(crate) fn print_var(&mut self, jet_name: &str) -> std::io::Result<String> {
-        self.cmd(&format!(
-            "frame variable {}",
-            Self::jet_local_to_rust(jet_name)
-        ))
+        self.frame_variable(&Self::jet_local_to_rust(jet_name))
+    }
+
+    pub(crate) fn frame_variable(&mut self, expression: &str) -> std::io::Result<String> {
+        if !valid_frame_expression(expression) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "debugger expression is not a read-only local path",
+            ));
+        }
+        self.cmd(&format!("frame variable {expression}"))
     }
 
     /// `bt` — the full native call stack (parsed by [`Self::parse_frames`]).
@@ -337,10 +620,120 @@ impl Inferior {
         self.cmd("bt")
     }
 
-    /// End the session: `quit`, then reap the child so it never lingers.
+    pub(crate) fn threads(&mut self) -> std::io::Result<Vec<ThreadInfo>> {
+        Ok(parse_threads(&self.cmd("thread list")?))
+    }
+
+    pub(crate) fn select_thread(&mut self, id: u32) -> std::io::Result<()> {
+        let output = self.cmd(&format!("thread select {id}"))?;
+        if output.contains("error:") || output.contains("no thread") {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                clean_lldb_error(&output, "thread is no longer available"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn select_frame(&mut self, index: usize) -> std::io::Result<()> {
+        let output = self.cmd(&format!("frame select {index}"))?;
+        if output.contains("error:") {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                clean_lldb_error(&output, "frame is no longer available"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn interrupt(&mut self) -> std::io::Result<String> {
+        self.cmd("process interrupt")?;
+        self.backtrace()
+    }
+
+    pub(crate) fn detach(&mut self) -> std::io::Result<()> {
+        if self.child.try_wait()?.is_some() {
+            self.attached = None;
+            self.detached = true;
+            return Ok(());
+        }
+        let output = self.cmd("process detach")?;
+        if lldb_reported_error(&output) && !output.contains("no process") {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "lldb could not detach from the debuggee",
+            ));
+        }
+        if let Some(identity) = &self.attached {
+            match identity.verify_running() {
+                Ok(()) => {}
+                // The debuggee exiting between detach and this check is the
+                // normal race, not a detach failure.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        self.attached = None;
+        self.detached = true;
+        Ok(())
+    }
+
+    /// Explicit DAP termination. `shutdown` otherwise detaches an attached
+    /// process by default, so this path must kill the debuggee first.
+    pub(crate) fn terminate_debuggee(&mut self) -> std::io::Result<()> {
+        if self.child.try_wait()?.is_some() {
+            return Ok(());
+        }
+        let output = self.cmd("process kill")?;
+        if lldb_reported_error(&output) && !output.contains("no process") {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "lldb could not terminate the debuggee",
+            ));
+        }
+        self.attached = None;
+        self.detached = true;
+        Ok(())
+    }
+
+    /// End the session: detach attached targets, terminate launched targets,
+    /// then reap lldb and remove both capture files. The command path is
+    /// bounded; a wedged debugger cannot leave a child behind.
     pub(crate) fn quit(mut self) {
-        let _ = self.cmd("quit");
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let running = self.child.try_wait().ok().flatten().is_none();
+        if running {
+            let command = if self.attached.is_some() {
+                "process detach"
+            } else if !self.detached {
+                "process kill"
+            } else {
+                "quit"
+            };
+            let _ = writeln!(self.stdin, "{command}");
+            if command != "quit" {
+                let _ = writeln!(self.stdin, "quit");
+            }
+            let _ = self.stdin.flush();
+        }
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while self.child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
         let _ = self.child.wait();
+        if let Some(reader) = self._reader.take() {
+            let _ = reader.join();
+        }
         let _ = std::fs::remove_file(&self.stdout_path);
         let _ = std::fs::remove_file(&self.stderr_path);
     }
@@ -362,19 +755,12 @@ impl Inferior {
             .collect()
     }
 
-    /// Parse `frame variable`'s `(type) name = value` lines into `(name,
-    /// value)` pairs, in the order lldb printed them. A composite value
+    /// Parse `frame variable`'s `(type) name = value` lines into `(type, name,
+    /// value)` triples, in the order lldb printed them. A composite value
     /// (`String`/struct/enum without a one-line summary provider) spans
     /// MULTIPLE lines, opening a `{` that doesn't close until a later line
     /// (confirmed live) — this tracks brace depth and joins the continuation
     /// lines into one compact value rather than truncating at the first `{`.
-    pub(crate) fn parse_locals(lldb_output: &str) -> Vec<(String, String)> {
-        Self::parse_typed_locals(lldb_output)
-            .into_iter()
-            .map(|(_, name, value)| (name, value))
-            .collect()
-    }
-
     pub(crate) fn parse_typed_locals(lldb_output: &str) -> Vec<(String, String, String)> {
         let mut pairs = Vec::new();
         let mut lines = lldb_output.lines();
@@ -434,6 +820,50 @@ impl Inferior {
             })
     }
 
+    /// Generated locals use the reserved dunder suffix. They remain available
+    /// to an explicit raw scope, but never cross the default Jet projection.
+    pub(crate) fn rust_local_is_jet_visible(name: &str) -> bool {
+        name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
+            .is_some_and(|rest| !rest.starts_with("__"))
+    }
+
+    /// Keep native summaries from exposing Rust layout, addresses, paths, or
+    /// optimized-away storage through the default debugger view.
+    pub(crate) fn safe_value(type_name: &str, raw: &str) -> String {
+        let raw = raw.trim();
+        if matches!(raw, "<optimized out>" | "<unavailable>") {
+            return raw.to_string();
+        }
+        let safe = match type_name.trim() {
+            "bool" | "Bool" => matches!(raw, "true" | "false"),
+            "f32" | "f64" | "Float" => raw.parse::<f64>().is_ok(),
+            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
+            | "usize" | "Int" => raw.parse::<i128>().is_ok(),
+            "alloc::string::String" | "std::string::String" | "String" | "&str" => {
+                complete_quoted_literal(raw).is_some_and(|value| value.len() == raw.len())
+            }
+            "()" | "Unit" => raw == "()",
+            _ => false,
+        };
+        if safe {
+            raw.to_string()
+        } else {
+            "<unavailable>".to_string()
+        }
+    }
+
+    pub(crate) fn jet_type_name(raw: &str) -> Option<&'static str> {
+        match raw.trim() {
+            "bool" => Some("Bool"),
+            "f32" | "f64" => Some("Float"),
+            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
+            | "usize" => Some("Int"),
+            "alloc::string::String" | "std::string::String" | "String" | "&str" => Some("String"),
+            "()" => Some("Unit"),
+            _ => None,
+        }
+    }
+
     /// The reverse of [`Self::rust_local_to_jet`] — the mangled Rust name
     /// lldb needs for `frame variable <name>`.
     pub(crate) fn jet_local_to_rust(name: &str) -> String {
@@ -457,6 +887,21 @@ impl Inferior {
         name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
             .unwrap_or(name)
             .to_string()
+    }
+
+    pub(crate) fn safe_jet_func(func: &str) -> String {
+        let name = Self::rust_func_to_jet(func);
+        if name.starts_with("__") || name == "?" || name.contains("::") {
+            "<native frame>".to_string()
+        } else {
+            name
+        }
+    }
+}
+
+impl Drop for Inferior {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -507,6 +952,355 @@ fn complete_quoted_literal(s: &str) -> Option<&str> {
     None
 }
 
+fn parse_breakpoint(output: &str) -> Option<Breakpoint> {
+    output.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("Breakpoint ")?;
+        let id = rest.split(':').next()?.parse().ok()?;
+        Some(Breakpoint {
+            id,
+            resolved: !line.contains("no locations"),
+        })
+    })
+}
+
+fn parse_exit_status(output: &str) -> Option<i32> {
+    output.lines().find_map(|line| {
+        let rest = line.split_once("exited with status =")?.1.trim_start();
+        rest.split_whitespace().next()?.parse().ok()
+    })
+}
+
+fn parse_exit_signal(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let marker = if line.contains("stop reason = signal ") {
+            "stop reason = signal "
+        } else if line.contains("stopped with signal ") {
+            "stopped with signal "
+        } else {
+            return None;
+        };
+        line.split_once(marker).map(|(_, rest)| {
+            rest.split_whitespace()
+                .next()
+                .unwrap_or("unknown")
+                .to_string()
+        })
+    })
+}
+
+fn lldb_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn checked_lldb_quote(value: &str) -> io::Result<String> {
+    if value.chars().any(|c| c.is_control()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "debugger path contains a control character",
+        ));
+    }
+    Ok(lldb_quote(value))
+}
+
+fn valid_frame_expression(expression: &str) -> bool {
+    !expression.is_empty()
+        && expression
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '[' | ']' | ' '))
+        && !expression.contains("  ")
+}
+
+fn parse_threads(output: &str) -> Vec<ThreadInfo> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let marker = line.find("thread #")?;
+            let rest = &line[marker + "thread #".len()..];
+            let id = rest
+                .split(|c: char| !c.is_ascii_digit())
+                .next()?
+                .parse()
+                .ok()?;
+            let name = rest
+                .split_once("name = ")
+                .map(|(_, rest)| rest.split(',').next().unwrap_or(rest).trim())
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("thread {id}"));
+            Some(ThreadInfo { id, name })
+        })
+        .collect()
+}
+
+fn clean_lldb_error(output: &str, fallback: &str) -> String {
+    output
+        .lines()
+        .find(|line| line.contains("error:") || line.contains("no locations"))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+#[cfg(target_os = "linux")]
+struct ProcSnapshot {
+    executable: PathBuf,
+    executable_hash: String,
+    uid: u32,
+    session: u64,
+    start_time: u64,
+    state: char,
+    tracer_pid: u32,
+}
+
+#[cfg(target_os = "linux")]
+impl ProcSnapshot {
+    fn read(base: &Path) -> io::Result<Self> {
+        let status = std::fs::read_to_string(base.join("status"))?;
+        let stat = std::fs::read_to_string(base.join("stat"))?;
+        let executable_path = base.join("exe");
+        let executable = std::fs::canonicalize(&executable_path)?;
+        let executable_hash = SHA256::sha256_file_hex(&executable_path)?;
+        let uid = proc_status_number(&status, "Uid:", 1)?;
+        let tracer_pid = proc_status_number(&status, "TracerPid:", 0)?;
+        let fields = proc_stat_fields(&stat)?;
+        let state = fields
+            .first()
+            .and_then(|field| field.chars().next())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "process has no state"))?;
+        let session = fields
+            .get(3)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "process has no session"))?
+            .parse()
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "process session is invalid")
+            })?;
+        let start_time = fields
+            .get(19)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "process has no start time"))?
+            .parse()
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "process start time is invalid")
+            })?;
+        Ok(Self {
+            executable,
+            executable_hash,
+            uid,
+            session,
+            start_time,
+            state,
+            tracer_pid,
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl TargetIdentity {
+    fn capture(binary: &Path, pid: u32) -> io::Result<Self> {
+        if pid == 0 || pid == std::process::id() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "attach processId must identify another positive process",
+            ));
+        }
+        if !binary.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "attach program does not exist",
+            ));
+        }
+        let executable = std::fs::canonicalize(binary)?;
+        let executable_hash = SHA256::sha256_file_hex(&executable)?;
+        let proc_dir = std::fs::File::open(format!("/proc/{pid}"))?;
+        let target = ProcSnapshot::read(&proc_base(&proc_dir))?;
+        let current_status = std::fs::read_to_string("/proc/self/status")?;
+        let current_stat = std::fs::read_to_string("/proc/self/stat")?;
+        let current_uid = proc_status_number(&current_status, "Uid:", 1)?;
+        let current_session = proc_stat_fields(&current_stat)?
+            .get(3)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "current session is invalid")
+            })?
+            .parse()
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "current session is invalid")
+            })?;
+        validate_target(
+            &target,
+            &executable,
+            &executable_hash,
+            current_uid,
+            current_session,
+        )?;
+        Ok(Self {
+            pid,
+            proc_dir,
+            executable,
+            executable_hash,
+            uid: target.uid,
+            session: target.session,
+            start_time: target.start_time,
+        })
+    }
+
+    fn verify(&self) -> io::Result<()> {
+        let current = ProcSnapshot::read(&proc_base(&self.proc_dir))?;
+        if current.executable != self.executable
+            || current.executable_hash != self.executable_hash
+            || current.uid != self.uid
+            || current.session != self.session
+            || current.start_time != self.start_time
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "attach target identity changed",
+            ));
+        }
+        if matches!(current.state, 'Z' | 'X' | 'x') {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "attach target has exited",
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_running(&self) -> io::Result<()> {
+        for _ in 0..20 {
+            let current = ProcSnapshot::read(&proc_base(&self.proc_dir))?;
+            self.verify()?;
+            if !matches!(current.state, 'T' | 't') {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!(
+                "attach target {} did not resume after detach",
+                self.pid
+            ),
+        ))
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl TargetIdentity {
+    fn capture(_binary: &Path, _pid: u32) -> io::Result<Self> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "verified local attach is unavailable on this host",
+        ))
+    }
+
+    fn verify(&self) -> io::Result<()> {
+        let _ = self;
+        Ok(())
+    }
+
+    fn verify_running(&self) -> io::Result<()> {
+        let _ = self;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn proc_base(proc_dir: &std::fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", proc_dir.as_raw_fd()))
+}
+
+#[cfg(target_os = "linux")]
+fn proc_status_number(status: &str, key: &str, index: usize) -> io::Result<u32> {
+    let values = status
+        .lines()
+        .find_map(|line| line.strip_prefix(key))
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "process status is incomplete")
+        })?;
+    values
+        .split_whitespace()
+        .nth(index)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "process status is incomplete"))?
+        .parse()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "process status is invalid"))
+}
+
+#[cfg(target_os = "linux")]
+fn proc_stat_fields(stat: &str) -> io::Result<Vec<&str>> {
+    let close = stat
+        .rfind(')')
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "process stat is invalid"))?;
+    Ok(stat[close + 1..].split_whitespace().collect())
+}
+
+#[cfg(target_os = "linux")]
+fn validate_target(
+    target: &ProcSnapshot,
+    executable: &Path,
+    executable_hash: &str,
+    current_uid: u32,
+    current_session: u64,
+) -> io::Result<()> {
+    if target.uid != current_uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "attach target belongs to another user",
+        ));
+    }
+    if target.session != current_session {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "attach target is outside the current session",
+        ));
+    }
+    if target.tracer_pid != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "attach target is already being traced",
+        ));
+    }
+    if matches!(target.state, 'Z' | 'X' | 'x') {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "attach target has exited",
+        ));
+    }
+    if target.executable != executable || target.executable_hash != executable_hash {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "attach target executable does not match the debug binary",
+        ));
+    }
+    Ok(())
+}
+
+fn lldb_reported_error(output: &str) -> bool {
+    output
+        .lines()
+        .any(|line| line.trim_start().starts_with("error:"))
+}
+
+fn verify_attach_target(binary: &Path, pid: u32) -> io::Result<TargetIdentity> {
+    TargetIdentity::capture(binary, pid)
+}
+
+fn cleanup_failed_start(
+    mut child: Child,
+    stdin: ChildStdin,
+    rx: Receiver<u8>,
+    reader: std::thread::JoinHandle<()>,
+    paths: &[&Path],
+) {
+    drop(stdin);
+    drop(rx);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = reader.join();
+    for path in paths {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 fn parse_frame_line(line: &str) -> Option<RawFrame> {
     // lldb marks the selected frame with a leading `* ` (e.g. `  * frame #0: …`);
     // every other frame just has leading whitespace before `frame #N:`.
@@ -547,6 +1341,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_breakpoint_identity_and_pending_state() {
+        let resolved =
+            parse_breakpoint("Breakpoint 4: where = prog`run + 8 at app.rs:7:1").unwrap();
+        assert_eq!(resolved.id, 4);
+        assert!(resolved.resolved);
+
+        let pending = parse_breakpoint("Breakpoint 5: no locations (pending).").unwrap();
+        assert_eq!(pending.id, 5);
+        assert!(!pending.resolved);
+    }
+
+    #[test]
+    fn parses_exit_status_and_quotes_paths_for_lldb() {
+        assert_eq!(
+            parse_exit_status("Process 1 exited with status = 17 (0x11)"),
+            Some(17)
+        );
+        assert_eq!(lldb_quote("a file\\name.rs"), "\"a file\\\\name.rs\"");
+    }
+
+    #[test]
     fn parses_multiple_frames_for_backtrace() {
         let out = "  * frame #0: 0x1 bin`__jet_helper at a.rs:3:1\n    frame #1: 0x2 bin`__jet_main + 10 at a.rs:9:1\n";
         let frames = Inferior::parse_frames(out);
@@ -558,12 +1373,12 @@ mod tests {
     #[test]
     fn parses_locals_with_type_prefix() {
         let out = "(int) n = 5\n(int) total = 0\n";
-        let locals = Inferior::parse_locals(out);
+        let locals = Inferior::parse_typed_locals(out);
         assert_eq!(
             locals,
             vec![
-                ("n".to_string(), "5".to_string()),
-                ("total".to_string(), "0".to_string())
+                ("int".to_string(), "n".to_string(), "5".to_string()),
+                ("int".to_string(), "total".to_string(), "0".to_string())
             ]
         );
     }
@@ -574,8 +1389,15 @@ mod tests {
     #[test]
     fn parses_a_string_summary_and_drops_its_synthetic_children() {
         let out = "(alloc::string::String) text = \"hi\" { [0] = 'h' [1] = 'i' }\n";
-        let locals = Inferior::parse_locals(out);
-        assert_eq!(locals, vec![("text".to_string(), "\"hi\"".to_string())]);
+        let locals = Inferior::parse_typed_locals(out);
+        assert_eq!(
+            locals,
+            vec![(
+                "alloc::string::String".to_string(),
+                "text".to_string(),
+                "\"hi\"".to_string()
+            )]
+        );
     }
 
     /// A composite value with NO summary provider genuinely spans multiple
@@ -584,10 +1406,11 @@ mod tests {
     #[test]
     fn parses_a_multiline_struct_without_a_summary_provider() {
         let out = "(__jet_Point) p = {\n  x = 1\n  y = 2\n}\n";
-        let locals = Inferior::parse_locals(out);
+        let locals = Inferior::parse_typed_locals(out);
         assert_eq!(locals.len(), 1);
-        assert_eq!(locals[0].0, "p");
-        assert!(locals[0].1.contains("x = 1") && locals[0].1.contains("y = 2"));
+        assert_eq!(locals[0].0, "__jet_Point");
+        assert_eq!(locals[0].1, "p");
+        assert!(locals[0].2.contains("x = 1") && locals[0].2.contains("y = 2"));
     }
 
     #[test]
@@ -617,6 +1440,31 @@ mod tests {
     }
 
     #[test]
+    fn default_local_projection_hides_internal_names_and_unknown_values() {
+        assert!(Inferior::rust_local_is_jet_visible("__jet_total"));
+        assert!(!Inferior::rust_local_is_jet_visible("__jet___temporary"));
+        assert!(!Inferior::rust_local_is_jet_visible("allocator_temp"));
+        assert_eq!(Inferior::safe_value("int", "7"), "7");
+        assert_eq!(
+            Inferior::safe_value("SomeRustStruct", "{ address = 0x1 }"),
+            "<unavailable>"
+        );
+        assert_eq!(
+            Inferior::safe_value("int", "<optimized out>"),
+            "<optimized out>"
+        );
+        assert_eq!(Inferior::jet_type_name("SomeRustStruct"), None);
+    }
+
+    #[test]
+    fn lldb_paths_reject_control_characters() {
+        assert!(checked_lldb_quote("safe/name.rs").is_ok());
+        assert!(checked_lldb_quote("bad\nname.rs").is_err());
+        assert!(valid_frame_expression("__jet_value.items[0]"));
+        assert!(!valid_frame_expression("__jet_value; process kill"));
+    }
+
+    #[test]
     fn func_name_strips_crate_path_and_hash() {
         assert_eq!(
             Inferior::rust_func_to_jet("prog::main::h40021039c79c235b"),
@@ -632,5 +1480,10 @@ mod tests {
             Inferior::rust_func_to_jet("__libc_start_main"),
             "__libc_start_main"
         );
+        assert_eq!(
+            Inferior::safe_jet_func("__libc_start_main"),
+            "<native frame>"
+        );
+        assert_eq!(Inferior::safe_jet_func("prog::__jet_run::h4002"), "run");
     }
 }

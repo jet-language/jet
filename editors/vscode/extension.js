@@ -1,9 +1,10 @@
 // Jet VS Code extension — LSP v0 client (M6 phase 4). Plain JS, no build step.
 //
 // Server discovery, in order:
-//   1. jet.languageServerPath setting (supports ${workspaceFolder} and ~)
-//   2. <workspaceFolder>/target/debug/jet   (developing the compiler itself)
-//   3. `jet` on PATH                        (installed, or editor launched from dev shell)
+//   1. jet.executablePath setting (supports ${workspaceFolder} and ~)
+//   2. legacy jet.languageServerPath setting
+//   3. <workspaceFolder>/target/debug/jet   (developing the compiler itself)
+//   4. `jet` on PATH                        (installed, or editor launched from dev shell)
 // `jet self lsp` does not invoke rustc, so the plain cargo binary is enough.
 
 const fs = require("fs");
@@ -22,9 +23,11 @@ function expandPathSetting(value, workspaceFolder) {
 }
 
 function findServer(workspaceFolder) {
-  const configured = vscode.workspace
-    .getConfiguration("jet")
-    .get("languageServerPath", "");
+  const settings = vscode.workspace.getConfiguration("jet");
+  const explicit = settings.get("executablePath", "");
+  const legacy = settings.get("languageServerPath", "");
+  const configured = explicit || legacy;
+  const configuredName = explicit ? "jet.executablePath" : "jet.languageServerPath";
 
   if (configured) {
     const expanded = expandPathSetting(configured, workspaceFolder || "");
@@ -32,7 +35,7 @@ function findServer(workspaceFolder) {
       return expanded;
     }
     vscode.window.showWarningMessage(
-      `jet.languageServerPath is set to "${expanded}" but nothing exists there; falling back to auto-discovery.`
+      `${configuredName} is set to "${expanded}" but nothing exists there; falling back to auto-discovery.`
     );
   }
 
@@ -45,6 +48,11 @@ function findServer(workspaceFolder) {
 
   // Bare command: the OS resolves it from PATH when the server spawns.
   return "jet";
+}
+
+function canonicalProgram(program) {
+  const absolute = path.resolve(program);
+  return fs.existsSync(absolute) ? fs.realpathSync(absolute) : absolute;
 }
 
 function shellQuote(value) {
@@ -64,9 +72,47 @@ function runJetInTerminal(serverPath, args) {
   terminal.sendText([shellQuote(serverPath), ...args.map(shellQuote)].join(" "));
 }
 
+function debugFile(file) {
+  const uri = vscode.Uri.file(canonicalProgram(file));
+  const folder = vscode.workspace.getWorkspaceFolder(uri);
+  vscode.debug.startDebugging(folder, {
+    type: "jet",
+    request: "launch",
+    name: "Jet: Debug File",
+    program: canonicalProgram(file),
+  });
+}
+
 function activate(context) {
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const serverPath = findServer(workspaceFolder);
+  const debugProvider = {
+    resolveDebugConfiguration(_folder, config) {
+      const program = config.program || vscode.window.activeTextEditor?.document.uri.fsPath;
+      if (!program) {
+        vscode.window.showErrorMessage("Jet debugger needs an open .jet file.");
+        return undefined;
+      }
+      return {
+        ...config,
+        type: "jet",
+        request: config.request || "launch",
+        name: config.name || "Jet: Debug File",
+        program: canonicalProgram(program),
+      };
+    },
+  };
+  const debugFactory = {
+    createDebugAdapterDescriptor(session) {
+      const program = canonicalProgram(session.configuration.program);
+      const cwd = session.workspaceFolder?.uri.fsPath || workspaceFolder;
+      return new vscode.DebugAdapterExecutable(
+        serverPath,
+        ["debug", "--dap", program],
+        cwd ? { cwd } : undefined
+      );
+    },
+  };
 
   client = new LanguageClient(
     "jet",
@@ -102,7 +148,15 @@ function activate(context) {
       if (file) {
         runJetInTerminal(serverPath, ["test", file]);
       }
-    })
+    }),
+    vscode.commands.registerCommand("jet.debugFile", (uriArg) => {
+      const file = uriArgToPath(uriArg);
+      if (file) {
+        debugFile(file);
+      }
+    }),
+    vscode.debug.registerDebugConfigurationProvider("jet", debugProvider),
+    vscode.debug.registerDebugAdapterDescriptorFactory("jet", debugFactory)
   );
 
   client.start().catch(() => {

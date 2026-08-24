@@ -3,7 +3,7 @@
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 
-use super::{unsupported, EvalCtx, EvalApp, EvalAppStep};
+use super::{unsupported, EvalApp, EvalAppStep, EvalCtx};
 
 const APP_HANDLE: &str = "__JetTirApp";
 const APP_STATE: &str = "__JetTirAppState";
@@ -94,13 +94,13 @@ impl EvalCtx<'_> {
         method: &str,
         args: Vec<CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let index = handle_index(recv)
-            .ok_or_else(|| unsupported("App interpreter handle", self.span()))?;
+        let index =
+            handle_index(recv).ok_or_else(|| unsupported("App interpreter handle", self.span()))?;
         match method {
-            "route" | "page" | "layout" | "action" | "form" | "data" | "mount"
-            | "routes" | "security" | "assets" | "split" | "code_split" | "cache"
-            | "a11y" | "adapter" | "csr" | "ssr" | "ssg" | "stream" | "streaming"
-            | "island" | "hydration_dev" | "hydration_release" => {
+            "route" | "page" | "layout" | "action" | "form" | "data" | "mount" | "routes"
+            | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter"
+            | "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
+            | "hydration_release" => {
                 let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                 let app = runtime
                     .apps
@@ -114,13 +114,8 @@ impl EvalCtx<'_> {
             }
             "facts_json" => {
                 let mut state = self.app_state_value(index)?;
-                crate::Comptime::try_ambient_handle(
-                    "AppFacts",
-                    &mut state,
-                    &mut [],
-                    self.span(),
-                )
-                .unwrap_or_else(|| Err(unsupported("App facts host", self.span())))
+                crate::Comptime::try_ambient_handle("AppFacts", &mut state, &mut [], self.span())
+                    .unwrap_or_else(|| Err(unsupported("App facts host", self.span())))
             }
             "serve" | "serve_on" => {
                 let mut state = self.app_state_value(index)?;
@@ -143,13 +138,9 @@ impl EvalCtx<'_> {
 
     fn run_app_server(&mut self, mut server: CtValue) -> Result<CtValue, Diagnostic> {
         loop {
-            let request = crate::Comptime::try_ambient_handle(
-                "AppNext",
-                &mut server,
-                &mut [],
-                self.span(),
-            )
-            .unwrap_or_else(|| Err(unsupported("App callback host", self.span())))?;
+            let request =
+                crate::Comptime::try_ambient_handle("AppNext", &mut server, &mut [], self.span())
+                    .unwrap_or_else(|| Err(unsupported("App callback host", self.span())))?;
             let CtValue::Struct { fields, .. } = request else {
                 return Err(unsupported("App callback request", self.span()));
             };

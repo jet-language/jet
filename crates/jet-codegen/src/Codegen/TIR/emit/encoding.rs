@@ -1,15 +1,15 @@
-use crate::AST::{Type};
-use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit::emit_panic_locals;
 use crate::Codegen::TIR::emit::emit_panic_message_expr;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_stmts;
-use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
+use crate::AST::Type;
 
 /// c109 Phase 8/15: format a `??` fallback right-hand side, mirroring
 /// `emit_or_fallback_rhs` (Statement.rs). Value and early-`return` (Phase 8); the
@@ -21,10 +21,7 @@ pub(crate) fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String
         TOrFallback::Return(Some(e)) => format!("return {}", emit_tir_expr(e, cx)),
         TOrFallback::Panic { msg, loc } => {
             if cx.test_mode {
-                return format!(
-                    "{{ return Err({}); }}",
-                    emit_panic_message_expr(msg, cx)
-                );
+                return format!("{{ return Err({}); }}", emit_panic_message_expr(msg, cx));
             }
             format!(
                 "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",

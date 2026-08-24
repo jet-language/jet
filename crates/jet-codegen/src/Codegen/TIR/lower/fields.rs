@@ -1,8 +1,8 @@
-use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::{LowerEnv, TExpr};
 use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::{LowerEnv, TExpr};
 use crate::Syntax;
+use crate::AST::{Expr, Item, ProgramBundle, Type, UnOp};
 use std::collections::HashSet;
 
 pub(crate) fn imported_type_name(owner: &str, leaf: &str) -> String {
@@ -34,7 +34,12 @@ fn module_owned_type_names(items: &[Item]) -> HashSet<String> {
                 names.insert(definition.name.clone());
             }
             Item::UnitFamily(family) => {
-                names.extend(family.distinct_defs().iter().map(|member| member.name.clone()));
+                names.extend(
+                    family
+                        .distinct_defs()
+                        .iter()
+                        .map(|member| member.name.clone()),
+                );
             }
             Item::Distinct(definition) => {
                 names.insert(definition.name.clone());
@@ -152,9 +157,7 @@ fn rewrite_apply_heads(ty: &Type, qualify: &impl Fn(&str) -> String) -> Type {
         Type::Tuple(fields) => Type::Tuple(
             fields
                 .iter()
-                .map(|(name, ty)| {
-                    (name.clone(), Box::new(rewrite_apply_heads(ty, qualify)))
-                })
+                .map(|(name, ty)| (name.clone(), Box::new(rewrite_apply_heads(ty, qualify))))
                 .collect(),
         ),
         Type::FixedList { elem, len } => Type::FixedList {
@@ -224,19 +227,19 @@ pub(crate) fn register_imported_struct_shapes(
         };
         for item in &bundle.modules[target].items {
             if let Item::Struct(definition) = item {
-                if bundle.name_ledger.visible(module_idx, target, &definition.name) {
+                if bundle
+                    .name_ledger
+                    .visible(module_idx, target, &definition.name)
+                {
                     imported.push((target, definition.name.clone()));
                 }
             }
         }
     }
     imported.extend(crate::Codegen::Imports::selective_nominal_targets(
-        bundle,
-        module_idx,
+        bundle, module_idx,
     ));
-    for ((_, _), (rust_mod, _)) in
-        crate::Codegen::Imports::reexport_call_map(bundle, module_idx)
-    {
+    for ((_, _), (rust_mod, _)) in crate::Codegen::Imports::reexport_call_map(bundle, module_idx) {
         let Some(target) = bundle
             .modules
             .iter()
@@ -246,7 +249,10 @@ pub(crate) fn register_imported_struct_shapes(
         };
         for item in &bundle.modules[target].items {
             if let Item::Struct(definition) = item {
-                if bundle.name_ledger.visible(module_idx, target, &definition.name) {
+                if bundle
+                    .name_ledger
+                    .visible(module_idx, target, &definition.name)
+                {
                     imported.push((target, definition.name.clone()));
                 }
             }
@@ -255,10 +261,14 @@ pub(crate) fn register_imported_struct_shapes(
     imported.sort();
     imported.dedup();
     for (target, definition_name) in imported {
-        let Some(definition) = bundle.modules[target].items.iter().find_map(|item| match item {
-            Item::Struct(definition) if definition.name == definition_name => Some(definition),
-            _ => None,
-        }) else {
+        let Some(definition) = bundle.modules[target]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Struct(definition) if definition.name == definition_name => Some(definition),
+                _ => None,
+            })
+        else {
             continue;
         };
         let owner = bundle
@@ -335,8 +345,7 @@ pub(crate) fn register_imported_struct_shapes(
                 .collect::<Vec<_>>();
             cx.struct_type_params
                 .insert(qualified.clone(), params.iter().cloned().collect());
-            cx.struct_type_param_order
-                .insert(qualified.clone(), params);
+            cx.struct_type_param_order.insert(qualified.clone(), params);
         }
     }
 }
@@ -387,9 +396,7 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
 /// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).
 pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str) -> Option<String> {
     if let Type::Apply { name, .. } = recv_ty {
-        if name == "DataJoin"
-            && !cx.type_names.contains(name)
-            && matches!(member, "left" | "right")
+        if name == "DataJoin" && !cx.type_names.contains(name) && matches!(member, "left" | "right")
         {
             return Some(member.to_string());
         }
@@ -524,8 +531,14 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
         "DataLineOptions" => matches!(
             member,
-            "title" | "x_label" | "y_label" | "markers" | "reference" | "style"
-                | "color" | "legend"
+            "title"
+                | "x_label"
+                | "y_label"
+                | "markers"
+                | "reference"
+                | "style"
+                | "color"
+                | "legend"
         ),
         "DataPivotCell" => matches!(member, "row_key" | "column_key" | "count" | "sum" | "mean"),
         "DataLimits" => matches!(
@@ -561,10 +574,20 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
         "HTTPShutdownReport" => {
-            matches!(member, "accepted" | "overloaded" | "completed" | "cancelled")
+            matches!(
+                member,
+                "accepted" | "overloaded" | "completed" | "cancelled"
+            )
         }
         "TLSPeerIdentity" => {
-            matches!(member, "verified_server_name" | "leaf" | "certificate_chain" | "cipher_suite" | "tls_version")
+            matches!(
+                member,
+                "verified_server_name"
+                    | "leaf"
+                    | "certificate_chain"
+                    | "cipher_suite"
+                    | "tls_version"
+            )
         }
         "TLSCertificate" => matches!(
             member,
@@ -583,23 +606,62 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             matches!(member, "hits" | "misses" | "size" | "bound")
         }
         "FieldError" => matches!(member, "path" | "reason"),
-        "EncodingLimits" => matches!(member, "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_total_bytes" | "max_expansion_depth" | "max_expansion_bytes"),
+        "EncodingLimits" => matches!(
+            member,
+            "buffer_bytes"
+                | "max_depth"
+                | "max_item_bytes"
+                | "max_total_bytes"
+                | "max_expansion_depth"
+                | "max_expansion_bytes"
+        ),
         "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
-        "EncodingError" => matches!(member, "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"),
-        "CBOROptions" => matches!(member, "max_depth" | "max_items" | "max_bytes" | "require_canonical"),
+        "EncodingError" => matches!(
+            member,
+            "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"
+        ),
+        "CBOROptions" => matches!(
+            member,
+            "max_depth" | "max_items" | "max_bytes" | "require_canonical"
+        ),
         "CBORError" => matches!(member, "kind" | "byte_offset" | "path" | "reason"),
-        "XMLLimits" => matches!(member, "max_depth" | "max_nodes" | "max_attributes_per_element" | "max_name_bytes" | "max_text_bytes" | "max_entity_declarations" | "max_entity_depth" | "max_entity_replacement_bytes"),
+        "XMLLimits" => matches!(
+            member,
+            "max_depth"
+                | "max_nodes"
+                | "max_attributes_per_element"
+                | "max_name_bytes"
+                | "max_text_bytes"
+                | "max_entity_declarations"
+                | "max_entity_depth"
+                | "max_entity_replacement_bytes"
+        ),
         "XMLParseOptions" => matches!(member, "entities" | "limits"),
         "XMLRenderOptions" => matches!(member, "encoding" | "lexical"),
         "XMLCanonical" => matches!(member, "mode" | "comments" | "inclusive_prefixes"),
-        "XMLError" => matches!(member, "kind" | "byte_offset" | "line" | "column" | "path" | "reason"),
+        "XMLError" => matches!(
+            member,
+            "kind" | "byte_offset" | "line" | "column" | "path" | "reason"
+        ),
         "Envelope" => matches!(member, "from" | "recipients"),
         "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
-        "Limits" => matches!(member,
-            "max_reply_line_bytes" | "max_reply_lines" | "max_capabilities" |
-            "max_recipients" | "max_message_bytes" | "max_auth_challenge_bytes"),
-        "SendReport" => matches!(member, "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"),
-        "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "not_before" | "issued_at"),
+        "Limits" => matches!(
+            member,
+            "max_reply_line_bytes"
+                | "max_reply_lines"
+                | "max_capabilities"
+                | "max_recipients"
+                | "max_message_bytes"
+                | "max_auth_challenge_bytes"
+        ),
+        "SendReport" => matches!(
+            member,
+            "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"
+        ),
+        "Claims" => matches!(
+            member,
+            "subject" | "audience" | "issuer" | "expires_at" | "not_before" | "issued_at"
+        ),
         "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
         "Auth" => matches!(member, "users_table"),
         n if n == Syntax::TYPE_TYPE_INFO => {
@@ -610,7 +672,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             "kind" | "size" | "alignment" | "stride" | "target" | "guarantee" | "source" | "fields"
         ),
         n if n == Syntax::TYPE_LAYOUT_FIELD => {
-            matches!(member, "name" | "ty" | "offset" | "size" | "target" | "guarantee" | "source")
+            matches!(
+                member,
+                "name" | "ty" | "offset" | "size" | "target" | "guarantee" | "source"
+            )
         }
         _ => false,
     };
@@ -762,8 +827,7 @@ pub(crate) fn lower_comptime_scalar(
         // D-TYPE2-IMAG1=A: a folded Complex still enters the canonical
         // precise constructor seam. This keeps AOT, resident JIT, and web
         // from treating its CtValue struct as an unrelated user record.
-        crate::AST::CtValue::Struct { type_name, fields }
-            if type_name == Syntax::TYPE_COMPLEX => {
+        crate::AST::CtValue::Struct { type_name, fields } if type_name == Syntax::TYPE_COMPLEX => {
             let part = |name: &str| {
                 fields
                     .iter()
@@ -841,12 +905,7 @@ pub(crate) fn call_return_type_with_args(
             } else {
                 actual.value.ty.clone()
             };
-            if !crate::Codegen::TIR::bind_generic_type(
-                template,
-                &actual_ty,
-                params,
-                &mut subst,
-            ) {
+            if !crate::Codegen::TIR::bind_generic_type(template, &actual_ty, params, &mut subst) {
                 return declared;
             }
         }

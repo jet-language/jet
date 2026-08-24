@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::Diagnostics::{Diagnostic, Severity};
+use jet_driver::Diagnostics::ReportEnvelope;
 use jet_driver::FixEngine;
 use jet_semindex::{DefinitionAnchor, SourceSpan, SymbolDef, SymbolRef};
 
@@ -1143,6 +1144,11 @@ fn finish_project_changes(
         .join("\n");
     if !preview {
         write_project_changes_with_rollback(ctx, &changes)?;
+        if changed && matches!(op, "rename_binding" | "rename_function") {
+            let from = required_project_string(request, "from")?;
+            let to = required_project_string(request, "to")?;
+            record_project_rename(ctx, &changes, &from, &to)?;
+        }
     }
     let touched_files = changes
         .iter()
@@ -1328,6 +1334,100 @@ fn write_project_changes_with_rollback(
     })
 }
 
+fn record_project_rename(
+    ctx: &ProjectContext,
+    changes: &[ProjectChange],
+    from: &str,
+    to: &str,
+) -> Result<(), String> {
+    let source_changes = changes
+        .iter()
+        .filter(|change| {
+            change.before != change.after
+                && change.path.extension().and_then(|extension| extension.to_str())
+                    == Some(jet_driver::Syntax::FILE_EXT)
+        })
+        .collect::<Vec<_>>();
+    if source_changes.is_empty() {
+        return Ok(());
+    }
+    let overlays = source_changes
+        .iter()
+        .map(|change| (change.path.as_path(), change.before.as_str()))
+        .collect::<Vec<_>>();
+    let before_index = jet_semindex::open_with_overlays(&ctx.entry_path, &overlays)
+        .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
+    let targets = before_index
+        .definition_facts()
+        .iter()
+        .filter(|fact| fact.name == from)
+        .filter(|fact| {
+            source_changes.iter().any(|change| {
+                module_belongs_to(&ctx.project_root, &change.path, &fact.module_path)
+            })
+        })
+        .map(|fact| {
+            format!(
+                "{{\"stable_id\":{},\"before\":{},\"after\":{},\"kind\":{},\"module_path\":{}}}",
+                json_str(&fact.stable_id),
+                json_str(&fact.human_identity),
+                json_str(&format!("{}::{to}", fact.module_path)),
+                json_str(&fact.kind),
+                json_str(&fact.module_path),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let files = source_changes
+        .iter()
+        .map(|change| {
+            format!(
+                "{{\"path\":{},\"before_hash\":{},\"after_hash\":{}}}",
+                json_str(&change.path.display().to_string()),
+                json_str(&source_revision(&change.before)),
+                json_str(&source_revision(&change.after)),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let op = format!(
+        "{{\"kind\":\"rename\",\"from\":{},\"to\":{},\"targets\":[{}],\"files\":[{}]}}",
+        json_str(from),
+        json_str(to),
+        targets,
+        files,
+    );
+    let directory = ctx.project_root.join(".jet/codemods");
+    fs::create_dir_all(&directory)
+        .map_err(|error| {
+            project_edit_error("io", &format!("could not record project rename: {error}"))
+        })?;
+    let digest = jet_driver::SHA256::sha256_hex(
+        source_changes
+            .iter()
+            .flat_map(|change| change.after.as_bytes().iter().copied())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
+    let base = format!("CanvasProjectRename-{}", &digest[..12]);
+    let mut receipt = directory.join(format!("{base}.log.json"));
+    let mut suffix = 0;
+    while receipt.exists() {
+        suffix += 1;
+        receipt = directory.join(format!("{base}-{suffix}.log.json"));
+    }
+    let log = format!(
+        "{{\"schema\":2,\"name\":{},\"project\":{},\"semantic_ops\":[{}],\"files\":[{}]}}\n",
+        json_str(&base),
+        json_str(&ctx.project_root.display().to_string()),
+        op,
+        files,
+    );
+    fs::write(receipt, log).map_err(|error| {
+        project_edit_error("io", &format!("could not record project rename: {error}"))
+    })
+}
+
 pub(super) fn project_revision_after_changes(
     ctx: &ProjectContext,
     changes: &[ProjectChange],
@@ -1386,13 +1486,18 @@ fn project_file_kind_for_rel(rel: &str) -> &'static str {
 }
 
 pub(super) fn diagnostic_json(d: &Diagnostic) -> String {
-    format!(
-        "{{\"code\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
-        json_str(&d.code),
-        json_str(&d.what),
-        json_str(&d.why),
-        json_str(&d.fix)
+    ReportEnvelope::new(
+        "canvas",
+        match d.severity {
+            Severity::Error => "error",
+            Severity::Lint => "warning",
+        },
+        &d.code,
+        &d.what,
+        &d.why,
+        &d.fix,
     )
+    .json()
 }
 
 pub(super) fn module_belongs_to(project_root: &Path, source_path: &Path, module_path: &str) -> bool {

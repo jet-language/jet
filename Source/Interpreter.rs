@@ -165,9 +165,8 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         }
         _ => None,
     };
-    let (outcome, _) = crate::program_allocator::jet_with_host_program_allocator(
-        cap_bytes,
-        || match crate::Comptime::TirBridge::run_bundle(
+    let (outcome, _) = crate::program_allocator::jet_with_host_program_allocator(cap_bytes, || {
+        match crate::Comptime::TirBridge::run_bundle(
             bundle,
             &mut sink,
             jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
@@ -207,8 +206,8 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
             // reaches this adapter.
             Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
             Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
-        },
-    );
+        }
+    });
     if jet_jit::trace_tiers_enabled() && matches!(&outcome, RunOutcome::Ran { .. }) {
         jet_jit::record_trace(vec![jet_jit::TierRow {
             function: "run".to_string(),
@@ -230,9 +229,11 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
         .why
         .strip_prefix("while computing this value at compile time, the program panicked: ")
         .unwrap_or(d.what.as_str());
-    let report = jet_foundation::Outcome::jet_render_runtime_stop(
-        "E3001", "", 0, "", "", 1, 1, msg, "",
+    let _ = crate::development_receipt::jet_production_failure_receipt_write(
+        "E3001", "", 0, "",
     );
+    let report =
+        jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, msg, "");
     sink.stderr.push_str(&report.rendered);
     RunOutcome::Ran {
         stdout: sink.stdout,
@@ -300,78 +301,77 @@ pub fn run_named_job(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> Ru
         }
         _ => None,
     };
-    let (outcome, _) = crate::program_allocator::jet_with_host_program_allocator(
-        cap_bytes,
-        || match crate::Codegen::TIR::run_program_with_structs(
-        &program,
-        &bundle.project_root,
-        &mut sink,
-        globals,
-        &core_imports,
-        jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
-        {
-            let mut fields = std::collections::HashMap::new();
-            for module in &bundle.modules {
-                for item in &module.items {
-                    if let Item::Struct(s) = item {
-                        fields.insert(
-                            s.name.clone(),
-                            s.fields
-                                .iter()
-                                .map(|f| (f.name.clone(), f.redact))
-                                .collect(),
-                        );
+    let (outcome, _) = crate::program_allocator::jet_with_host_program_allocator(cap_bytes, || {
+        match crate::Codegen::TIR::run_program_with_structs(
+            &program,
+            &bundle.project_root,
+            &mut sink,
+            globals,
+            &core_imports,
+            jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
+            {
+                let mut fields = std::collections::HashMap::new();
+                for module in &bundle.modules {
+                    for item in &module.items {
+                        if let Item::Struct(s) = item {
+                            fields.insert(
+                                s.name.clone(),
+                                s.fields
+                                    .iter()
+                                    .map(|f| (f.name.clone(), f.redact))
+                                    .collect(),
+                            );
+                        }
                     }
                 }
-            }
-            fields
-        },
-        {
-            let mut fields = std::collections::HashMap::new();
-            for module in &bundle.modules {
-                for item in &module.items {
-                    if let Item::Struct(s) = item {
-                        fields.insert(
-                            s.name.clone(),
-                            s.fields
-                                .iter()
-                                .map(|f| (f.name.clone(), f.ty.clone()))
-                                .collect(),
-                        );
+                fields
+            },
+            {
+                let mut fields = std::collections::HashMap::new();
+                for module in &bundle.modules {
+                    for item in &module.items {
+                        if let Item::Struct(s) = item {
+                            fields.insert(
+                                s.name.clone(),
+                                s.fields
+                                    .iter()
+                                    .map(|f| (f.name.clone(), f.ty.clone()))
+                                    .collect(),
+                            );
+                        }
                     }
                 }
+                fields
+            },
+        ) {
+            Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
+                let rendered = error
+                    .to_jet_err()
+                    .map(|error| jet_foundation::Outcome::jet_render_err(&error))
+                    .unwrap_or_else(|| {
+                        crate::Comptime::display_core_pure_value(&error)
+                            .unwrap_or_else(|| error.jet_show())
+                    });
+                // D-FAIL-CTX1=A: the fourth entry report edge. A `#Job` entry that
+                // lets a `?`-propagated failure escape reports the same journey AOT's
+                // `jet_entry_report` and the resident and deopt boundaries report (I9).
+                sink.stderr
+                    .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
+                RunOutcome::Ran {
+                    stdout: sink.stdout,
+                    stderr: sink.stderr,
+                    exit_code: 1,
+                }
             }
-            fields
-        },
-    ) {
-        Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
-            let rendered = error
-                .to_jet_err()
-                .map(|error| jet_foundation::Outcome::jet_render_err(&error))
-                .unwrap_or_else(|| {
-                    crate::Comptime::display_core_pure_value(&error)
-                        .unwrap_or_else(|| error.jet_show())
-                });
-            // D-FAIL-CTX1=A: the fourth entry report edge. A `#Job` entry that
-            // lets a `?`-propagated failure escape reports the same journey AOT's
-            // `jet_entry_report` and the resident and deopt boundaries report (I9).
-            sink.stderr
-                .push_str(&jet_foundation::Outcome::jet_journey_report(&rendered));
-            RunOutcome::Ran {
+            Ok(_) => RunOutcome::Ran {
                 stdout: sink.stdout,
                 stderr: sink.stderr,
-                exit_code: 1,
-            }
+                exit_code: 0,
+            },
+            Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
+            Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
         }
-        Ok(_) => RunOutcome::Ran {
-            stdout: sink.stdout,
-            stderr: sink.stderr,
-            exit_code: 0,
-        },
-        Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
-        Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
-        },
-    );
+    });
     outcome
 }
 
@@ -392,12 +392,16 @@ pub fn scheduled_jobs(bundle: &ProgramBundle) -> Vec<(String, crate::AST::EveryS
         .iter()
         .filter_map(|item| match item {
             Item::Func(f) if f.is_job => {
-                if f.job_metadata.as_ref().and_then(|metadata| {
-                    metadata
-                        .skip
-                        .as_ref()
-                        .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
-                }).is_some() {
+                if f.job_metadata
+                    .as_ref()
+                    .and_then(|metadata| {
+                        metadata
+                            .skip
+                            .as_ref()
+                            .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
+                    })
+                    .is_some()
+                {
                     return None;
                 }
                 let schedule = f.every.as_ref()?.resolved?;
@@ -422,24 +426,21 @@ pub fn scheduled_job_names_once(bundle: &ProgramBundle) -> Vec<String> {
 }
 
 fn bundle_has_service_output(bundle: &ProgramBundle) -> bool {
-    bundle
-        .modules
-        .get(bundle.entry)
-        .is_some_and(|module| {
-            module.items.iter().any(|item| {
-                matches!(
-                    item,
-                    Item::Const(value)
-                        if value
-                            .resolved_output
-                            .as_ref()
-                            .is_some_and(|output| {
-                                output.selected
-                                    && output.kind == crate::AST::OutputKind::Service
-                            })
-                )
-            })
+    bundle.modules.get(bundle.entry).is_some_and(|module| {
+        module.items.iter().any(|item| {
+            matches!(
+                item,
+                Item::Const(value)
+                    if value
+                        .resolved_output
+                        .as_ref()
+                        .is_some_and(|output| {
+                            output.selected
+                                && output.kind == crate::AST::OutputKind::Service
+                        })
+            )
         })
+    })
 }
 
 fn prelude_schedule(schedule: crate::AST::EverySchedule) -> jet_jit::Job::JetJobSchedule {
@@ -508,11 +509,7 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
         ),
         _ => return d,
     };
-    jet_driver::InterpreterBoundary::dev_boundary_for_refusal(
-        construct.as_deref(),
-        &d.what,
-        d.span,
-    )
+    jet_driver::InterpreterBoundary::dev_boundary_for_refusal(construct.as_deref(), &d.what, d.span)
 }
 
 /// One iteration of the `jet dev` watch loop, factored out so it can be
@@ -540,23 +537,17 @@ fn checked_bundle_with_entry(
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CheckedBundle, Vec<Diagnostic>> {
     jet_driver::run_compiler_work(|| {
-        if let Some(Err(diags)) = crate::check_programmable_build_for_tier(
-            file,
-            gates,
-            profile,
-            setting_overrides,
-        ) {
+        if let Some(Err(diags)) =
+            crate::check_programmable_build_for_tier(file, gates, profile, setting_overrides)
+        {
             return Err(diags);
         }
         crate::RunCache::note_parse();
         match crate::Loader::load_entry_with_overlay(file, None, false) {
             Ok(mut bundle) => {
-                if let Err(diags) = crate::Driver::seed_build_facts(
-                    &mut bundle,
-                    profile,
-                    false,
-                    setting_overrides,
-                ) {
+                if let Err(diags) =
+                    crate::Driver::seed_build_facts(&mut bundle, profile, false, setting_overrides)
+                {
                     return Err(diags);
                 }
                 if let Some(entry_fn) = entry_fn {
@@ -592,11 +583,8 @@ fn checked_bundle_with_entry(
                 // teaching must not disappear on the default `jet run` path.
                 // The canonical extension hook runs before this gate so its
                 // findings receive the same project lint policy as sema lints.
-                let extension_diags = jet_driver::CompilerExtensionHook::post_sema_diagnostics(
-                    &bundle,
-                    None,
-                    &diags,
-                );
+                let extension_diags =
+                    jet_driver::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
                 let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
                 let lints = crate::Driver::gate_diagnostics(
                     &bundle,
@@ -697,11 +685,7 @@ pub fn run_jit_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
 }
 
 /// Like [`run_jit_once_with_args`], with `json` suppressing the jet-dev signpost.
-pub fn run_jit_once_with_args_opts(
-    file: &str,
-    program_args: &[&str],
-    json: bool,
-) -> RunOutcome {
+pub fn run_jit_once_with_args_opts(file: &str, program_args: &[&str], json: bool) -> RunOutcome {
     run_jit_once_with_args_opts_and_gates(
         file,
         program_args,
@@ -1021,13 +1005,7 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
     }
     on_compiler_stack(|| {
         let requested = requested_job(program_args);
-        match checked_bundle_with_entry(
-            file,
-            gates,
-            requested,
-            profile,
-            setting_overrides,
-        ) {
+        match checked_bundle_with_entry(file, gates, requested, profile, setting_overrides) {
             Ok(checked) => {
                 let lints = checked.lints;
                 let bundle = checked.bundle;
@@ -1038,10 +1016,14 @@ pub fn run_interpreter_once_with_args_and_gates_profile_and_settings_with_lints(
                     program_args
                 };
                 let mut args = Vec::with_capacity(runtime_args.len() + 1);
-                args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
+                args.push(
+                    selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")),
+                );
                 args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
                 RunWithLints {
-                    outcome: jet_jit::with_program_args(&args, || dev_run_bundle(&bundle, false, true)),
+                    outcome: jet_jit::with_program_args(&args, || {
+                        dev_run_bundle(&bundle, false, true)
+                    }),
                     lints,
                 }
             }
@@ -1111,7 +1093,7 @@ pub fn dev_iteration_with_gates_and_settings(
         setting_overrides,
     )
 }
- 
+
 pub fn dev_iteration_with_gates_profile_and_settings(
     file: &str,
     try_anyway: bool,
@@ -1140,13 +1122,7 @@ pub fn dev_iteration_with_gates_profile_and_settings_with_lints(
     setting_overrides: &BTreeMap<String, String>,
 ) -> RunWithLints {
     on_compiler_stack(|| {
-        match checked_bundle_with_entry(
-            file,
-            gates,
-            None,
-            profile,
-            setting_overrides,
-        ) {
+        match checked_bundle_with_entry(file, gates, None, profile, setting_overrides) {
             Ok(checked) => RunWithLints {
                 outcome: dev_run_bundle(&checked.bundle, try_anyway, use_interpreter),
                 lints: checked.lints,

@@ -1,5 +1,9 @@
 //! Jet Zed extension — launches `jet self lsp` with the same discovery order as the
 //! VS Code extension (debug binary in the compiler repo, then `jet` on PATH).
+//!
+//! D-EDITOR1=A: Zed extension API 0.7.0 does not expose the trust and
+//! authorization hooks required by the native debugger. The extension therefore
+//! registers language support only. It must not start a partial DAP session.
 
 use zed_extension_api::{self as zed, Command, Extension, LanguageServerId, Result, Worktree};
 

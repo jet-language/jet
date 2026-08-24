@@ -1,11 +1,11 @@
-use crate::AST::{Expr, Type};
-use crate::Codegen::Cx;
 use crate::Codegen::is_db_value_type_name;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::lambda_in_subset;
-use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::THandleOp;
 use crate::Syntax;
+use crate::AST::{Expr, Type};
 use std::collections::HashSet;
 
 /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
@@ -43,12 +43,8 @@ pub(crate) fn alloc_new_type<'a>(
         return None;
     }
     match alloc_type.as_str() {
-        "Fixed" if method == "over" || method == Syntax::MEM_ALLOC_NEW => {
-            Some(alloc_type.as_str())
-        }
-        "Arena" | "Bump" | "Pool" if method == Syntax::MEM_ALLOC_NEW => {
-            Some(alloc_type.as_str())
-        }
+        "Fixed" if method == "over" || method == Syntax::MEM_ALLOC_NEW => Some(alloc_type.as_str()),
+        "Arena" | "Bump" | "Pool" if method == Syntax::MEM_ALLOC_NEW => Some(alloc_type.as_str()),
         _ => None,
     }
 }
@@ -105,8 +101,7 @@ pub(crate) fn game_static_type<'a>(
     let Expr::Ident(alias, _) = &**inner else {
         return None;
     };
-    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.game")
-    {
+    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.game") {
         return None;
     }
     match (static_type.as_str(), method) {
@@ -146,15 +141,16 @@ pub(crate) fn http_client_static_op(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> Option<THandleOp> {
-    let Expr::Field(inner, static_type, _) = receiver else { return None; };
-    let Expr::Ident(alias, _) = &**inner else { return None; };
-    if locals.contains(alias)
-        || cx.any_core_import_module(alias) != Some("core.http.client")
-    {
+    let Expr::Field(inner, static_type, _) = receiver else {
+        return None;
+    };
+    let Expr::Ident(alias, _) = &**inner else {
+        return None;
+    };
+    if locals.contains(alias) || cx.any_core_import_module(alias) != Some("core.http.client") {
         return None;
     }
-    matches!((static_type.as_str(), method), ("Client", "new"))
-        .then_some(THandleOp::HTTPClientNew)
+    matches!((static_type.as_str(), method), ("Client", "new")).then_some(THandleOp::HTTPClientNew)
 }
 
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
@@ -282,14 +278,12 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             type_name: "Fraction".to_string(),
             method: method.to_string(),
         },
-        (
-            "Fraction",
-            "numerator" | "denominator" | "to_string" | "to_float" | "is_zero",
-            0,
-        ) => THandleOp::PreciseMethod {
-            type_name: "Fraction".to_string(),
-            method: method.to_string(),
-        },
+        ("Fraction", "numerator" | "denominator" | "to_string" | "to_float" | "is_zero", 0) => {
+            THandleOp::PreciseMethod {
+                type_name: "Fraction".to_string(),
+                method: method.to_string(),
+            }
+        }
         ("TcpListener", "accept", 0 | 1) => THandleOp::TcpListenerAccept,
         ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
         ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,
@@ -322,7 +316,9 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("TLSClientConfig", "with_alpn", 1) => THandleOp::TLSClientConfigWithAlpn,
         ("TLSClientConfig", "with_trust", 1) => THandleOp::TLSClientConfigWithTrust,
         ("TLSClientConfig", "with_client_identity", 1) => THandleOp::TLSClientConfigWithIdentity,
-        ("TLSClientConfig", "with_version_bounds", 2) => THandleOp::TLSClientConfigWithVersionBounds,
+        ("TLSClientConfig", "with_version_bounds", 2) => {
+            THandleOp::TLSClientConfigWithVersionBounds
+        }
         // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`
@@ -422,21 +418,26 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             kind: "Mime".to_string(),
             method: method.to_string(),
         },
-        ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => THandleOp::EmailMethod {
-            method: method.to_string(),
-        },
+        ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => {
+            THandleOp::EmailMethod {
+                method: method.to_string(),
+            }
+        }
         ("Regex", "pattern" | "source" | "flags" | "options" | "names", 0) => {
             THandleOp::RegexMethod {
                 kind: "Regex".to_string(),
                 method: method.to_string(),
             }
         }
-        ("Regex", "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split" | "count", 1) => {
-            THandleOp::RegexMethod {
-                kind: "Regex".to_string(),
-                method: method.to_string(),
-            }
-        }
+        (
+            "Regex",
+            "is_match" | "full_match" | "match" | "find" | "find_all" | "matches" | "split"
+            | "count",
+            1,
+        ) => THandleOp::RegexMethod {
+            kind: "Regex".to_string(),
+            method: method.to_string(),
+        },
         ("Regex", "replace" | "replace_all" | "replace_all_with" | "split_limit", 2) => {
             THandleOp::RegexMethod {
                 kind: "Regex".to_string(),
@@ -542,16 +543,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::FakeEmail
             | THandleOp::FakeHost
             | THandleOp::FakeAddress
-            | THandleOp::SolverRequire => {
-                crate::Collections::BuiltinReceiverBorrow::EagerWrite
-            }
+            | THandleOp::SolverRequire => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
             _ => crate::Collections::BuiltinReceiverBorrow::Read,
         };
         debug_assert_eq!(
-            crate::Collections::builtin_receiver_borrow(
-                &Type::Named(handle.to_string()),
-                method
-            ),
+            crate::Collections::builtin_receiver_borrow(&Type::Named(handle.to_string()), method),
             emitted_borrow
         );
     }
@@ -588,8 +584,7 @@ pub(crate) fn handle_method_return_ty(
             } else if handle == "DBScope" {
                 Some(crate::Sema::db_scope_method_return_ty(method))
             } else if handle == "ServiceRuntime" {
-                crate::Sema::service_runtime_method_return_ty(method)
-                    .map(Some)
+                crate::Sema::service_runtime_method_return_ty(method).map(Some)
             } else {
                 None
             }
@@ -625,19 +620,18 @@ pub(crate) fn handle_method_return_ty(
                 || handle == crate::Syntax::TYPE_FRACTION
                 || handle == crate::Syntax::DURATION_TYPE
             {
-                crate::Collections::builtin_method_return(
-                    receiver_ty,
-                    method,
-                    nargs,
-                    false,
-                )
+                crate::Collections::builtin_method_return(receiver_ty, method, nargs, false)
             } else {
                 None
             }
         })
         .or_else(|| match (handle, method, nargs) {
-            ("Url", "scheme" | "path" | "query" | "to_string" | "username" | "password"
-            | "userinfo" | "authority", 0) => Some(Some(Type::String)),
+            (
+                "Url",
+                "scheme" | "path" | "query" | "to_string" | "username" | "password" | "userinfo"
+                | "authority",
+                0,
+            ) => Some(Some(Type::String)),
             ("Url", "host" | "fragment", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
             ("Url", "port" | "default_port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
             ("Url", "path_segments", 0) => Some(Some(Type::List(Box::new(Type::String)))),
@@ -701,12 +695,7 @@ pub(crate) fn handle_method_return_ty(
         .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs))
         .or_else(|| {
             if handle == crate::Syntax::SOLVER_TYPE {
-                crate::Collections::builtin_method_return(
-                    receiver_ty,
-                    method,
-                    nargs,
-                    false,
-                )
+                crate::Collections::builtin_method_return(receiver_ty, method, nargs, false)
             } else {
                 None
             }
@@ -724,8 +713,7 @@ pub(crate) fn handle_method_return_ty(
             ("GameInputSnapshot", "pressed", 1) => Some(Some(Type::Bool)),
             ("GameBackend", "should_continue", 0) => Some(Some(Type::Bool)),
             ("GameBackend", "present", 0) => Some(None),
-            ("GameScene", "on_frame" | "component", 1)
-            | ("GameInputMap", "bind", 2) => Some(None),
+            ("GameScene", "on_frame" | "component", 1) | ("GameInputMap", "bind", 2) => Some(None),
             _ => None,
         });
     match ret {
@@ -841,20 +829,18 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.data.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
         ("core.data.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),
         ("core.data.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
-        ("core.data.sketch.reservoir", "new") => return Type::Named("ReservoirSampler".to_string()),
-        // D-TIMEDEPTH1=A: civil-time constructors.
-        ("core.time", "new") | ("core.time", "today") => {
-            return Type::Named("Date".to_string())
+        ("core.data.sketch.reservoir", "new") => {
+            return Type::Named("ReservoirSampler".to_string())
         }
+        // D-TIMEDEPTH1=A: civil-time constructors.
+        ("core.time", "new") | ("core.time", "today") => return Type::Named("Date".to_string()),
         ("core.time", "parse") => {
             return Type::Result {
                 ok: Box::new(Type::Named("Date".to_string())),
                 err: Box::new(Type::String),
             }
         }
-        ("core.time", "from_timestamp") => {
-            return Type::Named("DateTime".to_string())
-        }
+        ("core.time", "from_timestamp") => return Type::Named("DateTime".to_string()),
         // D-CORE-SECRETS1=A: generic TTL constructor; T comes from argument 0.
         // D-EVENT1=D: generic constructors; sema normally writes the precise
         // resolved return type and lowering reads that. Placeholders keep node
@@ -869,7 +855,10 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             return Type::Result {
                 ok: Box::new(Type::Apply {
                     name: "AsyncEvent".to_string(),
-                    args: vec![Type::Named("Unknown".to_string()), Type::Named("Unknown".to_string())],
+                    args: vec![
+                        Type::Named("Unknown".to_string()),
+                        Type::Named("Unknown".to_string()),
+                    ],
                 }),
                 err: Box::new(Type::Named("EventConfigError".to_string())),
             }
@@ -893,9 +882,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             }
         }
         ("core.event", "scope") => return Type::Named("EventScope".to_string()),
-        ("core.event", "policy_sync") => {
-            return Type::Named("EventPolicy".to_string())
-        }
+        ("core.event", "policy_sync") => return Type::Named("EventPolicy".to_string()),
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
         ("core.http.client", "get") | ("core.http.client", "post") => {
             return Type::Result {
@@ -935,10 +922,12 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 err: Box::new(Type::Named("BrowserError".to_string())),
             };
         }
-        ("core.http.server", "bind") => return Type::Result {
-            ok: Box::new(Type::Named("HTTPServer".to_string())),
-            err: Box::new(Type::String),
-        },
+        ("core.http.server", "bind") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("HTTPServer".to_string())),
+                err: Box::new(Type::String),
+            }
+        }
         ("core.http.server", "tls") => return Type::Named("HTTPServerTls".to_string()),
         ("core.http.server", "serve" | "serve_once" | "serve_once_listener") => {
             return Type::Result {

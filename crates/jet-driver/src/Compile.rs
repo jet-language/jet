@@ -114,7 +114,7 @@ impl Abilities {
     }
 
     pub fn to_json(&self) -> String {
-        format!(
+        let payload = format!(
             "{{\"network\":{},\"file_io\":{},\"unsafe\":{},\"ffi\":{},\"crypto\":{},\"concurrency\":{}}}",
             self.uses_network,
             self.uses_file_io,
@@ -122,6 +122,12 @@ impl Abilities {
             self.uses_ffi,
             self.uses_crypto,
             self.uses_concurrency,
+        );
+        jet_foundation::Report::render_status_json(
+            "ok",
+            true,
+            "build.abilities",
+            &format!(",\"capabilities\":{payload}"),
         )
     }
 }

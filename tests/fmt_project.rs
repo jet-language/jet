@@ -693,8 +693,10 @@ fn check_json_output() {
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("schema_version") && stdout.contains("dirty"),
-        "JSON output should contain schema_version and dirty status, got: {}",
+        stdout.contains("\"schema\":\"jet.report/v1\"")
+            && stdout.contains("\"fmt\":")
+            && stdout.contains("dirty"),
+        "JSON output should contain the shared envelope and dirty status, got: {}",
         stdout
     );
 }

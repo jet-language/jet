@@ -1,22 +1,4 @@
 //! Exhaustive TExprKind evaluation (#777).
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
-use crate::AST::{BinOp, CtFloat, Type, UnOp};
-use crate::Codegen::mangle;
-use crate::Codegen::mangle_generated;
-use crate::Codegen::TIR::{
-    ambient_err_local, ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TFnValueKind,
-    THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind, TStrPart,
-    TStmt,
-};
-use crate::Comptime::Builtins::{as_bool, as_int, exact_big, exact_int_value};
-use crate::Comptime::{
-    apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
-    apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
-};
-use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
 use super::builtins::eval_builtin;
 use super::handles::{eval_handle_with_type_and_sink, reflect_value_carrier};
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
@@ -25,6 +7,24 @@ use super::{
     progress_source_has_exact_total, reborrow_repl_authorizer, unsupported, view_mut_window_args,
     EvalCallable, EvalCtx, Flow, ViewMutPathStep,
 };
+use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
+use crate::Codegen::TIR::{
+    ambient_err_local, ListSpreadPart, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
+    TFnValueKind, THostArg, THostCall, TIfCond, TModuleCallForm, TOrFallback, TPlace, TRequireKind,
+    TStmt, TStrPart,
+};
+use crate::Comptime::Builtins::{as_bool, as_int, exact_big, exact_int_value};
+use crate::Comptime::{
+    apply_core_call, apply_core_call_with_type, apply_impure_core_call_with_type,
+    apply_repl_authorized_core_call_with_type, CtReport, CtValue, DevSink,
+};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{BinOp, CtFloat, Type, UnOp};
+use jet_foundation::Effects::{core_effect, is_nondeterministic_core};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 #[allow(dead_code)]
 mod math_lib_pure {
@@ -116,7 +116,16 @@ mod wire_order_rt {
 
 fn progress_parts(
     value: &CtValue,
-) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
+) -> Option<(
+    Vec<CtValue>,
+    String,
+    String,
+    f64,
+    Vec<usize>,
+    usize,
+    usize,
+    bool,
+)> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
@@ -224,7 +233,10 @@ fn progress_value(
             ("items".to_string(), CtValue::List(items)),
             ("description".to_string(), CtValue::Str(description)),
             ("format".to_string(), CtValue::Str(format)),
-            ("started_at".to_string(), CtValue::Float(CtFloat::f64(started_at))),
+            (
+                "started_at".to_string(),
+                CtValue::Float(CtFloat::f64(started_at)),
+            ),
             (
                 "pulls".to_string(),
                 CtValue::List(pulls.into_iter().map(|n| CtValue::Int(n as i64)).collect()),
@@ -247,16 +259,13 @@ fn mark_unknown_progress_total(
         args.first().map(|arg| &arg.ty),
         Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_ITER
     );
-    let known_total = known_total.unwrap_or_else(|| {
-        args.first()
-            .is_some_and(progress_source_has_exact_total)
-    });
+    let known_total =
+        known_total.unwrap_or_else(|| args.first().is_some_and(progress_source_has_exact_total));
     if module == "core.term" && method == "progress" && is_iter && !known_total {
         if let CtValue::Struct { type_name, fields } = &mut value {
             if type_name == "__JetProgressIter" {
-                if let Some((_, known_total)) = fields
-                    .iter_mut()
-                    .find(|(name, _)| name == "known_total")
+                if let Some((_, known_total)) =
+                    fields.iter_mut().find(|(name, _)| name == "known_total")
                 {
                     *known_total = CtValue::Bool(false);
                 } else {
@@ -343,7 +352,11 @@ fn progress_builtin_plan(
     match op {
         crate::Codegen::TIR::TBuiltinOp::Take => {
             let len = output_len.min(n).min(source_pulls.len());
-            let tail = if n != 0 && n >= source_len { old_tail } else { 0 };
+            let tail = if n != 0 && n >= source_len {
+                old_tail
+            } else {
+                0
+            };
             (source_pulls.iter().copied().take(len).collect(), tail)
         }
         crate::Codegen::TIR::TBuiltinOp::Skip => {
@@ -373,7 +386,10 @@ fn progress_builtin_plan(
                     index = end;
                 }
             }
-            (pulls, source_pulls[index..].iter().sum::<usize>() + old_tail)
+            (
+                pulls,
+                source_pulls[index..].iter().sum::<usize>() + old_tail,
+            )
         }
         crate::Codegen::TIR::TBuiltinOp::Dedup => {
             let mut pulls = Vec::new();
@@ -487,7 +503,11 @@ pub fn tir_place_address_key(expr: &TExpr) -> String {
             format!("{}.{}", tir_place_address_key(recv), field)
         }
         TExprKind::Index { base, index, .. } => {
-            format!("{}[{}]", tir_place_address_key(base), tir_place_address_key(index))
+            format!(
+                "{}[{}]",
+                tir_place_address_key(base),
+                tir_place_address_key(index)
+            )
         }
         TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => tir_place_address_key(place),
         _ => format!("ty:{}", expr.ty.show()),
@@ -501,7 +521,11 @@ fn stable_address_parts(parts: &[&[u8]]) -> i64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     let addr = (hash as i64).wrapping_abs();
-    if addr == 0 { 1 } else { addr }
+    if addr == 0 {
+        1
+    } else {
+        addr
+    }
 }
 
 /// jet-jit shares this for tier-identical address identity.
@@ -528,12 +552,7 @@ pub fn stable_place_address(key: &str) -> i64 {
 /// dependency-write invalidation. Streaming the segments avoids allocating a
 /// formatted key while preserving the established `memo::<owner>::<field>` bytes.
 pub fn stable_memo_field_slot(owner: &str, field: &str) -> i64 {
-    stable_address_parts(&[
-        b"memo::",
-        owner.as_bytes(),
-        b"::",
-        field.as_bytes(),
-    ])
+    stable_address_parts(&[b"memo::", owner.as_bytes(), b"::", field.as_bytes()])
 }
 
 fn sentry_layout(ty: &Type) -> (usize, usize) {
@@ -549,7 +568,10 @@ fn sentry_layout(ty: &Type) -> (usize, usize) {
         Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => sentry_layout(inner),
         Type::FixedList { elem, len, .. } => {
             let (bytes, alignment) = sentry_layout(elem);
-            (bytes.saturating_mul(len.require_literal() as usize).max(1), alignment)
+            (
+                bytes.saturating_mul(len.require_literal() as usize).max(1),
+                alignment,
+            )
         }
         Type::Tuple(fields) => {
             let mut bytes = 0usize;
@@ -566,23 +588,27 @@ fn sentry_layout(ty: &Type) -> (usize, usize) {
 }
 
 fn raw_pointer_address(fields: &[(String, CtValue)]) -> Option<usize> {
-    fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-        ("address", CtValue::Int(address)) if *address >= 0 => usize::try_from(*address).ok(),
-        _ => None,
-    })
+    fields
+        .iter()
+        .find_map(|(field, value)| match (field.as_str(), value) {
+            ("address", CtValue::Int(address)) if *address >= 0 => usize::try_from(*address).ok(),
+            _ => None,
+        })
 }
 
 fn raw_pointer_name(fields: &[(String, CtValue)]) -> Option<String> {
-    fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-        ("name", CtValue::Str(name)) => Some(name.clone()),
-        _ => None,
-    })
+    fields
+        .iter()
+        .find_map(|(field, value)| match (field.as_str(), value) {
+            ("name", CtValue::Str(name)) => Some(name.clone()),
+            _ => None,
+        })
 }
 
 fn raw_pointer_value(fields: &[(String, CtValue)]) -> Option<CtValue> {
-    fields.iter().find_map(|(field, value)| {
-        (field == "value").then(|| value.clone())
-    })
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == "value").then(|| value.clone()))
 }
 
 fn sentry_allocator_owner(value: &CtValue) -> Option<usize> {
@@ -592,10 +618,12 @@ fn sentry_allocator_owner(value: &CtValue) -> Option<usize> {
     if type_name != "__JetTirAllocator" {
         return None;
     }
-    fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-        ("sentry_id", CtValue::Int(owner)) if *owner > 0 => usize::try_from(*owner).ok(),
-        _ => None,
-    })
+    fields
+        .iter()
+        .find_map(|(field, value)| match (field.as_str(), value) {
+            ("sentry_id", CtValue::Int(owner)) if *owner > 0 => usize::try_from(*owner).ok(),
+            _ => None,
+        })
 }
 
 /// TIR-eval representation of the erased `SQL = (String, Vec<String>)`
@@ -612,25 +640,34 @@ fn typed_sql_value(template: String, params: Vec<CtValue>) -> CtValue {
     }
 }
 
-fn typed_sql_parts(value: &CtValue, span: crate::Diagnostics::Span) -> Result<(String, Vec<CtValue>), crate::Diagnostics::Diagnostic> {
+fn typed_sql_parts(
+    value: &CtValue,
+    span: crate::Diagnostics::Span,
+) -> Result<(String, Vec<CtValue>), crate::Diagnostics::Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("SQL value", span));
     };
     if type_name != "SQL" {
         return Err(unsupported("SQL value", span));
     }
-    let template = fields.iter().find_map(|(name, value)| {
-        (name == "template").then(|| match value {
-            CtValue::Str(value) => Some(value.clone()),
-            _ => None,
+    let template = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "template").then(|| match value {
+                CtValue::Str(value) => Some(value.clone()),
+                _ => None,
+            })
         })
-    }).flatten();
-    let params = fields.iter().find_map(|(name, value)| {
-        (name == "params").then(|| match value {
-            CtValue::List(value) => Some(value.clone()),
-            _ => None,
+        .flatten();
+    let params = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "params").then(|| match value {
+                CtValue::List(value) => Some(value.clone()),
+                _ => None,
+            })
         })
-    }).flatten();
+        .flatten();
     match (template, params) {
         (Some(template), Some(params)) => Ok((template, params)),
         _ => Err(unsupported("malformed SQL value", span)),
@@ -666,8 +703,7 @@ fn range_parts(value: &CtValue) -> Option<(i64, i64, bool)> {
             .find(|(name, _)| name == wanted)
             .map(|(_, value)| value)
     };
-    let (Some(CtValue::Int(start)), Some(CtValue::Int(end))) =
-        (field("start"), field("end"))
+    let (Some(CtValue::Int(start)), Some(CtValue::Int(end))) = (field("start"), field("end"))
     else {
         return None;
     };
@@ -685,17 +721,21 @@ fn shared_guard_parts(value: &CtValue) -> Option<(usize, usize, bool, Vec<String
     if type_name != "__JetTirSharedGuard" {
         return None;
     }
-    let shared = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("shared", CtValue::Int(index)) => Some(*index as usize),
-        _ => None,
-    })?;
-    let lease = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("lease", CtValue::Int(index)) => Some(*index as usize),
-        _ => None,
-    })?;
-    let editable = fields.iter().any(
-        |(name, value)| matches!((name.as_str(), value), ("editable", CtValue::Bool(true))),
-    );
+    let shared = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("shared", CtValue::Int(index)) => Some(*index as usize),
+            _ => None,
+        })?;
+    let lease = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("lease", CtValue::Int(index)) => Some(*index as usize),
+            _ => None,
+        })?;
+    let editable = fields
+        .iter()
+        .any(|(name, value)| matches!((name.as_str(), value), ("editable", CtValue::Bool(true))));
     let path = fields
         .iter()
         .find_map(|(name, value)| match (name.as_str(), value) {
@@ -720,9 +760,9 @@ fn append_shared_guard_path(value: &mut CtValue, suffix: &[String]) -> bool {
     if type_name != "__JetTirSharedGuard" {
         return false;
     }
-    let path = fields.iter_mut().find_map(|(name, value)| {
-        (name == "path").then_some(value)
-    });
+    let path = fields
+        .iter_mut()
+        .find_map(|(name, value)| (name == "path").then_some(value));
     if let Some(CtValue::List(path)) = path {
         path.extend(suffix.iter().cloned().map(CtValue::Str));
     } else {
@@ -794,10 +834,12 @@ fn condition_index(value: &CtValue) -> Option<usize> {
         return None;
     };
     (type_name == "__JetTirCondition").then(|| {
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("index", CtValue::Int(index)) => Some(*index as usize),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("index", CtValue::Int(index)) => Some(*index as usize),
+                _ => None,
+            })
     })?
 }
 
@@ -886,24 +928,27 @@ fn env_config_map_error(error: CtValue, origins: &[(String, String)]) -> CtValue
                     return entry;
                 };
                 let path = fields.iter().find_map(|(name, value)| {
-                    (name == "path").then_some(value).and_then(|value| match value {
-                        CtValue::Str(path) => Some(path.clone()),
-                        _ => None,
-                    })
+                    (name == "path")
+                        .then_some(value)
+                        .and_then(|value| match value {
+                            CtValue::Str(path) => Some(path.clone()),
+                            _ => None,
+                        })
                 });
                 let reason = fields.iter().find_map(|(name, value)| {
-                    (name == "reason").then_some(value).and_then(|value| match value {
-                        CtValue::Str(reason) => Some(reason.clone()),
-                        _ => None,
-                    })
+                    (name == "reason")
+                        .then_some(value)
+                        .and_then(|value| match value {
+                            CtValue::Str(reason) => Some(reason.clone()),
+                            _ => None,
+                        })
                 });
                 let Some(path) = path else {
                     return CtValue::Struct { type_name, fields };
                 };
                 let reason = reason.unwrap_or_default();
-                let reason = env_config_prelude::jet_env_config_error_reason(
-                    &path, &reason, origins,
-                );
+                let reason =
+                    env_config_prelude::jet_env_config_error_reason(&path, &reason, origins);
                 if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "reason") {
                     *value = CtValue::Str(reason);
                 }
@@ -953,10 +998,12 @@ fn decode_error_under(segment: &str, error: CtValue) -> CtValue {
                 };
                 let text = |name: &str| {
                     fields.iter().find_map(|(field, value)| {
-                        (field == name).then_some(value).and_then(|value| match value {
-                            CtValue::Str(value) => Some(value.clone()),
-                            _ => None,
-                        })
+                        (field == name)
+                            .then_some(value)
+                            .and_then(|value| match value {
+                                CtValue::Str(value) => Some(value.clone()),
+                                _ => None,
+                            })
                     })
                 };
                 let path = text("path").unwrap_or_default();
@@ -985,13 +1032,8 @@ fn decode_error_under(segment: &str, error: CtValue) -> CtValue {
 fn ambient_http_json_decode_error(span: crate::Diagnostics::Span) -> Result<CtValue, Diagnostic> {
     let mut recv = CtValue::Unit;
     let mut args = [];
-    crate::Comptime::try_ambient_handle(
-        "HTTPJSONDecodeError",
-        &mut recv,
-        &mut args,
-        span,
-    )
-    .unwrap_or_else(|| Err(unsupported("HTTP JSON decode error adapter", span)))
+    crate::Comptime::try_ambient_handle("HTTPJSONDecodeError", &mut recv, &mut args, span)
+        .unwrap_or_else(|| Err(unsupported("HTTP JSON decode error adapter", span)))
 }
 
 struct EvalExprWorklistCache {
@@ -1010,12 +1052,10 @@ fn eval_expr_key(expr: &TExpr) -> usize {
 
 fn eval_expr_cache_begin() {
     EVAL_EXPR_WORKLIST_CACHE.with(|cache| {
-        cache
-            .borrow_mut()
-            .push(EvalExprWorklistCache {
-                values: HashMap::new(),
-                conditions: HashMap::new(),
-            });
+        cache.borrow_mut().push(EvalExprWorklistCache {
+            values: HashMap::new(),
+            conditions: HashMap::new(),
+        });
     });
 }
 
@@ -1257,8 +1297,9 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         | TExprKind::ListLit(args)
         | TExprKind::ColumnarListLit { elems: args, .. } => args.iter().collect(),
         TExprKind::RequireStop { .. } => Vec::new(),
-        TExprKind::Binary { op, lhs, rhs, .. }
-            if !matches!(*op, BinOp::And | BinOp::Or) => vec![lhs.as_ref(), rhs.as_ref()],
+        TExprKind::Binary { op, lhs, rhs, .. } if !matches!(*op, BinOp::And | BinOp::Or) => {
+            vec![lhs.as_ref(), rhs.as_ref()]
+        }
         TExprKind::Binary { .. } => Vec::new(),
         TExprKind::OverflowOpt { lhs, rhs, .. } => vec![lhs.as_ref(), rhs.as_ref()],
         TExprKind::CompareChain { operands, .. } => operands.iter().collect(),
@@ -1266,16 +1307,18 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         TExprKind::IncDec { place, .. } => eval_place_children(place),
         TExprKind::StructLit { fields, .. } => fields.iter().map(|(_, value, _)| value).collect(),
         TExprKind::TupleLit { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
-        TExprKind::MapLit(entries) => entries.iter().flat_map(|(key, value)| [key, value]).collect(),
+        TExprKind::MapLit(entries) => entries
+            .iter()
+            .flat_map(|(key, value)| [key, value])
+            .collect(),
         TExprKind::SharedGuardWait {
             guard, condition, ..
         } => vec![guard.as_ref(), condition.as_ref()],
         TExprKind::ConditionNotify { condition, .. } => vec![condition.as_ref()],
         TExprKind::EnumLit { payload, .. } => eval_enum_children(payload),
-        TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => arg
-            .as_ref()
-            .map(|arg| vec![&arg.0])
-            .unwrap_or_default(),
+        TExprKind::JSONLit { arg, .. } | TExprKind::DBValueLit { arg, .. } => {
+            arg.as_ref().map(|arg| vec![&arg.0]).unwrap_or_default()
+        }
         TExprKind::ListSpread { parts } => parts
             .iter()
             .map(|part| match part {
@@ -1328,9 +1371,10 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
                     | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
                     | crate::Codegen::TIR::TBuiltinOp::SplitWrite { .. }
                     | crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite
-            ) => std::iter::once(recv.as_ref())
-                .chain(args.iter())
-                .collect(),
+            ) =>
+        {
+            std::iter::once(recv.as_ref()).chain(args.iter()).collect()
+        }
         TExprKind::BuiltinMethod { args, .. } => args.iter().collect(),
         TExprKind::CoreCall { args, .. } => args.iter().collect(),
         TExprKind::IfExpr { .. } | TExprKind::OrFallback { .. } | TExprKind::InlineBlock(_) => {
@@ -1343,9 +1387,9 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         TExprKind::ClosureMethod { recv, args, .. } => std::iter::once(recv.as_ref())
             .chain(eval_closure_children(args))
             .collect(),
-        TExprKind::HandleMethod { recv, args, .. } => std::iter::once(recv.as_ref())
-            .chain(args.iter())
-            .collect(),
+        TExprKind::HandleMethod { recv, args, .. } => {
+            std::iter::once(recv.as_ref()).chain(args.iter()).collect()
+        }
         TExprKind::CoreClosureCall { kind } => eval_core_closure_children(kind),
         TExprKind::SelectRecv { builder, channel } => vec![builder.as_ref(), channel.as_ref()],
         TExprKind::SelectAfter {
@@ -1359,7 +1403,9 @@ fn eval_expr_children(expr: &TExpr) -> Vec<&TExpr> {
         TExprKind::FnValue { kind } => match kind {
             TFnValueKind::NamedFn { .. } => Vec::new(),
             TFnValueKind::Policy {
-                policy_args, callee, ..
+                policy_args,
+                callee,
+                ..
             } => std::iter::once(callee.as_ref())
                 .chain(policy_args.iter().map(|argument| &argument.value))
                 .collect(),
@@ -1514,7 +1560,9 @@ enum EvalExprWork<'a> {
 }
 
 fn datatree_kind_for(value: &CtValue) -> &'static str {
-    let tag = datatree_variant(value).map(|(tag, _)| tag).unwrap_or("value");
+    let tag = datatree_variant(value)
+        .map(|(tag, _)| tag)
+        .unwrap_or("value");
     codec_rt::datatree_kind(tag)
 }
 
@@ -1567,18 +1615,16 @@ fn codec_datetime_from_value(value: &CtValue) -> Option<(i64, u32)> {
     Some((struct_int(value, "secs")?, nanos))
 }
 
-fn builtin_codec_encode(
-    value: CtValue,
-    name: &str,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+fn builtin_codec_encode(value: CtValue, name: &str, span: Span) -> Result<CtValue, Diagnostic> {
     let tree = match name {
         "Date" => {
             let (year, month, day) = codec_date_from_value(&value)
                 .ok_or_else(|| unsupported("malformed Date value", span))?;
             datatree(
                 "Text",
-                Some(CtValue::Str(codec_rt::jet_codec_date_encode(year, month, day))),
+                Some(CtValue::Str(codec_rt::jet_codec_date_encode(
+                    year, month, day,
+                ))),
             )
         }
         "LocalTime" => {
@@ -1596,7 +1642,9 @@ fn builtin_codec_encode(
                 .ok_or_else(|| unsupported("malformed DateTime value", span))?;
             datatree(
                 "Text",
-                Some(CtValue::Str(codec_rt::jet_codec_datetime_encode(secs, nanos))),
+                Some(CtValue::Str(codec_rt::jet_codec_datetime_encode(
+                    secs, nanos,
+                ))),
             )
         }
         "Duration" => {
@@ -1688,15 +1736,13 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             ))),
         },
         "Duration" => match datatree_variant(&tree) {
-            Some(("Int", Some(CtValue::Int(ns)))) => CtValue::Present(Box::new(
-                CtValue::Struct {
-                    type_name: crate::Syntax::DURATION_TYPE.to_string(),
-                    fields: vec![(
-                        "ns".to_string(),
-                        CtValue::Int(codec_rt::jet_codec_duration_decode(*ns)),
-                    )],
-                },
-            )),
+            Some(("Int", Some(CtValue::Int(ns)))) => CtValue::Present(Box::new(CtValue::Struct {
+                type_name: crate::Syntax::DURATION_TYPE.to_string(),
+                fields: vec![(
+                    "ns".to_string(),
+                    CtValue::Int(codec_rt::jet_codec_duration_decode(*ns)),
+                )],
+            })),
             _ => CtValue::failed(Box::new(decode_error(
                 "",
                 format!("expected Duration, found {}", datatree_kind_for(&tree)),
@@ -1736,7 +1782,10 @@ fn builtin_codec_decode(tree: CtValue, name: &str) -> CtValue {
             Some(("Text", Some(CtValue::Str(text)))) => {
                 CtValue::Present(Box::new(CtValue::Struct {
                     type_name: "Secret".to_string(),
-                    fields: vec![("bytes".to_string(), CtValue::Bytes(text.as_bytes().to_vec()))],
+                    fields: vec![(
+                        "bytes".to_string(),
+                        CtValue::Bytes(text.as_bytes().to_vec()),
+                    )],
                 }))
             }
             _ => CtValue::failed(Box::new(decode_error(
@@ -1756,9 +1805,7 @@ fn datatree_object_pairs(value: &CtValue) -> Option<Vec<(String, CtValue)>> {
         return None;
     };
     match payload {
-        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-            Some(fields.clone())
-        }
+        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => Some(fields.clone()),
         CtValue::Map(fields) => fields
             .iter()
             .map(|(key, value)| match key {
@@ -1789,10 +1836,12 @@ pub(super) fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
         return None;
     };
     (actual == type_name).then_some(())?;
-    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("index", CtValue::Int(index)) => Some(*index as usize),
-        _ => None,
-    })
+    fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => Some(*index as usize),
+            _ => None,
+        })
 }
 
 fn struct_int(value: &CtValue, field: &str) -> Option<i64> {
@@ -1833,9 +1882,9 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
                 rendered
             })
         }
-        (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) if debug => Some(
-            jet_foundation::StructuralDebug::jet_debug_optional(None),
-        ),
+        (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) if debug => {
+            Some(jet_foundation::StructuralDebug::jet_debug_optional(None))
+        }
         (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => Some("null".to_string()),
         (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
             let parts = values
@@ -1875,7 +1924,9 @@ impl<'a> EvalCtx<'a> {
             _ => return None,
         };
         let generation = match field("generation") {
-            Some(CtValue::Int(generation)) if *generation >= 0 => u32::try_from(*generation).ok()?,
+            Some(CtValue::Int(generation)) if *generation >= 0 => {
+                u32::try_from(*generation).ok()?
+            }
             _ => return None,
         };
         let slot = match field("slot") {
@@ -1885,7 +1936,10 @@ impl<'a> EvalCtx<'a> {
         Some((owner, generation, slot))
     }
 
-    pub(super) fn materialize_allocator_view(&self, value: &CtValue) -> Result<Option<CtValue>, Diagnostic> {
+    pub(super) fn materialize_allocator_view(
+        &self,
+        value: &CtValue,
+    ) -> Result<Option<CtValue>, Diagnostic> {
         let Some((owner, generation, slot)) = Self::allocator_view_parts(value) else {
             return Ok(None);
         };
@@ -1895,7 +1949,10 @@ impl<'a> EvalCtx<'a> {
             .get(&owner)
             .ok_or_else(|| unsupported("allocator view", self.span()))?;
         if state.closed || state.generation != generation {
-            return Err(unsupported("allocator view after reset or close", self.span()));
+            return Err(unsupported(
+                "allocator view after reset or close",
+                self.span(),
+            ));
         }
         state
             .slots
@@ -1919,7 +1976,10 @@ impl<'a> EvalCtx<'a> {
             .get_mut(&owner)
             .ok_or_else(|| unsupported("allocator view", self.span()))?;
         if state.closed || state.generation != generation {
-            return Err(unsupported("allocator view after reset or close", self.span()));
+            return Err(unsupported(
+                "allocator view after reset or close",
+                self.span(),
+            ));
         }
         let target = state
             .slots
@@ -2013,7 +2073,12 @@ impl<'a> EvalCtx<'a> {
             state.allocator.as_str(),
             overhead,
         )
-        .map_err(|error| unsupported(&format!("{} allocation failed", error.allocator), self.span()))?;
+        .map_err(|error| {
+            unsupported(
+                &format!("{} allocation failed", error.allocator),
+                self.span(),
+            )
+        })?;
         let slot = state.slots.len();
         state.slots.push(stored);
         state.used = next_used;
@@ -2146,10 +2211,12 @@ impl<'a> EvalCtx<'a> {
         if type_name != "__JetTirGcRoot" {
             return None;
         }
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("index", CtValue::Int(index)) if *index > 0 => usize::try_from(*index - 1).ok(),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("index", CtValue::Int(index)) if *index > 0 => usize::try_from(*index - 1).ok(),
+                _ => None,
+            })
     }
 
     fn gc_root_carrier(index: usize) -> CtValue {
@@ -2214,7 +2281,9 @@ impl<'a> EvalCtx<'a> {
                 let value = scope
                     .get(&key)
                     .or_else(|| self.globals.get(&key))
-                    .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))?;
+                    .ok_or_else(|| {
+                        unsupported(&format!("automatic GC edge `{edge}`"), self.span())
+                    })?;
                 Self::gc_root_index(value)
                     .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))
             })
@@ -2235,10 +2304,7 @@ impl<'a> EvalCtx<'a> {
             })
             .collect::<Result<Vec<_>, _>>()?;
         if replace_all {
-            let grouped = ids
-                .iter()
-                .map(|id| ("value", 0, *id))
-                .collect::<Vec<_>>();
+            let grouped = ids.iter().map(|id| ("value", 0, *id)).collect::<Vec<_>>();
             root.replace_edge_slots(&grouped, None)
                 .map_err(|fault| unsupported(&fault.to_string(), self.span()))
         } else if let Some(index) = collection_index {
@@ -2270,7 +2336,9 @@ impl<'a> EvalCtx<'a> {
                 let value = scope
                     .get(&key)
                     .or_else(|| self.globals.get(&key))
-                    .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))?;
+                    .ok_or_else(|| {
+                        unsupported(&format!("automatic GC edge `{edge}`"), self.span())
+                    })?;
                 Self::gc_root_index(value)
                     .ok_or_else(|| unsupported(&format!("automatic GC edge `{edge}`"), self.span()))
             })
@@ -2291,9 +2359,7 @@ impl<'a> EvalCtx<'a> {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let result = match kind {
-            crate::Codegen::TIR::TGcEditKind::Clear => {
-                root.edit_clearing_edges(|_| ()).map(|_| ())
-            }
+            crate::Codegen::TIR::TGcEditKind::Clear => root.edit_clearing_edges(|_| ()).map(|_| ()),
             crate::Codegen::TIR::TGcEditKind::Pop => {
                 root.edit_edge_slot_pop("collection", |_| ()).map(|_| ())
             }
@@ -2424,10 +2490,9 @@ impl<'a> EvalCtx<'a> {
 
     fn clone_structural_untyped(&self, value: CtValue) -> Result<CtValue, Diagnostic> {
         match value {
-            CtValue::Struct {
-                type_name,
-                fields,
-            } if type_name == "Tensor" || type_name == "JetTensor" => {
+            CtValue::Struct { type_name, fields }
+                if type_name == "Tensor" || type_name == "JetTensor" =>
+            {
                 crate::Comptime::ComputeLite::tensor_clone_value(
                     &CtValue::Struct { type_name, fields },
                     self.span(),
@@ -2437,9 +2502,7 @@ impl<'a> EvalCtx<'a> {
                 type_name,
                 fields: fields
                     .into_iter()
-                    .map(|(name, value)| {
-                        Ok((name, self.clone_structural_untyped(value)?))
-                    })
+                    .map(|(name, value)| Ok((name, self.clone_structural_untyped(value)?)))
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             }),
             CtValue::Enum {
@@ -2451,9 +2514,7 @@ impl<'a> EvalCtx<'a> {
                 variant,
                 args: args
                     .into_iter()
-                    .map(|(name, value)| {
-                        Ok((name, self.clone_structural_untyped(value)?))
-                    })
+                    .map(|(name, value)| Ok((name, self.clone_structural_untyped(value)?)))
                     .collect::<Result<Vec<_>, Diagnostic>>()?,
             }),
             CtValue::List(values) => Ok(CtValue::List(
@@ -2513,7 +2574,10 @@ impl<'a> EvalCtx<'a> {
             Type::Shared(_) => Ok(value),
             Type::Apply { name, .. }
                 if name == crate::Syntax::TYPE_SHARED_WEAK
-                    || name == crate::Syntax::TYPE_SHARED_GUARD => Ok(value),
+                    || name == crate::Syntax::TYPE_SHARED_GUARD =>
+            {
+                Ok(value)
+            }
             Type::List(inner) | Type::FixedList { elem: inner, .. } => match value {
                 CtValue::List(values) => Ok(CtValue::List(
                     values
@@ -2527,9 +2591,7 @@ impl<'a> EvalCtx<'a> {
                 CtValue::Map(values) => Ok(CtValue::Map(
                     values
                         .into_iter()
-                        .map(|(key, value)| {
-                            Ok((key, self.clone_structural_value(value, inner)?))
-                        })
+                        .map(|(key, value)| Ok((key, self.clone_structural_value(value, inner)?)))
                         .collect::<Result<_, Diagnostic>>()?,
                 )),
                 other => self.clone_structural_untyped(other),
@@ -2593,7 +2655,10 @@ impl<'a> EvalCtx<'a> {
             && (is_nondeterministic_core(module, method)
                 || matches!(
                     (module, method),
-                    ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
+                    (
+                        "core.perf",
+                        "fidelity" | "override_fidelity" | "reset_fidelity"
+                    )
                 ))
     }
 
@@ -2612,11 +2677,7 @@ impl<'a> EvalCtx<'a> {
             return None;
         }
         if is_nondeterministic_core(module, method) {
-            let api = format!(
-                "{}.{}",
-                module.rsplit('.').next().unwrap_or(module),
-                method
-            );
+            let api = format!("{}.{}", module.rsplit('.').next().unwrap_or(module), method);
             return Some(crate::Sema::e3403(&api, Some(span)));
         }
         if self.should_decline_ambient_fold(module, method) {
@@ -2639,16 +2700,8 @@ impl<'a> EvalCtx<'a> {
         None
     }
 
-    fn runtime_time_now(
-        &self,
-        module: &str,
-        method: &str,
-        argv: &[CtValue],
-    ) -> Option<CtValue> {
-        (self.runtime_execution
-            && module == "core.time"
-            && method == "now"
-            && argv.is_empty())
+    fn runtime_time_now(&self, module: &str, method: &str, argv: &[CtValue]) -> Option<CtValue> {
+        (self.runtime_execution && module == "core.time" && method == "now" && argv.is_empty())
             .then(|| CtValue::Int(crate::scheduler::jet_std_time_now()))
     }
 
@@ -2725,9 +2778,9 @@ impl<'a> EvalCtx<'a> {
             Type::Named(name) if matches!(name.as_str(), "Decimal" | "Secret") => vec!["Text"],
             Type::List(_) | Type::FixedList { .. } => vec!["Array"],
             Type::Map { .. } | Type::Tuple(_) => vec!["Object"],
-            Type::Shared(inner) | Type::Quantity { base: inner, .. } | Type::Tagged { inner, .. } => {
-                self.union_wire_shapes(inner)
-            }
+            Type::Shared(inner)
+            | Type::Quantity { base: inner, .. }
+            | Type::Tagged { inner, .. } => self.union_wire_shapes(inner),
             Type::Option(inner) => {
                 let mut shapes = vec!["Null"];
                 shapes.extend(self.union_wire_shapes(inner));
@@ -2752,10 +2805,9 @@ impl<'a> EvalCtx<'a> {
                 .contains_key(name)
                 .then_some(vec!["Object"])
                 .unwrap_or_default(),
-            Type::Result { .. }
-            | Type::Fn { .. }
-            | Type::TraitObject(_)
-            | Type::Measure(_) => Vec::new(),
+            Type::Result { .. } | Type::Fn { .. } | Type::TraitObject(_) | Type::Measure(_) => {
+                Vec::new()
+            }
         };
         shapes.sort_unstable();
         shapes.dedup();
@@ -2832,7 +2884,9 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(datatree("Array", Some(CtValue::List(out))))
             }
-            Type::Map { key, value: item, .. } if matches!(key.as_ref(), Type::String) => {
+            Type::Map {
+                key, value: item, ..
+            } if matches!(key.as_ref(), Type::String) => {
                 let CtValue::Map(values) = value else {
                     return Err(unsupported("Encode map value", self.span()));
                 };
@@ -2858,9 +2912,9 @@ impl<'a> EvalCtx<'a> {
                         return self.eval_serde_encode_value(value, &base);
                     }
                 }
-                let func = self
-                    .serde_codec(ty, "encode")
-                    .ok_or_else(|| unsupported(&format!("Encode body for `{}`", ty.name()), self.span()))?;
+                let func = self.serde_codec(ty, "encode").ok_or_else(|| {
+                    unsupported(&format!("Encode body for `{}`", ty.name()), self.span())
+                })?;
                 let mut child = HashMap::new();
                 child.insert("self".to_string(), value);
                 self.run_func(func, Vec::new(), &mut child)
@@ -2894,13 +2948,8 @@ impl<'a> EvalCtx<'a> {
         for step in plan.steps.iter().skip(start) {
             for op in step {
                 match op {
-                    crate::Codegen::TIR::TCodecMigrationOp::Rename {
-                        from_key,
-                        to_key,
-                    } => {
-                        if let Some((key, _)) =
-                            pairs.iter_mut().find(|(key, _)| key == from_key)
-                        {
+                    crate::Codegen::TIR::TCodecMigrationOp::Rename { from_key, to_key } => {
+                        if let Some((key, _)) = pairs.iter_mut().find(|(key, _)| key == from_key) {
                             *key = to_key.clone();
                         }
                     }
@@ -2913,10 +2962,7 @@ impl<'a> EvalCtx<'a> {
                         default_fn,
                     } => {
                         let func = self.funcs.get(default_fn).copied().ok_or_else(|| {
-                            unsupported(
-                                &format!("migration default `{default_fn}`"),
-                                self.span(),
-                            )
+                            unsupported(&format!("migration default `{default_fn}`"), self.span())
                         })?;
                         let mut child = HashMap::new();
                         let value = self.run_func(func, Vec::new(), &mut child)?;
@@ -2929,8 +2975,7 @@ impl<'a> EvalCtx<'a> {
                         to_ty,
                         converter_fn,
                     } => {
-                        let Some((_, encoded)) =
-                            pairs.iter_mut().find(|(field, _)| field == key)
+                        let Some((_, encoded)) = pairs.iter_mut().find(|(field, _)| field == key)
                         else {
                             return Ok(None);
                         };
@@ -3112,12 +3157,13 @@ impl<'a> EvalCtx<'a> {
                 let decoded = self.eval_datatree_decode(tree, base)?;
                 match decoded {
                     CtValue::Present(value) => match *value {
-                        CtValue::Int(value) => match super::range_semantics::jet_inline_range_from_int(
-                            value, *lo, *hi,
-                        ) {
-                            Ok(value) => Ok(CtValue::Int(value)),
-                            Err(reason) => Err(decode_error("", reason)),
-                        },
+                        CtValue::Int(value) => {
+                            match super::range_semantics::jet_inline_range_from_int(value, *lo, *hi)
+                            {
+                                Ok(value) => Ok(CtValue::Int(value)),
+                                Err(reason) => Err(decode_error("", reason)),
+                            }
+                        }
                         other => Ok(other),
                     },
                     CtValue::Failed(CtReport::Told(error)) => Err(*error),
@@ -3133,12 +3179,14 @@ impl<'a> EvalCtx<'a> {
                     Some(("Int", Some(CtValue::BigInt(value)))) if matches!(ty, Type::Int) => {
                         Ok(CtValue::BigInt(value.clone()))
                     }
-                    Some(("Int", Some(CtValue::BigInt(value)))) => value
-                        .try_i64()
-                        .map(CtValue::Int)
-                        .ok_or_else(|| {
-                            decode_error("", format!("expected {}, found out-of-range Int", ty.name()))
-                        }),
+                    Some(("Int", Some(CtValue::BigInt(value)))) => {
+                        value.try_i64().map(CtValue::Int).ok_or_else(|| {
+                            decode_error(
+                                "",
+                                format!("expected {}, found out-of-range Int", ty.name()),
+                            )
+                        })
+                    }
                     Some(("Number", Some(CtValue::Str(value)))) => {
                         match jet_foundation::Numeric::CtBigInt::from_json_number(value) {
                             Ok(value) => {
@@ -3148,10 +3196,8 @@ impl<'a> EvalCtx<'a> {
                                 } else {
                                     match value {
                                         CtValue::Int(value) => Ok(CtValue::Int(value)),
-                                        CtValue::BigInt(value) => value
-                                            .try_i64()
-                                            .map(CtValue::Int)
-                                            .ok_or_else(|| {
+                                        CtValue::BigInt(value) => {
+                                            value.try_i64().map(CtValue::Int).ok_or_else(|| {
                                                 decode_error(
                                                     "",
                                                     format!(
@@ -3159,7 +3205,8 @@ impl<'a> EvalCtx<'a> {
                                                         ty.name()
                                                     ),
                                                 )
-                                            }),
+                                            })
+                                        }
                                         _ => unreachable!(),
                                     }
                                 }
@@ -3175,14 +3222,16 @@ impl<'a> EvalCtx<'a> {
                     {
                         Ok(CtValue::Int(value.as_f64() as i64))
                     }
-                    Some(("Text", Some(CtValue::Str(value)))) => jet_foundation::Numeric::CtBigInt::from_str(value.trim())
-                        .map(exact_int_value)
-                        .map_err(|_| {
-                            decode_error(
-                                "",
-                                format!("expected {}, found text {:?}", ty.name(), value),
-                            )
-                        }),
+                    Some(("Text", Some(CtValue::Str(value)))) => {
+                        jet_foundation::Numeric::CtBigInt::from_str(value.trim())
+                            .map(exact_int_value)
+                            .map_err(|_| {
+                                decode_error(
+                                    "",
+                                    format!("expected {}, found text {:?}", ty.name(), value),
+                                )
+                            })
+                    }
                     _ => Err(decode_error(
                         "",
                         format!("expected {}, found {}", ty.name(), datatree_kind_for(&tree)),
@@ -3204,8 +3253,7 @@ impl<'a> EvalCtx<'a> {
                         (-(1_i128 << shift)..=(1_i128 << shift) - 1)
                             .contains(&i128::from(*int_value))
                     } else {
-                        (0..=(1_i128 << u32::from(*bits)) - 1)
-                            .contains(&i128::from(*int_value))
+                        (0..=(1_i128 << u32::from(*bits)) - 1).contains(&i128::from(*int_value))
                     };
                     if !in_range {
                         let found = if !*signed && *bits == 8 {
@@ -3283,16 +3331,10 @@ impl<'a> EvalCtx<'a> {
                         ))));
                     }
                 };
-                if value.is_finite()
-                    && value >= -(f32::MAX as f64)
-                    && value <= f32::MAX as f64
-                {
+                if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
                     Ok(CtValue::Float(CtFloat::f32(value as f32)))
                 } else {
-                    Err(decode_error(
-                        "",
-                        "expected F32, found out-of-range Float",
-                    ))
+                    Err(decode_error("", "expected F32, found out-of-range Float"))
                 }
             }
             Type::Bool => match datatree_variant(&tree) {
@@ -3312,14 +3354,14 @@ impl<'a> EvalCtx<'a> {
             },
             Type::String => match datatree_variant(&tree) {
                 Some(("Text", Some(CtValue::Str(value))))
-                | Some(("TypedText", Some(CtValue::Str(value)))) => {
-                    Ok(CtValue::Str(value.clone()))
-                }
+                | Some(("TypedText", Some(CtValue::Str(value)))) => Ok(CtValue::Str(value.clone())),
                 Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Str(value.to_string())),
                 Some(("Int", Some(CtValue::BigInt(value)))) => {
                     Ok(CtValue::Str(value.to_string_rep()))
                 }
-                Some(("Float", Some(CtValue::Float(value)))) => Ok(CtValue::Str(format!("{value:?}"))),
+                Some(("Float", Some(CtValue::Float(value)))) => {
+                    Ok(CtValue::Str(format!("{value:?}")))
+                }
                 Some(("Bool", Some(CtValue::Bool(value)))) => Ok(CtValue::Str(value.to_string())),
                 _ => Err(decode_error(
                     "",
@@ -3334,7 +3376,10 @@ impl<'a> EvalCtx<'a> {
                     let mut chars = value.chars();
                     match (chars.next(), chars.next()) {
                         (Some(value), None) => Ok(CtValue::Char(value)),
-                        _ => Err(decode_error("", format!("expected a single Char, found {value:?}"))),
+                        _ => Err(decode_error(
+                            "",
+                            format!("expected a single Char, found {value:?}"),
+                        )),
                     }
                 }
                 CtValue::Failed(CtReport::Told(error)) => Err(*error),
@@ -3394,7 +3439,10 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 Ok(CtValue::List(
-                    bytes.into_iter().map(|byte| CtValue::Int(i64::from(byte))).collect(),
+                    bytes
+                        .into_iter()
+                        .map(|byte| CtValue::Int(i64::from(byte)))
+                        .collect(),
                 ))
             }
             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
@@ -3408,7 +3456,10 @@ impl<'a> EvalCtx<'a> {
                     if values.len() != len.require_literal() as usize {
                         return Ok(CtValue::failed(Box::new(decode_error(
                             "",
-                            format!("expected a fixed list of length {len}, found {}", values.len()),
+                            format!(
+                                "expected a fixed list of length {len}, found {}",
+                                values.len()
+                            ),
                         ))));
                     }
                 }
@@ -3418,10 +3469,9 @@ impl<'a> EvalCtx<'a> {
                     match self.eval_datatree_decode(value, inner)? {
                         CtValue::Present(value) => out.push(*value),
                         CtValue::Failed(CtReport::Told(error)) => {
-                            if let CtValue::List(items) = decode_error_under(
-                                &format!("[{index}]"),
-                                *error,
-                            ) {
+                            if let CtValue::List(items) =
+                                decode_error_under(&format!("[{index}]"), *error)
+                            {
                                 errors.extend(items);
                             }
                         }
@@ -3434,7 +3484,9 @@ impl<'a> EvalCtx<'a> {
                     Err(CtValue::List(errors))
                 }
             }
-            Type::Map { key, value: item, .. } if matches!(key.as_ref(), Type::String) => {
+            Type::Map {
+                key, value: item, ..
+            } if matches!(key.as_ref(), Type::String) => {
                 let Some(("Object", Some(object))) = datatree_variant(&tree) else {
                     return Ok(CtValue::failed(Box::new(decode_error(
                         "",
@@ -3487,10 +3539,8 @@ impl<'a> EvalCtx<'a> {
                 if let Type::Named(name) = ty {
                     if let Some(base) = self.distinct_bases.get(name).cloned() {
                         let decoded = self.eval_datatree_decode(tree, &base)?;
-                        if let (
-                            Some((lo, hi)),
-                            CtValue::Present(value),
-                        ) = (self.distinct_ranges.get(name), &decoded)
+                        if let (Some((lo, hi)), CtValue::Present(value)) =
+                            (self.distinct_ranges.get(name), &decoded)
                         {
                             if !matches!(value.as_ref(), CtValue::Int(n) if (*lo..=*hi).contains(n))
                             {
@@ -3506,14 +3556,12 @@ impl<'a> EvalCtx<'a> {
                         return Ok(builtin_codec_decode(tree, codec_name));
                     }
                 }
-                let func = self
-                    .serde_codec(ty, "decode")
-                    .ok_or_else(|| unsupported(&format!("Decode body for `{}`", ty.name()), self.span()))?;
+                let func = self.serde_codec(ty, "decode").ok_or_else(|| {
+                    unsupported(&format!("Decode body for `{}`", ty.name()), self.span())
+                })?;
                 let mut child = HashMap::new();
-                let migration_trace_start = self
-                    .codec_migrations
-                    .contains_key(&ty.name())
-                    .then(|| {
+                let migration_trace_start =
+                    self.codec_migrations.contains_key(&ty.name()).then(|| {
                         self.sink.as_ref().map_or(0, |sink| {
                             sink.lock().expect("evaluator sink poisoned").stderr.len()
                         })
@@ -3544,10 +3592,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 return Ok(result);
             }
-            _ => Err(decode_error(
-                "",
-                format!("cannot decode `{}`", ty.name()),
-            )),
+            _ => Err(decode_error("", format!("cannot decode `{}`", ty.name()))),
         };
         Ok(match result {
             Ok(value) => CtValue::Present(Box::new(value)),
@@ -3574,8 +3619,7 @@ impl<'a> EvalCtx<'a> {
             match paths {
                 [path] => {
                     let projected = guard.map(|value| {
-                        project_mut(value, path)
-                            .expect("sema validated Cell edit guard projection")
+                        project_mut(value, path).expect("sema validated Cell edit guard projection")
                     });
                     let index = self.local_cells.insert_edit_guard_for(projected, owner);
                     Ok(local_cell_handle("__JetTirCellEditGuard", index))
@@ -3586,10 +3630,8 @@ impl<'a> EvalCtx<'a> {
                         project_pair_mut(value, first, second)
                             .expect("sema proved disjoint Cell edit guard projections")
                     });
-                    let first_index =
-                        self.local_cells.insert_edit_guard_for(first_guard, owner);
-                    let second_index =
-                        self.local_cells.insert_edit_guard_for(second_guard, owner);
+                    let first_index = self.local_cells.insert_edit_guard_for(first_guard, owner);
+                    let second_index = self.local_cells.insert_edit_guard_for(second_guard, owner);
                     Ok(CtValue::Struct {
                         type_name: "tuple".to_string(),
                         fields: vec![
@@ -3616,8 +3658,7 @@ impl<'a> EvalCtx<'a> {
             match paths {
                 [path] => {
                     let projected = guard.map(|value| {
-                        project_ref(value, path)
-                            .expect("sema validated Cell read guard projection")
+                        project_ref(value, path).expect("sema validated Cell read guard projection")
                     });
                     let index = self.local_cells.insert_read_guard_for(projected, owner);
                     Ok(local_cell_handle("__JetTirCellReadGuard", index))
@@ -3625,16 +3666,13 @@ impl<'a> EvalCtx<'a> {
                 [first, second] => {
                     let (first_guard, second_guard) = guard.split(|value| {
                         (
-                            project_ref(value, first)
-                                .expect("sema validated Cell read projection"),
+                            project_ref(value, first).expect("sema validated Cell read projection"),
                             project_ref(value, second)
                                 .expect("sema validated Cell read projection"),
                         )
                     });
-                    let first_index =
-                        self.local_cells.insert_read_guard_for(first_guard, owner);
-                    let second_index =
-                        self.local_cells.insert_read_guard_for(second_guard, owner);
+                    let first_index = self.local_cells.insert_read_guard_for(first_guard, owner);
+                    let second_index = self.local_cells.insert_read_guard_for(second_guard, owner);
                     Ok(CtValue::Struct {
                         type_name: "tuple".to_string(),
                         fields: vec![
@@ -3694,9 +3732,7 @@ impl<'a> EvalCtx<'a> {
                         return Err(unsupported("Cell callback", self.span()));
                     };
                     if method == "read" {
-                        cell.read(|value| {
-                            self.eval_tlambda(lambda, vec![value.clone()], scope)
-                        })
+                        cell.read(|value| self.eval_tlambda(lambda, vec![value.clone()], scope))
                     } else {
                         cell.edit(|value| {
                             let (result, updated) =
@@ -3744,14 +3780,9 @@ impl<'a> EvalCtx<'a> {
                     else {
                         return Err(unsupported("Cell guard callback", self.span()));
                     };
-                    guard.read(|value| {
-                        self.eval_tlambda(lambda, vec![value.clone()], scope)
-                    })
+                    guard.read(|value| self.eval_tlambda(lambda, vec![value.clone()], scope))
                 }
-                _ => Err(unsupported(
-                    &format!("CellReadGuard.{method}"),
-                    self.span(),
-                )),
+                _ => Err(unsupported(&format!("CellReadGuard.{method}"), self.span())),
             };
         }
         let index = local_cell_index(receiver, "__JetTirCellEditGuard")
@@ -3764,9 +3795,8 @@ impl<'a> EvalCtx<'a> {
             "get" => Ok(guard.get()),
             "set" => {
                 let value = self.eval_expr_child(
-                    args.first().ok_or_else(|| {
-                        unsupported("Cell guard set argument", self.span())
-                    })?,
+                    args.first()
+                        .ok_or_else(|| unsupported("Cell guard set argument", self.span()))?,
                     scope,
                 )?;
                 guard.set(value);
@@ -3781,9 +3811,7 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("Cell guard callback", self.span()));
                 };
                 if method == "read" {
-                    guard.read(|value| {
-                        self.eval_tlambda(lambda, vec![value.clone()], scope)
-                    })
+                    guard.read(|value| self.eval_tlambda(lambda, vec![value.clone()], scope))
                 } else {
                     guard.edit(|value| {
                         let (result, updated) =
@@ -3793,10 +3821,7 @@ impl<'a> EvalCtx<'a> {
                     })
                 }
             }
-            _ => Err(unsupported(
-                &format!("CellEditGuard.{method}"),
-                self.span(),
-            )),
+            _ => Err(unsupported(&format!("CellEditGuard.{method}"), self.span())),
         }
     }
 
@@ -4005,15 +4030,16 @@ impl<'a> EvalCtx<'a> {
                         work.push(EvalExprWork::Leave(transparent_depth + 1));
                         match &leaf.kind {
                             TExprKind::Binary { op, lhs, rhs, .. }
-                                if matches!(*op, BinOp::And | BinOp::Or) => {
-                                    work.push(EvalExprWork::BinaryAfterLeft {
-                                        original: expr,
-                                        op: *op,
-                                        left: lhs.as_ref(),
-                                        rhs: rhs.as_ref(),
-                                    });
-                                    work.push(EvalExprWork::Enter(lhs));
-                                }
+                                if matches!(*op, BinOp::And | BinOp::Or) =>
+                            {
+                                work.push(EvalExprWork::BinaryAfterLeft {
+                                    original: expr,
+                                    op: *op,
+                                    left: lhs.as_ref(),
+                                    rhs: rhs.as_ref(),
+                                });
+                                work.push(EvalExprWork::Enter(lhs));
+                            }
                             TExprKind::IfExpr {
                                 cond,
                                 then_body,
@@ -4118,19 +4144,13 @@ impl<'a> EvalCtx<'a> {
                                 left,
                                 right,
                             });
-                            work.push(EvalExprWork::IfCondition {
-                                state,
-                                cond: left,
-                            });
+                            work.push(EvalExprWork::IfCondition { state, cond: left });
                         }
                         TIfCond::Plain(expr)
                         | TIfCond::IsNone { subj: expr }
                         | TIfCond::IfLet { subj: expr, .. }
                         | TIfCond::Matches { subj: expr, .. } => {
-                            work.push(EvalExprWork::IfAfterLeaf {
-                                cond,
-                                expr,
-                            });
+                            work.push(EvalExprWork::IfAfterLeaf { cond, expr });
                             work.push(EvalExprWork::Enter(expr));
                         }
                     },
@@ -4144,21 +4164,13 @@ impl<'a> EvalCtx<'a> {
                             unreachable!("if condition left value missing from evaluator worklist")
                         })?;
                         if value {
-                            work.push(EvalExprWork::IfAfterAndRight {
-                                parent,
-                                right,
-                            });
-                            work.push(EvalExprWork::IfCondition {
-                                state,
-                                cond: right,
-                            });
+                            work.push(EvalExprWork::IfAfterAndRight { parent, right });
+                            work.push(EvalExprWork::IfCondition { state, cond: right });
                         } else {
                             eval_if_cond_cache_put(parent, false);
                         }
                     }
-                    EvalExprWork::IfAfterAndRight {
-                        parent, right, ..
-                    } => {
+                    EvalExprWork::IfAfterAndRight { parent, right, .. } => {
                         let value = eval_if_cond_cache_take(right).ok_or_else(|| {
                             unreachable!("if condition right value missing from evaluator worklist")
                         })?;
@@ -4301,9 +4313,9 @@ impl<'a> EvalCtx<'a> {
                                 let fallback = match state.kind {
                                     TRequireKind::Require { .. } => "requirement failed",
                                     TRequireKind::RequireEq { .. } => "values are not equal",
-                                    TRequireKind::Panic { .. } => unreachable!(
-                                        "panic always-stop must carry its message"
-                                    ),
+                                    TRequireKind::Panic { .. } => {
+                                        unreachable!("panic always-stop must carry its message")
+                                    }
                                 };
                                 self.eval_require_failure(state.loc, fallback, scope)?;
                                 eval_expr_cache_put(state.original, CtValue::Unit);
@@ -4316,11 +4328,7 @@ impl<'a> EvalCtx<'a> {
                                 work.push(EvalExprWork::Enter(cond));
                             }
                             TRequireKind::RequireEq { left, right } => {
-                                work.push(EvalExprWork::RequireAfterLeft {
-                                    state,
-                                    left,
-                                    right,
-                                });
+                                work.push(EvalExprWork::RequireAfterLeft { state, left, right });
                                 work.push(EvalExprWork::Enter(left));
                             }
                             TRequireKind::Panic { msg } => {
@@ -4357,7 +4365,8 @@ impl<'a> EvalCtx<'a> {
                         let TRequireKind::RequireEq {
                             left: left_expr,
                             right: right_expr,
-                        } = state.kind else {
+                        } = state.kind
+                        else {
                             unreachable!("require_eq right continuation has non-equality kind")
                         };
                         let right = eval_expr_cache_take(right_expr).ok_or_else(|| {
@@ -4392,7 +4401,7 @@ impl<'a> EvalCtx<'a> {
                             self.leave_source_nesting();
                             entered -= 1;
                         }
-}
+                    }
                 }
             }
             Ok(())
@@ -4402,9 +4411,8 @@ impl<'a> EvalCtx<'a> {
             entered -= 1;
         }
         let result = result.and_then(|()| {
-            eval_expr_cache_take(root).ok_or_else(|| {
-                unreachable!("TIR expression worklist lost its root value")
-            })
+            eval_expr_cache_take(root)
+                .ok_or_else(|| unreachable!("TIR expression worklist lost its root value"))
         });
         eval_expr_cache_end();
         result
@@ -4422,14 +4430,7 @@ impl<'a> EvalCtx<'a> {
                 args,
                 source_span,
                 ..
-            } => Some(self.eval_core_call_expr(
-                expr,
-                module,
-                method,
-                args,
-                *source_span,
-                scope,
-            )),
+            } => Some(self.eval_core_call_expr(expr, module, method, args, *source_span, scope)),
             TExprKind::ListLit(elems) => Some(self.eval_list_lit_expr(expr, elems, scope)),
             _ => None,
         }
@@ -4468,7 +4469,8 @@ impl<'a> EvalCtx<'a> {
                 CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
             )),
             TIfCond::IfLet { pattern, .. } => {
-                if let crate::Codegen::TIR::TPatternPosition::DataEntries { temp } = &pattern.position
+                if let crate::Codegen::TIR::TPatternPosition::DataEntries { temp } =
+                    &pattern.position
                 {
                     if let CtValue::Enum { args, .. } = &value {
                         if let Some((_, payload)) = args.first() {
@@ -4691,11 +4693,7 @@ impl<'a> EvalCtx<'a> {
         }
         let (bytes, alignment) = sentry_layout(ty);
         if let Some(fault) = jet_foundation::MemSentry::jet_sentry_check(
-            address,
-            bytes,
-            alignment,
-            operation,
-            obligation,
+            address, bytes, alignment, operation, obligation,
         ) {
             return Err(self.runtime_sentry_failure(fault));
         }
@@ -4827,7 +4825,10 @@ impl<'a> EvalCtx<'a> {
         source_span: Span,
     ) -> Result<CtValue, Diagnostic> {
         let Type::Result { ok, .. } = return_type else {
-            return Err(unsupported("core.sys.decode resolved return type", source_span));
+            return Err(unsupported(
+                "core.sys.decode resolved return type",
+                source_span,
+            ));
         };
         let prefix = args
             .first()
@@ -4854,10 +4855,18 @@ impl<'a> EvalCtx<'a> {
             CtValue::Failed(CtReport::Told(error)) => {
                 return Ok(CtValue::Failed(CtReport::Told(error)));
             }
-            _ => return Err(unsupported("core.sys.decode environment carrier", source_span)),
+            _ => {
+                return Err(unsupported(
+                    "core.sys.decode environment carrier",
+                    source_span,
+                ))
+            }
         };
         let CtValue::Struct { fields, .. } = config else {
-            return Err(unsupported("core.sys.decode environment record", source_span));
+            return Err(unsupported(
+                "core.sys.decode environment record",
+                source_span,
+            ));
         };
         let field = |name: &str| {
             fields
@@ -4875,16 +4884,20 @@ impl<'a> EvalCtx<'a> {
                         return None;
                     };
                     let name = fields.iter().find_map(|(field, value)| {
-                        (field == "name").then_some(value).and_then(|value| match value {
-                            CtValue::Str(name) => Some(name.clone()),
-                            _ => None,
-                        })
+                        (field == "name")
+                            .then_some(value)
+                            .and_then(|value| match value {
+                                CtValue::Str(name) => Some(name.clone()),
+                                _ => None,
+                            })
                     })?;
                     let path = fields.iter().find_map(|(field, value)| {
-                        (field == "path").then_some(value).and_then(|value| match value {
-                            CtValue::Str(path) => Some(path.clone()),
-                            _ => None,
-                        })
+                        (field == "path")
+                            .then_some(value)
+                            .and_then(|value| match value {
+                                CtValue::Str(path) => Some(path.clone()),
+                                _ => None,
+                            })
                     })?;
                     Some((name, path))
                 })
@@ -4908,10 +4921,13 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         self.burn()?;
         if module == "core.encoding" && method == "__published_schema_empty" {
-            return Ok(datatree("Object", Some(CtValue::Struct {
-                type_name: "JSONObject".to_string(),
-                fields: Vec::new(),
-            })));
+            return Ok(datatree(
+                "Object",
+                Some(CtValue::Struct {
+                    type_name: "JSONObject".to_string(),
+                    fields: Vec::new(),
+                }),
+            ));
         }
         if module == "core.encoding" && method == "__published_schema_merge" && args.len() == 2 {
             let known = self.eval_expr_child(&args[0], scope)?;
@@ -5000,10 +5016,7 @@ impl<'a> EvalCtx<'a> {
         // kernel before `Ptr.from_addr` carries it onward.
         if module == "core.mem" && method == "address_of" && args.len() == 1 {
             if !self.runtime_execution {
-                return Err(unsupported(
-                    "`mem.address_of` at compile time",
-                    source_span,
-                ));
+                return Err(unsupported("`mem.address_of` at compile time", source_span));
             }
             let key = tir_place_address_key(&args[0]);
             let address = stable_place_address(&key) as usize;
@@ -5077,7 +5090,9 @@ impl<'a> EvalCtx<'a> {
             let address = raw_pointer_address(&fields)
                 .ok_or_else(|| unsupported("raw pointer address", self.span()))?;
             self.check_runtime_sentry(address, &args[1].ty, "volatile_write", "valid_ptr")?;
-            if let Some(name) = raw_pointer_name(&fields).or_else(|| self.sentry_places.get(&address).cloned()) {
+            if let Some(name) =
+                raw_pointer_name(&fields).or_else(|| self.sentry_places.get(&address).cloned())
+            {
                 scope.insert(name, value);
             }
             return Ok(CtValue::Unit);
@@ -5096,8 +5111,8 @@ impl<'a> EvalCtx<'a> {
             if let Some(value) = raw_pointer_value(&fields) {
                 return Ok(value);
             }
-            let name = raw_pointer_name(&fields)
-                .or_else(|| self.sentry_places.get(&address).cloned());
+            let name =
+                raw_pointer_name(&fields).or_else(|| self.sentry_places.get(&address).cloned());
             return name
                 .and_then(|name| scope.get(&name).cloned())
                 .ok_or_else(|| unsupported("raw pointer local", self.span()));
@@ -5130,9 +5145,9 @@ impl<'a> EvalCtx<'a> {
         if let Some(row) = jet_foundation::Syntax::core_call(module, method) {
             for (index, value) in argv.iter_mut().enumerate() {
                 if row.path_arg(index)
-                    && args.get(index).is_some_and(|arg| {
-                        matches!(&arg.ty, Type::Named(name) if name == "Path")
-                    })
+                    && args
+                        .get(index)
+                        .is_some_and(|arg| matches!(&arg.ty, Type::Named(name) if name == "Path"))
                 {
                     *value = CtValue::Str(
                         super::handles::path_string(value)
@@ -5170,10 +5185,9 @@ impl<'a> EvalCtx<'a> {
             } else {
                 match args.first().map(|arg| &arg.ty) {
                     Some(Type::List(_)) | Some(Type::FixedList { .. }) => Some(true),
-                    Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_ITER => Some(
-                        args.first()
-                            .is_some_and(progress_source_has_exact_total),
-                    ),
+                    Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_ITER => {
+                        Some(args.first().is_some_and(progress_source_has_exact_total))
+                    }
                     _ => None,
                 }
             }
@@ -5195,38 +5209,38 @@ impl<'a> EvalCtx<'a> {
             let tree = self.eval_serde_encode_value(argv[1].clone(), &args[1].ty)?;
             argv[1] = CtValue::Str(crate::Comptime::render_datatree_for_tir(&tree));
         }
-        if module == "core.encoding.cbor"
-            && matches!(method, "to_bytes" | "to_bytes_canonical")
-        {
+        if module == "core.encoding.cbor" && matches!(method, "to_bytes" | "to_bytes_canonical") {
             let value = argv.first().ok_or_else(|| {
                 unsupported("core.encoding.cbor encoder missing its value", source_span)
             })?;
             let tree = self.eval_serde_encode_value(value.clone(), &args[0].ty)?;
             let fields = HashMap::new();
-            return Ok(match crate::Comptime::cbor_encode_typed_for_tir(
-                &tree,
-                &Type::Named("DataTree".to_string()),
-                &fields,
-                method == "to_bytes_canonical",
-            ) {
-                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
-                    type_name: "CBORError".to_string(),
-                    fields: vec![
-                        (
-                            "kind".to_string(),
-                            CtValue::Enum {
-                                type_name: "CBORErrorKind".to_string(),
-                                variant: "Unsupported".to_string(),
-                                args: Vec::new(),
-                            },
-                        ),
-                        ("byte_offset".to_string(), CtValue::Int(0)),
-                        ("path".to_string(), CtValue::Str("$".to_string())),
-                        ("reason".to_string(), CtValue::Str(reason)),
-                    ],
-                })),
-            });
+            return Ok(
+                match crate::Comptime::cbor_encode_typed_for_tir(
+                    &tree,
+                    &Type::Named("DataTree".to_string()),
+                    &fields,
+                    method == "to_bytes_canonical",
+                ) {
+                    Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                    Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
+                        type_name: "CBORError".to_string(),
+                        fields: vec![
+                            (
+                                "kind".to_string(),
+                                CtValue::Enum {
+                                    type_name: "CBORErrorKind".to_string(),
+                                    variant: "Unsupported".to_string(),
+                                    args: Vec::new(),
+                                },
+                            ),
+                            ("byte_offset".to_string(), CtValue::Int(0)),
+                            ("path".to_string(), CtValue::Str("$".to_string())),
+                            ("reason".to_string(), CtValue::Str(reason)),
+                        ],
+                    })),
+                },
+            );
         }
         // D-MIGRATE3=A: typed text-codec decode uses the resolved return type.
         // The UNTYPED lenient `json.decode(text)` form is NOT that call: AOT
@@ -5264,10 +5278,7 @@ impl<'a> EvalCtx<'a> {
                     .iter()
                     .map(|value| match value {
                         CtValue::Int(byte) => u8::try_from(*byte).map_err(|_| {
-                            unsupported(
-                                "core.encoding.cbor.decode byte argument",
-                                source_span,
-                            )
+                            unsupported("core.encoding.cbor.decode byte argument", source_span)
                         }),
                         _ => Err(unsupported(
                             "core.encoding.cbor.decode byte argument",
@@ -5327,13 +5338,8 @@ impl<'a> EvalCtx<'a> {
             return result;
         }
         let is_shuffle = module == "core.math.random" && method == "shuffle";
-        let value = self.apply_core_call_with_policy(
-            module,
-            method,
-            argv,
-            source_span,
-            Some(&expr.ty),
-        )?;
+        let value =
+            self.apply_core_call_with_policy(module, method, argv, source_span, Some(&expr.ty))?;
         if is_shuffle {
             if let Some(place) = args.first() {
                 let items = match &value {
@@ -5344,7 +5350,13 @@ impl<'a> EvalCtx<'a> {
                 return Ok(CtValue::Unit);
             }
         }
-        Ok(mark_unknown_progress_total(value, module, method, args, progress_known_total))
+        Ok(mark_unknown_progress_total(
+            value,
+            module,
+            method,
+            args,
+            progress_known_total,
+        ))
     }
 
     /// D-SOA-TIER1=A: marshal a columnar list's rows into THE shared Prelude
@@ -5428,9 +5440,7 @@ impl<'a> EvalCtx<'a> {
                 let (index, lease_index, _, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard handle", self.span()))?;
                 let (shared, held) = {
-                    let runtime = self.runtime
-                        .lock()
-                        .expect("evaluator runtime poisoned");
+                    let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                     let held = runtime
                         .shared_guards
                         .get(lease_index)
@@ -5505,11 +5515,9 @@ impl<'a> EvalCtx<'a> {
                     .get(lease_index)
                     .cloned()
                     .ok_or_else(|| unsupported("SharedGuard split", self.span()))?;
-                let second_state = super::shared_protocol::jet_shared_guard_clone(
-                    &state,
-                    *editable,
-                )
-                .map_err(|message| unsupported(message, self.span()))?;
+                let second_state =
+                    super::shared_protocol::jet_shared_guard_clone(&state, *editable)
+                        .map_err(|message| unsupported(message, self.span()))?;
                 let first_state = map_shared_guard_state(state, first, *editable)
                     .map_err(|message| unsupported(message, self.span()))?;
                 let second_state = map_shared_guard_state(second_state, second, *editable)
@@ -5672,14 +5680,18 @@ impl<'a> EvalCtx<'a> {
                                     }
                                 }
                                 crate::AST::StrFormat::Pretty => {
-                                    unreachable!("Pretty interpolation lowers to core.text.fmt.pretty")
+                                    unreachable!(
+                                        "Pretty interpolation lowers to core.text.fmt.pretty"
+                                    )
                                 }
                                 crate::AST::StrFormat::Display => {
                                     show_typed_value(&v, &e.ty, false)
                                         .unwrap_or(self.show_value(&v, scope)?)
                                 }
                                 crate::AST::StrFormat::Fixed(_) => {
-                                    unreachable!("Fixed interpolation lowers to core.text.fmt.decimal")
+                                    unreachable!(
+                                        "Fixed interpolation lowers to core.text.fmt.decimal"
+                                    )
                                 }
                                 crate::AST::StrFormat::Unit(_) => {
                                     unreachable!("Unit interpolation lowers to a String")
@@ -5695,9 +5707,7 @@ impl<'a> EvalCtx<'a> {
                 let value = local
                     .persist_key
                     .as_ref()
-                    .and_then(|persist_key| {
-                        jet_foundation::Persist::shared_read_key(persist_key)
-                    })
+                    .and_then(|persist_key| jet_foundation::Persist::shared_read_key(persist_key))
                     .or_else(|| scope.get(&local.name).cloned())
                     .or_else(|| self.globals.get(&local.name).cloned())
                     .ok_or_else(|| {
@@ -5810,15 +5820,15 @@ impl<'a> EvalCtx<'a> {
                 };
                 let result = (|| {
                     match self.exec_stmts(prefix, scope)? {
-                    Flow::Normal => {}
-                    Flow::Return(value) => {
-                        self.pending_return = Some(value);
-                        return Ok(CtValue::Unit);
-                    }
-                    other => {
-                        self.pending_flow = Some(other);
-                        return Err(unsupported("pending loop control", self.span()));
-                    }
+                        Flow::Normal => {}
+                        Flow::Return(value) => {
+                            self.pending_return = Some(value);
+                            return Ok(CtValue::Unit);
+                        }
+                        other => {
+                            self.pending_flow = Some(other);
+                            return Err(unsupported("pending loop control", self.span()));
+                        }
                     }
                     if let crate::Codegen::TIR::TStmt::Loop { label, body } = tail {
                         return self.exec_loop_value(label.as_deref(), body, scope);
@@ -5852,7 +5862,9 @@ impl<'a> EvalCtx<'a> {
                 result
             }
             TExprKind::Uninit => match &expr.ty {
-                Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(len.require_literal() as usize)),
+                Type::FixedList { len, .. } => {
+                    Ok(super::uninit_fixed_carrier(len.require_literal() as usize))
+                }
                 _ => Ok(CtValue::Unit),
             },
             TExprKind::Unit | TExprKind::DefaultLit => Ok(CtValue::Unit),
@@ -5958,10 +5970,9 @@ impl<'a> EvalCtx<'a> {
                 if let Type::IntN { signed, bits } = &lhs.ty {
                     let a = as_int(&l, self.span())?;
                     let b = as_int(&r, self.span())?;
-                    let right_signed =
-                        crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
-                            .map(|(signed, _)| signed)
-                            .unwrap_or(true);
+                    let right_signed = crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
+                        .map(|(signed, _)| signed)
+                        .unwrap_or(true);
                     if *op == BinOp::Div && self.runtime_execution {
                         return self.eval_fixed_width_division(
                             a,
@@ -6009,19 +6020,15 @@ impl<'a> EvalCtx<'a> {
                     // is narrowed back to it, the same way `-` is above; the
                     // width-free default `Int` keeps the exact whole-number
                     // result, which is `-x - 1`.
-                    (UnOp::Not, CtValue::Int(n))
-                        if matches!(&operand.ty, Type::IntN { .. }) =>
-                    {
+                    (UnOp::Not, CtValue::Int(n)) if matches!(&operand.ty, Type::IntN { .. }) => {
                         let (signed, bits) =
                             crate::Comptime::MathLayout::integer_type_layout(&operand.ty)
                                 .expect("IntN layout");
-                        Ok(CtValue::Int(
-                            crate::Comptime::MathLayout::integer_narrow(
-                                !(n as i128),
-                                signed,
-                                bits,
-                            ),
-                        ))
+                        Ok(CtValue::Int(crate::Comptime::MathLayout::integer_narrow(
+                            !(n as i128),
+                            signed,
+                            bits,
+                        )))
                     }
                     (UnOp::Not, CtValue::Int(n)) => Ok(exact_int_value(
                         jet_foundation::Numeric::CtBigInt::from_int(n)
@@ -6029,8 +6036,7 @@ impl<'a> EvalCtx<'a> {
                             .sub(&jet_foundation::Numeric::CtBigInt::from_int(1)),
                     )),
                     (UnOp::Not, CtValue::BigInt(n)) => Ok(exact_int_value(
-                        n.neg()
-                            .sub(&jet_foundation::Numeric::CtBigInt::from_int(1)),
+                        n.neg().sub(&jet_foundation::Numeric::CtBigInt::from_int(1)),
                     )),
                     _ => Err(unsupported("unary form", self.span())),
                 }
@@ -6059,7 +6065,12 @@ impl<'a> EvalCtx<'a> {
                             self.span(),
                         )?
                     } else {
-                        self.eval_runtime_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?
+                        self.eval_runtime_binop(
+                            *op,
+                            vals[i].clone(),
+                            vals[i + 1].clone(),
+                            self.span(),
+                        )?
                     };
                     if !as_bool(&part, self.span())? {
                         return Ok(CtValue::Bool(false));
@@ -6087,7 +6098,10 @@ impl<'a> EvalCtx<'a> {
                             | crate::Codegen::TIR::TBuiltinOp::TryStringPush
                     )
                 {
-                    return Err(unsupported("fallible allocation at compile time", self.span()));
+                    return Err(unsupported(
+                        "fallible allocation at compile time",
+                        self.span(),
+                    ));
                 }
                 let is_tensor = recv.ty.is_compute_tensor_family();
                 if matches!(
@@ -6095,17 +6109,14 @@ impl<'a> EvalCtx<'a> {
                     crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }
                         | crate::Codegen::TIR::TBuiltinOp::ComputeViewMutNew { .. }
                 ) {
-                    let Some((base_name, path)) = self.eval_view_mut_place(recv, scope)?
-                    else {
+                    let Some((base_name, path)) = self.eval_view_mut_place(recv, scope)? else {
                         return Err(unsupported("view-mut base", self.span()));
                     };
                     let root = scope
                         .get(&base_name)
                         .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?;
                     let base_value = super::project_list_place(root, &path, self.span())?.clone();
-                    let mut fields = vec![
-                        ("base".into(), CtValue::Str(base_name)),
-                    ];
+                    let mut fields = vec![("base".into(), CtValue::Str(base_name))];
                     if !path.is_empty() {
                         fields.push(("path".into(), super::encode_view_mut_path(&path)));
                     }
@@ -6162,8 +6173,7 @@ impl<'a> EvalCtx<'a> {
                         super::checked_view_window(start, end, false, xs.len(), self.span())
                     };
                     let line = view_op_line(op).unwrap_or_else(|| self.span_line(self.span()));
-                    let (start, end_exclusive) =
-                        self.route_runtime_panic(window, "E3001", line)?;
+                    let (start, end_exclusive) = self.route_runtime_panic(window, "E3001", line)?;
                     let end = i64::try_from(end_exclusive)
                         .map_err(|_| unsupported("view-mut end is too large", self.span()))?
                         - 1;
@@ -6204,8 +6214,7 @@ impl<'a> EvalCtx<'a> {
                     };
                     match op {
                         crate::Codegen::TIR::TBuiltinOp::SplitWrite { tuple_struct } => {
-                            let mid =
-                                as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
+                            let mid = as_int(&self.eval_expr_child(&args[0], scope)?, self.span())?;
                             let ((left_start, left_end), (right_start, right_end)) =
                                 match super::disjoint_semantics::split(xs.len(), mid) {
                                     Ok(bounds) => bounds,
@@ -6216,10 +6225,7 @@ impl<'a> EvalCtx<'a> {
                             return Ok(CtValue::Present(Box::new(CtValue::Struct {
                                 type_name: tuple_struct.clone(),
                                 fields: vec![
-                                    (
-                                        "left".into(),
-                                        view(left_start as i64, left_end as i64 - 1),
-                                    ),
+                                    ("left".into(), view(left_start as i64, left_end as i64 - 1)),
                                     (
                                         "right".into(),
                                         view(right_start as i64, right_end as i64 - 1),
@@ -6228,7 +6234,8 @@ impl<'a> EvalCtx<'a> {
                             })));
                         }
                         crate::Codegen::TIR::TBuiltinOp::GetDisjointWrite => {
-                            let CtValue::List(targets) = self.eval_expr_child(&args[0], scope)? else {
+                            let CtValue::List(targets) = self.eval_expr_child(&args[0], scope)?
+                            else {
                                 return Err(unsupported("disjoint-view targets", self.span()));
                             };
                             let mut indexes = Vec::with_capacity(targets.len());
@@ -6267,15 +6274,9 @@ impl<'a> EvalCtx<'a> {
                 // `__JetViewMut` is a write-through handle; read builtins see the
                 // inclusive window as a List (same surface as View after ViewNew).
                 // Do not write the temporary List back over the ViewMut binding.
-                let mut skip_view_mut_wb = matches!(
-                    op,
-                    crate::Codegen::TIR::TBuiltinOp::ComputeViewNew { .. }
-                );
-                if let CtValue::Struct {
-                    type_name,
-                    fields,
-                } = &r
-                {
+                let mut skip_view_mut_wb =
+                    matches!(op, crate::Codegen::TIR::TBuiltinOp::ComputeViewNew { .. });
+                if let CtValue::Struct { type_name, fields } = &r {
                     if type_name == "__JetViewMut"
                         && matches!(
                             *op,
@@ -6298,9 +6299,20 @@ impl<'a> EvalCtx<'a> {
                     argv.push(self.eval_expr_child(a, scope)?);
                 }
                 let progress_arg = argv.first().cloned();
-                if let Some((source_items, description, format, started_at, pulls, tail, total, known_total)) = &progress {
+                if let Some((
+                    source_items,
+                    description,
+                    format,
+                    started_at,
+                    pulls,
+                    tail,
+                    total,
+                    known_total,
+                )) = &progress
+                {
                     if progress_terminal_builtin(op) {
-                        let raw_pulls = if matches!(op, crate::Codegen::TIR::TBuiltinOp::TryCollect) {
+                        let raw_pulls = if matches!(op, crate::Codegen::TIR::TBuiltinOp::TryCollect)
+                        {
                             try_collect_pulls(source_items, pulls, *tail)
                         } else {
                             pulls.iter().sum::<usize>().saturating_add(*tail)
@@ -6324,7 +6336,17 @@ impl<'a> EvalCtx<'a> {
                     Some(line) => self.route_runtime_panic(raw, "E3001", line)?,
                     None => raw?,
                 };
-                if let Some((source_items, description, format, started_at, source_pulls, source_tail, total, known_total)) = progress {
+                if let Some((
+                    source_items,
+                    description,
+                    format,
+                    started_at,
+                    source_pulls,
+                    source_tail,
+                    total,
+                    known_total,
+                )) = progress
+                {
                     if progress_lazy_builtin(op) {
                         // A lazy adapter may hand back either a plain List or
                         // the evaluator's erased Iter carrier — `zip` builds
@@ -6338,10 +6360,7 @@ impl<'a> EvalCtx<'a> {
                             None => match result {
                                 CtValue::List(items) => items,
                                 _ => {
-                                    return Err(unsupported(
-                                        "progress adapter result",
-                                        self.span(),
-                                    ))
+                                    return Err(unsupported("progress adapter result", self.span()))
                                 }
                             },
                         };
@@ -6439,10 +6458,12 @@ impl<'a> EvalCtx<'a> {
                             if type_name == crate::Syntax::DURATION_TYPE
                                 || type_name == "Duration" =>
                         {
-                            fields.iter().find_map(|(name, v)| match (name.as_str(), v) {
-                                ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
-                                _ => None,
-                            })
+                            fields
+                                .iter()
+                                .find_map(|(name, v)| match (name.as_str(), v) {
+                                    ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
+                                    _ => None,
+                                })
                         }
                         _ => None,
                     });
@@ -6475,8 +6496,7 @@ impl<'a> EvalCtx<'a> {
                     let now = *clock;
                     drop(runtime);
                     if let CtValue::Struct { fields, .. } = &mut r {
-                        if let Some((_, value)) =
-                            fields.iter_mut().find(|(name, _)| name == "now")
+                        if let Some((_, value)) = fields.iter_mut().find(|(name, _)| name == "now")
                         {
                             *value = CtValue::Int(now);
                         } else {
@@ -6502,12 +6522,8 @@ impl<'a> EvalCtx<'a> {
                         crate::Codegen::TIR::THandleOp::FakeAddress => "address",
                         _ => unreachable!(),
                     };
-                    let result = crate::Comptime::apply_fake_method(
-                        &mut r,
-                        method,
-                        &argv,
-                        self.span(),
-                    )?;
+                    let result =
+                        crate::Comptime::apply_fake_method(&mut r, method, &argv, self.span())?;
                     if !matches!(op, crate::Codegen::TIR::THandleOp::FakeLocale) {
                         self.write_back_place(recv, r, scope)?;
                     }
@@ -6542,10 +6558,7 @@ impl<'a> EvalCtx<'a> {
                         jet_foundation::MemSentry::jet_sentry_quarantine_owner(owner);
                     }
                 }
-                if matches!(
-                    op,
-                    crate::Codegen::TIR::THandleOp::ExpiringMethod { .. }
-                ) {
+                if matches!(op, crate::Codegen::TIR::THandleOp::ExpiringMethod { .. }) {
                     let deadline = struct_int(&r, "deadline")
                         .ok_or_else(|| unsupported("expiring deadline", self.span()))?;
                     let clock_index = argv
@@ -6670,10 +6683,7 @@ impl<'a> EvalCtx<'a> {
                                     ambient_http_json_decode_error(self.span())?
                                 }
                                 _ => {
-                                    return Err(unsupported(
-                                        "HTTP JSON parse result",
-                                        self.span(),
-                                    ))
+                                    return Err(unsupported("HTTP JSON parse result", self.span()))
                                 }
                             };
                             if matches!(tree, CtValue::Failed(CtReport::Told(_))) {
@@ -6794,7 +6804,9 @@ impl<'a> EvalCtx<'a> {
                             format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
                                 .to_string(),
-                            format!("use `T.{field}`, or `T.reflect().{projected}` for full reflection"),
+                            format!(
+                                "use `T.{field}`, or `T.reflect().{projected}` for full reflection"
+                            ),
                             Some(self.span()),
                         ));
                     };
@@ -6808,7 +6820,9 @@ impl<'a> EvalCtx<'a> {
                                 format!("the reflected type has no `{field}` fact"),
                                 "the compiler fact projection is fixed by D-LAYOUT-FACTS1"
                                     .to_string(),
-                                format!("use `T.reflect().{projected}` for the full reflection object"),
+                                format!(
+                                    "use `T.reflect().{projected}` for the full reflection object"
+                                ),
                                 Some(self.span()),
                             )
                         });
@@ -6817,8 +6831,8 @@ impl<'a> EvalCtx<'a> {
                 // ordinary field read with an internal projection name. The
                 // value still comes from the one reflected `fields` list, so
                 // source and `jet inspect expand` cannot drift.
-                if let Some(selected) = field
-                    .strip_prefix(crate::Syntax::LAYOUT_FIELD_PROJECTION_PREFIX)
+                if let Some(selected) =
+                    field.strip_prefix(crate::Syntax::LAYOUT_FIELD_PROJECTION_PREFIX)
                 {
                     let CtValue::Struct { type_name, fields } = r else {
                         return Err(crate::Sema::Diagnostics::render_registered(
@@ -6882,10 +6896,7 @@ impl<'a> EvalCtx<'a> {
                 match r {
                     // TupleLit stores Rust-mangled `__jet_<f>` names (emit needs them);
                     // Field TIR keeps Jet names. Accept either so named-tuple reads work.
-                    CtValue::Struct {
-                        type_name,
-                        fields,
-                    } if type_name == "__JetViewMut" => {
+                    CtValue::Struct { type_name, fields } if type_name == "__JetViewMut" => {
                         let window =
                             self.materialize_view_mut_window(&fields, scope, self.span())?;
                         let CtValue::List(xs) = window else {
@@ -6902,7 +6913,8 @@ impl<'a> EvalCtx<'a> {
                                     .find(|(n, _)| {
                                         n == field
                                             || n == &mangled
-                                            || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
+                                            || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                                == Some(field.as_str())
                                     })
                                     .map(|(_, v)| v.clone())
                                     .ok_or_else(|| {
@@ -6919,7 +6931,8 @@ impl<'a> EvalCtx<'a> {
                             .find(|(n, _)| {
                                 n == field
                                     || n == &mangled
-                                    || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
+                                    || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                        == Some(field.as_str())
                             })
                             .map(|(_, v)| v)
                             .ok_or_else(|| unsupported(&format!("field `{field}`"), self.span()))
@@ -6940,12 +6953,16 @@ impl<'a> EvalCtx<'a> {
                     Ok(value)
                 }
             }
-            TExprKind::Present(inner) => {
-                Ok(CtValue::Present(Box::new(self.eval_expr_child(inner, scope)?)))
-            }
+            TExprKind::Present(inner) => Ok(CtValue::Present(Box::new(
+                self.eval_expr_child(inner, scope)?,
+            ))),
             TExprKind::Absent => Ok(CtValue::absent(expr.ty.clone())),
-            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(self.eval_expr_child(inner, scope)?))),
-            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(self.eval_expr_child(inner, scope)?))),
+            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(
+                self.eval_expr_child(inner, scope)?,
+            ))),
+            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(
+                self.eval_expr_child(inner, scope)?,
+            ))),
             TExprKind::TupleLit { fields, .. } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, e) in fields {
@@ -6981,33 +6998,28 @@ impl<'a> EvalCtx<'a> {
                     let key = crate::AST::CtKey::from_value(i)
                         .ok_or_else(|| unsupported("map index key", self.span()))?;
                     match b {
-                        CtValue::Map(m) => m
-                            .get(&key)
-                            .cloned()
-                            .ok_or_else(|| {
-                                self.runtime_index_stop(
-                                    "E3001",
-                                    *line as u32,
-                                    &jet_foundation::Outcome::jet_missing_map_key_value(
-                                        key.to_value().jet_show(),
-                                    ),
-                                )
-                            }),
+                        CtValue::Map(m) => m.get(&key).cloned().ok_or_else(|| {
+                            self.runtime_index_stop(
+                                "E3001",
+                                *line as u32,
+                                &jet_foundation::Outcome::jet_missing_map_key_value(
+                                    key.to_value().jet_show(),
+                                ),
+                            )
+                        }),
                         _ => Err(unsupported("map index recv", self.span())),
                     }
                 } else {
                     let idx = as_int(&i, self.span())?;
                     // Mutable place-window (`__JetViewMut`) — index into the owner.
-                    if let CtValue::Struct {
-                        type_name,
-                        fields,
-                    } = &b
-                    {
+                    if let CtValue::Struct { type_name, fields } = &b {
                         if type_name == "__JetViewMut" {
                             let owner = self.view_mut_owner_value(fields, scope, self.span())?;
-                            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
-                                let window = view_mut_window_args(fields)
-                                    .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
+                            {
+                                let window = view_mut_window_args(fields).ok_or_else(|| {
+                                    unsupported("Tensor view window", self.span())
+                                })?;
                                 return crate::Comptime::ComputeLite::tensor_view_get_value(
                                     &owner,
                                     window,
@@ -7025,7 +7037,8 @@ impl<'a> EvalCtx<'a> {
                                     "E3010",
                                     *line as u32,
                                     &jet_foundation::Outcome::jet_list_bounds_message(
-                                        xs.len(), idx,
+                                        xs.len(),
+                                        idx,
                                     ),
                                 ));
                             }
@@ -7042,9 +7055,7 @@ impl<'a> EvalCtx<'a> {
                                     unsupported("negative uninit index", self.span())
                                 })?,
                             )
-                            .ok_or_else(|| {
-                                unsupported("uninit fixed-list index", self.span())
-                            })
+                            .ok_or_else(|| unsupported("uninit fixed-list index", self.span()))
                         }
                         CtValue::List(xs) => {
                             if idx < 0 || idx as usize >= xs.len() {
@@ -7052,7 +7063,8 @@ impl<'a> EvalCtx<'a> {
                                     "E3010",
                                     *line as u32,
                                     &jet_foundation::Outcome::jet_list_bounds_message(
-                                        xs.len(), idx,
+                                        xs.len(),
+                                        idx,
                                     ),
                                 ))
                             } else {
@@ -7065,7 +7077,8 @@ impl<'a> EvalCtx<'a> {
                                     "E3010",
                                     *line as u32,
                                     &jet_foundation::Outcome::jet_list_bounds_message(
-                                        bs.len(), idx,
+                                        bs.len(),
+                                        idx,
                                     ),
                                 ))
                             } else {
@@ -7101,7 +7114,11 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Slice {
-                base, start, end, range, ..
+                base,
+                start,
+                end,
+                range,
+                ..
             } => {
                 let b = self.eval_expr_child(base, scope)?;
                 let (a, z, exclusive) = if let Some(range) = range {
@@ -7113,7 +7130,10 @@ impl<'a> EvalCtx<'a> {
                         return Err(unsupported("Range slice type", self.span()));
                     }
                     let field = |name: &str| {
-                        fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+                        fields
+                            .iter()
+                            .find(|(field, _)| field == name)
+                            .map(|(_, value)| value)
                     };
                     (
                         field("start")
@@ -7199,12 +7219,7 @@ impl<'a> EvalCtx<'a> {
                     .find_map(|arg| arg.template_items.as_deref())
                     .map(|items| {
                         let funcs = HashMap::new();
-                        crate::Comptime::format_template_body(
-                            items,
-                            scope,
-                            &funcs,
-                            &self.base_dir,
-                        )
+                        crate::Comptime::format_template_body(items, scope, &funcs, &self.base_dir)
                     })
                     .transpose()?;
                 let mut argv = Vec::with_capacity(args.len().saturating_sub(1));
@@ -7247,9 +7262,7 @@ impl<'a> EvalCtx<'a> {
                     {
                         Some(BinOp::Eq)
                     }
-                    (Some(crate::Syntax::TRAIT_COMPARABLE), "compare", ty)
-                        if ty.is_numeric() =>
-                    {
+                    (Some(crate::Syntax::TRAIT_COMPARABLE), "compare", ty) if ty.is_numeric() => {
                         Some(BinOp::Compare)
                     }
                     _ => None,
@@ -7281,10 +7294,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 if method.name == "apply" {
                     if let (
-                        CtValue::Struct {
-                            type_name,
-                            fields,
-                        },
+                        CtValue::Struct { type_name, fields },
                         Some(CtValue::Struct {
                             type_name: patch_name,
                             fields: patch_fields,
@@ -7317,10 +7327,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 if method.name == "merge" {
                     if let (
-                        CtValue::Struct {
-                            type_name,
-                            fields,
-                        },
+                        CtValue::Struct { type_name, fields },
                         Some(CtValue::Struct {
                             type_name: other_name,
                             fields: other_fields,
@@ -7351,17 +7358,15 @@ impl<'a> EvalCtx<'a> {
                 }
                 let span = self.span();
                 let base_dir = self.base_dir.clone();
-                if let Some(result) =
-                    crate::Comptime::Build::eval_program_build_input_method(
-                        &r,
-                        &method.name,
-                        &argv,
-                        source_first_string_literal.as_deref(),
-                        &base_dir,
-                        self.embed_inputs.as_deref_mut(),
-                        span,
-                    )
-                {
+                if let Some(result) = crate::Comptime::Build::eval_program_build_input_method(
+                    &r,
+                    &method.name,
+                    &argv,
+                    source_first_string_literal.as_deref(),
+                    &base_dir,
+                    self.embed_inputs.as_deref_mut(),
+                    span,
+                ) {
                     return result;
                 }
                 if let Some(result) = crate::Comptime::Build::eval_program_build_method(
@@ -7375,11 +7380,36 @@ impl<'a> EvalCtx<'a> {
                     return result;
                 }
                 const MUTATING: &[&str] = &[
-                    "push", "pop", "add", "add_new", "insert", "remove", "extend", "clear", "reverse",
-                    "sort", "tick", "advance", "wait", "int", "float", "float_range", "bool",
-                    "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample",
-                    "shuffle", "require",
-                    "name", "email", "host", "address",
+                    "push",
+                    "pop",
+                    "add",
+                    "add_new",
+                    "insert",
+                    "remove",
+                    "extend",
+                    "clear",
+                    "reverse",
+                    "sort",
+                    "tick",
+                    "advance",
+                    "wait",
+                    "int",
+                    "float",
+                    "float_range",
+                    "bool",
+                    "normal",
+                    "exponential",
+                    "bytes",
+                    "split",
+                    "pick",
+                    "weighted_pick",
+                    "sample",
+                    "shuffle",
+                    "require",
+                    "name",
+                    "email",
+                    "host",
+                    "address",
                 ];
                 let try_mutating = MUTATING.contains(&method.name.as_str())
                     || matches!(
@@ -7491,8 +7521,7 @@ impl<'a> EvalCtx<'a> {
                             crate::Codegen::TIR::TFuncKind::Method {
                                 self_conv: Some(_),
                                 ..
-                            }
-                                | crate::Codegen::TIR::TFuncKind::TraitMethod { .. }
+                            } | crate::Codegen::TIR::TFuncKind::TraitMethod { .. }
                         );
                         if has_receiver {
                             if let Some(memo_field) = &func.memo_field {
@@ -7501,9 +7530,7 @@ impl<'a> EvalCtx<'a> {
                                 }
                                 child.insert("self".to_string(), r.clone());
                                 let result = self.run_func(func, argv, &mut child)?;
-                                let mut updated = child
-                                    .remove("self")
-                                    .unwrap_or_else(|| r.clone());
+                                let mut updated = child.remove("self").unwrap_or_else(|| r.clone());
                                 memo_write(&mut updated, memo_field, result.clone());
                                 self.write_back_place(recv, updated, scope)?;
                                 return Ok(result);
@@ -7719,36 +7746,90 @@ impl<'a> EvalCtx<'a> {
                         }
                         (Type::Int, "MAX") => Ok(CtValue::Int(i64::MAX)),
                         (Type::Int, "MIN") => Ok(CtValue::Int(i64::MIN)),
-                        (Type::IntN { signed: false, bits: 8 }, "MAX") => {
-                            Ok(CtValue::Int(u8::MAX as i64))
-                        }
-                        (Type::IntN { signed: false, bits: 8 }, "MIN") => Ok(CtValue::Int(0)),
-                        (Type::IntN { signed: true, bits: 8 }, "MAX") => {
-                            Ok(CtValue::Int(i8::MAX as i64))
-                        }
-                        (Type::IntN { signed: true, bits: 8 }, "MIN") => {
-                            Ok(CtValue::Int(i8::MIN as i64))
-                        }
-                        (Type::IntN { signed: false, bits: 16 }, "MAX") => {
-                            Ok(CtValue::Int(u16::MAX as i64))
-                        }
-                        (Type::IntN { signed: false, bits: 16 }, "MIN") => Ok(CtValue::Int(0)),
-                        (Type::IntN { signed: true, bits: 16 }, "MAX") => {
-                            Ok(CtValue::Int(i16::MAX as i64))
-                        }
-                        (Type::IntN { signed: true, bits: 16 }, "MIN") => {
-                            Ok(CtValue::Int(i16::MIN as i64))
-                        }
-                        (Type::IntN { signed: false, bits: 32 }, "MAX") => {
-                            Ok(CtValue::Int(u32::MAX as i64))
-                        }
-                        (Type::IntN { signed: false, bits: 32 }, "MIN") => Ok(CtValue::Int(0)),
-                        (Type::IntN { signed: true, bits: 32 }, "MAX") => {
-                            Ok(CtValue::Int(i32::MAX as i64))
-                        }
-                        (Type::IntN { signed: true, bits: 32 }, "MIN") => {
-                            Ok(CtValue::Int(i32::MIN as i64))
-                        }
+                        (
+                            Type::IntN {
+                                signed: false,
+                                bits: 8,
+                            },
+                            "MAX",
+                        ) => Ok(CtValue::Int(u8::MAX as i64)),
+                        (
+                            Type::IntN {
+                                signed: false,
+                                bits: 8,
+                            },
+                            "MIN",
+                        ) => Ok(CtValue::Int(0)),
+                        (
+                            Type::IntN {
+                                signed: true,
+                                bits: 8,
+                            },
+                            "MAX",
+                        ) => Ok(CtValue::Int(i8::MAX as i64)),
+                        (
+                            Type::IntN {
+                                signed: true,
+                                bits: 8,
+                            },
+                            "MIN",
+                        ) => Ok(CtValue::Int(i8::MIN as i64)),
+                        (
+                            Type::IntN {
+                                signed: false,
+                                bits: 16,
+                            },
+                            "MAX",
+                        ) => Ok(CtValue::Int(u16::MAX as i64)),
+                        (
+                            Type::IntN {
+                                signed: false,
+                                bits: 16,
+                            },
+                            "MIN",
+                        ) => Ok(CtValue::Int(0)),
+                        (
+                            Type::IntN {
+                                signed: true,
+                                bits: 16,
+                            },
+                            "MAX",
+                        ) => Ok(CtValue::Int(i16::MAX as i64)),
+                        (
+                            Type::IntN {
+                                signed: true,
+                                bits: 16,
+                            },
+                            "MIN",
+                        ) => Ok(CtValue::Int(i16::MIN as i64)),
+                        (
+                            Type::IntN {
+                                signed: false,
+                                bits: 32,
+                            },
+                            "MAX",
+                        ) => Ok(CtValue::Int(u32::MAX as i64)),
+                        (
+                            Type::IntN {
+                                signed: false,
+                                bits: 32,
+                            },
+                            "MIN",
+                        ) => Ok(CtValue::Int(0)),
+                        (
+                            Type::IntN {
+                                signed: true,
+                                bits: 32,
+                            },
+                            "MAX",
+                        ) => Ok(CtValue::Int(i32::MAX as i64)),
+                        (
+                            Type::IntN {
+                                signed: true,
+                                bits: 32,
+                            },
+                            "MIN",
+                        ) => Ok(CtValue::Int(i32::MIN as i64)),
                         (Type::IntN { signed, bits }, "MAX") => Ok(CtValue::Int(
                             crate::Comptime::MathLayout::integer_bound(*signed, *bits, true),
                         )),
@@ -7783,17 +7864,25 @@ impl<'a> EvalCtx<'a> {
                     match kind {
                         TTypedTextForm::SQLRaw => match value {
                             CtValue::Str(template) => {
-                                let (template, params) = crate::typed_text::jet_typed_sql_raw(template);
-                                Ok(typed_sql_value(template, params.into_iter().map(CtValue::Str).collect()))
+                                let (template, params) =
+                                    crate::typed_text::jet_typed_sql_raw(template);
+                                Ok(typed_sql_value(
+                                    template,
+                                    params.into_iter().map(CtValue::Str).collect(),
+                                ))
                             }
                             _ => Err(unsupported("SQL.raw expects String", self.span())),
                         },
                         TTypedTextForm::HTMLRaw => match value {
-                            CtValue::Str(value) => Ok(CtValue::Str(crate::typed_text::jet_typed_html_raw(value))),
+                            CtValue::Str(value) => {
+                                Ok(CtValue::Str(crate::typed_text::jet_typed_html_raw(value)))
+                            }
                             _ => Err(unsupported("HTML value expects String", self.span())),
                         },
                         TTypedTextForm::HTMLText => match value {
-                            CtValue::Str(value) => Ok(CtValue::Str(crate::typed_text::jet_typed_html_text(value))),
+                            CtValue::Str(value) => {
+                                Ok(CtValue::Str(crate::typed_text::jet_typed_html_text(value)))
+                            }
                             _ => Err(unsupported("HTML value expects String", self.span())),
                         },
                         TTypedTextForm::ShRaw => match value {
@@ -7825,28 +7914,27 @@ impl<'a> EvalCtx<'a> {
                     }
                     match kind {
                         TTypedTextInterpKind::SQL => {
-                            let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let literal_refs =
+                                literals.iter().map(String::as_str).collect::<Vec<_>>();
                             let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
-                            let (template, params) = crate::typed_text::jet_typed_sql_interpolate(
-                                &literal_refs,
-                                shown,
-                            );
+                            let (template, params) =
+                                crate::typed_text::jet_typed_sql_interpolate(&literal_refs, shown);
                             Ok(typed_sql_value(
                                 template,
                                 params.into_iter().map(CtValue::Str).collect(),
                             ))
                         }
                         TTypedTextInterpKind::Sh => {
-                            let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let literal_refs =
+                                literals.iter().map(String::as_str).collect::<Vec<_>>();
                             let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
-                            let argv = crate::typed_text::jet_typed_sh_interpolate(
-                                &literal_refs,
-                                shown,
-                            );
+                            let argv =
+                                crate::typed_text::jet_typed_sh_interpolate(&literal_refs, shown);
                             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
                         }
                         TTypedTextInterpKind::HTML => {
-                            let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
+                            let literal_refs =
+                                literals.iter().map(String::as_str).collect::<Vec<_>>();
                             let shown = crate::Comptime::render_typed_holes(&values, self.span())?;
                             Ok(CtValue::Str(crate::typed_text::jet_typed_html_interpolate(
                                 &literal_refs,
@@ -7855,14 +7943,12 @@ impl<'a> EvalCtx<'a> {
                         }
                         TTypedTextInterpKind::URL
                         | TTypedTextInterpKind::Path
-                        | TTypedTextInterpKind::DateTime => {
-                            crate::Comptime::evaluate_typed_head(
-                                *kind,
-                                literals,
-                                &values,
-                                self.span(),
-                            )
-                        }
+                        | TTypedTextInterpKind::DateTime => crate::Comptime::evaluate_typed_head(
+                            *kind,
+                            literals,
+                            &values,
+                            self.span(),
+                        ),
                     }
                 }
                 crate::Codegen::TIR::THostCall::BinMatchScan { parts, probe } => {
@@ -7883,7 +7969,10 @@ impl<'a> EvalCtx<'a> {
                                 return Err(unsupported("binary pattern tuple", self.span()));
                             };
                             if fields.len() != binds.len() {
-                                return Err(unsupported("binary pattern binding count", self.span()));
+                                return Err(unsupported(
+                                    "binary pattern binding count",
+                                    self.span(),
+                                ));
                             }
                             let plain_fields = fields
                                 .iter()
@@ -7893,9 +7982,7 @@ impl<'a> EvalCtx<'a> {
                                 .into_iter()
                                 .map(|(_, _, bind)| super::bin_match_bind_value(bind));
                             Ok(CtValue::Struct {
-                                type_name: crate::Codegen::Tuples::tuple_struct_name(
-                                    &plain_fields,
-                                ),
+                                type_name: crate::Codegen::Tuples::tuple_struct_name(&plain_fields),
                                 fields: fields
                                     .iter()
                                     .map(|(name, _)| name.clone())
@@ -7908,9 +7995,9 @@ impl<'a> EvalCtx<'a> {
                 crate::Codegen::TIR::THostCall::OptionProbe { inner, kind } => {
                     let value = self.eval_expr_child(inner, scope)?;
                     match kind {
-                        crate::Codegen::TIR::TOptionProbe::IsSome => Ok(CtValue::Bool(
-                            matches!(value, CtValue::Present(_)),
-                        )),
+                        crate::Codegen::TIR::TOptionProbe::IsSome => {
+                            Ok(CtValue::Bool(matches!(value, CtValue::Present(_))))
+                        }
                         crate::Codegen::TIR::TOptionProbe::Unwrap => match value {
                             CtValue::Present(value) => Ok(*value),
                             CtValue::Failed(crate::AST::CtReport::Clean(_)) => {
@@ -7949,17 +8036,19 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 crate::Codegen::TIR::THostCall::SwitchSubjectField { field } => {
-                    let CtValue::Struct { fields, .. } = self
-                        .switch_subject
-                        .as_ref()
-                        .ok_or_else(|| unsupported("switch subject field outside switch", self.span()))?
+                    let CtValue::Struct { fields, .. } =
+                        self.switch_subject.as_ref().ok_or_else(|| {
+                            unsupported("switch subject field outside switch", self.span())
+                        })?
                     else {
                         return Err(unsupported("switch subject is not a struct", self.span()));
                     };
                     fields
                         .iter()
                         .find_map(|(name, value)| (name == field).then(|| value.clone()))
-                        .ok_or_else(|| unsupported(&format!("switch subject field `{field}`"), self.span()))
+                        .ok_or_else(|| {
+                            unsupported(&format!("switch subject field `{field}`"), self.span())
+                        })
                 }
                 crate::Codegen::TIR::THostCall::SwitchSubjectValue => self
                     .switch_subject
@@ -7975,7 +8064,9 @@ impl<'a> EvalCtx<'a> {
                         .or_else(|| scope.get(source_root).cloned())
                         .or_else(|| self.globals.get(root).cloned())
                         .or_else(|| self.globals.get(source_root).cloned())
-                        .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                        .ok_or_else(|| {
+                            unsupported(&format!("unbound GC root `{root}`"), self.span())
+                        })?;
                     self.gc_read_root(&root)
                 }
                 crate::Codegen::TIR::THostCall::GcEdit {
@@ -7999,7 +8090,9 @@ impl<'a> EvalCtx<'a> {
                         .cloned()
                         .or_else(|| self.globals.get(root).cloned())
                         .or_else(|| self.globals.get(&root_key).cloned())
-                        .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                        .ok_or_else(|| {
+                            unsupported(&format!("unbound GC root `{root}`"), self.span())
+                        })?;
                     let current = self.gc_read_root(&root_value)?;
                     let value_key = mangle_generated("value");
                     let prior_value = scope.insert(value_key.clone(), current);
@@ -8066,13 +8159,14 @@ impl<'a> EvalCtx<'a> {
                 // a failure each answer is decided in one place.
                 crate::Codegen::TIR::THostCall::CarrierFact { recv, field, notes } => {
                     let outcome = self.eval_expr_child(recv, scope)?;
-                    crate::Comptime::Builtins::carrier_fact(&outcome, field, *notes)
-                        .ok_or_else(|| {
+                    crate::Comptime::Builtins::carrier_fact(&outcome, field, *notes).ok_or_else(
+                        || {
                             unsupported(
                                 "this middle state needs an error type that carries it",
                                 self.span(),
                             )
-                        })
+                        },
+                    )
                 }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr_child(recv, scope)?;
@@ -8086,12 +8180,7 @@ impl<'a> EvalCtx<'a> {
                                     | "__JetTirCellEditGuard"
                             )
                     ) {
-                        return self.eval_local_cell_method(
-                            &r,
-                            method,
-                            args,
-                            scope,
-                        );
+                        return self.eval_local_cell_method(&r, method, args, scope);
                     }
                     if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirExpiring")
                         && method == "with"
@@ -8160,7 +8249,8 @@ impl<'a> EvalCtx<'a> {
                             CtValue::absent(Type::Shared(Box::new(Type::Int)))
                         });
                     }
-                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirShared") {
+                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirShared")
+                    {
                         let CtValue::Struct { fields, .. } = &r else {
                             unreachable!();
                         };
@@ -8203,8 +8293,8 @@ impl<'a> EvalCtx<'a> {
                             let state = shared
                                 .acquire_guard(editable, self.task_cancel.as_ref())
                                 .ok_or_else(|| {
-                                    crate::Sema::Diagnostics::task_cancelled(Some(self.span()))
-                                })?;
+                                crate::Sema::Diagnostics::task_cancelled(Some(self.span()))
+                            })?;
                             let mut runtime =
                                 self.runtime.lock().expect("evaluator runtime poisoned");
                             let lease_index = runtime.shared_guards.len();
@@ -8216,10 +8306,7 @@ impl<'a> EvalCtx<'a> {
                                 fields: vec![
                                     ("shared".to_string(), CtValue::Int(index as i64)),
                                     ("lease".to_string(), CtValue::Int(lease_index as i64)),
-                                    (
-                                        "editable".to_string(),
-                                        CtValue::Bool(editable),
-                                    ),
+                                    ("editable".to_string(), CtValue::Bool(editable)),
                                 ],
                             });
                         }
@@ -8245,9 +8332,7 @@ impl<'a> EvalCtx<'a> {
                                     self.span(),
                                 ));
                             };
-                            transaction
-                                .transaction
-                                .touch(shared.protocol.clone());
+                            transaction.transaction.touch(shared.protocol.clone());
                             transaction.deltas.push(super::EvalSharedDelta {
                                 shared_index: index,
                                 lambda,
@@ -8298,12 +8383,9 @@ impl<'a> EvalCtx<'a> {
                         Some(&expr.ty),
                     ) {
                         Ok(v) => v,
-                        Err(_) => crate::Comptime::Builtins::apply_method(
-                            &r,
-                            method,
-                            argv,
-                            self.span(),
-                        )?,
+                        Err(_) => {
+                            crate::Comptime::Builtins::apply_method(&r, method, argv, self.span())?
+                        }
                     };
                     self.write_back_place(recv, r, scope)?;
                     Ok(result)
@@ -8322,10 +8404,9 @@ impl<'a> EvalCtx<'a> {
                         items.push(yielded);
                         return Ok(CtValue::Unit);
                     }
-                    let consumer = self
-                        .yield_consumer
-                        .clone()
-                        .ok_or_else(|| unsupported("yield outside a stream consumer", self.span()))?;
+                    let consumer = self.yield_consumer.clone().ok_or_else(|| {
+                        unsupported("yield outside a stream consumer", self.span())
+                    })?;
                     if consumer
                         .producer
                         .cancelled
@@ -8346,10 +8427,8 @@ impl<'a> EvalCtx<'a> {
                     // under that task's cancellation fact, not the child's.
                     let producer_cancel =
                         std::mem::replace(&mut self.task_cancel, consumer.consumer_cancel);
-                    let producer_shield_depth = std::mem::replace(
-                        &mut self.shield_depth,
-                        consumer.consumer_shield_depth,
-                    );
+                    let producer_shield_depth =
+                        std::mem::replace(&mut self.shield_depth, consumer.consumer_shield_depth);
                     let result = self.exec_stmts(consumer.body, &mut consumer_scope);
                     self.shield_depth = producer_shield_depth;
                     self.task_cancel = producer_cancel;
@@ -8374,10 +8453,7 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 crate::Codegen::TIR::THostCall::Helper { helper, args } => {
-                    let leaf = helper
-                        .rsplit("::")
-                        .next()
-                        .unwrap_or(helper.as_str());
+                    let leaf = helper.rsplit("::").next().unwrap_or(helper.as_str());
                     let mut argv = Vec::with_capacity(args.len());
                     for a in args {
                         match a {
@@ -8403,8 +8479,7 @@ impl<'a> EvalCtx<'a> {
                                 ));
                             }
                         };
-                        let mut runtime =
-                            self.runtime.lock().expect("evaluator runtime poisoned");
+                        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                         let index = runtime.clocks.len();
                         runtime.clocks.push(seed);
                         return Ok(CtValue::Struct {
@@ -8509,10 +8584,7 @@ impl<'a> EvalCtx<'a> {
                         crate::Codegen::TIR::THostCall::ExpectSnapshot { .. } => "ExpectSnapshot",
                         _ => "Other",
                     };
-                    Err(unsupported(
-                        &format!("expr `HostCall` {tag}"),
-                        self.span(),
-                    ))
+                    Err(unsupported(&format!("expr `HostCall` {tag}"), self.span()))
                 }
             },
             TExprKind::DataEntriesToMap(local) => {
@@ -8520,7 +8592,9 @@ impl<'a> EvalCtx<'a> {
                     .get(&local.name)
                     .cloned()
                     .or_else(|| self.globals.get(&local.name).cloned())
-                    .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span()))?;
+                    .ok_or_else(|| {
+                        unsupported(&format!("unbound `{}`", local.name), self.span())
+                    })?;
                 // DataTree.Object binds its ordered payload as the evaluator's
                 // JSONObject record. The AOT/JIT paths collect that payload into
                 // the user-facing Map before the generated decoder iterates it;
@@ -8538,19 +8612,23 @@ impl<'a> EvalCtx<'a> {
                     other => Ok(other),
                 }
             }
-            TExprKind::DistinctCtor { name: _, arg, base: _ } => {
+            TExprKind::DistinctCtor {
+                name: _,
+                arg,
+                base: _,
+            } => {
                 // Distinct is a zero-cost nominal wrapper over its base scalar.
                 self.eval_expr_child(arg, scope)
             }
             TExprKind::RangeCheckedCtor { name, arg } => {
                 let v = self.eval_expr_child(arg, scope)?;
                 Ok(CtValue::Present(Box::new(v)))
-                // Range bounds are enforced by sema for literals; dynamic checks
-                // reuse the same ok-wrapping Result shape as AOT try_new.
-                .map(|ok| {
-                    let _ = name;
-                    ok
-                })
+                    // Range bounds are enforced by sema for literals; dynamic checks
+                    // reuse the same ok-wrapping Result shape as AOT try_new.
+                    .map(|ok| {
+                        let _ = name;
+                        ok
+                    })
             }
             TExprKind::DistinctConvert {
                 name: _,
@@ -8563,7 +8641,9 @@ impl<'a> EvalCtx<'a> {
                 let converted = self.eval_numeric_op(&v, op, &arg.ty, &expr.ty)?;
                 let inner = match converted {
                     CtValue::Present(v) => *v,
-                    CtValue::Failed(CtReport::Told(e)) if *fallible => return Ok(CtValue::Failed(CtReport::Told(e))),
+                    CtValue::Failed(CtReport::Told(e)) if *fallible => {
+                        return Ok(CtValue::Failed(CtReport::Told(e)))
+                    }
                     other if !*fallible => other,
                     other => other,
                 };
@@ -8692,10 +8772,7 @@ impl<'a> EvalCtx<'a> {
                         Err(_) => {}
                     }
                 }
-                Err(unsupported(
-                    &format!("`{type_name}.{func}`"),
-                    self.span(),
-                ))
+                Err(unsupported(&format!("`{type_name}.{func}`"), self.span()))
             }
             TExprKind::PreciseBuiltin {
                 type_name,
@@ -8712,7 +8789,11 @@ impl<'a> EvalCtx<'a> {
             TExprKind::ResourceTake(place) => scope
                 .get(place)
                 .cloned()
-                .or_else(|| place.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).and_then(|name| scope.get(name).cloned()))
+                .or_else(|| {
+                    place
+                        .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                        .and_then(|name| scope.get(name).cloned())
+                })
                 .or_else(|| self.globals.get(place).cloned())
                 .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { prompt } => {
@@ -8761,13 +8842,12 @@ impl<'a> EvalCtx<'a> {
             TExprKind::RequireStop { .. } => {
                 unreachable!("require/panic stop bypassed its evaluator continuation")
             }
-            TExprKind::LayoutCompare { .. } => Err(unsupported("expr `LayoutCompare`", self.span())),
+            TExprKind::LayoutCompare { .. } => {
+                Err(unsupported("expr `LayoutCompare`", self.span()))
+            }
             TExprKind::LayoutLit { .. } => Err(unsupported("expr `LayoutLit`", self.span())),
             TExprKind::IncDec {
-                op,
-                place,
-                postfix,
-                ..
+                op, place, postfix, ..
             } => {
                 let TPlace::Local(local) = place else {
                     return Err(unsupported("inc/dec place", self.span()));
@@ -8776,9 +8856,7 @@ impl<'a> EvalCtx<'a> {
                 let cur = local
                     .persist_key
                     .as_ref()
-                    .and_then(|persist_key| {
-                        jet_foundation::Persist::shared_read_key(persist_key)
-                    })
+                    .and_then(|persist_key| jet_foundation::Persist::shared_read_key(persist_key))
                     .or_else(|| scope.get(&key).cloned())
                     .or_else(|| self.globals.get(&key).cloned())
                     .unwrap_or(CtValue::Unit);
@@ -8795,16 +8873,15 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 scope.insert(key, next.clone());
-                Ok(if *postfix {
-                    CtValue::Int(n)
-                } else {
-                    next
-                })
+                Ok(if *postfix { CtValue::Int(n) } else { next })
             }
             TExprKind::PtrFromAddr { addr, .. } => {
                 let address = self.eval_expr_child(addr, scope)?;
                 if std::env::var_os("JET_DEBUG_RAW").is_some() {
-                    eprintln!("[raw-debug] from_addr address={address:?} span={:?}", self.span());
+                    eprintln!(
+                        "[raw-debug] from_addr address={address:?} span={:?}",
+                        self.span()
+                    );
                 }
                 let address = match address {
                     CtValue::Int(address) => address,
@@ -8831,7 +8908,11 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Deref(inner) => {
                 let pointer = self.eval_expr_child(inner, scope)?;
                 if std::env::var_os("JET_DEBUG_RAW").is_some() {
-                    eprintln!("[raw-debug] deref pointer={pointer:?} ty={:?} span={:?}", expr.ty, self.span());
+                    eprintln!(
+                        "[raw-debug] deref pointer={pointer:?} ty={:?} span={:?}",
+                        expr.ty,
+                        self.span()
+                    );
                 }
                 let CtValue::Struct { type_name, fields } = pointer else {
                     return Err(unsupported("raw pointer carrier", self.span()));
@@ -8845,8 +8926,8 @@ impl<'a> EvalCtx<'a> {
                 if let Some(value) = raw_pointer_value(&fields) {
                     return Ok(value);
                 }
-                let name = raw_pointer_name(&fields)
-                    .or_else(|| self.sentry_places.get(&address).cloned());
+                let name =
+                    raw_pointer_name(&fields).or_else(|| self.sentry_places.get(&address).cloned());
                 name.and_then(|name| scope.get(&name).cloned())
                     .ok_or_else(|| unsupported("raw pointer local", self.span()))
             }
@@ -9038,11 +9119,8 @@ impl<'a> EvalCtx<'a> {
                     CtValue::List(slots) if name == "slots" => Some(slots),
                     _ => None,
                 });
-                let Some(CtValue::Enum {
-                    variant,
-                    args,
-                    ..
-                }) = slots.and_then(|slots| slots.get(index))
+                let Some(CtValue::Enum { variant, args, .. }) =
+                    slots.and_then(|slots| slots.get(index))
                 else {
                     return Err(self.pool_stale_stop(*line as u32));
                 };
@@ -9061,7 +9139,9 @@ impl<'a> EvalCtx<'a> {
                     value = fields
                         .into_iter()
                         .find_map(|(name, value)| (name == *field).then_some(value))
-                        .ok_or_else(|| unsupported(&format!("Pool field `{field}`"), self.span()))?;
+                        .ok_or_else(|| {
+                            unsupported(&format!("Pool field `{field}`"), self.span())
+                        })?;
                 }
                 Ok(value)
             }
@@ -9085,7 +9165,9 @@ impl<'a> EvalCtx<'a> {
                     CtValue::Failed(CtReport::Clean(_)) if self.runtime_execution => {
                         Err(self.runtime_stop("E3001", *line as u32, "index miss"))
                     }
-                    CtValue::Failed(CtReport::Clean(_)) => Err(unsupported("index miss", self.span())),
+                    CtValue::Failed(CtReport::Clean(_)) => {
+                        Err(unsupported("index miss", self.span()))
+                    }
                     _ => Err(unsupported("Index.get result", self.span())),
                 }
             }
@@ -9108,7 +9190,9 @@ impl<'a> EvalCtx<'a> {
                 let callable = fields
                     .into_iter()
                     .find_map(|(name, value)| (name == *field).then_some(value))
-                    .ok_or_else(|| unsupported(&format!("function field `{field}`"), self.span()))?;
+                    .ok_or_else(|| {
+                        unsupported(&format!("function field `{field}`"), self.span())
+                    })?;
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
                     argv.push(self.eval_expr_child(&arg.value, scope)?);
@@ -9157,12 +9241,11 @@ impl<'a> EvalCtx<'a> {
                                     let fields = new_fields
                                         .iter()
                                         .map(|(name, new_value)| {
-                                            let changed = old_fields
-                                                .iter()
-                                                .find_map(|(old_name, old_value)| {
+                                            let changed = old_fields.iter().find_map(
+                                                |(old_name, old_value)| {
                                                     (old_name == name).then_some(old_value)
-                                                })
-                                                != Some(new_value);
+                                                },
+                                            ) != Some(new_value);
                                             (
                                                 name.clone(),
                                                 if changed {
@@ -9191,8 +9274,7 @@ impl<'a> EvalCtx<'a> {
                         // Core-import alias may still lower as StaticCall when
                         // function bodies were typed before imports propagated.
                         if let Some(module) = self.core_imports.get(type_name) {
-                            if let Some(value) =
-                                self.runtime_time_now(module, &method.name, &argv)
+                            if let Some(value) = self.runtime_time_now(module, &method.name, &argv)
                             {
                                 return Ok(value);
                             }
@@ -9208,10 +9290,7 @@ impl<'a> EvalCtx<'a> {
                             ) {
                                 return Err(diagnostic);
                             }
-                            if module == "core.reflect"
-                                && method.name == "of"
-                                && args.len() == 1
-                            {
+                            if module == "core.reflect" && method.name == "of" && args.len() == 1 {
                                 let value = argv
                                     .into_iter()
                                     .next()
@@ -9226,8 +9305,7 @@ impl<'a> EvalCtx<'a> {
                                 Some(&expr.ty),
                             )?;
                             if module == "core.math.random" && method.name == "shuffle" {
-                                if let (Some(place), CtValue::List(items)) =
-                                    (args.first(), &value)
+                                if let (Some(place), CtValue::List(items)) = (args.first(), &value)
                                 {
                                     self.write_back_place(
                                         &place.value,
@@ -9283,11 +9361,9 @@ impl<'a> EvalCtx<'a> {
                             let mut runtime =
                                 self.runtime.lock().expect("evaluator runtime poisoned");
                             let index = runtime.shared_values.len();
-                            runtime
-                                .shared_values
-                                .push(std::sync::Arc::new(super::EvalSharedState::new(
-                                    argv.remove(0),
-                                )));
+                            runtime.shared_values.push(std::sync::Arc::new(
+                                super::EvalSharedState::new(argv.remove(0)),
+                            ));
                             return Ok(CtValue::Struct {
                                 type_name: "__JetTirShared".to_string(),
                                 fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -9311,8 +9387,7 @@ impl<'a> EvalCtx<'a> {
                         if matches!(
                             path.as_str(),
                             "jet_std::JetCell" | "jet_std::jet_cell::JetCell"
-                        )
-                            && method.name == "new"
+                        ) && method.name == "new"
                             && argv.len() == 1
                         {
                             let index = self.local_cells.insert_cell(argv.remove(0));
@@ -9472,12 +9547,7 @@ impl<'a> EvalCtx<'a> {
                     },
                     || {
                         move |left, right| {
-                            self.apply_callable_once(
-                                f,
-                                &mut callable,
-                                vec![left, right],
-                                scope,
-                            )
+                            self.apply_callable_once(f, &mut callable, vec![left, right], scope)
                         }
                     },
                 )
@@ -9660,10 +9730,7 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                     }
-                    Ok(self.store_callable(EvalCallable::Lambda {
-                        lambda,
-                        captured,
-                    }))
+                    Ok(self.store_callable(EvalCallable::Lambda { lambda, captured }))
                 }
                 TFnValueKind::NamedFn {
                     name: None,
@@ -9748,8 +9815,7 @@ impl<'a> EvalCtx<'a> {
                 // owner's storage, not the window binding.
                 let span = self.span();
                 if let Some(handle) = scope.get(&local.name).cloned() {
-                    if let Some(written) =
-                        self.write_place_mut(&handle, value.clone(), scope, span)
+                    if let Some(written) = self.write_place_mut(&handle, value.clone(), scope, span)
                     {
                         return written;
                     }
@@ -9808,8 +9874,8 @@ impl<'a> EvalCtx<'a> {
                 let address = raw_pointer_address(&fields)
                     .ok_or_else(|| unsupported("raw pointer address", self.span()))?;
                 self.check_runtime_sentry(address, &place.ty, "write", "valid_ptr")?;
-                let name = raw_pointer_name(&fields)
-                    .or_else(|| self.sentry_places.get(&address).cloned());
+                let name =
+                    raw_pointer_name(&fields).or_else(|| self.sentry_places.get(&address).cloned());
                 let Some(name) = name else {
                     return Err(unsupported("raw pointer local", self.span()));
                 };
@@ -9851,12 +9917,15 @@ impl<'a> EvalCtx<'a> {
                                         CtValue::Struct { type_name, fields } => {
                                             self.invalidate_memo_fields(type_name, fields, field);
                                             let mangled = crate::Codegen::mangle(field);
-                                            if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
-                                                n == field
-                                                    || n == &mangled
-                                                    || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                                                        == Some(field.as_str())
-                                            }) {
+                                            if let Some((_, slot)) =
+                                                fields.iter_mut().find(|(n, _)| {
+                                                    n == field
+                                                        || n == &mangled
+                                                        || n.strip_prefix(
+                                                            crate::Syntax::GENERATED_NAME_PREFIX,
+                                                        ) == Some(field.as_str())
+                                                })
+                                            {
                                                 *slot = value;
                                             } else {
                                                 fields.push((field.clone(), value));
@@ -9883,10 +9952,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 let mut base_val = self.eval_expr_child(recv, scope)?;
                 match &mut base_val {
-                    CtValue::Struct {
-                        type_name,
-                        fields,
-                    } if type_name == "__JetViewMut" => {
+                    CtValue::Struct { type_name, fields } if type_name == "__JetViewMut" => {
                         return Err(unsupported("field write-back on view-mut", self.span()));
                     }
                     CtValue::Struct { type_name, fields } => {
@@ -9895,7 +9961,8 @@ impl<'a> EvalCtx<'a> {
                         if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
                             n == field
                                 || n == &mangled
-                                || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
+                                || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                    == Some(field.as_str())
                         }) {
                             *slot = value;
                         } else {
@@ -9927,11 +9994,8 @@ impl<'a> EvalCtx<'a> {
                     CtValue::List(slots) if name == "slots" => Some(slots),
                     _ => None,
                 });
-                let Some(CtValue::Enum {
-                    variant,
-                    args,
-                    ..
-                }) = slots.and_then(|slots| slots.get_mut(index))
+                let Some(CtValue::Enum { variant, args, .. }) =
+                    slots.and_then(|slots| slots.get_mut(index))
                 else {
                     return Err(self.pool_stale_stop(*line as u32));
                 };
@@ -9951,7 +10015,9 @@ impl<'a> EvalCtx<'a> {
                     let slot = fields
                         .iter_mut()
                         .find_map(|(name, value)| (name == field).then_some(value))
-                        .ok_or_else(|| unsupported(&format!("Pool field `{field}`"), self.span()))?;
+                        .ok_or_else(|| {
+                            unsupported(&format!("Pool field `{field}`"), self.span())
+                        })?;
                     *slot = value;
                 } else {
                     *payload = value;
@@ -10010,7 +10076,11 @@ impl<'a> EvalCtx<'a> {
                             let value = exact_big(value)
                                 .ok_or_else(|| unsupported("CastAs to f64", self.span()))?;
                             let value = value.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
-                                if value.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                                if value.negative {
+                                    f64::NEG_INFINITY
+                                } else {
+                                    f64::INFINITY
+                                }
                             });
                             Ok(CtValue::Float(CtFloat::f64(value)))
                         }
@@ -10023,7 +10093,11 @@ impl<'a> EvalCtx<'a> {
                             let value = exact_big(value)
                                 .ok_or_else(|| unsupported("CastAs to f32", self.span()))?;
                             let value = value.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
-                                if value.negative { f64::NEG_INFINITY } else { f64::INFINITY }
+                                if value.negative {
+                                    f64::NEG_INFINITY
+                                } else {
+                                    f64::INFINITY
+                                }
                             });
                             Ok(CtValue::Float(CtFloat::f32(value as f32)))
                         }
@@ -10042,7 +10116,10 @@ impl<'a> EvalCtx<'a> {
                     exact_big(v).and_then(|value| value.checked_widen(*target_f32))
                 } else {
                     let CtValue::Int(value) = v else {
-                        return Err(unsupported("checked numeric widening expects Int", self.span()));
+                        return Err(unsupported(
+                            "checked numeric widening expects Int",
+                            self.span(),
+                        ));
                     };
                     crate::numeric_widen::jet_numeric_checked_widen(
                         *value as u64,
@@ -10069,7 +10146,7 @@ impl<'a> EvalCtx<'a> {
                     ));
                 };
                 Ok(CtValue::Float(if *target_f32 {
-                        CtFloat::f32(value as f32)
+                    CtFloat::f32(value as f32)
                 } else {
                     CtFloat::f64(value)
                 }))
@@ -10083,7 +10160,9 @@ impl<'a> EvalCtx<'a> {
                     exact_big(v)
                 } else {
                     match v {
-                        CtValue::Int(value) => Some(jet_foundation::Numeric::CtBigInt::from_int(*value)),
+                        CtValue::Int(value) => {
+                            Some(jet_foundation::Numeric::CtBigInt::from_int(*value))
+                        }
                         _ => None,
                     }
                 };
@@ -10127,7 +10206,9 @@ impl<'a> EvalCtx<'a> {
                 let lo: f64 = lower.parse().unwrap_or(f64::NEG_INFINITY);
                 let hi: f64 = upper_exclusive.parse().unwrap_or(f64::INFINITY);
                 if f.is_finite() && f.as_f64() >= lo && f.as_f64() < hi {
-                    Ok(CtValue::Present(Box::new(CtValue::Int(f.as_f64().trunc() as i64))))
+                    Ok(CtValue::Present(Box::new(CtValue::Int(
+                        f.as_f64().trunc() as i64
+                    ))))
                 } else {
                     Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                         "value doesn't fit in {dst_spelling}"
@@ -10151,7 +10232,10 @@ impl<'a> EvalCtx<'a> {
             }
             TNumericOp::InlineRange { lo, hi, fallible } => {
                 let CtValue::Int(n) = v else {
-                    return Err(unsupported("inline range conversion expects Int", self.span()));
+                    return Err(unsupported(
+                        "inline range conversion expects Int",
+                        self.span(),
+                    ));
                 };
                 if !*fallible {
                     return Ok(CtValue::Int(*n));
@@ -10175,11 +10259,12 @@ impl<'a> EvalCtx<'a> {
         // stream and project it into the cell result. Do not bypass it just
         // because the host process itself has a terminal, or because a one-shot
         // `jet run`/`jet dev` handed its streams to the program.
-        let direct = !self.repl_mode && if to_stderr {
-            super::term_semantics::jet_term_stderr_is_program_stream()
-        } else {
-            super::term_semantics::jet_term_stdout_is_program_stream()
-        };
+        let direct = !self.repl_mode
+            && if to_stderr {
+                super::term_semantics::jet_term_stderr_is_program_stream()
+            } else {
+                super::term_semantics::jet_term_stdout_is_program_stream()
+            };
         if direct {
             let frame = super::term_semantics::jet_term_print_frame(text);
             if to_stderr {
@@ -10236,8 +10321,7 @@ impl<'a> EvalCtx<'a> {
             let text = argv
                 .iter()
                 .map(|v| {
-                    crate::Comptime::display_core_pure_value(v)
-                        .unwrap_or_else(|| v.jet_show())
+                    crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show())
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -10248,8 +10332,7 @@ impl<'a> EvalCtx<'a> {
             let text = argv
                 .iter()
                 .map(|v| {
-                    crate::Comptime::display_core_pure_value(v)
-                        .unwrap_or_else(|| v.jet_show())
+                    crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show())
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -10269,7 +10352,10 @@ impl<'a> EvalCtx<'a> {
         }
         if name == "consume" && self.funcs.get(name).is_none() {
             if argv.len() != 1 {
-                return Err(unsupported("`consume` discards exactly one value", self.span()));
+                return Err(unsupported(
+                    "`consume` discards exactly one value",
+                    self.span(),
+                ));
             }
             return Ok(CtValue::Unit);
         }
@@ -10317,7 +10403,10 @@ impl<'a> EvalCtx<'a> {
         }
         let Some(func) = func else {
             if std::env::var_os("JET_DEBUG_TIR_CALLS").is_some() {
-                eprintln!("missing TIR call {name}; funcs={:?}", self.funcs.keys().collect::<Vec<_>>());
+                eprintln!(
+                    "missing TIR call {name}; funcs={:?}",
+                    self.funcs.keys().collect::<Vec<_>>()
+                );
             }
             return Err(unsupported(&format!("call `{name}`"), self.span()));
         };
@@ -10352,7 +10441,9 @@ impl<'a> EvalCtx<'a> {
             if !needs_wb {
                 continue;
             }
-            let jet = pname.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(pname.as_str());
+            let jet = pname
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(pname.as_str());
             if let Some(updated) = child.get(jet) {
                 self.write_back_place(&carg.value, updated.clone(), scope)?;
             }
@@ -10467,9 +10558,8 @@ impl<'a> EvalCtx<'a> {
             let field = |wanted: &str| {
                 fields.iter().find_map(|(name, value)| {
                     (name == wanted
-                        || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                            == Some(wanted))
-                        .then_some(value)
+                        || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(wanted))
+                    .then_some(value)
                 })
             };
             let CtValue::Enum {
@@ -10507,10 +10597,7 @@ impl<'a> EvalCtx<'a> {
             let resource = optional_text("resource")?;
             let cause = optional_text("cause")?;
             Some(jet_foundation::StructuralDebug::jet_show_io_error(
-                variant,
-                operation,
-                resource,
-                cause,
+                variant, operation, resource, cause,
             ))
         };
         if let Some(text) = io_error_display() {
@@ -10540,7 +10627,9 @@ impl<'a> EvalCtx<'a> {
             | CtValue::Map(_)
             | CtValue::Present(_)
             | CtValue::Failed(CtReport::Clean(_))
-            | CtValue::Failed(CtReport::Told(_)) => unreachable!("composite display case handled above"),
+            | CtValue::Failed(CtReport::Told(_)) => {
+                unreachable!("composite display case handled above")
+            }
         })
     }
 
@@ -10596,9 +10685,7 @@ impl<'a> EvalCtx<'a> {
                 if ty == crate::Syntax::TYPE_RANGE {
                     if let Some((start, end, exclusive)) = range_parts(v) {
                         return super::range_semantics::jet_range_structural_text(
-                            start,
-                            end,
-                            exclusive,
+                            start, end, exclusive,
                         );
                     }
                 }
@@ -10632,7 +10719,9 @@ impl<'a> EvalCtx<'a> {
                     let fields = fields
                         .iter()
                         .map(|(name, value)| {
-                            let name = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name);
+                            let name = name
+                                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                .unwrap_or(name);
                             (name.to_string(), render_field(name, value))
                         })
                         .collect::<Vec<_>>();
@@ -10647,8 +10736,9 @@ impl<'a> EvalCtx<'a> {
                             let rendered = fields
                                 .iter()
                                 .find(|(n, _)| {
-                                        n == name
-                                        || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(name.as_str())
+                                    n == name
+                                        || n.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                            == Some(name.as_str())
                                 })
                                 .map(|(_, value)| render_field(name, value))
                                 .unwrap_or_else(|| render_field(name, &CtValue::Unit));
@@ -10690,25 +10780,19 @@ impl<'a> EvalCtx<'a> {
                         }),
                     )
                 } else {
-                    let parts: Vec<String> = args
-                        .iter()
-                        .map(|(_, val)| self.debug_value(val))
-                        .collect();
+                    let parts: Vec<String> =
+                        args.iter().map(|(_, val)| self.debug_value(val)).collect();
                     jet_foundation::StructuralDebug::jet_debug_variant(var, Some(parts.join(", ")))
                 }
             }
-            CtValue::Map(entries) => jet_foundation::StructuralDebug::jet_debug_map(
-                entries.iter().map(|(key, value)| {
-                    (
-                        self.debug_value(&key.to_value()),
-                        self.debug_value(value),
-                    )
-                }),
-            ),
+            CtValue::Map(entries) => {
+                jet_foundation::StructuralDebug::jet_debug_map(entries.iter().map(
+                    |(key, value)| (self.debug_value(&key.to_value()), self.debug_value(value)),
+                ))
+            }
             _ => v.debug_rust(),
         }
     }
-
 }
 
 fn pool_id_parts(value: &CtValue) -> Option<(usize, i64)> {
@@ -10724,7 +10808,10 @@ fn pool_id_parts(value: &CtValue) -> Option<(usize, i64)> {
             _ => None,
         })
     };
-    Some((usize::try_from(int_field("index")?).ok()?, int_field("generation")?))
+    Some((
+        usize::try_from(int_field("index")?).ok()?,
+        int_field("generation")?,
+    ))
 }
 
 fn eval_precise_builtin(
@@ -10803,8 +10890,8 @@ fn eval_precise_builtin(
         ("Decimal", "add" | "sub" | "mul" | "equal" | "to_string")
         | (
             "Fraction",
-            "add" | "sub" | "mul" | "neg" | "to_string" | "div" | "equal"
-                | "numerator" | "denominator" | "to_float" | "is_zero",
+            "add" | "sub" | "mul" | "neg" | "to_string" | "div" | "equal" | "numerator"
+            | "denominator" | "to_float" | "is_zero",
         ) => {
             let mut it = args.into_iter();
             let Some(recv) = it.next() else {
@@ -10815,7 +10902,10 @@ fn eval_precise_builtin(
         }
         ("Complex", "from_parts") => {
             let [real, imaginary] = args.as_slice() else {
-                return Err(unsupported("`Complex` needs real and imaginary parts", span));
+                return Err(unsupported(
+                    "`Complex` needs real and imaginary parts",
+                    span,
+                ));
             };
             let real = complex_part(real)
                 .ok_or_else(|| unsupported("`Complex` needs numeric parts", span))?;
@@ -10858,9 +10948,6 @@ fn eval_precise_builtin(
                 .ok_or_else(|| unsupported("malformed Complex value", span))?;
             Ok(CtValue::Str(value.to_string_rep()))
         }
-        _ => Err(unsupported(
-            &format!("precise `{type_name}.{func}`"),
-            span,
-        )),
+        _ => Err(unsupported(&format!("precise `{type_name}.{func}`"), span)),
     }
 }

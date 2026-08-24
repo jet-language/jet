@@ -5855,12 +5855,14 @@ revokes to safe text fallback.
 ### Ratified product and runtime architecture — 2026-07-10 (batch 2)
 
 **D-CLI-SURFACE1=B — frequency-ringed jet command surface** *(as amended by
-D-CLI-STORE2, D-CLI-DEVSERVE1, D-CLI-SURFACE3, 2026-07-11)*: the daily
+D-CLI-STORE2, D-CLI-DEVSERVE1, D-CLI-SURFACE3, D-DEVR-FIND1)*: the daily
 dev-loop verbs (`run`, `build`, `test`, `check`, `fix`, `new`, `init`, `add`,
 `remove`, `update`, `fmt`, `lint`, `dev`, `repl`, `debug`, `bench`,
 `eval`, `emit`, `explain`, `help`, `version`, plus D-CLI-SURFACE3's `env`,
-`fetch`, `search`, `info`, `outdated`, `clean`) stay flat and top-level. The
-long tail lives under groups on the jet binary: `jet registry`
+`fetch`, `search`, `find`, `info`, `outdated`, `clean`) stay flat and top-level.
+D-DEVR-FIND1 adds `find` for code discovery by contract; `search` remains the
+package-catalog route. The long tail lives under groups on the jet binary:
+`jet registry`
 (publish, yank, keygen, key backup, vendor), `jet inspect` (graph, query,
 explain-build, impact, dossier, semindex, expand, schema, codemod, audit,
 sbom, bind, plus D-CLI-SURFACE3's logs), `jet hangar` (physical store verbs

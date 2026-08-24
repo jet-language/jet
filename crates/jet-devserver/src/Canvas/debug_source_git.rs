@@ -406,6 +406,8 @@ fn validate_debug_command(command: &str) -> Result<(), String> {
             arg.is_none() && !extra
         }
         "print" | "p" => arg.is_some() && !extra,
+        "why" => arg.is_some(),
+        "when" => arg.is_some() && !extra,
         "break" | "b" => {
             arg.and_then(|value| value.parse::<usize>().ok())
                 .is_some_and(|line| line >= 1)

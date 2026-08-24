@@ -103,7 +103,11 @@ pub fn select_compatible<'a>(
     }
     let winner = available
         .iter()
-        .filter(|version| constraints.iter().all(|constraint| constraint.req.matches(version)))
+        .filter(|version| {
+            constraints
+                .iter()
+                .all(|constraint| constraint.req.matches(version))
+        })
         .min();
     winner.ok_or_else(|| {
         select_highest_compatible(package, constraints, available)
@@ -249,10 +253,14 @@ fn solve_registry_state(
     let preserve_lock = matches!(mode, ResolveMode::Conservative);
     viable.sort_by(|left, right| {
         let left_preferred = state.preferred.get(&package).is_some_and(|rules| {
-            rules.iter().any(|requirement| requirement.matches(&left.version))
+            rules
+                .iter()
+                .any(|requirement| requirement.matches(&left.version))
         });
         let right_preferred = state.preferred.get(&package).is_some_and(|rules| {
-            rules.iter().any(|requirement| requirement.matches(&right.version))
+            rules
+                .iter()
+                .any(|requirement| requirement.matches(&right.version))
         });
         let left_locked = locked.get(&package).is_some_and(|version| {
             preserve_lock
@@ -266,9 +274,7 @@ fn solve_registry_state(
         });
         right_preferred
             .cmp(&left_preferred)
-            .then_with(|| right_locked
-            .cmp(&left_locked)
-            )
+            .then_with(|| right_locked.cmp(&left_locked))
             .then_with(|| {
                 if low_first {
                     left.version.cmp(&right.version)
@@ -342,20 +348,10 @@ fn solve_registry_state(
     Err(diagnostic)
 }
 
-fn proof_diagnostic(
-    package: &str,
-    requirements: &[VersionConstraint],
-    reason: &str,
-) -> Diagnostic {
+fn proof_diagnostic(package: &str, requirements: &[VersionConstraint], reason: &str) -> Diagnostic {
     let (first, second) = conflicting_pair(requirements);
     let mut diagnostic = match (first, second) {
-        (Some(a), Some(b)) => e2602(
-            package,
-            a.req.display(),
-            &a.from,
-            b.req.display(),
-            &b.from,
-        ),
+        (Some(a), Some(b)) => e2602(package, a.req.display(), &a.from, b.req.display(), &b.from),
         (Some(a), None) => e2602(
             package,
             a.req.display(),

@@ -5,6 +5,7 @@ use std::process::exit;
 
 use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
+use jet_foundation::Report::render_status_json;
 /// D-CONF-MODULE1=A: explain a generic-module member's specialization input
 /// from the semantic index, including the profile/declaration chain for a
 /// build-fact value.
@@ -49,13 +50,22 @@ pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json:
             })
             .collect::<Vec<_>>()
             .join(",");
-        println!(
-            "{{\"schema_version\":1,\"subject\":{},\"module\":{},\"fingerprint\":{},\"arguments\":[{}],\"check\":{}}}",
+        let payload = format!(
+            "{{\"subject\":{},\"module\":{},\"fingerprint\":{},\"arguments\":[{}],\"check\":{}}}",
             json_string(subject),
             json_string(&instance.name),
             json_string(&instance.fingerprint),
             arguments,
             crate::CmdInspect::check_result_json(&checked.check),
+        );
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.generic_module",
+                &format!(",\"generic_module\":{payload}"),
+            )
         );
         return;
     }
@@ -89,7 +99,15 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         match jet::Driver::target_machine_dossier_json(name) {
             Ok(audit) => {
                 if json {
-                    println!("{audit}");
+                    println!(
+                        "{}",
+                        render_status_json(
+                            "ok",
+                            true,
+                            "inspect.target",
+                            &format!(",\"target\":{audit}"),
+                        )
+                    );
                 } else {
                     println!("target machine: {name}");
                     println!("{audit}");
@@ -406,8 +424,15 @@ fn render_data_status_dossier(json: bool) {
             })
             .collect::<Vec<_>>()
             .join(",");
+        let payload = format!("{{\"rows\":[{body}]}}");
         println!(
-            "{{\"lens\":\"data\",\"schema\":\"jet.data-status\",\"rows\":[{body}]}}"
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.data",
+                &format!(",\"data\":{payload}"),
+            )
         );
         return;
     }

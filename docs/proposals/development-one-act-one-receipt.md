@@ -200,7 +200,7 @@ What to look at: today `jet report` writes version-and-policy, `jet inspect live
 $ jet run --release service.jet        # in prod, crash:
 wrote crash receipt 8a3f (.jet/reports/8a3f): report frame, closure, replay capture   # proposed
 $ jet report --attach 8a3f             # proposed: the support bundle carries evidence
-$ jet debug --replay 8a3f              # proposed: receipt-id addressing extends the ratified --replay=NAME rail (D-RUN-RECORD1)
+$ jet debug --replay=8a3f              # proposed: receipt-id addressing extends the ratified --replay=NAME rail (D-RUN-RECORD1)
 ```
 
 Scope, honestly: this is the on-ramp, not an observability platform. Local-only stays law (D-TELEMETRY1=A — receipts never leave the machine unless the operator ships the bundle). A fleet that forbids any on-host artifact refuses recording itself with the same project switch (`receipts: .Off`). Metrics exporters, distributed tracing, and OTel remain explicitly future territory; what this element fixes is that the crash you are asked to debug arrives with its closure and its replay instead of a prose ticket.
@@ -253,7 +253,7 @@ Honesty about evidence: today's warm numbers are measured at toy scale (0.05 s h
 Debugging is reconstructing causality backward from a symptom, but every mainstream tool samples forward: breakpoints, prints, re-runs. Jet already ratified the recording rail (D-JREPLAY1, shipped under `jet prove`; Part I's PROD1 feeds it from crashes). The missing law: **any recorded run answers questions.**
 
 ```text
-$ jet debug --replay 8a3f              # the crash receipt from element 6
+$ jet debug --replay=8a3f              # the crash receipt from element 6
 > why total == 0                        # proposed: backward slice
 total = 0   because sum(items) ran over []        service.jet:41
 items = []  because parse(csv) dropped 14 rows    service.jet:22   (decode refused: E0910)
@@ -262,27 +262,27 @@ order.state = .Open      service.jet:12
 order.state = .Stale     service.jet:87   ← last write before the crash
 ```
 
-The beginner story: `jet debug` is unchanged, and the crash that used to be a prose ticket arrives replayable. The expert story: `why` and `when` over any recorded run — local, test, or production. The schedule story, honestly: `when` is a per-place write timeline, which is inside the territory D-TIMETRAVEL1=C deferred to Epoch 6 and D-RUN-RECORD1=A re-affirmed as deferred — so option A is a **named amendment** that pulls the query surface over existing recordings forward, while reverse-step execution and the standalone always-on history engine stay on the Epoch 6 schedule. Exits: recording is opt-in (a flag, a crash, or a claim run); queries are read-only over a capture; a project that never records never carries one. Peers: rr and Pernosco prove record-and-query works and stay niche because they fight the platform from outside; a language that owns every tier can make determinism a property, not a heroic capture.
+The beginner story: `jet debug` is unchanged, and the crash that used to be a prose ticket arrives replayable. The expert story: `why` and `when` over any recorded run — local, test, or production. The schedule story, honestly: `when` is a query over recorded local snapshots. It does not add reverse-step execution or a standing per-variable history engine. Those remain inside D-TIMETRAVEL1=C and D-RUN-RECORD1=A's deferral. Option A pulls the query surface over existing recordings forward. Recording is opt-in (a flag, a crash, or a claim run); queries are read-only over a capture; a project that never records never carries one. Peers: rr and Pernosco prove record-and-query works and stay niche because they fight the platform from outside; a language that owns every tier can make determinism a property, not a heroic capture.
 
-### Element 9 — the goal is a value: `#Todo` holes and `jet fill`
+### Element 9 — the goal is a value: `#Todo` goals and `jet fill`
 
-Jet already has the hole: `#Todo` compiles and stops at runtime. But the checker — which knows the expected type, the required effects, and every fact in scope at that position — says nothing about it. The upgrade: **`#Todo` in expression position is a typed goal, and the toolchain talks about it.**
+Jet already has the goal: `#Todo` compiles and stops at runtime. But the checker — which knows the expected type, the required effects, and every fact in scope at that position — says nothing about it. The upgrade: **`#Todo` in expression position is a typed goal, and the toolchain talks about it.**
 
 ```text
-fn parse_row(line: String) -> Row ? ParseError {
+fn parse_row(line: String) Row ? ParseError -> {
     #Todo                               # shipped today: compiles, stops if reached (E3011)
 }
 
 $ jet check                             # proposed: the goal card
 goal: parse_row's body                  needs Row ? ParseError
   in scope: line: String · ParseError.{...} · Row.{...}
-  effects allowed: none (pure)
+  required effects: none (pure)
 $ jet fill run.jet:2                    # proposed verb (or a `jet fix` mode — the ballot decides): ranked candidates
-  1. Row.{ cells: line.split(",") }                    (uses: split — passes check)
+  1. Row{ cells: line.split(",") }                     (uses: split — passes check)
   2. line.take_pattern("{a}, {b}") … build Row          (uses: D-PARSESTR1 pattern)
 ```
 
-Beginners keep writing programs that run before they are finished — the stop-on-reach behavior is unchanged, so no rung gains ceremony. Experts and agents get the highest-value property in the five quantities: repair determinism — one goal, one typed target, ranked candidates that already pass sema. The walls hold by construction: `fill` proposes ordinary term-level code that then enters ordinary checking (never AST injection, never a macro — D-METAMUTATE1 untouched; comptime still never creates a type). Exits: goal cards are advisory rows that never change `jet check`'s exit code, they summarize past a handful ("…and 17 more goals"), and a project switch silences them entirely. Precedent: GHC's typed holes and Idris's holes are the most-loved feature of their ecosystems and never left them, because no mainstream toolchain owns both the checker and the fill surface. Naming note: the word is genuinely contested — ratified surfaces already use "hole" both for interpolation slots (D-PARSESTR1, D-META-CODE1) and for `#Todo` itself (E3011/E2902 row text, D-TOOL2) — so the ballot carries the word choice: keep "hole" as shipped, or adopt "goal" and rename the E3011/E2902/D-TOOL2 text and examples with it.
+Beginners keep writing programs that run before they are finished — the stop-on-reach behavior is unchanged, so no rung gains ceremony. Experts and agents get the highest-value property in the five quantities: repair determinism — one goal, one typed target, ranked candidates that already pass sema. The walls hold by construction: `fill` proposes ordinary term-level code that then enters ordinary checking (never AST injection, never a macro — D-METAMUTATE1 untouched; comptime still never creates a type). Exits: goal cards are advisory rows that never change `jet check`'s exit code, they summarize past a handful ("…and 17 more goals"), and a project switch silences them entirely. Precedent: GHC's typed holes and Idris's holes are the most-loved feature of their ecosystems and never left them, because no mainstream toolchain owns both the checker and the fill surface. Naming note: the word remains reserved for interpolation slots (D-PARSESTR1, D-META-CODE1); `#Todo` uses the distinct vocabulary "goal" in E3011/E2902, D-TOOL2, and tool output.
 
 ### Element 10 — discovery by contract: `jet find`
 
@@ -292,7 +292,7 @@ The costliest beginner hour is "what is this called"; the costliest agent tokens
 $ jet find "String -> Path"                       # proposed: search by signature (unification, not text)
 core.files.Path.from(s: String) -> Path ? PathError
 $ jet find --effect FS.Read "read a csv"          # proposed: search by effect + words
-core.data.csv.read(path) =[FS.Read]=> Table ? CsvError
+core.data.csv.read(path) -[FS.Read]> Table ? CsvError
 $ jet find --example '"a,b" -> ["a","b"]'         # proposed: run pure candidates at comptime
 String.split(sep) -> [String]                      (1 match on the example)
 ```
@@ -362,7 +362,7 @@ $ jet verify --cold               # what the CI machine runs; nothing else exist
 $ jet status --json               # 1 line per claim: current/stale/not-recorded
 $ jet try fix-plan.json           # would this break? — verdict + receipt, tree untouched
 $ (edit) && jet test              # only the 2 stale claims re-run
-$ jet debug --replay 8a3f         # a failing claim's run, then: why total == 0
+$ jet debug --replay=8a3f         # a failing claim's run, then: why total == 0
 $ tower card close #N --evidence receipt:4c22   # closure cites the store; false green impossible
 ```
 
@@ -424,7 +424,7 @@ Every element marked its proposed spellings in place; the final-vision transcrip
 | D-DEVR-PROD1 | Crash/observed-run receipts + evidence-carrying `jet report` | adopt / crash receipts only / decline | feeds D-JREPLAY1=A; keeps D-TELEMETRY1=A verbatim |
 | D-DEVR-CONE1 | The cone law: re-verdict cost scales with the edit's blast radius, budget-enforced | adopt for every verb with typed latency budgets / budgets on check+dev only / decline | rides D-PERFBUDGET-COMPILE1=C (#677); per-verb latency rows are new entries in its closed budget grammar (named extension) |
 | D-DEVR-CAUSE1 | Debugging is queries (`why`, `when`) over a recorded run | adopt the substrate law now (named amendment) / crash-replay queries only / decline | amends D-TIMETRAVEL1=C and D-RUN-RECORD1=A's per-variable-history deferral for query-over-recording only; reverse-step and the always-on history engine stay Epoch 6; rides D-JREPLAY1=A |
-| D-DEVR-HOLE1 | `#Todo` is a typed goal; `jet fill` proposes checked candidates | goal card + fill / goal card only / decline | `#Todo` runtime meaning unchanged; `fill` spelling amends D-CLI-SURFACE1=B or rides `jet fix` (options); word choice (keep "hole" vs adopt "goal" + rename E3011/E2902/D-TOOL2 text) carried in the ballot; walls untouched |
+| D-DEVR-HOLE1 | `#Todo` is a typed goal; `jet fill` proposes checked candidates | goal card + fill / goal card only / decline | `#Todo` runtime meaning unchanged; `fill` spelling amends D-CLI-SURFACE1=B or rides `jet fix` (options); goal vocabulary keeps interpolation "hole" distinct from `#Todo`; walls untouched |
 | D-DEVR-FIND1 | Discovery by contract: signature, effect, and example search | full find verb / signature-only / under `jet inspect` / decline | amends D-CLI-SURFACE1=B if a flat verb is added; settles `find` (code by shape) vs `search` (packages by name); read-only |
 | D-DEVR-SEMID1 | Toolchain refactors record semantic ops; diff/merge/review/blame consume ops + stable IDs | record and consume / record only / decline | rides D-SEMINDEX1, D-CODEMOD1, structural-merge stable IDs; hand edits stay plain text |
 | D-DEVR-TRY1 | Speculative acts: apply in overlay, verdict affected claims, roll back, remember | full try verb / flag on `jet inspect codemod` (agent-only JSON) / decline | amends D-CLI-SURFACE1=B if a verb is added; try receipts marked speculative |

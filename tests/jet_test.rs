@@ -1016,7 +1016,7 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
     );
     let json_golden = fs::read_to_string(root.join("tests/fixtures/coverage.json.golden"))
         .expect("coverage.json.golden");
-    assert!(json.contains("\"schema_version\":1"), "missing coverage schema:\n{json}");
+    assert!(json.contains("\"schema\":\"jet.report/v1\""), "missing coverage envelope:\n{json}");
     for row in json_golden.lines().filter(|line| !line.trim().is_empty()) {
         assert!(json.contains(row.trim()), "JSON golden row missing: {row}\n{json}");
     }

@@ -1,49 +1,49 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
-use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
+use crate::Codegen::Cx;
+use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
-use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
+use crate::Codegen::TIR::lower::bin_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::bool_and_chain;
-use crate::Codegen::TIR::lower_enum_match;
+use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
+use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
+use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
+use crate::Codegen::TIR::lower::struct_pattern_field_type;
 use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
-use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::lower_enum_match;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
-use crate::Codegen::TIR::lower::lower_str_match_pattern_bindings;
-use crate::Codegen::TIR::lower::lower_bin_match_pattern_bindings;
 use crate::Codegen::TIR::lower_range_switch;
-use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
-use crate::Codegen::TIR::lower::bin_match_pattern_cond_expr;
-use crate::Codegen::TIR::lower::struct_pattern_field_type;
 use crate::Codegen::TIR::static_call_type_name_unchecked;
+use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::BranchClass;
+use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
-use crate::Codegen::TIR::tir_recv_jet_ty;
-use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TPatternPosition;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TirWorklist;
-use crate::Codegen::TIR::BranchClass;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 use crate::Diagnostics::Span;
 use crate::Syntax;
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -67,10 +67,7 @@ fn encoding_reader_method(ty: &Type) -> Option<TForInMethod> {
     }
 }
 
-pub(super) fn tracked_float_origin(
-    b: &crate::AST::Binding,
-    ty: &Type,
-) -> Option<TBindingOrigin> {
+pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type) -> Option<TBindingOrigin> {
     if !b.track() || !matches!(ty, Type::Float) {
         return None;
     }
@@ -80,11 +77,7 @@ pub(super) fn tracked_float_origin(
     })
 }
 
-pub(super) fn tracked_float_slot(
-    b: &crate::AST::Binding,
-    ty: &Type,
-    slot: TLocal,
-) -> TLocal {
+pub(super) fn tracked_float_slot(b: &crate::AST::Binding, ty: &Type, slot: TLocal) -> TLocal {
     match tracked_float_origin(b, ty) {
         Some(origin) => slot.with_origin(origin),
         None => slot,
@@ -198,7 +191,8 @@ pub(crate) fn lower_forin_collection(
         }
     } else {
         let coll = lower_expr(collection, cx, env);
-        if matches!(&coll.ty, Type::Apply { name, args } if name == Syntax::TYPE_RECEIVER && args.len() == 1) {
+        if matches!(&coll.ty, Type::Apply { name, args } if name == Syntax::TYPE_RECEIVER && args.len() == 1)
+        {
             return (coll, Some(TForInMethod::ChannelReceiver));
         }
         let method = encoding_reader_method(&coll.ty);
@@ -247,11 +241,7 @@ pub(super) fn lower_binding_free_variant_pattern_test(
                 .unwrap_or(name.as_str());
             cx.enum_variants
                 .get(resolved)
-                .is_some_and(|variants| {
-                    variants
-                        .iter()
-                        .any(|(candidate, _)| candidate == variant)
-                })
+                .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
                 .then(|| resolved.to_string())
         }
         _ => None,
@@ -260,9 +250,13 @@ pub(super) fn lower_binding_free_variant_pattern_test(
     // A variant known to the resolved enum layout compares against the bare
     // variant path; anything else tests as a match-arm head.
     let position = match &enum_type {
-        Some(type_name) if cx.enum_variants.get(type_name).is_some_and(|variants| {
-            variants.iter().any(|(candidate, _)| candidate == variant)
-        }) => TPatternPosition::VariantPath,
+        Some(type_name)
+            if cx.enum_variants.get(type_name).is_some_and(|variants| {
+                variants.iter().any(|(candidate, _)| candidate == variant)
+            }) =>
+        {
+            TPatternPosition::VariantPath
+        }
         _ => TPatternPosition::Arm,
     };
     TExpr {
@@ -300,12 +294,7 @@ fn pattern_subject_is_owned_self(subject: &Expr, env: &LowerEnv) -> bool {
     }
 }
 
-fn lower_if_let_subject(
-    subject: &Expr,
-    cx: &Cx,
-    env: &mut LowerEnv,
-    cached: bool,
-) -> TExpr {
+fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv, cached: bool) -> TExpr {
     // Sema protects ordinary owning-position field reads with an implicit `Copy`
     // whose span is exactly the wrapped field span. A take-self method owns that
     // field, so an if-let may move it. Preserve an explicitly written `~field`
@@ -314,7 +303,10 @@ fn lower_if_let_subject(
         Expr::Copy(inner, copy_span)
             if matches!(inner.as_ref(), Expr::Field(..))
                 && *copy_span == inner.span()
-                && pattern_subject_is_owned_self(inner, env) => inner.as_ref(),
+                && pattern_subject_is_owned_self(inner, env) =>
+        {
+            inner.as_ref()
+        }
         _ => subject,
     };
     let subj = lower_if_expr(lowered_subject, cx, env, cached);
@@ -572,8 +564,8 @@ fn lower_if_cond_atom(
                             ty: map_ty.clone(),
                             kind: TExprKind::DataEntriesToMap(TLocal::generated(&obj_tmp)),
                         },
-                gc_promotion: None,
-                gc_transferred: false,
+                        gc_promotion: None,
+                        gc_transferred: false,
                     };
                     return (
                         TIfCond::IfLet {
@@ -611,15 +603,17 @@ fn lower_if_cond_atom(
         if !is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                 let ty = match &subj.ty {
-                    Type::Named(enum_name) | Type::Apply { name: enum_name, .. } => {
+                    Type::Named(enum_name)
+                    | Type::Apply {
+                        name: enum_name, ..
+                    } => {
                         let resolved = cx
                             .core_qualified_rust_type_name(enum_name)
                             .unwrap_or(enum_name.as_str());
                         variant_binding_types_for_enum(cx, resolved, variant)
                             .and_then(|ts| ts.into_iter().next())
                     }
-                    _ => variant_binding_types(cx, variant)
-                        .and_then(|ts| ts.into_iter().next()),
+                    _ => variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next()),
                 };
                 return (
                     TIfCond::IfLet {
@@ -646,16 +640,17 @@ fn lower_if_cond_atom(
         }
         if is_binding_free_user_variant_pattern_test(pattern, cx) {
             let enum_type = match &subj.ty {
-                Type::Named(enum_name) | Type::Apply { name: enum_name, .. } => {
+                Type::Named(enum_name)
+                | Type::Apply {
+                    name: enum_name, ..
+                } => {
                     let resolved = cx
                         .core_qualified_rust_type_name(enum_name)
                         .unwrap_or(enum_name.as_str());
                     cx.enum_variants
                         .get(resolved)
                         .filter(|variants| {
-                            variants
-                                .iter()
-                                .any(|(candidate, _)| candidate == variant)
+                            variants.iter().any(|(candidate, _)| candidate == variant)
                         })
                         .map(|_| resolved.to_string())
                 }
@@ -796,10 +791,7 @@ fn lower_if_cond_atom(
                 TPattern::binding(pattern.clone())
             };
             return (
-                TIfCond::IfLet {
-                    pattern,
-                    subj,
-                },
+                TIfCond::IfLet { pattern, subj },
                 Some((name, place, ty)),
                 Vec::new(),
             );
@@ -871,9 +863,9 @@ pub(crate) fn lower_switch<'a>(
     // TIfCond chain used by ordinary `if` conditions. This keeps payload bindings
     // in scope for their guards and gives AOT, JIT, and interpreter one lowering.
     if else_body.is_some()
-        && arms.iter().any(|a| {
-            arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
-        })
+        && arms
+            .iter()
+            .any(|a| arm_guarded_variant_pattern(cx, &a.cond, subject).is_some())
         && arms.iter().all(|a| {
             arm_variant_pattern(cx, &a.cond, subject).is_some()
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
@@ -920,12 +912,7 @@ fn readiness_result_local(result_name: &str, result_ty: &Type) -> TExpr {
     }
 }
 
-fn readiness_result_field(
-    result_name: &str,
-    result_ty: &Type,
-    index: usize,
-    ty: Type,
-) -> TExpr {
+fn readiness_result_field(result_name: &str, result_ty: &Type, index: usize, ty: Type) -> TExpr {
     TExpr {
         ty,
         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
@@ -967,7 +954,10 @@ fn lower_readiness_switch<'a>(
             arm: i64,
             elem_ty: Type,
         },
-        After { duration: TExpr, arm: i64 },
+        After {
+            duration: TExpr,
+            arm: i64,
+        },
     }
 
     let mut lowered_heads = Vec::with_capacity(arms.len());
@@ -1062,29 +1052,38 @@ fn lower_readiness_switch<'a>(
         let result_ty_for_prepare = result_ty.clone();
         let (arm_index, binding, elem_ty) = match &head {
             LoweredHead::Receive {
-                arm, binding, elem_ty, ..
+                arm,
+                binding,
+                elem_ty,
+                ..
             } => (*arm, Some(binding.clone()), Some(elem_ty.clone())),
             LoweredHead::After { arm, .. } => (receiver_count + *arm, None, None),
         };
-        bodies.push(LowerBody::scoped(&arm.body, branch).prepare(move |_cx, branch| {
-            let mut prefix = Vec::new();
-            if let (Some(binding), Some(elem_ty)) = (binding, elem_ty) {
-                branch.bind(&binding, TLocal::user(binding.clone()), Some(elem_ty.clone()));
-                prefix.push(TStmt::Let {
-                    name: binding,
-                    kw: "let",
-                    let_ty: crate::Codegen::TIR::TLetTy::plain(elem_ty.clone()),
-                    init: readiness_result_value(
-                        &result_name_for_prepare,
-                        &result_ty_for_prepare,
-                        elem_ty,
-                    ),
-                    gc_promotion: None,
-                    gc_transferred: false,
-                });
-            }
-            *state_for_prepare.borrow_mut() = Some((arm_index, prefix));
-        }));
+        bodies.push(
+            LowerBody::scoped(&arm.body, branch).prepare(move |_cx, branch| {
+                let mut prefix = Vec::new();
+                if let (Some(binding), Some(elem_ty)) = (binding, elem_ty) {
+                    branch.bind(
+                        &binding,
+                        TLocal::user(binding.clone()),
+                        Some(elem_ty.clone()),
+                    );
+                    prefix.push(TStmt::Let {
+                        name: binding,
+                        kw: "let",
+                        let_ty: crate::Codegen::TIR::TLetTy::plain(elem_ty.clone()),
+                        init: readiness_result_value(
+                            &result_name_for_prepare,
+                            &result_ty_for_prepare,
+                            elem_ty,
+                        ),
+                        gc_promotion: None,
+                        gc_transferred: false,
+                    });
+                }
+                *state_for_prepare.borrow_mut() = Some((arm_index, prefix));
+            }),
+        );
         arm_states.push(state);
     }
     if let Some(body) = else_body {
@@ -1120,11 +1119,9 @@ fn lower_readiness_switch<'a>(
             };
             dispatch_arms.push((condition, prefix));
         }
-        let else_body = else_body.is_some().then(|| {
-            lowered
-                .next()
-                .expect("readiness else body was deferred")
-        });
+        let else_body = else_body
+            .is_some()
+            .then(|| lowered.next().expect("readiness else body was deferred"));
         TStmt::Inline(vec![
             TStmt::Let {
                 name: result_name.clone(),
@@ -1178,9 +1175,7 @@ fn equality_literal<'a>(subject: &Expr, cond: &'a Expr) -> Option<&'a Expr> {
 fn switch_subject_expr(ty: Type) -> TExpr {
     TExpr {
         ty,
-        kind: TExprKind::HostCall(Box::new(
-            crate::Codegen::TIR::THostCall::SwitchSubjectValue,
-        )),
+        kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::SwitchSubjectValue)),
     }
 }
 
@@ -1267,12 +1262,7 @@ pub(crate) fn classify_branch(subject: &Expr, arms: &[SwitchArm], cx: &Cx) -> Br
         arm_head_range(cx, &arm.cond, subject).is_some()
             || matches!(
                 arm.cond,
-                Expr::Binary(
-                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge,
-                    _,
-                    _,
-                    _
-                )
+                Expr::Binary(BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge, _, _, _)
             )
     }) {
         BranchClass::Ordered
@@ -1339,7 +1329,10 @@ fn lower_guard_switch<'a>(
             }];
             else_is_elseif = true;
         }
-        chain.into_iter().next().expect("guard table has at least one arm")
+        chain
+            .into_iter()
+            .next()
+            .expect("guard table has at least one arm")
     })
 }
 
@@ -1476,11 +1469,8 @@ pub(crate) fn lower_mixed_switch<'a>(
                 (cond, prefix)
             })
             .collect();
-        let else_body = has_else.then(|| {
-            lowered
-                .next()
-                .expect("mixed-switch else body was deferred")
-        });
+        let else_body =
+            has_else.then(|| lowered.next().expect("mixed-switch else body was deferred"));
         TStmt::MixedSwitch {
             subject: subject_expr,
             class,
@@ -1507,9 +1497,11 @@ fn struct_pattern_cond_expr(
             let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
             let lhs = TExpr {
                 ty: fty.clone(),
-                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::SwitchSubjectField {
-                    field: field.clone(),
-                })),
+                kind: TExprKind::HostCall(Box::new(
+                    crate::Codegen::TIR::THostCall::SwitchSubjectField {
+                        field: field.clone(),
+                    },
+                )),
             };
             let rhs = lower_expr(value, cx, env);
             tests.push(TExpr {
@@ -1560,8 +1552,8 @@ fn lower_struct_pattern_bindings(
                     )),
                 })),
             },
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         });
     }
     out
@@ -1607,7 +1599,10 @@ pub(crate) fn str_match_scan_closure_ex(
 ) -> (String, Vec<(String, Type)>) {
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
-    body.push_str(&jet_format!("let mut {jet_prefix}sm: &str = {};\n", subject_src));
+    body.push_str(&jet_format!(
+        "let mut {jet_prefix}sm: &str = {};\n",
+        subject_src
+    ));
     if !require_full_match {
         body.push_str(&jet_format!(
             "let {jet_prefix}sm_orig_len: usize = {jet_prefix}sm.len();\n"
@@ -1768,7 +1763,10 @@ pub(crate) fn bin_match_scan_closure_ex(
     let mut holes: Vec<(String, Type)> = Vec::new();
     let mut body = String::new();
     let consume_prefix = !require_full_match;
-    body.push_str(&jet_format!("let {jet_prefix}bm: &[u8] = {};\n", subject_src));
+    body.push_str(&jet_format!(
+        "let {jet_prefix}bm: &[u8] = {};\n",
+        subject_src
+    ));
     let kernel_parts = parts
         .iter()
         .map(|part| match part {
@@ -1807,7 +1805,10 @@ pub(crate) fn bin_match_scan_closure_ex(
         );
         let (ty, value) = match spec {
             BinSpec::Rest => (
-                Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
+                Type::List(Box::new(Type::IntN {
+                    signed: false,
+                    bits: 8,
+                })),
                 "Some(JetBinMatchValue::Rest(value)) => value".to_string(),
             ),
             BinSpec::Bits { width, .. } => {
@@ -1845,7 +1846,11 @@ pub(crate) fn bin_match_scan_closure_ex(
         tuple_tys.push("usize".to_string());
     }
     body.push_str(&format!("Some(({}))\n", tuple_join(&tuple_vars)));
-    let closure = format!("(|| -> Option<({})> {{\n{}}})()", tuple_join(&tuple_tys), body);
+    let closure = format!(
+        "(|| -> Option<({})> {{\n{}}})()",
+        tuple_join(&tuple_tys),
+        body
+    );
     (closure, holes)
 }
 
@@ -1861,7 +1866,10 @@ pub(super) fn bin_bits_type(width: u8) -> Type {
     } else {
         64
     };
-    Type::IntN { signed: false, bits }
+    Type::IntN {
+        signed: false,
+        bits,
+    }
 }
 
 /// A single-element Rust tuple needs a trailing comma (`(x,)`); zero or 2+

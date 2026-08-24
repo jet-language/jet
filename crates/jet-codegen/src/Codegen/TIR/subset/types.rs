@@ -1,15 +1,15 @@
-use crate::AST::{Type};
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::core_rust_type_name;
-use crate::Codegen::Cx;
 use crate::Codegen::file_handle_rust_type;
 use crate::Codegen::layout_handle_rust_type;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::root_prelude_rust_type_name;
 use crate::Codegen::service_handle_rust_type;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::struct_is_covered;
+use crate::AST::Type;
 use std::collections::HashSet;
 
 /// Resolve a `Self` type reference to the owning concrete type. Other types pass
@@ -61,7 +61,8 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }
-    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")) {
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError"))
+    {
         return true;
     }
     if matches!(&ty, Type::Named(n) if n == "HTTPHandler") {
@@ -73,7 +74,8 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         // D-WEBAPP1 / D-RENDERTGT*: opaque UI + web graph value types (prelude hosts).
         | "App" | "WebPage" | "DevServer"
         | "EventResult" | "NullBackend" | "TuiBackend" | "GtkBackend"
-        | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent")) {
+        | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent"))
+    {
         return true;
     }
     // D-UNIONTYPE1=A: anonymous unions are one generated enum of covered members.
@@ -145,10 +147,16 @@ fn is_covered_view_ty(ty: &Type, cx: &Cx) -> bool {
 }
 
 pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {
-    let Type::Apply { name, args } = ty else { return false; };
+    let Type::Apply { name, args } = ty else {
+        return false;
+    };
     match name.as_str() {
-        "Event" | "DispatchReport" | "DispatchFailure" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
-        "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome" | "AsyncEvent" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
+        "Event" | "DispatchReport" | "DispatchFailure" => {
+            args.len() == 1 && is_subset_param_ty(&args[0], cx)
+        }
+        "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome" | "AsyncEvent" => {
+            args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx))
+        }
         _ => false,
     }
 }
@@ -162,9 +170,7 @@ pub(crate) fn is_covered_data_ty(ty: &Type, cx: &Cx) -> bool {
         return false;
     };
     match name.as_str() {
-        "Table" | "Series" | "LazyFrame" => {
-            args.len() == 1 && is_subset_param_ty(&args[0], cx)
-        }
+        "Table" | "Series" | "LazyFrame" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
         "DataJoin" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
         _ => false,
     }
@@ -452,7 +458,20 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     if name == "Match" {
         return true;
     }
-    if matches!(name.as_str(), "Claims" | "AuthError" | "Session" | "Auth" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy" | "LiveQuery" | "DBScope") {
+    if matches!(
+        name.as_str(),
+        "Claims"
+            | "AuthError"
+            | "Session"
+            | "Auth"
+            | "SyncText"
+            | "SyncCounter"
+            | "SyncMap"
+            | "SyncList"
+            | "RowPolicy"
+            | "LiveQuery"
+            | "DBScope"
+    ) {
         return true;
     }
     // Core crypto values already have total `cx.rust_type` mappings. Admitting

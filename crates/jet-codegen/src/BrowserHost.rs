@@ -4,9 +4,9 @@
 //! the CtValue handle table needed by the structured TIR evaluator.
 #![allow(dead_code)]
 
-use crate::AST::Type;
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::Type;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
@@ -17,7 +17,6 @@ trait JetShow {
 trait JetDebug {
     fn jet_debug(&self) -> String;
 }
-
 
 /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
 trait JetDisplay {
@@ -278,8 +277,14 @@ pub(crate) fn eval_core_call(
         ),
         "connect_profile" => {
             let endpoint = string_arg(&args, 0, span)?;
-            let profile = profile_value(args.get(1).ok_or_else(|| host_error("profile", span))?, span)?;
-            let timeout = timeout_value(args.get(2).ok_or_else(|| host_error("timeout", span))?, span)?;
+            let profile = profile_value(
+                args.get(1).ok_or_else(|| host_error("profile", span))?,
+                span,
+            )?;
+            let timeout = timeout_value(
+                args.get(2).ok_or_else(|| host_error("timeout", span))?,
+                span,
+            )?;
             result(
                 jet_browser_connect_profile(&endpoint, &profile, timeout),
                 |browser| store("Browser", BrowserHostValue::Browser(browser)),
@@ -301,294 +306,304 @@ pub(crate) fn eval_method(
         .with(|values| values.borrow().get(&id).cloned())
         .ok_or_else(|| host_error(kind, span))?;
     Ok(match (&value, method) {
-            (BrowserHostValue::Browser(browser), "abilities") => {
-                let caps = jet_browser_abilities(browser);
-                CtValue::Struct {
-                    type_name: "BrowserAbilities".to_string(),
-                    fields: vec![
-                        ("bidi".to_string(), CtValue::Bool(caps.bidi)),
-                        ("cdp".to_string(), CtValue::Bool(caps.cdp)),
-                        ("profile".to_string(), CtValue::Str(caps.profile)),
-                    ],
-                }
+        (BrowserHostValue::Browser(browser), "abilities") => {
+            let caps = jet_browser_abilities(browser);
+            CtValue::Struct {
+                type_name: "BrowserAbilities".to_string(),
+                fields: vec![
+                    ("bidi".to_string(), CtValue::Bool(caps.bidi)),
+                    ("cdp".to_string(), CtValue::Bool(caps.cdp)),
+                    ("profile".to_string(), CtValue::Str(caps.profile)),
+                ],
             }
-            (BrowserHostValue::Browser(browser), "context") => result(
-                jet_browser_context(browser),
-                |context| store("BrowserContext", BrowserHostValue::Context(context)),
+        }
+        (BrowserHostValue::Browser(browser), "context") => {
+            result(jet_browser_context(browser), |context| {
+                store("BrowserContext", BrowserHostValue::Context(context))
+            })
+        }
+        (BrowserHostValue::Browser(browser), "subscribe") => result(
+            jet_browser_subscribe(browser, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Browser(browser), "next_event") => result(
+            jet_browser_next_event(
+                browser,
+                timeout_value(
+                    args.first().ok_or_else(|| host_error("timeout", span))?,
+                    span,
+                )?,
             ),
-            (BrowserHostValue::Browser(browser), "subscribe") => result(
-                jet_browser_subscribe(browser, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
+            event_ct,
+        ),
+        (BrowserHostValue::Browser(browser), "add_intercept") => result(
+            jet_browser_add_intercept(browser, &string_arg(args, 0, span)?),
+            |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
+        ),
+        (BrowserHostValue::Browser(browser), "add_intercept_url") => result(
+            jet_browser_add_intercept_url(
+                browser,
+                &string_arg(args, 0, span)?,
+                &string_arg(args, 1, span)?,
             ),
-            (BrowserHostValue::Browser(browser), "next_event") => result(
-                jet_browser_next_event(
-                    browser,
-                    timeout_value(args.first().ok_or_else(|| host_error("timeout", span))?, span)?,
-                ),
-                event_ct,
+            |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
+        ),
+        (BrowserHostValue::Browser(browser), "continue_request") => result(
+            jet_browser_continue_request(browser, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Browser(browser), "fail_request") => result(
+            jet_browser_fail_request(browser, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Browser(browser), "fulfill_request") => result(
+            jet_browser_fulfill_request(
+                browser,
+                &string_arg(args, 0, span)?,
+                int_arg(args, 1, span)?,
+                &string_arg(args, 2, span)?,
             ),
-            (BrowserHostValue::Browser(browser), "add_intercept") => result(
-                jet_browser_add_intercept(browser, &string_arg(args, 0, span)?),
-                |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
-            ),
-            (BrowserHostValue::Browser(browser), "add_intercept_url") => result(
-                jet_browser_add_intercept_url(
-                    browser,
-                    &string_arg(args, 0, span)?,
-                    &string_arg(args, 1, span)?,
-                ),
-                |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
-            ),
-            (BrowserHostValue::Browser(browser), "continue_request") => result(
-                jet_browser_continue_request(browser, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Browser(browser), "fail_request") => result(
-                jet_browser_fail_request(browser, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Browser(browser), "fulfill_request") => result(
-                jet_browser_fulfill_request(
-                    browser,
-                    &string_arg(args, 0, span)?,
-                    int_arg(args, 1, span)?,
-                    &string_arg(args, 2, span)?,
-                ),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Browser(browser), "allow_downloads") => result(
-                jet_browser_allow_downloads(browser, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Browser(browser), "protocol") => result(
-                jet_browser_protocol(browser, &string_arg(args, 0, span)?),
-                |protocol| store("BrowserProtocol", BrowserHostValue::Protocol(protocol)),
-            ),
-            (BrowserHostValue::Browser(browser), "trace") => {
-                let trace = jet_browser_trace(browser);
-                CtValue::Struct {
-                    type_name: "BrowserTrace".to_string(),
-                    fields: vec![(
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Browser(browser), "allow_downloads") => result(
+            jet_browser_allow_downloads(browser, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Browser(browser), "protocol") => result(
+            jet_browser_protocol(browser, &string_arg(args, 0, span)?),
+            |protocol| store("BrowserProtocol", BrowserHostValue::Protocol(protocol)),
+        ),
+        (BrowserHostValue::Browser(browser), "trace") => {
+            let trace = jet_browser_trace(browser);
+            CtValue::Struct {
+                type_name: "BrowserTrace".to_string(),
+                fields: vec![(
+                    "entries".to_string(),
+                    CtValue::List(trace.entries.into_iter().map(CtValue::Str).collect()),
+                )],
+            }
+        }
+        (BrowserHostValue::Browser(browser), "privacy") => {
+            let privacy = jet_browser_privacy(browser);
+            CtValue::Struct {
+                type_name: "BrowserPrivacy".to_string(),
+                fields: vec![
+                    (
+                        "isolated_profiles".to_string(),
+                        CtValue::Bool(privacy.isolated_profiles),
+                    ),
+                    (
+                        "redact_receipts".to_string(),
+                        CtValue::Bool(privacy.redact_receipts),
+                    ),
+                    (
+                        "shared_profiles".to_string(),
+                        CtValue::Bool(privacy.shared_profiles),
+                    ),
+                ],
+            }
+        }
+        (BrowserHostValue::Browser(browser), "receipt") => {
+            let receipt = jet_browser_receipt(browser);
+            CtValue::Struct {
+                type_name: "BrowserReceipt".to_string(),
+                fields: vec![
+                    (
                         "entries".to_string(),
-                        CtValue::List(trace.entries.into_iter().map(CtValue::Str).collect()),
-                    )],
-                }
+                        CtValue::List(receipt.entries.into_iter().map(CtValue::Str).collect()),
+                    ),
+                    ("isolated".to_string(), CtValue::Bool(receipt.isolated)),
+                    ("cleaned".to_string(), CtValue::Bool(receipt.cleaned)),
+                ],
             }
-            (BrowserHostValue::Browser(browser), "privacy") => {
-                let privacy = jet_browser_privacy(browser);
-                CtValue::Struct {
-                    type_name: "BrowserPrivacy".to_string(),
-                    fields: vec![
-                        (
-                            "isolated_profiles".to_string(),
-                            CtValue::Bool(privacy.isolated_profiles),
-                        ),
-                        (
-                            "redact_receipts".to_string(),
-                            CtValue::Bool(privacy.redact_receipts),
-                        ),
-                        (
-                            "shared_profiles".to_string(),
-                            CtValue::Bool(privacy.shared_profiles),
-                        ),
-                    ],
-                }
-            }
-            (BrowserHostValue::Browser(browser), "receipt") => {
-                let receipt = jet_browser_receipt(browser);
-                CtValue::Struct {
-                    type_name: "BrowserReceipt".to_string(),
-                    fields: vec![
-                        (
-                            "entries".to_string(),
-                            CtValue::List(receipt.entries.into_iter().map(CtValue::Str).collect()),
-                        ),
-                        ("isolated".to_string(), CtValue::Bool(receipt.isolated)),
-                        ("cleaned".to_string(), CtValue::Bool(receipt.cleaned)),
-                    ],
-                }
-            }
-            (BrowserHostValue::Browser(browser), "close") => {
-                result(jet_browser_close(browser), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Context(context), "page") => result(
-                jet_browser_context_page(context),
-                |page| store("BrowserPage", BrowserHostValue::Page(page)),
+        }
+        (BrowserHostValue::Browser(browser), "close") => {
+            result(jet_browser_close(browser), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Context(context), "page") => {
+            result(jet_browser_context_page(context), |page| {
+                store("BrowserPage", BrowserHostValue::Page(page))
+            })
+        }
+        (BrowserHostValue::Context(context), "tab") => {
+            result(jet_browser_context_tab(context), |page| {
+                store("BrowserPage", BrowserHostValue::Page(page))
+            })
+        }
+        (BrowserHostValue::Context(context), "close") => {
+            result(jet_browser_context_close(context), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Context(context), "isolated") => {
+            CtValue::Bool(jet_browser_context_isolated(context))
+        }
+        (BrowserHostValue::Context(context), "user_hash") => {
+            CtValue::Str(jet_browser_context_user_hash(context))
+        }
+        (BrowserHostValue::Page(page), "goto") => result(
+            jet_browser_page_goto(page, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Page(page), "get_by_role") => store(
+            "BrowserLocator",
+            BrowserHostValue::Locator(jet_browser_page_get_by_role(
+                page,
+                &string_arg(args, 0, span)?,
+                &string_arg(args, 1, span)?,
+            )),
+        ),
+        (BrowserHostValue::Page(page), "get_by_text") => store(
+            "BrowserLocator",
+            BrowserHostValue::Locator(jet_browser_page_get_by_text(
+                page,
+                &string_arg(args, 0, span)?,
+            )),
+        ),
+        (BrowserHostValue::Page(page), "get_by_label") => store(
+            "BrowserLocator",
+            BrowserHostValue::Locator(jet_browser_page_get_by_label(
+                page,
+                &string_arg(args, 0, span)?,
+            )),
+        ),
+        (BrowserHostValue::Page(page), "get_by_placeholder") => store(
+            "BrowserLocator",
+            BrowserHostValue::Locator(jet_browser_page_get_by_placeholder(
+                page,
+                &string_arg(args, 0, span)?,
+            )),
+        ),
+        (BrowserHostValue::Page(page), "get_by_test_id") => store(
+            "BrowserLocator",
+            BrowserHostValue::Locator(jet_browser_page_get_by_test_id(
+                page,
+                &string_arg(args, 0, span)?,
+            )),
+        ),
+        (BrowserHostValue::Page(page), "get_by_css") => store(
+            "BrowserLocator",
+            BrowserHostValue::Locator(jet_browser_page_get_by_css(
+                page,
+                &string_arg(args, 0, span)?,
+            )),
+        ),
+        (BrowserHostValue::Page(page), "main_frame") => {
+            result(jet_browser_page_main_frame(page), |frame| {
+                store("BrowserFrame", BrowserHostValue::Frame(frame))
+            })
+        }
+        (BrowserHostValue::Page(page), "frames") => {
+            result(jet_browser_page_frames(page), |frames| {
+                CtValue::List(
+                    frames
+                        .into_iter()
+                        .map(|frame| store("BrowserFrame", BrowserHostValue::Frame(frame)))
+                        .collect(),
+                )
+            })
+        }
+        (BrowserHostValue::Page(page), "close") => {
+            result(jet_browser_page_close(page), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Page(page), "screenshot") => {
+            result(jet_browser_page_screenshot(page), CtValue::Str)
+        }
+        (BrowserHostValue::Page(page), "pdf") => result(jet_browser_page_pdf(page), CtValue::Str),
+        (BrowserHostValue::Page(page), "set_cookie") => result(
+            jet_browser_page_set_cookie(
+                page,
+                &string_arg(args, 0, span)?,
+                &string_arg(args, 1, span)?,
+                &string_arg(args, 2, span)?,
             ),
-            (BrowserHostValue::Context(context), "tab") => result(
-                jet_browser_context_tab(context),
-                |page| store("BrowserPage", BrowserHostValue::Page(page)),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Page(page), "cookie") => result(
+            jet_browser_page_cookie(page, &string_arg(args, 0, span)?),
+            |value| match value {
+                Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                None => CtValue::absent(Type::String),
+            },
+        ),
+        (BrowserHostValue::Page(page), "clear_cookies") => {
+            result(jet_browser_page_clear_cookies(page), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Page(page), "storage_get") => result(
+            jet_browser_page_storage_get(
+                page,
+                &string_arg(args, 0, span)?,
+                &string_arg(args, 1, span)?,
             ),
-            (BrowserHostValue::Context(context), "close") => {
-                result(jet_browser_context_close(context), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Context(context), "isolated") => {
-                CtValue::Bool(jet_browser_context_isolated(context))
-            }
-            (BrowserHostValue::Context(context), "user_hash") => {
-                CtValue::Str(jet_browser_context_user_hash(context))
-            }
-            (BrowserHostValue::Page(page), "goto") => result(
-                jet_browser_page_goto(page, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
+            |value| match value {
+                Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                None => CtValue::absent(Type::String),
+            },
+        ),
+        (BrowserHostValue::Page(page), "storage_set") => result(
+            jet_browser_page_storage_set(
+                page,
+                &string_arg(args, 0, span)?,
+                &string_arg(args, 1, span)?,
+                &string_arg(args, 2, span)?,
             ),
-            (BrowserHostValue::Page(page), "get_by_role") => store(
-                "BrowserLocator",
-                BrowserHostValue::Locator(jet_browser_page_get_by_role(
-                    page,
-                    &string_arg(args, 0, span)?,
-                    &string_arg(args, 1, span)?,
-                )),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Page(page), "storage_clear") => result(
+            jet_browser_page_storage_clear(page, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Frame(frame), "close") => {
+            result(jet_browser_frame_close(frame), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Locator(locator), "wait") => result(
+            jet_browser_locator_wait(
+                locator,
+                timeout_value(
+                    args.first().ok_or_else(|| host_error("timeout", span))?,
+                    span,
+                )?,
             ),
-            (BrowserHostValue::Page(page), "get_by_text") => store(
-                "BrowserLocator",
-                BrowserHostValue::Locator(jet_browser_page_get_by_text(
-                    page,
-                    &string_arg(args, 0, span)?,
-                )),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Locator(locator), "wait_gone") => result(
+            jet_browser_locator_wait_gone(
+                locator,
+                timeout_value(
+                    args.first().ok_or_else(|| host_error("timeout", span))?,
+                    span,
+                )?,
             ),
-            (BrowserHostValue::Page(page), "get_by_label") => store(
-                "BrowserLocator",
-                BrowserHostValue::Locator(jet_browser_page_get_by_label(
-                    page,
-                    &string_arg(args, 0, span)?,
-                )),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Locator(locator), "click") => {
+            result(jet_browser_locator_click(locator), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Locator(locator), "hover") => {
+            result(jet_browser_locator_hover(locator), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Locator(locator), "fill") => result(
+            jet_browser_locator_fill(locator, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Locator(locator), "press") => result(
+            jet_browser_locator_press(locator, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Locator(locator), "set_files") => result(
+            jet_browser_locator_set_files(locator, &string_arg(args, 0, span)?),
+            |_| CtValue::Unit,
+        ),
+        (BrowserHostValue::Intercept(intercept), "remove") => {
+            result(jet_browser_intercept_remove(intercept), |_| CtValue::Unit)
+        }
+        (BrowserHostValue::Protocol(protocol), "send") => result(
+            jet_browser_protocol_send(
+                protocol,
+                &string_arg(args, 0, span)?,
+                &string_arg(args, 1, span)?,
             ),
-            (BrowserHostValue::Page(page), "get_by_placeholder") => store(
-                "BrowserLocator",
-                BrowserHostValue::Locator(jet_browser_page_get_by_placeholder(
-                    page,
-                    &string_arg(args, 0, span)?,
-                )),
-            ),
-            (BrowserHostValue::Page(page), "get_by_test_id") => store(
-                "BrowserLocator",
-                BrowserHostValue::Locator(jet_browser_page_get_by_test_id(
-                    page,
-                    &string_arg(args, 0, span)?,
-                )),
-            ),
-            (BrowserHostValue::Page(page), "get_by_css") => store(
-                "BrowserLocator",
-                BrowserHostValue::Locator(jet_browser_page_get_by_css(
-                    page,
-                    &string_arg(args, 0, span)?,
-                )),
-            ),
-            (BrowserHostValue::Page(page), "main_frame") => result(
-                jet_browser_page_main_frame(page),
-                |frame| store("BrowserFrame", BrowserHostValue::Frame(frame)),
-            ),
-            (BrowserHostValue::Page(page), "frames") => result(
-                jet_browser_page_frames(page),
-                |frames| {
-                    CtValue::List(
-                        frames
-                            .into_iter()
-                            .map(|frame| store("BrowserFrame", BrowserHostValue::Frame(frame)))
-                            .collect(),
-                    )
-                },
-            ),
-            (BrowserHostValue::Page(page), "close") => {
-                result(jet_browser_page_close(page), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Page(page), "screenshot") => {
-                result(jet_browser_page_screenshot(page), CtValue::Str)
-            }
-            (BrowserHostValue::Page(page), "pdf") => {
-                result(jet_browser_page_pdf(page), CtValue::Str)
-            }
-            (BrowserHostValue::Page(page), "set_cookie") => result(
-                jet_browser_page_set_cookie(
-                    page,
-                    &string_arg(args, 0, span)?,
-                    &string_arg(args, 1, span)?,
-                    &string_arg(args, 2, span)?,
-                ),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Page(page), "cookie") => result(
-                jet_browser_page_cookie(page, &string_arg(args, 0, span)?),
-                |value| match value {
-                    Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-                    None => CtValue::absent(Type::String),
-                },
-            ),
-            (BrowserHostValue::Page(page), "clear_cookies") => {
-                result(jet_browser_page_clear_cookies(page), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Page(page), "storage_get") => result(
-                jet_browser_page_storage_get(
-                    page,
-                    &string_arg(args, 0, span)?,
-                    &string_arg(args, 1, span)?,
-                ),
-                |value| match value {
-                    Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-                    None => CtValue::absent(Type::String),
-                },
-            ),
-            (BrowserHostValue::Page(page), "storage_set") => result(
-                jet_browser_page_storage_set(
-                    page,
-                    &string_arg(args, 0, span)?,
-                    &string_arg(args, 1, span)?,
-                    &string_arg(args, 2, span)?,
-                ),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Page(page), "storage_clear") => result(
-                jet_browser_page_storage_clear(page, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Frame(frame), "close") => {
-                result(jet_browser_frame_close(frame), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Locator(locator), "wait") => result(
-                jet_browser_locator_wait(
-                    locator,
-                    timeout_value(args.first().ok_or_else(|| host_error("timeout", span))?, span)?,
-                ),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Locator(locator), "wait_gone") => result(
-                jet_browser_locator_wait_gone(
-                    locator,
-                    timeout_value(args.first().ok_or_else(|| host_error("timeout", span))?, span)?,
-                ),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Locator(locator), "click") => {
-                result(jet_browser_locator_click(locator), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Locator(locator), "hover") => {
-                result(jet_browser_locator_hover(locator), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Locator(locator), "fill") => result(
-                jet_browser_locator_fill(locator, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Locator(locator), "press") => result(
-                jet_browser_locator_press(locator, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Locator(locator), "set_files") => result(
-                jet_browser_locator_set_files(locator, &string_arg(args, 0, span)?),
-                |_| CtValue::Unit,
-            ),
-            (BrowserHostValue::Intercept(intercept), "remove") => {
-                result(jet_browser_intercept_remove(intercept), |_| CtValue::Unit)
-            }
-            (BrowserHostValue::Protocol(protocol), "send") => result(
-                jet_browser_protocol_send(
-                    protocol,
-                    &string_arg(args, 0, span)?,
-                    &string_arg(args, 1, span)?,
-                ),
-                CtValue::Str,
-            ),
-            _ => return Err(host_error(method, span)),
+            CtValue::Str,
+        ),
+        _ => return Err(host_error(method, span)),
     })
 }
 
@@ -600,13 +615,17 @@ pub(crate) fn eval_value_method(
 ) -> Result<Option<CtValue>, Diagnostic> {
     let value = match (kind, method) {
         ("BrowserEvent", "kind") => field(recv, kind, "method").cloned(),
-        ("BrowserEvent", "request_id" | "request_method" | "url_hash" | "download_id"
-            | "suggested_filename_hash") => field(recv, kind, method).cloned(),
+        (
+            "BrowserEvent",
+            "request_id"
+            | "request_method"
+            | "url_hash"
+            | "download_id"
+            | "suggested_filename_hash",
+        ) => field(recv, kind, method).cloned(),
         ("BrowserEvent", "is_blocked") => field(recv, kind, "is_blocked").cloned(),
         ("BrowserEvent", "status_code") => field(recv, kind, "status_code").cloned(),
-        ("BrowserAbilities", "bidi" | "cdp" | "profile") => {
-            field(recv, kind, method).cloned()
-        }
+        ("BrowserAbilities", "bidi" | "cdp" | "profile") => field(recv, kind, method).cloned(),
         ("BrowserTrace", "entry_count") => field(recv, kind, "entries").and_then(|value| {
             if let CtValue::List(entries) = value {
                 Some(CtValue::Int(entries.len() as i64))
@@ -641,9 +660,9 @@ pub(crate) fn eval_value_method(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(CtValue::Bool(jet_browser_trace_redacted(&JetBrowserTrace {
-                entries,
-            })))
+            Some(CtValue::Bool(jet_browser_trace_redacted(
+                &JetBrowserTrace { entries },
+            )))
         }),
         ("BrowserReceipt", "entry_count") => field(recv, kind, "entries").and_then(|value| {
             if let CtValue::List(entries) = value {
@@ -679,11 +698,13 @@ pub(crate) fn eval_value_method(
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(CtValue::Bool(jet_browser_receipt_redacted(&JetBrowserReceipt {
-                entries,
-                isolated: true,
-                cleaned: false,
-            })))
+            Some(CtValue::Bool(jet_browser_receipt_redacted(
+                &JetBrowserReceipt {
+                    entries,
+                    isolated: true,
+                    cleaned: false,
+                },
+            )))
         }),
         ("BrowserReceipt", "isolated" | "cleaned") => field(recv, kind, method).cloned(),
         ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
@@ -694,7 +715,9 @@ pub(crate) fn eval_value_method(
         }
         ("BrowserLocked", "verify") => {
             let locked = locked_value(recv, span)?;
-            Some(result(jet_browser_locked_verify(&locked), |_| CtValue::Unit))
+            Some(result(jet_browser_locked_verify(&locked), |_| {
+                CtValue::Unit
+            }))
         }
         _ => None,
     };

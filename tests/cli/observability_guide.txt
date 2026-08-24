@@ -32,6 +32,24 @@ not add a second recording flag. The table keeps live snapshots, GC evidence,
 historical sessions, and browser transport distinct until their contracts can
 share one envelope without losing meaning.
 
+## Recorded-run queries
+
+`jet run <file> --record=<name>` can attach source-level act snapshots to the
+same `.jetproof-replay` receipt. The receipt keeps the existing Time authority,
+identity, frame hashes, and footer. It does not create a `.jettrace` file or a
+second trace format.
+
+`jet debug <file> --replay=<name>` reads the receipt without changing it. The
+source-level prompt supports these queries:
+
+- `why <place> == <value>` names the recorded acts that produced the value.
+- `when <place>` lists recorded changes and names the last change.
+
+The queries use recorded local snapshots. They do not reverse execution, move
+the program through time, or keep a standing per-variable history buffer. A run
+without a receipt has no backward query result. Those deferred features remain
+under D-TIMETRAVEL1=C and D-RUN-RECORD1's deferral.
+
 ## Implementation homes
 
 - Live scheduler: `crates/jet-devserver/src/LiveInspect.rs`

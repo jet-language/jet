@@ -15,7 +15,7 @@ use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
 use jet_semindex::{
     open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs, SemIndex,
-    DefinitionAnchor, SemIndexError, SymbolKind,
+    DefinitionAnchor, SemIndexError, SemanticOp, SemanticOpTarget, SymbolKind,
 };
 use JSON::Value;
 use Transaction::Change;
@@ -89,6 +89,7 @@ struct BatchPlan {
     counts: Vec<(String, usize)>,
     validations: Vec<String>,
     inputs: BTreeMap<PathBuf, String>,
+    semantic_ops: Vec<SemanticOp>,
 }
 
 pub(crate) fn run_codemod(args: &[String]) {
@@ -308,7 +309,7 @@ fn run_v2(batch: Batch, apply: bool, yes: bool) {
         })
         .collect::<Vec<_>>();
     let log_path = log_path(&batch.project, &batch.name);
-    let log = render_v2_log(&batch, &changes);
+    let log = render_v2_log(&batch, &changes, &plan.semantic_ops);
     Transaction::commit(&lock, &changes, &log_path, log.as_bytes());
     println!(
         "codemod `{}` applied\n  files: {}\n  log: {}",
@@ -341,8 +342,15 @@ fn plan_batch(batch: &Batch) -> BatchPlan {
         read_fingerprint(input, &mut inputs);
     }
     let mut counts = Vec::new();
+    let mut semantic_ops = Vec::new();
     for rule in &batch.rules {
-        let count = apply_rule(rule, &units, &mut files, &mut inputs);
+        let count = apply_rule(
+            rule,
+            &units,
+            &mut files,
+            &mut inputs,
+            &mut semantic_ops,
+        );
         let (id, expected, allow) = match rule {
             Rule::Rename {
                 id,
@@ -374,6 +382,7 @@ fn plan_batch(batch: &Batch) -> BatchPlan {
         counts,
         validations,
         inputs,
+        semantic_ops,
     }
 }
 
@@ -431,6 +440,7 @@ fn apply_rule(
     units: &[Unit],
     files: &mut BTreeMap<PathBuf, FileState>,
     inputs: &mut BTreeMap<PathBuf, String>,
+    semantic_ops: &mut Vec<SemanticOp>,
 ) -> usize {
     match rule {
         Rule::Rename {
@@ -443,6 +453,7 @@ fn apply_rule(
         } => {
             let mut edits: BTreeMap<PathBuf, Vec<TextEdit>> = BTreeMap::new();
             let mut anchors = BTreeSet::new();
+            let mut targets = Vec::new();
             for u in units {
                 let idx = index_unit(u, files, inputs);
                 if idx.definitions().iter().any(|d| d.name == *to) {
@@ -458,7 +469,18 @@ fn apply_rule(
                             .as_ref()
                             .is_none_or(|p| same_path(Path::new(&d.module_path), p))
                 }) {
-                    anchors.insert(definition_anchor(d));
+                    let anchor = definition_anchor(d);
+                    if anchors.insert(anchor) {
+                        if let Some(fact) = definition_fact(&idx, d) {
+                            targets.push(SemanticOpTarget {
+                                stable_id: fact.stable_id.clone(),
+                                before: fact.human_identity.clone(),
+                                after: renamed_identity(fact, to),
+                                kind: fact.kind.clone(),
+                                module_path: fact.module_path.clone(),
+                            });
+                        }
+                    }
                 }
             }
             if anchors.is_empty() {
@@ -488,7 +510,21 @@ fn apply_rule(
                     }
                 }
             }
-            dedup_apply_edits(id, edits, files)
+            let count = dedup_apply_edits(id, edits, files);
+            if count > 0 {
+                semantic_ops.push(SemanticOp {
+                    kind: "rename".to_string(),
+                    rule_id: Some(id.clone()),
+                    from: Some(name.clone()),
+                    to: Some(to.clone()),
+                    node: None,
+                    match_template: None,
+                    replace_template: None,
+                    targets,
+                    files: Vec::new(),
+                });
+            }
+            count
         }
         Rule::Ast {
             id,
@@ -515,9 +551,52 @@ fn apply_rule(
                     });
                 }
             }
-            dedup_apply_edits(id, edits, files)
+            let count = dedup_apply_edits(id, edits, files);
+            if count > 0 {
+                semantic_ops.push(SemanticOp {
+                    kind: "ast_rewrite".to_string(),
+                    rule_id: Some(id.clone()),
+                    from: None,
+                    to: None,
+                    node: Some(node.clone()),
+                    match_template: Some(template_text(pattern)),
+                    replace_template: Some(template_text(replacement)),
+                    targets: Vec::new(),
+                    files: Vec::new(),
+                });
+            }
+            count
         }
     }
+}
+
+fn definition_fact<'a>(idx: &'a SemIndex, definition: &jet_semindex::SymbolDef) -> Option<&'a jet_semindex::DefinitionFact> {
+    idx.definition_facts().iter().find(|fact| {
+        fact.module_path == definition.module_path
+            && fact.span.start <= definition.def_span.start
+            && definition.def_span.end <= fact.span.end
+    })
+}
+
+fn renamed_identity(fact: &jet_semindex::DefinitionFact, to: &str) -> String {
+    fact.human_identity
+        .strip_suffix(&fact.name)
+        .map(|prefix| format!("{prefix}{to}"))
+        .unwrap_or_else(|| format!("{}::{to}", fact.module_path))
+}
+
+fn template_text(template: &Template) -> String {
+    template
+        .atoms
+        .iter()
+        .map(|atom| match atom {
+            Atom::Literal(value) => value.clone(),
+            Atom::Capture(name, variadic) => {
+                if *variadic { format!("${name}...") } else { format!("${name}") }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn index_unit(
@@ -1321,9 +1400,58 @@ fn print_simple_diff(before: &[u8], after: &[u8]) {
     }
 }
 
-fn render_v2_log(batch: &Batch, changes: &[Change]) -> String {
+fn render_v2_log(batch: &Batch, changes: &[Change], semantic_ops: &[SemanticOp]) -> String {
     let rows=changes.iter().map(|c|format!("{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}}",json_escape(&c.path.display().to_string()),hash_bytes(&c.before),hash_bytes(&c.after),hex(&c.before),hex(&c.after))).collect::<Vec<_>>().join(",\n    ");
-    format!("{{\n  \"schema\": 2,\n  \"name\": \"{}\",\n  \"project\": \"{}\",\n  \"files\": [\n    {}\n  ]\n}}\n",json_escape(&batch.name),json_escape(&batch.project.display().to_string()),rows)
+    let ops = semantic_ops.iter().map(|op| semantic_op_json(op, changes)).collect::<Vec<_>>().join(",\n    ");
+    format!("{{\n  \"schema\": 2,\n  \"name\": \"{}\",\n  \"project\": \"{}\",\n  \"semantic_ops\": [\n    {}\n  ],\n  \"files\": [\n    {}\n  ]\n}}\n",json_escape(&batch.name),json_escape(&batch.project.display().to_string()),ops,rows)
+}
+
+fn semantic_op_json(op: &SemanticOp, changes: &[Change]) -> String {
+    let targets = op
+        .targets
+        .iter()
+        .map(|target| {
+            format!(
+                "{{\"stable_id\":\"{}\",\"before\":\"{}\",\"after\":\"{}\",\"kind\":\"{}\",\"module_path\":\"{}\"}}",
+                json_escape(&target.stable_id),
+                json_escape(&target.before),
+                json_escape(&target.after),
+                json_escape(&target.kind),
+                json_escape(&target.module_path),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let files = changes
+        .iter()
+        .map(|change| {
+            format!(
+                "{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\"}}",
+                json_escape(&change.path.display().to_string()),
+                hash_bytes(&change.before),
+                hash_bytes(&change.after),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let optional = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .unwrap_or_else(|| "null".to_string())
+    };
+    format!(
+        "{{\"kind\":\"{}\",\"rule_id\":{},\"from\":{},\"to\":{},\"node\":{},\"match\":{},\"replace\":{},\"targets\":[{}],\"files\":[{}]}}",
+        json_escape(&op.kind),
+        optional(&op.rule_id),
+        optional(&op.from),
+        optional(&op.to),
+        optional(&op.node),
+        optional(&op.match_template),
+        optional(&op.replace_template),
+        targets,
+        files,
+    )
 }
 fn undo(path: &Path) {
     let project = replay_log_project(path);
@@ -1354,8 +1482,15 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
     if schema != 2 {
         fail("unsupported codemod log schema")
     }
+    let operation = take_string_opt(&mut o, "operation").unwrap_or_else(|| "codemod".into());
+    let is_fix = match operation.as_str() {
+        "codemod" => false,
+        "fix" => true,
+        other => fail(&format!("unsupported replay log operation `{other}`")),
+    };
     let name = take_string(&mut o, "name");
     let declared_project = PathBuf::from(take_string(&mut o, "project"));
+    let _ = take_array_opt(&mut o, "semantic_ops");
     let rows = take_array(&mut o, "files");
     reject_unknown(o, "schema 2 replay log");
     let declared_project = fs::canonicalize(&declared_project)
@@ -1383,13 +1518,22 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
         decoded.push((p, before, after));
     }
     let paths = decoded.iter().map(|(path, _, _)| path.clone()).collect::<Vec<_>>();
-    Transaction::validate_destinations(project, &paths);
-    Transaction::validate_replay_aliases(project, path, &paths);
+    if is_fix {
+        Transaction::validate_fix_destinations(project, &paths);
+        Transaction::validate_fix_replay_aliases(project, path, &paths);
+    } else {
+        Transaction::validate_destinations(project, &paths);
+        Transaction::validate_replay_aliases(project, path, &paths);
+    }
     let lock = Transaction::lock(project);
     Transaction::recover(&lock);
     let mut changes = Vec::new();
     for (p, before, after) in decoded {
-        let current = Transaction::read_destination(project, &p)
+        let current = if is_fix {
+            Transaction::read_fix_destination(project, &p)
+        } else {
+            Transaction::read_destination(project, &p)
+        }
             .unwrap_or_else(|e| fail(&format!("could not read `{}`: {e}", p.display())));
         if current != after {
             fail(&format!(
@@ -1404,7 +1548,11 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
         "{{\"schema\":2,\"name\":\"{}-undo\",\"files\":[]}}\n",
         json_escape(&name)
     );
-    Transaction::commit(&lock, &changes, &undo_log, marker.as_bytes());
+    if is_fix {
+        Transaction::commit_fix(&lock, &changes, &undo_log, marker.as_bytes());
+    } else {
+        Transaction::commit(&lock, &changes, &undo_log, marker.as_bytes());
+    }
     println!(
         "codemod undo `{name}` applied\n  files: {}\n  source log: {}",
         changes.len(),
@@ -1412,9 +1560,115 @@ fn undo_v2(value: Value, path: &Path, project: &Path) {
     )
 }
 
+pub(crate) fn commit_fix(path: &Path, before: Vec<u8>, after: Vec<u8>) -> PathBuf {
+    commit_fix_with_semantic_ops(path, before, after, &[])
+}
+
+pub(crate) fn commit_fix_with_semantic_ops(
+    path: &Path,
+    before: Vec<u8>,
+    after: Vec<u8>,
+    semantic_ops: &[SemanticOp],
+) -> PathBuf {
+    let path = fs::canonicalize(path)
+        .unwrap_or_else(|e| fail(&format!("could not canonicalize fix target `{}`: {e}", path.display())));
+    let project = fix_project_for(&path);
+    let lock = Transaction::lock(&project);
+    Transaction::recover(&lock);
+    let (name, log_path) = next_fix_log_path(&project, &path);
+    let changes = vec![Change {
+        path: path.clone(),
+        before,
+        after,
+    }];
+    let log = render_fix_log(&project, &name, &changes, semantic_ops);
+    Transaction::commit_fix(&lock, &changes, &log_path, log.as_bytes());
+    log_path
+}
+
+fn fix_project_for(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    if let Some(root) = jet::Loader::find_manifest_root(parent) {
+        return root;
+    }
+    for ancestor in path.ancestors().skip(1) {
+        let Some(relative) = path.strip_prefix(ancestor).ok() else {
+            continue;
+        };
+        if relative.starts_with("examples") || relative.starts_with(Path::new("tests").join("ui")) {
+            return ancestor.to_path_buf();
+        }
+    }
+    parent.to_path_buf()
+}
+
+fn next_fix_log_path(project: &Path, path: &Path) -> (String, PathBuf) {
+    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("source");
+    let base = format!("Fix-{}", sanitize_file_name(stem));
+    for suffix in 0.. {
+        let name = if suffix == 0 {
+            base.clone()
+        } else {
+            format!("{base}-{suffix}")
+        };
+        let path = log_path(project, &name);
+        if !path.exists() {
+            return (name, path);
+        }
+    }
+    unreachable!()
+}
+
+fn render_fix_log(
+    project: &Path,
+    name: &str,
+    changes: &[Change],
+    semantic_ops: &[SemanticOp],
+) -> String {
+    let rows = changes
+        .iter()
+        .map(|c| {
+            format!(
+                "{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}}",
+                json_escape(&c.path.display().to_string()),
+                hash_bytes(&c.before),
+                hash_bytes(&c.after),
+                hex(&c.before),
+                hex(&c.after)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    let semantic_ops = semantic_ops
+        .iter()
+        .map(|operation| semantic_op_json(operation, changes))
+        .collect::<Vec<_>>()
+        .join(",\n    ");
+    format!(
+        "{{\n  \"schema\": 2,\n  \"operation\": \"fix\",\n  \"name\": \"{}\",\n  \"project\": \"{}\",\n  \"semantic_ops\": [\n    {}\n  ],\n  \"files\": [\n    {}\n  ]\n}}\n",
+        json_escape(name),
+        json_escape(&project.display().to_string()),
+        semantic_ops,
+        rows
+    )
+}
+
 // Version-1 compatibility retains the original semantic-index rename and edit log.
 fn run_v1(cm: V1, apply: bool) {
     let idx = open(&cm.entry).unwrap_or_else(|e| render_index_error(&cm.entry, e));
+    let targets = idx
+        .definitions()
+        .iter()
+        .filter(|d| d.name == cm.from)
+        .filter_map(|d| definition_fact(&idx, d))
+        .map(|fact| SemanticOpTarget {
+            stable_id: fact.stable_id.clone(),
+            before: fact.human_identity.clone(),
+            after: renamed_identity(fact, &cm.to),
+            kind: fact.kind.clone(),
+            module_path: fact.module_path.clone(),
+        })
+        .collect::<Vec<_>>();
     let mut by: BTreeMap<PathBuf, Vec<TextEdit>> = BTreeMap::new();
     for d in idx.definitions().iter().filter(|d| d.name == cm.from) {
         by.entry(canonicalish(Path::new(&d.module_path)))
@@ -1458,7 +1712,7 @@ fn run_v1(cm: V1, apply: bool) {
         let project = managed_project_for_entry(&cm.entry);
         let paths = changes.iter().map(|change| change.path.clone()).collect::<Vec<_>>();
         Transaction::validate_destinations(&project, &paths);
-        let log = render_v1_log(&cm, &changes);
+        let log = render_v1_log(&cm, &changes, &targets);
         let dir = project.join(".jet/codemods");
         let p = dir.join(format!("{}.log.json", sanitize_file_name(&cm.name)));
         let lock = Transaction::lock(&project);
@@ -1467,13 +1721,26 @@ fn run_v1(cm: V1, apply: bool) {
         println!("  log: {}", p.display())
     }
 }
-fn render_v1_log(cm: &V1, changes: &[Change]) -> String {
+fn render_v1_log(cm: &V1, changes: &[Change], targets: &[SemanticOpTarget]) -> String {
     let files=changes.iter().map(|c|format!("{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\",\"inverse_edits\":[]}}",json_escape(&c.path.display().to_string()),hash_bytes(&c.before),hash_bytes(&c.after),hex(&c.before),hex(&c.after))).collect::<Vec<_>>().join(",");
+    let op = SemanticOp {
+        kind: "rename".to_string(),
+        rule_id: None,
+        from: Some(cm.from.clone()),
+        to: Some(cm.to.clone()),
+        node: None,
+        match_template: None,
+        replace_template: None,
+        targets: targets.to_vec(),
+        files: Vec::new(),
+    };
+    let semantic_ops = semantic_op_json(&op, changes);
     format!(
-        "{{\"name\":\"{}\",\"inverse_from\":\"{}\",\"inverse_to\":\"{}\",\"files\":[{}]}}\n",
+        "{{\"name\":\"{}\",\"inverse_from\":\"{}\",\"inverse_to\":\"{}\",\"semantic_ops\":[{}],\"files\":[{}]}}\n",
         json_escape(&cm.name),
         json_escape(&cm.to),
         json_escape(&cm.from),
+        semantic_ops,
         files
     )
 }

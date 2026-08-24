@@ -1,4 +1,3 @@
-use crate::AST::{Expr, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::LowerEnv;
@@ -7,6 +6,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPanicLoc;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Diagnostics::Span;
+use crate::AST::{Expr, Type};
 
 pub(crate) const RESOURCE_CLEANUP_MARKER: &str = "__JET_RESOURCE_CLEANUP__";
 
@@ -95,7 +95,11 @@ pub(crate) fn lower_require_stop(
     let loc = capture_panic_loc(&call.name_span, cx, env);
     let cond = Box::new(lower_expr(&call.args[0].expr, cx, env));
     let msg = if call.args.len() == 2 {
-        Some(Box::new(lower_panic_message_expr(&call.args[1].expr, cx, env)))
+        Some(Box::new(lower_panic_message_expr(
+            &call.args[1].expr,
+            cx,
+            env,
+        )))
     } else {
         None
     };

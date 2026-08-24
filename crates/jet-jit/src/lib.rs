@@ -47,6 +47,12 @@ pub mod Job {
     include!("../../jet-codegen/src/Prelude/Job.rs");
 }
 
+/// D-DEVR-LAW1=A / I9: the JIT uses the exact receipt record source embedded
+/// by AOT. It does not define a second receipt schema or serializer.
+pub mod development_receipt {
+    include!("../../jet-codegen/src/Prelude/DevelopmentReceipt.rs");
+}
+
 /// The dev watcher sleeps through the same Prelude TimerWheel as language
 /// timers. This is only the host adapter; timer ownership stays in
 /// `Prelude/Scheduler.rs`.

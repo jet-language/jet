@@ -1,14 +1,14 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{AccessConvention, Type, ViewSource};
-use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
-use crate::Codegen::TIR::{emit_tir_expr, emit_tir_stmts};
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::{emit_tir_expr, emit_tir_stmts};
+use crate::AST::{AccessConvention, Type, ViewSource};
 
 fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
     // A synthesized function keeps file/line/name attribution, but the source
@@ -35,7 +35,9 @@ fn emit_stack_guard(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
 }
 
 fn emit_sentry_gate(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize) {
-    let Some(gate) = tir.unsafe_gate.as_ref() else { return };
+    let Some(gate) = tir.unsafe_gate.as_ref() else {
+        return;
+    };
     let pad = "    ".repeat(indent);
     let scope = if gate.fenced {
         "jet_sentry_fenced_scope"
@@ -166,11 +168,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     // needs the C calling convention: the referenced Rust item's own type
     // must match the raw `extern "C" fn` pointer type the C side expects.
     let ffi_callback = cx.ffi_callback_fns.contains(&tir.name) && tir.generics.is_empty();
-    let abi = if ffi_callback {
-        "extern \"C\" "
-    } else {
-        ""
-    };
+    let abi = if ffi_callback { "extern \"C\" " } else { "" };
     // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` lower to a Rust `#[inline]`/
     // `#[inline(always)]` attribute right above the signature. `is_inline_always`
     // is only ever `true` here once sema has confirmed the function can actually
@@ -272,10 +270,7 @@ fn emit_tir_memoized_toplevel(
     let body_name = jet_name_format!("{name_prefix}memo_body_{name}");
     let stats_name = jet_name_format!("{name_prefix}memo_stats_{name}");
     let key_type = memo_key_type(tir, cx);
-    let value_type = ret_clause
-        .strip_prefix(" -> ")
-        .unwrap_or("()")
-        .to_string();
+    let value_type = ret_clause.strip_prefix(" -> ").unwrap_or("()").to_string();
     let key_expr = memo_key_expr(tir, cx);
     let call_args = tir
         .params
@@ -364,7 +359,8 @@ fn emit_tir_function_body(tir: &TFunc, cx: &Cx, out: &mut String, indent: usize)
     }
     if tir.is_reactive {
         emit_reactive_wrapped_body(&tir.body, cx, out, indent);
-    } else if matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM) {
+    } else if matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM)
+    {
         emit_generator_wrapped_body(&tir.body, cx, out, indent);
     } else {
         emit_tir_stmts(&tir.body, cx, out, indent);
@@ -476,14 +472,10 @@ pub(crate) fn emit_tir_method(
     if let Some(conv) = self_conv {
         params.push(
             match conv {
-                AccessConvention::Read
-                    if borrows_receiver =>
-                {
+                AccessConvention::Read if borrows_receiver => {
                     jet_format!("&'{jet_prefix}view self")
                 }
-                AccessConvention::Write
-                    if borrows_receiver =>
-                {
+                AccessConvention::Write if borrows_receiver => {
                     jet_format!("&'{jet_prefix}view mut self")
                 }
                 AccessConvention::Read => "&self".to_string(),
@@ -495,11 +487,13 @@ pub(crate) fn emit_tir_method(
     }
     for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
         let rust = rust_param_type(cx, *conv, ty);
-        let rust = if view_provenance.is_some_and(|map| map.values().any(|provenance| {
-            provenance.sources.iter().any(
+        let rust = if view_provenance.is_some_and(|map| {
+            map.values().any(|provenance| {
+                provenance.sources.iter().any(
                 |source| matches!(source.source, ViewSource::Parameter(owner) if owner == index),
             )
-        })) {
+            })
+        }) {
             add_hidden_view_lifetime(rust)
         } else {
             rust
@@ -662,11 +656,13 @@ pub(crate) fn emit_tir_trait_method(
     let mut params: Vec<String> = vec![self_recv];
     for (index, (rust_name, ty, conv)) in tir.params.iter().enumerate() {
         let rust = rust_param_type(cx, *conv, ty);
-        let rust = if view_provenance.is_some_and(|map| map.values().any(|provenance| {
-            provenance.sources.iter().any(
+        let rust = if view_provenance.is_some_and(|map| {
+            map.values().any(|provenance| {
+                provenance.sources.iter().any(
                 |source| matches!(source.source, ViewSource::Parameter(owner) if owner == index),
             )
-        })) {
+            })
+        }) {
             add_hidden_view_lifetime(rust)
         } else {
             rust
@@ -734,9 +730,7 @@ pub(crate) fn emit_tir_serde_method_named(
     *cx.current_fn.borrow_mut() = tir.name.clone();
     match codec {
         SerdeCodec::Encode => {
-            out.push_str(&format!(
-                "{pad}fn {name}(&self) -> jet_std::DataTree {{\n"
-            ));
+            out.push_str(&format!("{pad}fn {name}(&self) -> jet_std::DataTree {{\n"));
             emit_stack_guard(tir, cx, out, indent + 1);
             emit_sentry_gate(tir, cx, out, indent + 1);
             if cx.coverage {

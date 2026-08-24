@@ -14,6 +14,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, TryLockError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use jet_foundation::JetTrace::TRACE_VERSION;
+
 const MAX_OBJECTS: usize = 1_000_000;
 const MAX_EDGES_PER_OBJECT: usize = 65_536;
 const MAX_TRACE_BYTES: usize = 4 * 1024 * 1024;
@@ -21,7 +23,6 @@ const MAX_TRACE_FIELD_BYTES: usize = 4 * 1024;
 const MAX_TRACE_IDENTITIES: usize = 65_536;
 const MAX_TRACE_SITES: usize = 4_096;
 const TRACE_SCHEMA: &str = "jet.gc.trace";
-const TRACE_VERSION: u32 = 1;
 static NEXT_OBJECT_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_TRACE_TEMP: AtomicU64 = AtomicU64::new(1);
 static TRACE: OnceLock<Option<Mutex<TraceState>>> = OnceLock::new();

@@ -88,8 +88,7 @@ pub fn collect_fixes_from_diagnostics(diagnostics: Vec<Diagnostic>, text: &str) 
         crate::Formatter::retired_interpolation_selector_edits(text)
             .into_iter()
             .map(|edit| Fix {
-                title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)"
-                    .to_string(),
+                title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)".to_string(),
                 edit,
                 applicability: FixApplicability::Safe,
                 safety: FixSafety::Formatting,
@@ -122,16 +121,14 @@ pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {
     diagnostics
         .into_iter()
         .filter_map(|d| {
-            d.edit
-                .clone()
-                .zip(d.applicability)
-                .zip(d.safety)
-                .map(|((edit, applicability), safety)| Fix {
+            d.edit.clone().zip(d.applicability).zip(d.safety).map(
+                |((edit, applicability), safety)| Fix {
                     title: d.fix.clone(),
                     edit,
                     applicability,
                     safety,
-                })
+                },
+            )
         })
         .collect()
 }
@@ -300,6 +297,28 @@ pub fn measure_bench(src: &str, rounds: usize) -> BenchReport {
     }
 }
 
+/// Measure one body edit at two program sizes. Reverified item count is the
+/// deterministic cone-work unit; each row also carries wall time in its
+/// `ReverdictReceipt`.
+pub fn measure_cone_bench() -> Vec<jet_driver::QueryService::ReverdictReceipt> {
+    let mut receipts = Vec::new();
+    for functions in [16, 128] {
+        let mut source = (0..functions)
+            .map(|index| format!("fn helper_{index}() Int -> {{ return {index} }}\n"))
+            .collect::<String>();
+        source.push_str("fn target() Int -> { return 1 }\nfn run() Int -> { return target() }\n");
+        let edited = source.replace(
+            "fn target() Int -> { return 1 }",
+            "fn target() Int -> { return 2 }",
+        );
+        let mut queries = jet_driver::QueryService::CompilerQueries::new();
+        let _ = queries.check_text_with_receipt("cone-bench.jet", &source, true);
+        let (_, receipt) = queries.check_text_with_receipt("cone-bench.jet", &edited, true);
+        receipts.push(receipt);
+    }
+    receipts
+}
+
 pub fn run_bench(src: &str, rounds: usize, reference_budget_ms: u128) {
     let report = measure_bench(src, rounds);
     println!(
@@ -320,4 +339,7 @@ pub fn run_bench(src: &str, rounds: usize, reference_budget_ms: u128) {
         report.live_items,
         report.live_item_bytes,
     );
+    for receipt in measure_cone_bench() {
+        println!("cone-receipt {}", receipt.to_json().trim_end());
+    }
 }

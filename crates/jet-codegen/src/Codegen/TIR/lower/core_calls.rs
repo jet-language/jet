@@ -1,22 +1,22 @@
-use crate::AST::{Expr, Lambda, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_closure_call_return_ty;
-use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lambda_body_ty;
-use crate::Codegen::TIR::spawn_body_result_ty;
-use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda;
+use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::render_lambda_str_expecting_value;
 use crate::Codegen::TIR::render_lambda_str_unboxed;
 use crate::Codegen::TIR::render_spawn_lambda;
+use crate::Codegen::TIR::spawn_body_result_ty;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TCoreClosureKind;
-use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
-use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Diagnostics::Span;
+use crate::AST::{Expr, Lambda, Type};
 
 /// The JIT spawn-lambda table index for one source callback.
 ///
@@ -69,9 +69,10 @@ fn interrupt_callback_value(value: TExpr) -> TExpr {
 fn normalize_interrupt_named_value(mut value: TExpr, cx: &Cx) -> TExpr {
     let name = match &value.kind {
         TExprKind::FnValue {
-            kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                name: Some(name), ..
-            },
+            kind:
+                crate::Codegen::TIR::TFnValueKind::NamedFn {
+                    name: Some(name), ..
+                },
         } => Some(name.clone()),
         _ => None,
     };
@@ -191,7 +192,8 @@ pub(crate) fn lower_core_closure_call(
         });
     }
     let data_err = || Type::Named("DataError".to_string());
-    let data_checked = jet_foundation::PackageEdition::edition_at_least(&cx.package_edition, "2027");
+    let data_checked =
+        jet_foundation::PackageEdition::edition_at_least(&cx.package_edition, "2027");
     let wrap_data = |ok: Type| -> Type {
         if data_checked {
             Type::Result {
@@ -205,16 +207,16 @@ pub(crate) fn lower_core_closure_call(
     let data_row_ty = |ty: &Type| -> Type {
         match ty {
             Type::List(inner) => (**inner).clone(),
-            Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => args[0].clone(),
+            Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
+                args[0].clone()
+            }
             _ => Type::Int,
         }
     };
     let kind = match (module, method) {
-        ("core.sys", "on_interrupt") if args.len() == 1 => {
-            TCoreClosureKind::OnInterrupt {
-                callback: Box::new(lower_interrupt_callback(&args[0].expr, cx, env)),
-            }
-        }
+        ("core.sys", "on_interrupt") if args.len() == 1 => TCoreClosureKind::OnInterrupt {
+            callback: Box::new(lower_interrupt_callback(&args[0].expr, cx, env)),
+        },
         ("core.http", "serve") => {
             let lam = lam_at(1)?;
             let addr = lower_expr(&args[0].expr, cx, env);
@@ -254,7 +256,11 @@ pub(crate) fn lower_core_closure_call(
             let pred = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             let list = Type::List(Box::new(row_ty));
             return Some(TExpr {
-                ty: if method == "sort_by" { wrap_data(list) } else { list },
+                ty: if method == "sort_by" {
+                    wrap_data(list)
+                } else {
+                    list
+                },
                 kind: TExprKind::CoreCall {
                     module: module.to_string(),
                     method: method.to_string(),

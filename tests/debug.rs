@@ -715,6 +715,8 @@ fn native_session_steps_and_shows_locals() {
             "skipping native lldb session: lldb launched but did not stop at a Jet line\n{}",
             transcript
         );
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&file);
         return;
     }
     assert!(
@@ -738,4 +740,28 @@ fn native_session_steps_and_shows_locals() {
          the interpreter backend uses:\n{}",
         transcript
     );
+    assert!(
+        !transcript.contains("__jet_") && !transcript.contains("prog.rs:"),
+        "default native projection leaked generated Rust details:\n{}",
+        transcript
+    );
+
+    let raw = jet::Debug::run_native_scripted(
+        &bin,
+        "prog.rs",
+        &out.rust,
+        &file,
+        &jet_src,
+        true,
+        &["locals", "backtrace", "continue"],
+    );
+    if raw.contains("breakpoint hit") {
+        assert!(
+            raw.contains("[raw]"),
+            "raw expert mode must mark generated frames and scopes:\n{}",
+            raw
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(&file);
 }

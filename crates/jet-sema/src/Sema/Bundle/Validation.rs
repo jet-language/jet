@@ -408,11 +408,35 @@ fn check_func_body_incremental(
     no_prelude: bool,
     name_ledger: &mut jet_foundation::Names::NameLedger,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
-    cache: Option<&mut IncrementalSemaCache>,
+    mut cache: Option<&mut IncrementalSemaCache>,
     cache_allowed: bool,
 ) -> Vec<Diagnostic> {
     let cache_allowed = cache_allowed && !stmts_have_comptime_evaluation(&function.body);
-    let Some(cache) = cache.filter(|_| cache_allowed) else {
+    if !cache_allowed {
+        if let Some(cache) = cache.as_deref_mut() {
+            cache.record_recompute(key);
+        }
+        return check_func_body_bundle(
+            function,
+            module_idx,
+            states,
+            effect_facts,
+            owner_type,
+            ct_funcs,
+            ct_externs,
+            ct_base_dir,
+            ct_globals,
+            freestanding,
+            gates,
+            summaries,
+            embed_inputs_out,
+            global_addr_taken,
+            no_prelude,
+            name_ledger,
+            pending_diagnostics_out,
+        );
+    }
+    let Some(cache) = cache else {
         return check_func_body_bundle(
             function,
             module_idx,
@@ -485,6 +509,7 @@ fn check_func_body_incremental(
     name_ledger.merge_structure_facts(&local_ledger);
     pending_diagnostics_out.extend(local_pending_diagnostics.clone());
     if !local_inputs.is_empty() {
+        cache.record_recompute(key);
         return diagnostics;
     }
     cache.store(

@@ -93,6 +93,19 @@ pub trait DebugHook {
         span: Span,
         scope: &HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic>;
+
+    /// Called after a statement completes. A recorder uses this one bounded
+    /// receipt point to retain the locals produced by the act; ordinary
+    /// debugger hooks do nothing here.
+    fn after_stmt(
+        &mut self,
+        _func: &str,
+        _depth: usize,
+        _span: Span,
+        _scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        Ok(())
+    }
 }
 
 /// Concrete ambient operation reached by a REPL turn after arguments have
@@ -502,7 +515,7 @@ impl<'a> Interp<'a> {
             self.debugger = Some(dbg);
             res?;
         }
-        if self.repl_mode {
+        let result = if self.repl_mode {
             if let Stmt::Caps {
                 caps,
                 binding,
@@ -529,10 +542,20 @@ impl<'a> Interp<'a> {
                         scope.remove(&name);
                     }
                 }
-                return result;
+                result
+            } else {
+                self.exec_block(std::slice::from_ref(stmt), scope)
             }
+        } else {
+            self.exec_block(std::slice::from_ref(stmt), scope)
+        };
+        if let Some(dbg) = self.debugger.take() {
+            let span = stmt.span();
+            let after = dbg.after_stmt(&self.cur_func, self.depth, span, scope);
+            self.debugger = Some(dbg);
+            after?;
         }
-        self.exec_block(std::slice::from_ref(stmt), scope)
+        result
     }
 
     /// Canonical evaluator entry for expressions (#777): lower to TIR, then eval.

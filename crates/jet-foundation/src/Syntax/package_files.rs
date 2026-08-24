@@ -310,6 +310,8 @@ pub const DBG_LIST: &str = "list"; // D-DBG3 (alias `l`): show source around `he
 pub const DBG_PRINT: &str = "print"; // D-DBG3 (alias `p`): show one local's value
 pub const DBG_LOCALS: &str = "locals"; // D-DBG3: dump all locals in the frame
 pub const DBG_BACKTRACE: &str = "backtrace"; // D-DBG3 (alias `bt`): the Jet call stack
+pub const DBG_WHY: &str = "why"; // D-DEVR-CAUSE1=A: query recorded acts that produced a value
+pub const DBG_WHEN: &str = "when"; // D-DEVR-CAUSE1=A: query recorded changes for a place
 pub const DBG_HELP: &str = "help"; // D-DBG3 (alias `h`): list the verbs
 pub const DBG_QUIT: &str = "quit"; // D-DBG3 (alias `q`): end the session (E2204)
 

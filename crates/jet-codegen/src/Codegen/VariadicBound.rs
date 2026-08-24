@@ -84,10 +84,7 @@ pub(crate) fn lower_variadic_bound_call(
                     .and_then(|ps| ps.get(i))
                     .map(|(c, t)| (*c, t.clone()))
             } else {
-                Some((
-                    tail_convention,
-                    Type::Named(format!("JaiVar{}", i - fixed)),
-                ))
+                Some((tail_convention, Type::Named(format!("JaiVar{}", i - fixed))))
             };
             lower_one_call_arg(a, conv, env, cx)
         })
@@ -163,7 +160,10 @@ pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usiz
             ty_span: last.ty_span,
             default: None,
             variadic: false,
-            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         });
     }
     let body = match unroll_variadic_body(&f.body, &last.name, arity) {
@@ -173,7 +173,9 @@ pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usiz
             "trait-bounded variadic `{}` — {} — codegen only covers a \
              single top-level `loop x in {}` loop; sema's E1314 (Sema/Registration.rs::\
              check_variadic_bound_body_shape) should have rejected this body already (D-ANY-JAI1)",
-            f.name, msg, last.name
+            f.name,
+            msg,
+            last.name
         ),
     };
     Func {
@@ -218,7 +220,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                     out.push(Stmt::Val(Binding {
                         mutable: false,
                         markers: Vec::new(),
-                reactive_upgrade: false,
+                        reactive_upgrade: false,
                         meta: None,
                         name: var.clone(),
                         name_span: *var_span,
@@ -231,9 +233,9 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                         ct: None,
                         uninit: false,
                         arena_view: false,
-                string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
+                        string_view: false,
+                        gc_promotion: None,
+                        gc_transferred: false,
                     }));
                     out.extend(body.clone());
                 }
@@ -256,9 +258,9 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
 /// whether `name` is referenced anywhere in `s`.
 fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
     match s {
-        Stmt::Expr(e)
-        | Stmt::DeferClose { close: e, .. }
-        | Stmt::Return(Some(e), _) => expr_references_ident(e, name),
+        Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } | Stmt::Return(Some(e), _) => {
+            expr_references_ident(e, name)
+        }
         Stmt::Val(b) => expr_references_ident(&b.init, name),
         Stmt::Assign { target, value, .. } => {
             let target_hit = match target {
@@ -275,15 +277,24 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         }
         Stmt::For { kind, body, .. } => {
             let kind_hit = match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => {
+                ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     expr_references_ident(start, name)
                         || expr_references_ident(end, name)
                         || step
                             .as_ref()
                             .is_some_and(|s| expr_references_ident(s, name))
                 }
-                ForKind::In { collection, step } => expr_references_ident(collection, name)
-                    || step.as_ref().is_some_and(|s| expr_references_ident(s, name)),
+                ForKind::In { collection, step } => {
+                    expr_references_ident(collection, name)
+                        || step
+                            .as_ref()
+                            .is_some_and(|s| expr_references_ident(s, name))
+                }
             };
             kind_hit || body.iter().any(|s| stmt_references_ident(s, name))
         }
@@ -312,7 +323,9 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         } => {
             expr_references_ident(&init.init, name)
                 || expr_references_ident(cond, name)
-                || step.as_ref().is_some_and(|step| stmt_references_ident(step, name))
+                || step
+                    .as_ref()
+                    .is_some_and(|step| stmt_references_ident(step, name))
                 || body.iter().any(|s| stmt_references_ident(s, name))
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
@@ -353,21 +366,24 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         | Expr::Err(inner, _) => expr_references_ident(inner, name),
         Expr::Try(inner, _, _, note) => {
             expr_references_ident(inner, name)
-                || note.as_deref().is_some_and(|note| expr_references_ident(note, name))
+                || note
+                    .as_deref()
+                    .is_some_and(|note| expr_references_ident(note, name))
         }
         Expr::OptField { base, .. } => expr_references_ident(base, name),
         Expr::Index { base, index, .. } => {
             expr_references_ident(base, name) || expr_references_ident(index, name)
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             expr_references_ident(base, name)
                 || range.as_deref().map_or_else(
-                    || {
-                        expr_references_ident(start, name)
-                            || expr_references_ident(end, name)
-                    },
+                    || expr_references_ident(start, name) || expr_references_ident(end, name),
                     |range| expr_references_ident(range, name),
                 )
         }

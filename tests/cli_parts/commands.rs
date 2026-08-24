@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn status_renders_missing_receipts_as_unproven_with_a_proving_act() {
+    let dir = isolated_cwd("status_missing_receipts");
+    fs::write(dir.join("run.jet"), "fn run() { print(\"status\") }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["status", "run.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let json = String::from_utf8(output.stdout).unwrap();
+    assert!(json.contains("\"schema\":\"jet.status\""), "{json}");
+    assert!(json.contains("\"state\":\"unproven\""), "{json}");
+    assert!(json.contains("\"action\":\"jet prove run.jet\""), "{json}");
+    assert!(!json.contains("\"state\":\"proven\""), "{json}");
+}
+
+#[test]
 fn inspect_provenance_human_and_json_agree() {
     let dir = isolated_cwd("inspect_provenance");
     fs::write(

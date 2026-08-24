@@ -18,8 +18,8 @@
 //! are lldb-familiar `step` / `next` / `continue` / `finish` with single-letter
 //! aliases `s` / `n` / `c` / `f`. A paused line shows a `<- here` caret and a
 //! one-line `locals:` dump; `help` lists every verb. Only Jet frames/lines and
-//! safe locals are shown (D-DBG2 — `--raw-frames` is the expert opt-in, a
-//! follow-on once the native backend lands).
+//! safe locals are shown by default (D-DBG2 — `--raw-frames` is the clearly
+//! marked native expert view).
 //!
 //! I6: std-only — no DAP/JSON crate, no debugger library. The interactive loop
 //! reads stdin with `std::io`; tests drive it with a scripted-input transcript
@@ -35,7 +35,7 @@
 
 // D-ARCH-SOURCE1=A: full debugger ownership lives here. Compiler semantics
 // enter through inward path-only seams; no root host dependency exists.
-pub use jet_driver::{AST, Comptime, Diagnostics, Loader, Sema, Syntax};
+pub use jet_driver::{Comptime, Diagnostics, Loader, Sema, Syntax, AST};
 pub use jet_foundation::ExitCodes;
 
 mod Dap;
@@ -82,6 +82,22 @@ pub struct DebugSnapshot {
     pub line: usize,
     pub locals: Vec<ValueSnapshot>,
     pub call_stack: Vec<FrameSnapshot>,
+}
+
+/// One post-statement state in a recorded run receipt. This is an act
+/// snapshot, not a live or reversible variable-history buffer.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RecordedAct {
+    pub sequence: u64,
+    pub function: String,
+    pub line: usize,
+    pub locals: Vec<ValueSnapshot>,
+}
+
+/// Bounded causal evidence attached to a `.jetproof-replay` receipt.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RecordedRun {
+    pub acts: Vec<RecordedAct>,
 }
 
 /// What the user asked the debugger to do next, set by a `(jet)` command and
@@ -175,10 +191,19 @@ struct Debugger {
     /// Structured state captured at the last real stop. This is separate from
     /// the human transcript so program output cannot fabricate liveness.
     snapshot: Option<DebugSnapshot>,
+    /// Post-statement evidence for `why` and `when`.
+    recording: RecordedRun,
+    /// Replay receipts are authoritative; do not append live observations to
+    /// their captured act list.
+    recording_locked: bool,
 }
 
 impl Debugger {
-    fn new(src: String, file: String, io: IO) -> Self {
+    fn new(src: String, file: String, io: IO, recording: Option<RecordedRun>) -> Self {
+        let (recording, recording_locked) = match recording {
+            Some(recording) => (recording, true),
+            None => (RecordedRun::default(), true),
+        };
         Debugger {
             breakpoints: HashSet::new(),
             // Stop on the very first statement so the user lands inside `main`
@@ -192,6 +217,8 @@ impl Debugger {
             quit: false,
             paused: false,
             snapshot: None,
+            recording,
+            recording_locked,
         }
     }
 
@@ -301,6 +328,12 @@ impl Debugger {
             let mut parts = cmd.split_whitespace();
             let verb = parts.next().unwrap_or("");
             let arg = parts.next();
+            let tail = parts.collect::<Vec<_>>().join(" ");
+            let query = match (arg, tail.is_empty()) {
+                (Some(arg), true) => arg.to_string(),
+                (Some(arg), false) => format!("{arg} {tail}"),
+                (None, _) => tail,
+            };
             match verb {
                 v if v == Syntax::DBG_STEP || v == "s" => {
                     self.resume = Resume::Step;
@@ -333,6 +366,12 @@ impl Debugger {
                 }
                 v if v == Syntax::DBG_BACKTRACE || v == "bt" => {
                     self.cmd_backtrace();
+                }
+                v if v == Syntax::DBG_WHY => {
+                    self.cmd_why(&query);
+                }
+                v if v == Syntax::DBG_WHEN => {
+                    self.cmd_when(&query);
                 }
                 v if v == Syntax::DBG_HELP || v == "h" => {
                     self.cmd_help();
@@ -400,6 +439,80 @@ impl Debugger {
         self.emit(&joined);
     }
 
+    fn act_location(&self, act: &RecordedAct) -> String {
+        let source = self.source_line(act.line).trim();
+        format!(
+            "act {}: {}() at {}:{} — {}",
+            act.sequence, act.function, self.file, act.line, source
+        )
+    }
+
+    fn cmd_why(&mut self, query: &str) {
+        let query = query.trim();
+        if query.is_empty() {
+            self.emit("why needs a query, e.g. `why total == 0`");
+            return;
+        }
+        let (name, expected) = query
+            .split_once("==")
+            .map(|(name, value)| (name.trim(), Some(value.trim())))
+            .unwrap_or((query, None));
+        if name.is_empty() {
+            self.emit("why needs a place name, e.g. `why total == 0`");
+            return;
+        }
+        let mut answer = Vec::new();
+        let mut previous: Option<&str> = None;
+        for act in &self.recording.acts {
+            let Some(value) = act.locals.iter().find(|local| local.name == name) else {
+                continue;
+            };
+            let changed = previous != Some(value.value.as_str());
+            if changed && expected.map_or(true, |expected| expected == value.value) {
+                answer.push(format!(
+                    "{} = {} because {}",
+                    value.name,
+                    value.value,
+                    self.act_location(act)
+                ));
+            }
+            previous = Some(value.value.as_str());
+        }
+        if answer.is_empty() {
+            self.emit(&format!("no recorded act explains `{query}`"));
+        } else {
+            self.emit(&answer.join("\n"));
+        }
+    }
+
+    fn cmd_when(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.emit("when needs a place name, e.g. `when total`");
+            return;
+        }
+        let mut previous: Option<&str> = None;
+        let mut changes = Vec::new();
+        for act in &self.recording.acts {
+            let Some(value) = act.locals.iter().find(|local| local.name == name) else {
+                continue;
+            };
+            if previous != Some(value.value.as_str()) {
+                changes.push(format!(
+                    "{} = {} at {}",
+                    value.name,
+                    value.value,
+                    self.act_location(act)
+                ));
+                previous = Some(value.value.as_str());
+            }
+        }
+        match changes.last() {
+            Some(last) => self.emit(&format!("{}\nlast change: {}", changes.join("\n"), last)),
+            None => self.emit(&format!("no recorded changes for `{name}`")),
+        }
+    }
+
     fn cmd_help(&mut self) {
         let text = "\
 commands:
@@ -412,6 +525,8 @@ commands:
   print X, p X   show the value of local X
   locals         show every local in this frame
   backtrace, bt  show the Jet call stack
+  why X == V     name the recorded act(s) that produced a value
+  when X         show recorded changes and the last change for a place
   help, h        show this list
   quit, q        end the debug session";
         self.emit(text);
@@ -489,6 +604,25 @@ impl DebugHook for Debugger {
         }
         Ok(())
     }
+
+    fn after_stmt(
+        &mut self,
+        func: &str,
+        _depth: usize,
+        span: Span,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        if !self.recording_locked && self.recording.acts.len() < 100_000 {
+            let sequence = u64::try_from(self.recording.acts.len() + 1).unwrap_or(u64::MAX);
+            self.recording.acts.push(RecordedAct {
+                sequence,
+                function: func.to_string(),
+                line: self.line_of(span),
+                locals: snapshot_values(scope),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Render the one-line `locals:` dump (D-DBG3): `locals:  a = 1   b = "hi"`.
@@ -523,10 +657,113 @@ fn snapshot_values(scope: &HashMap<String, CtValue>) -> Vec<ValueSnapshot> {
         .collect()
 }
 
+struct RecordingHook {
+    src: String,
+    run: RecordedRun,
+}
+
+impl DebugHook for RecordingHook {
+    fn at_stmt(
+        &mut self,
+        _func: &str,
+        _depth: usize,
+        _span: Span,
+        _scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        Ok(())
+    }
+
+    fn after_stmt(
+        &mut self,
+        func: &str,
+        _depth: usize,
+        span: Span,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        if self.run.acts.len() < 100_000 {
+            let sequence = u64::try_from(self.run.acts.len() + 1).unwrap_or(u64::MAX);
+            self.run.acts.push(RecordedAct {
+                sequence,
+                function: func.to_string(),
+                line: span_line_col(&self.src, span.start).0,
+                locals: snapshot_values(scope),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Output and causal receipt produced by the source-level recording adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordedExecution {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub run: RecordedRun,
+}
+
+/// Run the interpreter once to produce the act snapshots attached to a named
+/// `--record` receipt. Unsupported programs return `Err` so the normal run
+/// path remains responsible for their existing execution adapter.
+pub fn record_run(file: &str) -> Result<RecordedExecution, String> {
+    jet_driver::run_compiler_work(|| {
+        let mut bundle = crate::Loader::load_entry(file).map_err(|_| "load failed".to_string())?;
+        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+        if diags
+            .iter()
+            .any(|diag| matches!(diag.severity, crate::Diagnostics::Severity::Error))
+        {
+            return Err("semantic check failed".to_string());
+        }
+        if jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle).is_some() {
+            return Err("program is outside the source recording boundary".to_string());
+        }
+        let funcs = collect_funcs(&bundle);
+        let main = funcs
+            .get("run")
+            .copied()
+            .ok_or_else(|| "program has no `run` function".to_string())?;
+        let src = bundle.modules[bundle.entry].source.clone();
+        let mut sink = DevSink::new();
+        let mut hook = RecordingHook {
+            src,
+            run: RecordedRun::default(),
+        };
+        let result = crate::Comptime::run_main_debug(
+            main,
+            &funcs,
+            &bundle.project_root,
+            &mut sink,
+            &mut hook,
+        );
+        let exit_code = sink.exit_code.unwrap_or_else(|| {
+            if result.is_ok() {
+                ExitCodes::OK
+            } else {
+                ExitCodes::USER_ERROR
+            }
+        });
+        let mut stderr = sink.stderr;
+        if let Err(diag) = result {
+            stderr.push_str(&format!("[{}] {}\n", diag.code, diag.what));
+        }
+        Ok(RecordedExecution {
+            stdout: sink.stdout,
+            stderr,
+            exit_code,
+            run: hook.run,
+        })
+    })
+}
+
 /// Load + check `file`, then run it under the debugger driving `io`. Returns
 /// the process exit code and the captured transcript (empty in interactive
 /// mode, where output already went to the terminal).
-fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool, Option<DebugSnapshot>) {
+fn run_with_io(
+    file: &str,
+    mut io: IO,
+    recording: Option<RecordedRun>,
+) -> (i32, String, bool, Option<DebugSnapshot>) {
     let scripted = io.is_scripted();
     let checked = jet_driver::run_compiler_work(|| {
         let mut bundle = crate::Loader::load_entry(file).map_err(|diags| (None, diags))?;
@@ -568,7 +805,7 @@ fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool, Option<DebugSnapsh
         emit_diags(&mut io, file, &src, &[b]);
         return (ExitCodes::USER_ERROR, io.into_output(), false, None);
     }
-    run_checked(&bundle, file, io)
+    run_checked(&bundle, file, io, recording)
 }
 
 fn emit_diags(io: &mut IO, file: &str, src: &str, diags: &[Diagnostic]) {
@@ -585,6 +822,7 @@ fn run_checked(
     bundle: &crate::AST::ProgramBundle,
     file: &str,
     mut io: IO,
+    recording: Option<RecordedRun>,
 ) -> (i32, String, bool, Option<DebugSnapshot>) {
     let funcs = collect_funcs(bundle);
     let main = match funcs.get("run") {
@@ -613,7 +851,7 @@ fn run_checked(
 
     let scripted = io.is_scripted();
     let mut sink = DevSink::new();
-    let mut dbg = Debugger::new(src, short, io);
+    let mut dbg = Debugger::new(src, short, io, recording);
     let result = crate::Comptime::run_main_debug(main, &funcs, base_dir, &mut sink, &mut dbg);
 
     // Flush the program's buffered output, then a completion line, then return
@@ -666,7 +904,14 @@ fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::
 /// and steps the program with a live `(jet)` prompt on stdin/stdout. Returns
 /// the process exit code.
 pub fn run_debug(file: &str) -> i32 {
-    let (code, _captured, _paused, _snapshot) = run_with_io(file, IO::Interactive);
+    let (code, _captured, _paused, _snapshot) = run_with_io(file, IO::Interactive, None);
+    code
+}
+
+/// `jet debug --replay` query surface. The receipt's act snapshots are
+/// read-only evidence; no reverse execution or standing history is created.
+pub fn run_debug_with_recording(file: &str, recording: RecordedRun) -> i32 {
+    let (code, _captured, _paused, _snapshot) = run_with_io(file, IO::Interactive, Some(recording));
     code
 }
 
@@ -696,7 +941,7 @@ pub fn run_session_result(file: &str, inputs: &[&str]) -> SessionResult {
             out: String::new(),
             pause_on_input_end: false,
         };
-        let (code, transcript, _paused, snapshot) = run_with_io(file, io);
+        let (code, transcript, _paused, snapshot) = run_with_io(file, io, None);
         let status = if code == ExitCodes::OK {
             SessionStatus::Finished
         } else {
@@ -723,7 +968,7 @@ pub fn run_session_result_paused(file: &str, inputs: &[&str]) -> SessionResult {
             out: String::new(),
             pause_on_input_end: true,
         };
-        let (code, transcript, paused, snapshot) = run_with_io(file, io);
+        let (code, transcript, paused, snapshot) = run_with_io(file, io, None);
         let status = if paused {
             SessionStatus::Running
         } else if code == ExitCodes::OK {

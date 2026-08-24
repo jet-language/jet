@@ -1,7 +1,7 @@
-use crate::AST::{Expr};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::lambda_in_subset;
+use crate::AST::Expr;
 use std::collections::HashSet;
 
 /// c109 Phase 10: is a core/stdlib call `(module, method)` one the TIR lowers? The
@@ -45,7 +45,9 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // Argument expressions and resolved value types are checked by the callers
     // below; this lookup owns the call-key coverage decision.
     if let Some(row) = crate::Syntax::core_call(module, method) {
-        return row.coverage.contains(crate::Syntax::CoreCallCoverage::TIR_SUBSET);
+        return row
+            .coverage
+            .contains(crate::Syntax::CoreCallCoverage::TIR_SUBSET);
     }
     // c109 Phase 18: `mem.address_of` is not a registry row — it has a bespoke
     // sema return type and Rust expression — so it needs its own admission here.
@@ -59,12 +61,14 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // selected by the method name, and they are not registry rows. Their fixed
     // integer argument and Result type are already resolved by sema.
     if module == "core.time"
-        && matches!(method, "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours")
+        && matches!(
+            method,
+            "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours"
+        )
     {
         return true;
     }
-    if module == "core.tasks" && matches!(method, "yield_now" | "current_task")
-    {
+    if module == "core.tasks" && matches!(method, "yield_now" | "current_task") {
         return true;
     }
     // D-PIN1=A: `mem.pin(&place)` lowers to the same exclusive borrow node as
@@ -135,14 +139,18 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return true;
     }
     // D-PENDING1=B: `L.idle/loading/loaded/failed` → `JetLoadable`. NOT in `core_fixed_sig`.
-    if module == "core.reactive.loadable" && matches!(method, "idle" | "loading" | "loaded" | "failed")
+    if module == "core.reactive.loadable"
+        && matches!(method, "idle" | "loading" | "loaded" | "failed")
     {
         return true;
     }
     // D-APPROX1=A: `HLL.new()`, `TD.new()`, `CMS.new()`, `RS.new(capacity)`. NOT in `core_fixed_sig`.
     if matches!(
         module,
-        "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir"
+        "core.data.sketch.hll"
+            | "core.data.sketch.tdigest"
+            | "core.data.sketch.cms"
+            | "core.data.sketch.reservoir"
     ) && method == "new"
     {
         return true;
@@ -152,7 +160,13 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.event"
         && matches!(
             method,
-            "new" | "with_policy" | "hook" | "decision_hook" | "scope" | "policy_sync" | "async_result"
+            "new"
+                | "with_policy"
+                | "hook"
+                | "decision_hook"
+                | "scope"
+                | "policy_sync"
+                | "async_result"
         )
     {
         return true;
@@ -164,34 +178,35 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return true;
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
-    if matches!(module, "core.http.client" | "core.http.server" | "core.http.middleware")
-        && matches!(
-            method,
-            "get"
-                | "post"
-                | "request"
-                | "bind"
-                | "mux"
-                | "mux_handler"
-                | "serve"
-                | "serve_once"
-                | "serve_once_listener"
-                | "response"
-                | "tls"
-                | "sse"
-                | "static_file"
-                | "static_file_range"
-                | "static_files"
-                | "json"
-                | "access_log"
-                | "request_id"
-                | "timeout"
-                | "body_limit"
-                | "cors"
-                | "cors_policy"
-                | "compress"
-        )
-    {
+    if matches!(
+        module,
+        "core.http.client" | "core.http.server" | "core.http.middleware"
+    ) && matches!(
+        method,
+        "get"
+            | "post"
+            | "request"
+            | "bind"
+            | "mux"
+            | "mux_handler"
+            | "serve"
+            | "serve_once"
+            | "serve_once_listener"
+            | "response"
+            | "tls"
+            | "sse"
+            | "static_file"
+            | "static_file_range"
+            | "static_files"
+            | "json"
+            | "access_log"
+            | "request_id"
+            | "timeout"
+            | "body_limit"
+            | "cors"
+            | "cors_policy"
+            | "compress"
+    ) {
         return true;
     }
     // D-WS1=B: WebSocket entry points live in core.net.ws (not core.http).
@@ -238,15 +253,27 @@ pub(super) fn core_call_args_in_subset(
     // D-REGEX-LIT1=D: regex one-shot calls support `pattern:` and `text:`.
     // Sema binds each label; lowering preserves written expression order.
     if module == "core.regex" {
-        return args
-            .iter()
-            .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
         let labels: &[Option<&str>] = if method == "verify_jwt" {
-            &[None, Some("key"), Some("audience"), Some("issuer"), Some("clock_skew")]
+            &[
+                None,
+                Some("key"),
+                Some("audience"),
+                Some("issuer"),
+                Some("clock_skew"),
+            ]
         } else {
-            &[None, Some("key"), Some("audience"), Some("issuer"), Some("clock_skew"), Some("footer"), Some("implicit")]
+            &[
+                None,
+                Some("key"),
+                Some("audience"),
+                Some("issuer"),
+                Some("clock_skew"),
+                Some("footer"),
+                Some("implicit"),
+            ]
         };
         return args.len() >= 3
             && args.len() <= labels.len()
@@ -265,7 +292,10 @@ pub(super) fn core_call_args_in_subset(
     if module == "core.net.tls" && method == "client" && args.len() == 3 {
         return args.iter().enumerate().all(|(idx, arg)| {
             let label_ok = if idx == 2 {
-                matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), Some("deadline"))
+                matches!(
+                    arg.label.as_ref().map(|(label, _)| label.as_str()),
+                    Some("deadline")
+                )
             } else {
                 arg.label.is_none()
             };
@@ -275,17 +305,17 @@ pub(super) fn core_call_args_in_subset(
     if module == "core.net" && method == "unix_connect" && args.len() == 2 {
         return args.iter().enumerate().all(|(idx, arg)| {
             let label_ok = if idx == 1 {
-                matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), Some("deadline"))
+                matches!(
+                    arg.label.as_ref().map(|(label, _)| label.as_str()),
+                    Some("deadline")
+                )
             } else {
                 arg.label.is_none()
             };
             label_ok && expr_in_subset(&arg.expr, cx, locals)
         });
     }
-    if module == "core.http.server"
-        && matches!(method, "serve" | "bind")
-        && args.len() == 3
-    {
+    if module == "core.http.server" && matches!(method, "serve" | "bind") && args.len() == 3 {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = if idx == 2 {
                 matches!(
@@ -365,8 +395,7 @@ pub(super) fn core_call_args_in_subset(
         .is_ok()
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
-    args.iter()
-        .all(|a| expr_in_subset(&a.expr, cx, locals))
+    args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
 /// c109 Phase 13: is a closure-taking core call (`tasks.spawn`, `http.serve`, or

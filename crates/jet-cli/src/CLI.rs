@@ -96,11 +96,17 @@ pub fn reserved_report_json() -> String {
             .collect::<Vec<_>>()
             .join(",")
     };
-    format!(
-        "{{\"schema_version\":1,\"keywords\":[{}],\"teaching_reserved\":[{}],\"sigils\":[{}]}}",
+    let payload = format!(
+        "{{\"keywords\":[{}],\"teaching_reserved\":[{}],\"sigils\":[{}]}}",
         keywords,
         render_entries(TEACHING_RESERVED),
         render_entries(RESERVED_SIGILS),
+    );
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "inspect.reserved",
+        &format!(",\"reserved\":{payload}"),
     )
 }
 
@@ -387,6 +393,9 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static Neste
     if command_group(name).is_some() {
         return None;
     }
+    if COMMANDS.iter().any(|command| command.name == name) {
+        return None;
+    }
     if command_groups().any(|group| {
         group
             .actions
@@ -433,6 +442,14 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: None,
     },
     CommandSpec {
+        name: "review",
+        summary: "Review meaning, authority, and proof changes",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("review <base.jet> <head.jet>"),
+    },
+    CommandSpec {
         name: "run",
         summary: "Run a program or project",
         headline: true,
@@ -457,6 +474,14 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: Some("check [<file.jet|dir>]"),
     },
     CommandSpec {
+        name: "fill",
+        summary: "Propose checked code for typed goals",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("fill <file.jet[:line]>"),
+    },
+    CommandSpec {
         name: "test",
         summary: "Run tests",
         headline: true,
@@ -471,6 +496,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         actions: &[],
         exhaustive: false,
         usage: None,
+    },
+    // D-DEVR-STATUS1=A: the one project-truth surface. The renderer reads
+    // receipts and does not perform a check, test, build, or proof.
+    CommandSpec {
+        name: "status",
+        summary: "Show what the project has proved",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("status [<file.jet|dir>]"),
     },
     CommandSpec {
         name: "build",
@@ -487,6 +522,14 @@ pub const COMMANDS: &[CommandSpec] = &[
         actions: &[],
         exhaustive: false,
         usage: None,
+    },
+    CommandSpec {
+        name: "try",
+        summary: "Speculatively apply a plan and re-check its claims",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("try <plan.json>"),
     },
     CommandSpec {
         name: "debug",
@@ -657,6 +700,14 @@ pub const COMMANDS: &[CommandSpec] = &[
         actions: &[],
         exhaustive: false,
         usage: Some("search <query>"),
+    },
+    CommandSpec {
+        name: "find",
+        summary: "Find code by type, effect, or example",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>]"),
     },
     CommandSpec {
         name: "update",
@@ -989,8 +1040,12 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--attach", help: "with inspect live: process id to observe" },
     FlagSpec { long: "--once", help: "with inspect live: print one snapshot and exit" },
     FlagSpec { long: "--observe", help: "with run: expose bounded live runtime facts for attachment" },
+    FlagSpec { long: "--raw-frames", help: "with debug: show generated Rust frames and scopes (expert)" },
+    FlagSpec { long: "--dap", help: "with debug: speak the Debug Adapter Protocol over stdio" },
     FlagSpec { long: "--gc-trace", help: "with run/dev: record bounded automatic GC-promotion evidence" },
     FlagSpec { long: "--structural", help: "with diff/merge: compare checked definitions by semantic identity" },
+    FlagSpec { long: "--base-receipt", help: "with review: proof receipt for the base change-set side" },
+    FlagSpec { long: "--receipt", help: "with review: proof receipt for the reviewed change-set side" },
     FlagSpec { long: "--out", help: "with structural merge: write the checked result to this path" },
     FlagSpec { long: "--report", help: "with structural diff/merge: text, json, or editor report" },
     FlagSpec { long: "--repo", help: "with merge install-driver: Git worktree to configure" },
@@ -1017,6 +1072,8 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--lib", help: "with build: emit the native Library and C header" },
     FlagSpec { long: "--output", help: "with run: run a named build output" },
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
+    FlagSpec { long: "--effect", help: "with find: require an effect such as FS.Read" },
+    FlagSpec { long: "--example", help: "with find: search by input/output example" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
     FlagSpec { long: "--read-only", help: "with shared-store enroll: grant read-only broker access" },
@@ -1047,6 +1104,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--online", help: "with doctor: allow network checks" },
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: DRY_RUN_FLAG, help: "with rewrite commands: preview changes without writing" },
+    FlagSpec { long: "--keep", help: "with try: keep a clean speculative edit" },
     FlagSpec { long: "--edition", help: "with fix: apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--all", help: "with fix: apply safety classes beyond formatting and behavior-preserving" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
@@ -1278,6 +1336,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "expand"
             | "diff"
             | "merge"
+            | "review"
             | "prove"
             | "budget"
             | "perf"
@@ -1743,6 +1802,8 @@ mod tests {
     fn known_flag_ignores_value() {
         assert!(is_known_flag("--color=always"));
         assert!(is_known_flag("--json"));
+        assert!(is_known_flag("--raw-frames"));
+        assert!(is_known_flag("--dap"));
         assert!(!is_known_flag("--nonsense"));
     }
 

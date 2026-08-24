@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::render_status_json;
 
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
 
@@ -25,6 +26,26 @@ fn emit_run_output(stdout: &str, stderr: &str) {
         eprint!("{stderr}");
     }
 }
+
+fn try_recorded_run(
+    file: &str,
+    capture: &crate::ProveReplay::NamedCapture,
+    mode: OutputMode,
+) -> bool {
+    let Ok(execution) = jet::Debug::record_run(file) else {
+        return false;
+    };
+    emit_run_output(&execution.stdout, &execution.stderr);
+    crate::ProveReplay::finish_named_capture_with_run(
+        capture,
+        execution.exit_code,
+        mode.json,
+        &execution.run,
+    )
+    .unwrap_or_else(|status| exit(status));
+    exit(execution.exit_code);
+}
+
 fn render_internal_fault(what: &str) -> String {
     jet::Diagnostics::render_ice_report(what, "", false)
 }
@@ -382,15 +403,30 @@ pub(crate) fn run_compile_cmd(
     }
 
     if cmd == "check" {
-        let all_diags = match crate::CmdInspect::check_projection_with_options(
+        let checked = match crate::CmdInspect::check_projection_with_options(
             Path::new(file),
             gates,
             profile.budget_name(),
             setting_overrides,
         ) {
-            Ok(checked) => checked.diagnostics,
-            Err(diagnostics) => diagnostics,
+            Ok(checked) => Some(checked),
+            Err(diagnostics) => {
+                let errors: Vec<_> = diagnostics
+                    .iter()
+                    .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+                    .cloned()
+                    .collect();
+                if !errors.is_empty() {
+                    report_problems(mode, file, &src, &errors);
+                    exit(ExitCodes::USER_ERROR);
+                }
+                None
+            }
         };
+        let all_diags = checked
+            .as_ref()
+            .map(|projection| projection.diagnostics.clone())
+            .unwrap_or_default();
         let errors: Vec<_> = all_diags
             .iter()
             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -403,6 +439,15 @@ pub(crate) fn run_compile_cmd(
         let lints = crate::CmdDevTools::visible_lints(&all_diags);
         if !lints.is_empty() {
             report_problems(mode, file, &src, &lints);
+        }
+        if !mode.json && !mode.quiet {
+            if let Some(mut checked) = checked {
+                if let Some(report) =
+                    crate::CmdFill::render_goal_report(&mut checked, None, None, false, false)
+                {
+                    print!("{report}");
+                }
+            }
         }
         if mode.json && lints.is_empty() {
             let machine_file = crate::machine_report_path_for_process(file);
@@ -422,6 +467,17 @@ pub(crate) fn run_compile_cmd(
     // D-PLUGIN1=B / D-DEP-WASM1=A (c81): `--target=sandbox` routes to the
     // sandboxed WASM Component Model guest build instead of a native binary.
     let is_plugin = cross_target == Some(jet::Syntax::TARGET_SANDBOX);
+    // D-DEVR-PROD1=A: native `jet run` gives every execution tier one shared,
+    // redacted receipt context. The Prelude writer owns receipt bytes; this
+    // CLI boundary supplies only closure/input digests and a local destination.
+    let production_receipt = (cmd == "run"
+        && !is_web
+        && !is_plugin
+        && cross_target.is_none())
+        .then(|| crate::ProductionReceipt::prepare(file, &src, program_args));
+    if let Some(context) = production_receipt.as_ref() {
+        context.install();
+    }
     if explain_partition && !is_web {
         let diag = jet::Diagnostics::Diagnostic::error(
             "E2102",
@@ -477,6 +533,12 @@ pub(crate) fn run_compile_cmd(
             );
             report_problems(mode, file, &src, &[diagnostic]);
             exit(ExitCodes::USAGE);
+        }
+
+        if program_args.is_empty() {
+            if let Some(capture) = record.as_ref() {
+                try_recorded_run(file, capture, mode);
+            }
         }
 
         // The program's output is the program's, not data this verb reads back:
@@ -537,6 +599,12 @@ pub(crate) fn run_compile_cmd(
         && !is_plugin
         && !selects_build_entry
     {
+        if program_args.is_empty() {
+            if let Some(capture) = record.as_ref() {
+                try_recorded_run(file, capture, mode);
+            }
+        }
+
         // Same one-shot contract as the `--interpret` path above.
         jet_jit::set_program_owns_streams();
         let args = program_args
@@ -1521,6 +1589,13 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
     }
 }
 
+struct FixPlan {
+    before: String,
+    staged: String,
+    edits: usize,
+    skipped_suggestions: usize,
+}
+
 /// Apply all auto-fixable diagnostics in a source file in place (D-LSP7 / M13).
 /// Goes through `jet::LSP::collect_fixes` / `apply_all` — the SAME unified fix
 /// engine the LSP code-action layer uses — so a fix on the command line and a
@@ -1563,22 +1638,31 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
     } else {
         jet::LSP::apply_all(&migrated, &selected_fixes)
     };
-    if fixed == src {
-        if skipped_suggestions == 0 {
+    let plan = FixPlan {
+        before: src.clone(),
+        staged: fixed,
+        edits: selected_fixes.len(),
+        skipped_suggestions,
+    };
+    if plan.staged == plan.before {
+        if plan.skipped_suggestions == 0 {
             println!("{}: no changes made", file);
         } else {
             println!(
                 "{}: no changes made ({} suggestion{} need review)",
                 file,
-                skipped_suggestions,
-                if skipped_suggestions == 1 { "" } else { "s" }
+                plan.skipped_suggestions,
+                if plan.skipped_suggestions == 1 { "" } else { "s" }
             );
         }
         return;
     }
-    let n = selected_fixes.len();
+    let n = plan.edits;
     if dry_run {
-        print!("{}", jet::Formatter::unified_diff(file, &src, &fixed));
+        print!(
+            "{}",
+            jet::Formatter::unified_diff(file, &plan.before, &plan.staged)
+        );
         if n == 0
             && retired_target_count == 0
             && retired_selector_count == 0
@@ -1629,20 +1713,21 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
                 if retired_type_count == 1 { "" } else { "s" }
             );
         }
-        if skipped_suggestions > 0 {
+        if plan.skipped_suggestions > 0 {
             println!(
                 "{}: skipped {} suggestion{} for review (dry run)",
                 file,
-                skipped_suggestions,
-                if skipped_suggestions == 1 { "" } else { "s" }
+                plan.skipped_suggestions,
+                if plan.skipped_suggestions == 1 { "" } else { "s" }
             );
         }
         return;
     }
-    fs::write(file, &fixed).unwrap_or_else(|e| {
-        crate::cli_error!("E2105", "couldn't write {}: {}", file, e);
-        exit(ExitCodes::USER_ERROR);
-    });
+    let log = crate::CmdCodemod::commit_fix(
+        Path::new(file),
+        plan.before.into_bytes(),
+        plan.staged.into_bytes(),
+    );
     if n == 0
         && retired_target_count == 0
         && retired_selector_count == 0
@@ -1658,14 +1743,15 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             if n == 1 { "" } else { "es" }
         );
     }
-    if skipped_suggestions > 0 {
+    if plan.skipped_suggestions > 0 {
         println!(
             "{}: skipped {} suggestion{} for review",
             file,
-            skipped_suggestions,
-            if skipped_suggestions == 1 { "" } else { "s" }
+            plan.skipped_suggestions,
+            if plan.skipped_suggestions == 1 { "" } else { "s" }
         );
     }
+    println!("  log: {}", log.display());
     if retired_target_count > 0 {
         println!(
             "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
@@ -2655,11 +2741,20 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
             })
             .collect::<Vec<_>>()
             .join(",");
-        println!(
-            "{{\"schema_version\":1,\"file\":\"{}\",\"functions\":[{}],\"branches\":[{}]}}",
+        let payload = format!(
+            "{{\"file\":\"{}\",\"functions\":[{}],\"branches\":[{}]}}",
             json_escape(file),
             functions,
             branch_rows
+        );
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "coverage",
+                &format!(",\"coverage\":{payload}"),
+            )
         );
         return;
     }
@@ -2877,7 +2972,7 @@ fn collect_changed_files() -> Vec<PathBuf> {
 
 /// Emit a JSON "ok" result for `--json --check` or successful format with no changes.
 fn fmt_json_ok() -> String {
-    "{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"ok\"}".to_string()
+    render_status_json("ok", true, "fmt", ",\"fmt\":{\"status\":\"ok\"}")
 }
 
 /// Emit a JSON "dirty" result (--check found changes, no --diff).
@@ -2887,9 +2982,11 @@ fn fmt_json_dirty_paths(paths: &[&str]) -> String {
         .map(|p| format!("\"{}\"", json_escape(p)))
         .collect::<Vec<_>>()
         .join(",");
-    format!(
-        "{{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"dirty\",\"files\":[{}]}}",
-        list
+    render_status_json(
+        "dirty",
+        false,
+        "fmt",
+        &format!(",\"fmt\":{{\"status\":\"dirty\",\"files\":[{list}]}}"),
     )
 }
 
@@ -2906,9 +3003,11 @@ fn fmt_json_dirty_diffs(entries: &[(&str, &str)]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!(
-        "{{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"dirty\",\"files\":[{}]}}",
-        list
+    render_status_json(
+        "dirty",
+        false,
+        "fmt",
+        &format!(",\"fmt\":{{\"status\":\"dirty\",\"files\":[{list}]}}"),
     )
 }
 
@@ -3383,9 +3482,17 @@ pub(crate) fn run_fmt(
                 if mode.json {
                     let path_s = r.path.to_str().unwrap_or("?");
                     eprintln!(
-                        "{{\"schema_version\":1,\"command\":\"fmt\",\"status\":\"error\",\"errors\":[{{\"path\":\"{}\",\"message\":\"{}\"}}]}}",
-                        json_escape(path_s),
-                        json_escape(io_err)
+                        "{}",
+                        render_status_json(
+                            "error",
+                            false,
+                            "fmt",
+                            &format!(
+                                ",\"fmt\":{{\"status\":\"error\",\"errors\":[{{\"path\":\"{}\",\"message\":\"{}\"}}]}}",
+                                json_escape(path_s),
+                                json_escape(io_err)
+                            ),
+                        )
                     );
                 } else {
                     crate::cli_error!("E2105", "{}", io_err);

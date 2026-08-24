@@ -1,11 +1,10 @@
-use crate::AST::{Expr, Type};
-use crate::Codegen::Cx;
+use crate::Codegen::foreign_binding_method_key;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_db_value_variant;
 use crate::Codegen::is_json_type_name;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
-use crate::Codegen::foreign_binding_method_key;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::alloc_new_type;
 use crate::Codegen::TIR::core_call_covered;
 use crate::Codegen::TIR::core_closure_call_in_subset;
@@ -15,6 +14,8 @@ use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::game_static_type;
 use crate::Codegen::TIR::handle_method_op;
+use crate::Codegen::TIR::http_client_static_op;
+use crate::Codegen::TIR::is_app_method_name;
 use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_covered_builtin_name;
@@ -23,7 +24,6 @@ use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_numeric_method;
 use crate::Codegen::TIR::is_covered_struct_ty;
 use crate::Codegen::TIR::is_devserver_method_name;
-use crate::Codegen::TIR::is_app_method_name;
 use crate::Codegen::TIR::is_event_handle_type;
 use crate::Codegen::TIR::is_event_method_name;
 use crate::Codegen::TIR::is_http_method_name;
@@ -31,22 +31,22 @@ use crate::Codegen::TIR::is_http_type;
 use crate::Codegen::TIR::is_loadable_method_name;
 use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_process_handle_method_name;
-use crate::Codegen::TIR::is_reactive_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
+use crate::Codegen::TIR::is_reactive_method_name;
 use crate::Codegen::TIR::is_sketch_method_name;
 use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
-use crate::Codegen::TIR::tls_static_op;
-use crate::Codegen::TIR::http_client_static_op;
-use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::router_register_in_subset;
 use crate::Codegen::TIR::service_method_route;
 use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::subset::core_call_args_in_subset;
+use crate::Codegen::TIR::tls_static_op;
+use crate::Codegen::TIR::THandleOp;
 use crate::Syntax;
+use crate::AST::{Expr, Type};
 use std::collections::HashSet;
 
 /// c109 Phase 6: is this `Expr::MethodCall` inside the subset? Two shapes only:
@@ -64,9 +64,7 @@ pub(crate) fn method_call_in_subset(
     // same function-value call represented by `Expr::CallValue`.
     if recv_type.as_deref() == Some(Syntax::INTERNAL_CALL_VALUE) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     // D-VALIDATE1: `Validate.over(value)` is only a compiler-owned head; its
     // materialized builder is an ordinary covered struct value.
@@ -83,8 +81,7 @@ pub(crate) fn method_call_in_subset(
         && matches!(method, "with" | "without")
         && args.len() == 1
     {
-        return expr_in_subset(receiver, cx, locals)
-            && expr_in_subset(&args[0].expr, cx, locals);
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
     }
     // D-MEMO1=A: sema resolves `name.cache()` to the MemoStats projection.
     // Mirror the lowerer's exact shape so the TIR gate cannot reject a call
@@ -105,9 +102,7 @@ pub(crate) fn method_call_in_subset(
             || name.starts_with(Syntax::INTERNAL_ROOT_CALL_CORE_PREFIX)
     }) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     // D-NETIO-CONTRACT2=B / D-DBDRIVER1=A: sema resolves bounded dispatch to
     // either the type parameter (legacy metadata) or the selected trait owner.
@@ -135,9 +130,8 @@ pub(crate) fn method_call_in_subset(
             | "commit"
             | "rollback"
     ) {
-        return args.iter().all(|arg| {
-            expr_in_subset(&arg.expr, cx, locals)
-        }) && expr_in_subset(receiver, cx, locals);
+        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals))
+            && expr_in_subset(receiver, cx, locals);
     }
     // Shape (a): the sema-inserted `.clone()`. It takes no args; the receiver is an
     // owning field read / borrowed value, which must itself be in-subset. The AST
@@ -149,16 +143,14 @@ pub(crate) fn method_call_in_subset(
     // not a runtime receiver. Sema records the resolved range on `Int(lo..hi)`;
     // lowering consumes that same fact into `TNumericOp::InlineRange`.
     let inline_range_head = matches!(receiver, Expr::Call(call)
-        if call.name == Syntax::TYPE_INT
-            && call.args.len() == 1
-            && match call.resolved_ret.as_ref() {
-                Some(Type::InlineRange { .. }) => true,
-                Some(Type::Result { ok, .. }) => matches!(ok.as_ref(), Type::InlineRange { .. }),
-                _ => false,
-            });
-    if method == Syntax::conversion_method_for_source("Int")
-        && args.len() == 1
-        && inline_range_head
+    if call.name == Syntax::TYPE_INT
+        && call.args.len() == 1
+        && match call.resolved_ret.as_ref() {
+            Some(Type::InlineRange { .. }) => true,
+            Some(Type::Result { ok, .. }) => matches!(ok.as_ref(), Type::InlineRange { .. }),
+            _ => false,
+        });
+    if method == Syntax::conversion_method_for_source("Int") && args.len() == 1 && inline_range_head
     {
         return expr_in_subset(&args[0].expr, cx, locals);
     }
@@ -219,11 +211,7 @@ pub(crate) fn method_call_in_subset(
         // here. Keep the qualified import form (`lib.Pattern.raw`) on the
         // same structural path.
         if args.len() == 1
-            && crate::Codegen::TIR::is_checked_text_head_static(
-                receiver,
-                resolved_ret.as_ref(),
-                cx,
-            )
+            && crate::Codegen::TIR::is_checked_text_head_static(receiver, resolved_ret.as_ref(), cx)
         {
             return expr_in_subset(&args[0].expr, cx, locals);
         }
@@ -305,9 +293,7 @@ pub(crate) fn method_call_in_subset(
         recv_type.as_deref(),
         Some(Syntax::TYPE_TASKGROUP) | Some(Syntax::INTERNAL_TASK_GROUP_SURFACE_TYPE)
     );
-    if task_group_receiver
-        && method == Syntax::INTERNAL_TASK_SPAWN_METHOD
-    {
+    if task_group_receiver && method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
         return args.len() == 1
             && args[0].label.is_none()
             && matches!(&args[0].expr, Expr::Lambda(_))
@@ -315,9 +301,7 @@ pub(crate) fn method_call_in_subset(
     }
     // D-CONC-SPAWN1=D: canonical `task.group` combinators use the same TIR
     // nodes as top-level `task.all`/`task.race`/`task.any`.
-    if task_group_receiver
-        && method == Syntax::INTERNAL_TASK_ALL_METHOD
-    {
+    if task_group_receiver && method == Syntax::INTERNAL_TASK_ALL_METHOD {
         return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
     }
     // D-CONC-SPAWN1=D: `task.race { … }` / `task.any { … }` — nested child combinators.
@@ -370,12 +354,14 @@ pub(crate) fn method_call_in_subset(
             }
             "split" => {
                 args.len() == 2
-                    && args.iter().all(|arg| matches!(
-                        &arg.expr,
-                        Expr::Lambda(lam)
-                            if lam.meta.guard_projection.is_some()
-                                && lambda_in_subset(lam, cx, locals)
-                    ))
+                    && args.iter().all(|arg| {
+                        matches!(
+                            &arg.expr,
+                            Expr::Lambda(lam)
+                                if lam.meta.guard_projection.is_some()
+                                    && lambda_in_subset(lam, cx, locals)
+                        )
+                    })
             }
             "wait" => {
                 args.len() == 2
@@ -398,9 +384,7 @@ pub(crate) fn method_call_in_subset(
         .is_some_and(|handle| service_method_route(handle, method).is_some())
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(
         recv_type.as_deref(),
@@ -415,9 +399,7 @@ pub(crate) fn method_call_in_subset(
         };
         if plain {
             return expr_in_subset(receiver, cx, locals)
-                && args
-                    .iter()
-                    .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
         }
         let closure = matches!(
             (recv_type.as_deref(), method),
@@ -441,9 +423,7 @@ pub(crate) fn method_call_in_subset(
             && args.len() == 3
             && matches!(receiver, Expr::Ident(name, _) if name == "ExpiringSecret")
         {
-            return args
-                .iter()
-                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
         }
         return method == "with"
             && args.len() == 1
@@ -473,9 +453,7 @@ pub(crate) fn method_call_in_subset(
     // form, handled in `expr_in_subset`'s `Field` arm, not here.
     if let Expr::Ident(type_name, _) = receiver {
         if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) {
-            return args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
     // D-DBDRIVER1: a `DBValue` construction `DBValue.Int(n)` / `.Float(f)` /
@@ -485,9 +463,7 @@ pub(crate) fn method_call_in_subset(
             && is_db_value_type_name(type_name)
             && is_db_value_variant(method)
         {
-            return args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
     // Shape (e) [c109 Phase 10]: a core/stdlib module call `alias.method(args)` where
@@ -503,9 +479,7 @@ pub(crate) fn method_call_in_subset(
     // call stay on the AST path.
     if recv_type.is_none() {
         if matches!(receiver, Expr::Field(..)) {
-            if let Some(submodule) =
-                core_module_path_from_receiver(receiver, cx, locals)
-            {
+            if let Some(submodule) = core_module_path_from_receiver(receiver, cx, locals) {
                 return core_call_covered(&submodule, method)
                     && core_call_args_in_subset(&submodule, method, args, cx, locals);
             }
@@ -654,13 +628,13 @@ pub(crate) fn method_call_in_subset(
     // Sema may retain the nominal Set family in `recv_type` for an instance
     // operation. It is still the same built-in collection surface, not a user
     // method; keep it on the TIR/JIT path rather than falling through to Todo.
-    if matches!(recv_type.as_deref(), Some("Set") | Some(crate::Syntax::TYPE_RANK))
-        && is_covered_builtin_name(method, args.len())
+    if matches!(
+        recv_type.as_deref(),
+        Some("Set") | Some(crate::Syntax::TYPE_RANK)
+    ) && is_covered_builtin_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d-coll-ctor) [D-COLLBREADTH1=A]: a collection static constructor —
     // `Set.from([...])` or `Queue.new()`. The receiver is a bare type-name ident
@@ -691,60 +665,48 @@ pub(crate) fn method_call_in_subset(
                     | (crate::Syntax::TYPE_BYTES, "with_capacity", 1)
                     | (crate::Syntax::TYPE_LIST, "try_new", 0)
                     | (crate::Syntax::TYPE_LIST, "try_with_capacity", 1) => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-MEM1 S6: `Pool<T>.new()` / `Shared.new(x)` — same bare
                     // type-name static-constructor shape as `Queue.new()` above.
                     ("Pool", "new", 0) => return true,
                     ("Shared", "new", 1) => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     ("Condition", "new", 0) => return true,
                     ("Cell", "new", 1) => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     ("ExpiringSecret", "new", 3) => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     ("ExpiringValue", "new", 3) => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
                     // Like `Set.from`, admitted before `static_method_call_in_subset`
                     // blocks `from` (an intercepted name). Path is not a user type.
                     ("Path", "from", 1) if !cx.type_names.contains("Path") => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-SHIFT1 (c7shift): `Reader.over(bytes)` / `Cursor.over(s)` —
                     // same static-constructor admission shape as `Path.from`.
                     ("Reader", "over", 1) if !cx.type_names.contains("Reader") => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     ("Cursor", "over", 1) if !cx.type_names.contains("Cursor") => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
                     // as `http.Type.method(...)` and rewritten by sema to their
                     // internal `HTTP*` type names.
                     ("HTTPMethod", "custom", 1)
-                    | ("HTTPMethod", "get" | "head" | "post" | "put" | "delete"
-                        | "connect" | "options" | "trace" | "patch", 0)
+                    | (
+                        "HTTPMethod",
+                        "get" | "head" | "post" | "put" | "delete" | "connect" | "options"
+                        | "trace" | "patch",
+                        0,
+                    )
                     | ("HTTPStatus", "new", 1)
                     | ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0)
                     | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1)
@@ -752,18 +714,16 @@ pub(crate) fn method_call_in_subset(
                     | ("HTTPBody", "empty", 0)
                     | ("HTTPBody", "bytes" | "json" | "form" | "multipart", 1)
                     | ("HTTPBody", "text" | "reader", 1 | 2) => {
-                        return args.iter().all(|argument| {
-                            expr_in_subset(&argument.expr, cx, locals)
-                        });
+                        return args
+                            .iter()
+                            .all(|argument| expr_in_subset(&argument.expr, cx, locals));
                     }
                     // D-HOLE1: `Option.lift2(f, a, b)` — static combinator, not a
                     // user type. `f` is a plain in-subset lambda arg (no closure-arg
                     // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already
                     // routes through `lambda_in_subset`).
                     ("Option", "lift2", 3) if !cx.type_names.contains("Option") => {
-                        return args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     _ => {}
                 }
@@ -796,12 +756,9 @@ pub(crate) fn method_call_in_subset(
     // `Receiver`/`Sender` value `(tx, rx) := tasks.channel<T>()`-destructured or
     // `task`-produced. Tried after the collection builtins so a
     // list/map/string method can't be misclaimed.
-    if recv_type.is_none() && is_concurrency_method_name(method, args.len())
-    {
+    if recv_type.is_none() && is_concurrency_method_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d4): `Match.group(n)` (D-REGEXENGINE1). Sema sets `recv_type ==
     // Some("Match")` (the `Match` receiver type, CheckerInfer's user/handle-method
@@ -813,9 +770,7 @@ pub(crate) fn method_call_in_subset(
     // binding). Lowered to `BuiltinMethod`/`TBuiltinOp::MatchGroup`. The result is `String?`.
     if recv_type.as_deref() == Some("Match") && method == "group" && args.len() == 1 {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d5) [D-REACT1=B]: a reactive `Signal`/`Derived` method (`.get()`/`.set(v)`).
     // Sema sets `recv_type == Some("Signal"|"Derived")` (CheckerInfer's reactive arm), so
@@ -827,9 +782,7 @@ pub(crate) fn method_call_in_subset(
     ) && is_reactive_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if recv_type.as_deref() == Some(crate::Syntax::TYPE_EFFECT)
         && is_reactive_effect_method_name(method, args.len())
@@ -897,26 +850,20 @@ pub(crate) fn method_call_in_subset(
     ) && is_process_handle_method_name(recv_type.as_deref(), method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d6) [D-HONESTNUM1=A]: a `Measurement<Float>` method.
     // Sema sets `recv_type == Some("Measurement")`.
     if recv_type.as_deref() == Some("Measurement") && is_measurement_method_name(method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d7) [D-PENDING1=B]: a `Loadable<T,E>` method.
     // Sema sets `recv_type == Some("Loadable")`.
     if recv_type.as_deref() == Some("Loadable") && is_loadable_method_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` construction and access.
     //
@@ -940,18 +887,14 @@ pub(crate) fn method_call_in_subset(
             && args.len() == 3
             && matches!(receiver, Expr::Ident(name, _) if name == Syntax::EXPIRING_VALUE_TYPE)
         {
-            return args
-                .iter()
-                .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+            return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
         }
         if matches!(
             (method, args.len()),
             ("get", 1) | ("is_valid", 1) | ("force", 1)
         ) {
             return expr_in_subset(receiver, cx, locals)
-                && args
-                    .iter()
-                    .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
         }
     }
     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
@@ -961,16 +904,12 @@ pub(crate) fn method_call_in_subset(
     ) && is_ui_backend_method_name(recv_type.as_deref(), method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // c-devserver (owner-directed 2026-07-01): a DevServer builder method.
     if recv_type.as_deref() == Some("DevServer") && is_devserver_method_name(method, args.len()) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // D-WEBAPP1=D: an App builder method.
     if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
@@ -982,16 +921,12 @@ pub(crate) fn method_call_in_subset(
     // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
     if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d10) [D-NETDEP1=A / D-HTTPLIB1=A]: an HTTP type method call.
     if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (d9) [D-TIMEDEPTH1=A]: a civil-time method (Date/DateTime).
     if matches!(
@@ -1009,9 +944,7 @@ pub(crate) fn method_call_in_subset(
     ) && is_civil_time_method_name(recv_type.as_deref(), method)
     {
         return expr_in_subset(receiver, cx, locals)
-            && args
-                .iter()
-                .all(|a| expr_in_subset(&a.expr, cx, locals));
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (f) [c109 Phase 11]: a closure-taking collection method (`map`/`filter`/
     // `each`/`find`/`any`/`all`/`sort_by`/`reduce`). Like the Phase-9 builtin shape it
@@ -1048,12 +981,11 @@ pub(crate) fn method_call_in_subset(
     // node, so every execution tier consumes the same operation.
     if method == "equal"
         && args.len() == 1
-        && recv_type.as_deref().is_some_and(|name| {
-            core_enum_equal_type(name.rsplit('.').next().unwrap_or(name))
-        })
+        && recv_type
+            .as_deref()
+            .is_some_and(|name| core_enum_equal_type(name.rsplit('.').next().unwrap_or(name)))
     {
-        return expr_in_subset(receiver, cx, locals)
-            && expr_in_subset(&args[0].expr, cx, locals);
+        return expr_in_subset(receiver, cx, locals) && expr_in_subset(&args[0].expr, cx, locals);
     }
     // Shape (h2) [c109 Phase 25]: HTTPRouter route registration `router.get(path, handler)`
     // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HTTPRouter")`.
@@ -1091,9 +1023,7 @@ pub(crate) fn method_call_in_subset(
             let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
             if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
                 return expr_in_subset(receiver, cx, locals)
-                    && args
-                        .iter()
-                        .all(|a| expr_in_subset(&a.expr, cx, locals));
+                    && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
             }
         }
     }
@@ -1107,9 +1037,7 @@ pub(crate) fn method_call_in_subset(
         }
         if handle_method_op(handle, method, args.len()).is_some() {
             return expr_in_subset(receiver, cx, locals)
-                && args
-                    .iter()
-                    .all(|a| expr_in_subset(&a.expr, cx, locals));
+                && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
         // D-SHIFT1 (c7shift): `cursor.take_pattern("…")` — not in
         // `handle_method_op` (its `THandleOp` carries the pattern parts, so
@@ -1141,9 +1069,7 @@ pub(crate) fn method_call_in_subset(
             && crate::Sema::layout_method_return(handle, method, args.len()).is_some()
         {
             return expr_in_subset(receiver, cx, locals)
-                && args
-                    .iter()
-                    .all(|a| expr_in_subset(&a.expr, cx, locals));
+                && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
     // D-ENCSTREAM-SURFACE1=A: `encoding.EncodingLimits.safe()` is a
@@ -1177,7 +1103,10 @@ pub(crate) fn method_call_in_subset(
                     }
                 }
             }
-            if matches!(leaf.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions") {
+            if matches!(
+                leaf.as_str(),
+                "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions"
+            ) {
                 if let Expr::Ident(alias, _) = base.as_ref() {
                     if cx.any_core_import_module(alias) == Some("core.encoding.xml") {
                         return true;
@@ -1211,9 +1140,7 @@ pub(crate) fn method_call_in_subset(
                 // `cx.enum_variants`; handle it specially before the user-enum path.
                 if type_name == crate::Syntax::TYPE_KEY {
                     return is_key_variant(method)
-                        && args
-                            .iter()
-                            .all(|a| expr_in_subset(&a.expr, cx, locals));
+                        && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                 }
                 if type_name == "DataEvent" {
                     return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
@@ -1223,9 +1150,7 @@ pub(crate) fn method_call_in_subset(
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)
-                            && args
-                                .iter()
-                                .all(|a| expr_in_subset(&a.expr, cx, locals));
+                            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                 }
             }
@@ -1252,7 +1177,20 @@ pub(crate) fn method_call_in_subset(
     if matches!(
         (recv_type_leaf, method, args.len()),
         (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)
-            | (Some("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512"), "bytes", 0)
+            | (
+                Some(
+                    "VerifyKey"
+                        | "X25519PublicKey"
+                        | "Signature"
+                        | "Sealed"
+                        | "WrappedKey"
+                        | "WrappedVaultKey"
+                        | "Digest256"
+                        | "Digest512"
+                ),
+                "bytes",
+                0
+            )
             | (Some("Digest256" | "Digest512"), "hex", 0)
             | (Some("PasswordHash"), "text", 0)
             | (Some("X25519PublicKey"), "text", 0)
@@ -1278,9 +1216,7 @@ pub(crate) fn method_call_in_subset(
     if let Some(ty) = recv_type {
         if cx.trait_names.contains(ty) {
             return expr_in_subset(receiver, cx, locals)
-                && args
-                    .iter()
-                    .all(|a| expr_in_subset(&a.expr, cx, locals));
+                && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
     // Shape (b): a user-defined instance method. The `recv_type` is the TOTAL sema
@@ -1475,9 +1411,7 @@ pub(crate) fn static_method_call_in_subset(
         return false;
     }
     if type_name == "FieldError" && method == "under" && args.len() == 2 {
-        return args.iter().all(|arg| {
-            expr_in_subset(&arg.expr, cx, locals)
-        });
+        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(
         (type_name, method, args.len()),
@@ -1494,16 +1428,18 @@ pub(crate) fn static_method_call_in_subset(
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {
-        return args
-            .iter()
-            .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
-    if matches!((type_name, method, args.len()), ("ExpiringSecret", "new", 3)) {
-        return args
-            .iter()
-            .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    if matches!(
+        (type_name, method, args.len()),
+        ("ExpiringSecret", "new", 3)
+    ) {
+        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
-    if matches!((type_name, method, args.len()), ("Int" | "Float", "parse", 1)) {
+    if matches!(
+        (type_name, method, args.len()),
+        ("Int" | "Float", "parse", 1)
+    ) {
         return expr_in_subset(&args[0].expr, cx, locals);
     }
     if crate::AST::numeric_type_from_name(type_name).is_some()
@@ -1541,11 +1477,7 @@ pub(crate) fn static_method_call_in_subset(
             );
             return args[0].label.is_none()
                 && args[1].label.is_none()
-                && args[2]
-                    .label
-                    .as_ref()
-                    .map(|(label, _)| label.as_str())
-                    == Some("digits")
+                && args[2].label.as_ref().map(|(label, _)| label.as_str()) == Some("digits")
                 && mode
                 && expr_in_subset(&args[0].expr, cx, locals)
                 && expr_in_subset(&args[2].expr, cx, locals);
@@ -1555,7 +1487,16 @@ pub(crate) fn static_method_call_in_subset(
         (type_name, method, args.len()),
         ("Secret", "from_text" | "from_bytes", 1)
             | ("SigningKey" | "X25519SecretKey", "new_random", 0)
-            | ("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey", "from_bytes", 1)
+            | (
+                "VerifyKey"
+                    | "X25519PublicKey"
+                    | "Signature"
+                    | "Sealed"
+                    | "WrappedKey"
+                    | "WrappedVaultKey",
+                "from_bytes",
+                1
+            )
             | ("KeyUnlock", "Recipient" | "Passphrase", 1)
             | ("X25519PublicKey", "from_text", 1)
             | ("PasswordHash", "parse", 1)
@@ -1570,17 +1511,13 @@ pub(crate) fn static_method_call_in_subset(
         && !cx.type_names.contains(type_name)
         && crate::Sema::math_static_return(type_name, method, args.len()).is_some()
     {
-        return args
-            .iter()
-            .all(|a| expr_in_subset(&a.expr, cx, locals));
+        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if type_name == "Perf"
         && !cx.type_names.contains("Perf")
         && core_call_covered("core.perf", method)
     {
-        return args
-            .iter()
-            .all(|a| expr_in_subset(&a.expr, cx, locals));
+        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // c109 Phase 25: a STATIC constructor `Type.new(args)` is the Phase-7 static-call
     // shape (`recv_type == None`, receiver a covered type-name ident, `(Type, "new") ∈
@@ -1732,10 +1669,7 @@ pub(crate) fn closure_method_in_subset(
                 && expr_in_subset(&args[0].expr, cx, locals)
                 && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
         }
-        "para_fold" => {
-            args.len() == 3
-                && args.iter().all(|arg| para_callback(&arg.expr))
-        }
+        "para_fold" => args.len() == 3 && args.iter().all(|arg| para_callback(&arg.expr)),
         "para_map" | "para_filter" | "para_partition" => {
             args.len() == 1 && para_callback(&args[0].expr)
         }

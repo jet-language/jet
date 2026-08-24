@@ -203,7 +203,9 @@ mod tests {
     fn hover_shows_callable_access_defaults_and_policies() {
         let src = "#Policy(trace(\"users.load\"))\nfn load(value: &Int, label: String{\"user\"}) Int { return 1 }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
-        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error));
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error));
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
@@ -211,7 +213,10 @@ mod tests {
         let hover = compute_hover(&db, &toks, src, project.entry(), offset).expect("load hover");
         assert!(hover.contains("&value: Int"), "{hover}");
         assert!(hover.contains("label: String{\"user\"}"), "{hover}");
-        assert!(hover.contains("policies=[trace(\"users.load\")]"), "{hover}");
+        assert!(
+            hover.contains("policies=[trace(\"users.load\")]"),
+            "{hover}"
+        );
     }
 
     #[test]
@@ -219,7 +224,9 @@ mod tests {
         let src = "struct Point { x: Int }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(
-            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
             "unique type fixture should check: {diagnostics:#?}"
         );
         let bundle = bundle.expect("bundle");
@@ -229,8 +236,7 @@ mod tests {
             .symbols()
             .iter()
             .find(|symbol| {
-                symbol.name == "Point"
-                    && symbol.kind == jet_semindex::SemanticSymbolKind::Type
+                symbol.name == "Point" && symbol.kind == jet_semindex::SemanticSymbolKind::Type
             })
             .expect("Point semantic symbol");
         assert_eq!(point.qualified_name, "Point");
@@ -265,7 +271,9 @@ mod tests {
         let src = "use \"./library\" as one\nfn run() { value :: 1\n    value.render()\n}\n";
         let (diagnostics, bundle, facts) = check_document_with_bundle(project.entry(), src);
         assert!(
-            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
             "imported root-call fixture should check: {diagnostics:#?}"
         );
         let bundle = bundle.expect("imported root-call bundle");
@@ -289,20 +297,16 @@ mod tests {
         let src = "struct Packet { count: Int }\nderive T.LayoutFacts { info :: T.@layout }\nfn run() {}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
         assert!(
-            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
             "layout fact LSP fixture should check: {diagnostics:#?}"
         );
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let layout_offset = src.find("@layout").expect("layout fact") + 2;
-        let completions = compute_completions(
-            &db,
-            src,
-            layout_offset + 4,
-            project.entry(),
-            None,
-            None,
-        );
+        let completions =
+            compute_completions(&db, src, layout_offset + 4, project.entry(), None, None);
         assert!(
             completions.iter().any(|item| {
                 item.label == "@layout"
@@ -328,7 +332,10 @@ mod tests {
         // that type declaration.
         let navigation_src = "struct Packet { count: Int }\nfn run() { info :: Packet.@layout }\n";
         let (navigation_tokens, navigation_diagnostics) = crate::Lexer::lex(navigation_src);
-        assert!(navigation_diagnostics.is_empty(), "{navigation_diagnostics:#?}");
+        assert!(
+            navigation_diagnostics.is_empty(),
+            "{navigation_diagnostics:#?}"
+        );
         let navigation_offset = navigation_src.find("@layout").expect("layout fact") + 2;
         let (definition_path, definition_span) = compute_definition(
             &db,
@@ -341,15 +348,12 @@ mod tests {
         assert_eq!(definition_path, project.entry());
         assert_eq!(&src[definition_span.start..definition_span.end], "Packet");
 
-        let rename_error = compute_rename(
-            &db,
-            &tokens,
-            project.entry(),
-            layout_offset,
-            "Other",
-        )
-        .expect_err("compiler facts are not renameable");
-        assert!(rename_error.contains("compiler-owned @layout"), "{rename_error}");
+        let rename_error = compute_rename(&db, &tokens, project.entry(), layout_offset, "Other")
+            .expect_err("compiler facts are not renameable");
+        assert!(
+            rename_error.contains("compiler-owned @layout"),
+            "{rename_error}"
+        );
     }
 
     #[test]
@@ -475,7 +479,10 @@ fn run() {}
     fn inlay_hints_for_bare_call_parameter_names() {
         let src = "fn clamp(value: Int, low: Int, high: Int) Int {\n    return value\n}\nfn run() {\n    print(clamp(12, low: 0, high: 10))\n}\n";
         let (project, diagnostics, bundle, facts) = check_test_document(src);
-        assert!(diagnostics.is_empty(), "unexpected diagnostics: {diagnostics:?}");
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected diagnostics: {diagnostics:?}"
+        );
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let hints = db.inlay_hints_for(project.entry());
@@ -484,7 +491,9 @@ fn run() {}
             "expected the bare argument to carry its public name: {hints:?}"
         );
         assert!(
-            !hints.iter().any(|hint| hint.label == "low: " || hint.label == "high: "),
+            !hints
+                .iter()
+                .any(|hint| hint.label == "low: " || hint.label == "high: "),
             "written labels must not receive duplicate ghost text: {hints:?}"
         );
     }
@@ -571,8 +580,7 @@ fn run() {
             .expect("add fact");
         let (tokens, _) = crate::Lexer::lex(src);
         let hover_offset = src.find("\nfn add").unwrap() + 4;
-        let hover =
-            compute_hover(&db, &tokens, src, project.entry(), hover_offset).expect("hover");
+        let hover = compute_hover(&db, &tokens, src, project.entry(), hover_offset).expect("hover");
         let offset = src.rfind("    \n").unwrap() + 4;
         let completion = compute_completions(&db, src, offset, project.entry(), None, None)
             .into_iter()
@@ -580,7 +588,10 @@ fn run() {
             .expect("add completion");
         assert!(hover.contains(&symbol.signature));
         assert!(hover.contains(&symbol.summary));
-        assert_eq!(completion.detail.as_deref(), Some(symbol.signature.as_str()));
+        assert_eq!(
+            completion.detail.as_deref(),
+            Some(symbol.signature.as_str())
+        );
     }
 
     #[test]
@@ -636,8 +647,7 @@ fn run() {
         let items = compute_completions(&db, src, offset, project.entry(), None, None);
         assert!(items.iter().any(|item| {
             item.label == "from_float"
-                && item.detail.as_deref()
-                    == Some("F32.from_float(value: Float) -> F32 String!")
+                && item.detail.as_deref() == Some("F32.from_float(value: Float) -> F32 String!")
         }));
     }
 
@@ -669,8 +679,7 @@ fn run() {
         );
         assert!(token_items.iter().any(|item| {
             item.label == "from_u8"
-                && item.detail.as_deref()
-                    == Some("Token.from_u8(value: U8) -> Token String!")
+                && item.detail.as_deref() == Some("Token.from_u8(value: U8) -> Token String!")
         }));
         for (unit_site, _) in src.match_indices("Credit.from_int") {
             let unit_items = compute_completions(
@@ -681,7 +690,13 @@ fn run() {
                 None,
                 None,
             );
-            assert_eq!(unit_items.iter().filter(|item| item.label == "from_int").count(), 1);
+            assert_eq!(
+                unit_items
+                    .iter()
+                    .filter(|item| item.label == "from_int")
+                    .count(),
+                1
+            );
         }
     }
 
@@ -691,9 +706,11 @@ fn run() {
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
-        assert!(!compute_completions(&db, src, offset, project.entry(), None, None)
-            .iter()
-            .any(|item| item.label == "hidden"));
+        assert!(
+            !compute_completions(&db, src, offset, project.entry(), None, None)
+                .iter()
+                .any(|item| item.label == "hidden")
+        );
     }
 
     #[test]
@@ -716,13 +733,11 @@ fn run() {
                 && boundary.span.end == else_end
         }));
         let then_offset = src.find("print(then_only)").unwrap();
-        let then_items =
-            compute_completions(&db, src, then_offset, project.entry(), None, None);
+        let then_items = compute_completions(&db, src, then_offset, project.entry(), None, None);
         assert!(then_items.iter().any(|item| item.label == "then_only"));
         assert!(!then_items.iter().any(|item| item.label == "else_only"));
         let else_offset = src.find("print(else_only)").unwrap();
-        let else_items =
-            compute_completions(&db, src, else_offset, project.entry(), None, None);
+        let else_items = compute_completions(&db, src, else_offset, project.entry(), None, None);
         assert!(else_items.iter().any(|item| item.label == "else_only"));
         assert!(!else_items.iter().any(|item| item.label == "then_only"));
     }
@@ -733,9 +748,11 @@ fn run() {
         let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("        \n").unwrap() + 8;
-        assert!(!compute_completions(&db, src, offset, project.entry(), None, None)
-            .iter()
-            .any(|item| item.label == "then_only"));
+        assert!(
+            !compute_completions(&db, src, offset, project.entry(), None, None)
+                .iter()
+                .any(|item| item.label == "then_only")
+        );
     }
 
     #[test]
@@ -755,9 +772,11 @@ fn run() {
             .unwrap();
         assert_eq!(scope.span.start, src.find('{').unwrap() + 1);
         assert_eq!(scope.span.end, src.rfind('}').unwrap());
-        assert!(compute_completions(&db, src, offset, project.entry(), None, None)
-            .iter()
-            .any(|item| item.label == "value"));
+        assert!(
+            compute_completions(&db, src, offset, project.entry(), None, None)
+                .iter()
+                .any(|item| item.label == "value")
+        );
     }
 
     #[test]
@@ -776,9 +795,11 @@ fn run() {
             .as_ref()
             .unwrap();
         assert_eq!(scope.span.end, src.rfind('}').unwrap());
-        assert!(compute_completions(&db, src, offset, project.entry(), None, None)
-            .iter()
-            .any(|item| item.label == "last_local"));
+        assert!(
+            compute_completions(&db, src, offset, project.entry(), None, None)
+                .iter()
+                .any(|item| item.label == "last_local")
+        );
     }
 
     #[test]
@@ -788,11 +809,16 @@ fn run() {
         let bundle = bundle.expect("bundle");
         let expected_start = src.find('{').unwrap() + 1;
         let expected_end = src.rfind('}').unwrap();
-        assert_eq!(bundle.modules[0].block_spans, vec![crate::Diagnostics::Span::new(expected_start, expected_end)]);
+        assert_eq!(
+            bundle.modules[0].block_spans,
+            vec![crate::Diagnostics::Span::new(expected_start, expected_end)]
+        );
         let db = build_symbol_db(&bundle, &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
-        assert!(compute_completions(&db, src, offset, project.entry(), None, None)
-            .iter()
-            .any(|item| item.label == "text"));
+        assert!(
+            compute_completions(&db, src, offset, project.entry(), None, None)
+                .iter()
+                .any(|item| item.label == "text")
+        );
     }
 }

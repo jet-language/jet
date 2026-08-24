@@ -223,8 +223,12 @@ pub fn capability_report_json() -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
-    format!(
-        "{{\"schema\":\"jet-ffi-capability-report-v1\",\"languages\":[{rows}]}}"
+    let payload = format!("{{\"languages\":[{rows}]}}");
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "inspect.ffi",
+        &format!(",\"ffi\":{payload}"),
     )
 }
 

@@ -113,8 +113,7 @@ pub fn keygen(registry: &str, force: bool) -> Result<(PathBuf, PathBuf, String),
         }
         std::fs::write(&seed_path, &seed).map_err(|e| io_error("signing key", e))?;
         set_mode(&seed_path, 0o600);
-        std::fs::write(&pub_path, pub_hex.as_bytes())
-            .map_err(|e| io_error("public key", e))?;
+        std::fs::write(&pub_path, pub_hex.as_bytes()).map_err(|e| io_error("public key", e))?;
         set_mode(&pub_path, 0o644);
         Ok::<_, Diagnostic>(())
     })();
@@ -190,7 +189,9 @@ fn run_keygen_helper(helper: &Path) -> Result<Vec<u8>, Diagnostic> {
     }
     if !out.status.success() {
         volatile_zeroize(&mut out.stdout);
-        return Err(bridge_error("the crypto helper could not generate a signing key"));
+        return Err(bridge_error(
+            "the crypto helper could not generate a signing key",
+        ));
     }
     Ok(out.stdout)
 }
@@ -454,7 +455,9 @@ mod tests {
     fn e1292_command_frame_is_exact() {
         assert_eq!(
             render_e1292(),
-            include_str!("../../tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr")
+            include_str!(
+                "../../tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr"
+            )
         );
         let diagnostic = e1292();
         assert_eq!(diagnostic.code, "E1292");

@@ -1,18 +1,18 @@
-use crate::AST::{Type, VariantPayload};
 use crate::Codegen::alloc_handle_rust_type;
-use crate::Codegen::Cx;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_json_type_name;
 use crate::Codegen::net_handle_rust_type;
-use crate::Codegen::TIR::is_covered_distinct_ty;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_cell_ty;
+use crate::Codegen::TIR::is_covered_distinct_ty;
 use crate::Codegen::TIR::is_covered_fallible_ty;
 use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_pool_ty;
 use crate::Codegen::TIR::is_covered_shared_guard_ty;
-use crate::Codegen::TIR::is_covered_shared_weak_ty;
 use crate::Codegen::TIR::is_covered_shared_ty;
+use crate::Codegen::TIR::is_covered_shared_weak_ty;
 use crate::Codegen::TIR::is_type_var_param_ty;
+use crate::AST::{Type, VariantPayload};
 use std::collections::HashSet;
 
 /// c109 Phase 4: `ty` is a plain user enum the subset can lower. It must be a
@@ -135,8 +135,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     let Some(variants) = cx.enum_variants.get(&canonical_name) else {
         return false;
     };
-    let carries_mutable_view =
-        cx.type_contains_mutable_view(&Type::Named(name.to_string()));
+    let carries_mutable_view = cx.type_contains_mutable_view(&Type::Named(name.to_string()));
     // A recursive edge back to this enum admits it (already under check) — the box
     // decision is total. Insert before recursing so a self-reference terminates here.
     if !seen.insert(canonical_name.clone()) {
@@ -156,8 +155,8 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     // cloneability set because the source type is still the visible leaf while
     // the codegen registry stores its canonical identity. A covered payload is
     // itself the stronger Clone fact needed by the generated enum.
-    let ok = payloads_covered
-        && (is_foreign || cx.cloneable.contains(name) || carries_mutable_view);
+    let ok =
+        payloads_covered && (is_foreign || cx.cloneable.contains(name) || carries_mutable_view);
     seen.remove(&canonical_name);
     ok
 }
@@ -477,9 +476,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         Type::Map { key, value, .. } => {
             field_ty_covered(key, cx, seen) && field_ty_covered(value, cx, seen)
         }
-        Type::Tuple(fields) => fields
-            .iter()
-            .all(|(_, ty)| field_ty_covered(ty, cx, seen)),
+        Type::Tuple(fields) => fields.iter().all(|(_, ty)| field_ty_covered(ty, cx, seen)),
         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
         // D-MEM1 S6 / D-LOCALCELL1=A: a bare core memory-handle field.
         Type::Apply { .. } => {

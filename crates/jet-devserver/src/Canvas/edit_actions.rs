@@ -44,7 +44,74 @@ pub(super) fn apply_rename(path: &Path, src: &str, from: &str, to: &str) -> Resu
     }
     let changed = FixEngine::apply_edits(src, &edits)
         .map_err(|_| edit_error("overlap", "Canvas rename edits overlapped"))?;
-    write_checked_formatted(path, src, &changed)
+    let formatted = jet_driver::Formatter::format_source(&changed)
+        .map_err(|diags| diagnostics_error(path, &changed, &diags))?;
+    let result = write_checked_source(path, src, &formatted)?;
+    if formatted != src {
+        record_canvas_rename(path, src, &formatted, from, to, &idx)?;
+    }
+    Ok(result)
+}
+
+fn record_canvas_rename(
+    path: &Path,
+    before: &str,
+    after: &str,
+    from: &str,
+    to: &str,
+    index: &jet_semindex::SemIndex,
+) -> Result<(), String> {
+    let project = path.parent().unwrap_or_else(|| Path::new("."));
+    let directory = project.join(".jet/codemods");
+    fs::create_dir_all(&directory)
+        .map_err(|error| edit_error("io", &format!("could not record semantic rename: {error}")))?;
+    let before_hash = jet_driver::SHA256::sha256_hex(before.as_bytes());
+    let after_hash = jet_driver::SHA256::sha256_hex(after.as_bytes());
+    let targets = index
+        .definition_facts()
+        .iter()
+        .filter(|fact| fact.name == from)
+        .map(|fact| {
+            format!(
+                "{{\"stable_id\":{},\"before\":{},\"after\":{},\"kind\":{},\"module_path\":{}}}",
+                json_str(&fact.stable_id),
+                json_str(&fact.human_identity),
+                json_str(&format!("{}::{to}", fact.module_path)),
+                json_str(&fact.kind),
+                json_str(&fact.module_path),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let file = format!(
+        "{{\"path\":{},\"before_hash\":{},\"after_hash\":{}}}",
+        json_str(&path.display().to_string()),
+        json_str(&before_hash),
+        json_str(&after_hash),
+    );
+    let op = format!(
+        "{{\"kind\":\"rename\",\"from\":{},\"to\":{},\"targets\":[{}],\"files\":[{}]}}",
+        json_str(from),
+        json_str(to),
+        targets,
+        file,
+    );
+    let base = format!("CanvasRename-{}", &after_hash[..12]);
+    let mut receipt = directory.join(format!("{base}.log.json"));
+    let mut suffix = 0;
+    while receipt.exists() {
+        suffix += 1;
+        receipt = directory.join(format!("{base}-{suffix}.log.json"));
+    }
+    let log = format!(
+        "{{\"schema\":2,\"name\":{},\"project\":{},\"semantic_ops\":[{}],\"files\":[{}]}}\n",
+        json_str(&base),
+        json_str(&project.display().to_string()),
+        op,
+        file,
+    );
+    fs::write(receipt, log)
+        .map_err(|error| edit_error("io", &format!("could not record semantic rename: {error}")))
 }
 
 pub(super) fn apply_create_function(

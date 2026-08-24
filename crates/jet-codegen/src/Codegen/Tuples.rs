@@ -1,8 +1,8 @@
-use crate::jet_generated_format as jet_format;
 use super::*;
+use crate::jet_generated_format as jet_format;
 use crate::AST::{
-    EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Stmt,
-    StrPart, Type, VariantPayload,
+    EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Stmt, StrPart, Type,
+    VariantPayload,
 };
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
@@ -337,7 +337,12 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => {
+                ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     collect_tuple_shapes_from_expr(start, out);
                     collect_tuple_shapes_from_expr(end, out);
                     if let Some(s) = step {
@@ -346,7 +351,9 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
                 }
                 ForKind::In { collection, step } => {
                     collect_tuple_shapes_from_expr(collection, out);
-                    if let Some(step) = step { collect_tuple_shapes_from_expr(step, out); }
+                    if let Some(step) = step {
+                        collect_tuple_shapes_from_expr(step, out);
+                    }
                 }
             }
             for s in body {
@@ -558,23 +565,17 @@ fn is_move_only_cell_guard(ty: &Type) -> bool {
 fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
     // Tuples are structural types with no type-parameter scope of their own.
     let no_params: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let map_key = fields
-        .iter()
-        .all(|(_, ty)| field_type_map_key(ty, cx));
+    let map_key = fields.iter().all(|(_, ty)| field_type_map_key(ty, cx));
     let mut derives = Vec::new();
-    if fields
-        .iter()
-        .all(|(_, t)| {
-            !cx.type_contains_shared_guard(t)
-                && !is_move_only_cell_guard(t)
-                && field_type_cloneable(t, &cx.type_names, &no_params)
-        })
-    {
+    if fields.iter().all(|(_, t)| {
+        !cx.type_contains_shared_guard(t)
+            && !is_move_only_cell_guard(t)
+            && field_type_cloneable(t, &cx.type_names, &no_params)
+    }) {
         derives.push("Clone");
     }
-    if !map_key && fields
-        .iter()
-        .all(|(_, t)| {
+    if !map_key
+        && fields.iter().all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
                 && !is_move_only_cell_guard(t)
                 && field_type_rust_eq_compatible(t, &cx.type_names, &no_params)
@@ -582,9 +583,8 @@ fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut S
     {
         derives.push("PartialEq");
     }
-    if !map_key && fields
-        .iter()
-        .all(|(_, t)| {
+    if !map_key
+        && fields.iter().all(|(_, t)| {
             !cx.type_contains_shared_guard(t)
                 && !is_move_only_cell_guard(t)
                 && field_type_hashable(t, &cx.hashable, &no_params)

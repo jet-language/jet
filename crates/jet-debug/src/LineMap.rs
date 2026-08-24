@@ -8,6 +8,13 @@
 //! DAP adapter) works in Jet lines, translated through this table.
 
 use std::collections::{BTreeMap, HashMap};
+use std::io;
+use std::path::Path;
+
+use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json};
+use jet_foundation::SHA256::{sha256_file_hex, sha256_hex};
+
+const MAP_SCHEMA_VERSION: i64 = 1;
 
 pub(crate) struct LineMap {
     /// Generated-Rust line -> Jet line, for every line a marker introduces.
@@ -86,6 +93,133 @@ impl LineMap {
             .unwrap_or(1);
         self.first_at_or_after(entry_header)
     }
+
+    /// Persist the exact source-to-generated table used by a native debug
+    /// build. The hashes make stale binaries and stale generated sources a
+    /// hard failure at the adapter boundary instead of a plausible wrong
+    /// breakpoint.
+    pub(crate) fn write_artifact(
+        path: &Path,
+        jet_file: &str,
+        jet_src: &str,
+        rust_file: &str,
+        rust_src: &str,
+        binary: &Path,
+    ) -> io::Result<()> {
+        let map = Self::build(rust_src);
+        let binary_sha256 = sha256_file_hex(binary)?;
+        let entries = map
+            .rust_to_jet
+            .iter()
+            .map(|(rust, jet)| format!("{{\"rust\":{rust},\"jet\":{jet}}}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!(
+            "{{\"schema_version\":{MAP_SCHEMA_VERSION},\"jet_file\":\"{}\",\"rust_file\":\"{}\",\"jet_sha256\":\"{}\",\"rust_sha256\":\"{}\",\"binary_sha256\":\"{}\",\"entries\":[{}]}}\n",
+            json_escape(jet_file),
+            json_escape(rust_file),
+            sha256_hex(jet_src.as_bytes()),
+            sha256_hex(rust_src.as_bytes()),
+            binary_sha256,
+            entries,
+        );
+        static MAP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let counter = MAP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let temporary = path.with_extension(format!("jetmap.tmp-{}-{counter}", std::process::id()));
+        std::fs::write(&temporary, json.as_bytes())?;
+        if let Err(error) = std::fs::rename(&temporary, path) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Load and verify a sidecar before it is allowed to translate a native
+    /// stop. The generated source remains the source of truth for the caller,
+    /// but the sidecar is the build identity check for editor/attach flows.
+    pub(crate) fn load_verified(
+        path: &Path,
+        jet_file: &str,
+        jet_src: &str,
+        rust_file: &str,
+        rust_src: &str,
+        binary: &Path,
+    ) -> Result<LineMap, String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read debugger map {}: {error}", path.display()))?;
+        let root = parse_json(&text).map_err(|()| "debugger map is not valid JSON".to_string())?;
+        let schema = json_get(&root, "schema_version")
+            .and_then(json_int)
+            .ok_or_else(|| "debugger map has no schema version".to_string())?;
+        if schema != MAP_SCHEMA_VERSION {
+            return Err(format!("unsupported debugger map schema {schema}"));
+        }
+        let jet_sha256 = sha256_hex(jet_src.as_bytes());
+        let rust_sha256 = sha256_hex(rust_src.as_bytes());
+        for (field, expected) in [
+            ("jet_file", jet_file),
+            ("rust_file", rust_file),
+            ("jet_sha256", jet_sha256.as_str()),
+            ("rust_sha256", rust_sha256.as_str()),
+        ] {
+            let actual = json_get(&root, field)
+                .and_then(json_str)
+                .ok_or_else(|| format!("debugger map has no {field}"))?;
+            if field.ends_with("_file") {
+                let expected_path = std::fs::canonicalize(expected)
+                    .ok()
+                    .map(|path| path.display().to_string());
+                if actual != expected
+                    && expected_path.as_deref() != Some(actual)
+                    && !(field == "rust_file"
+                        && Path::new(actual).file_name() == Path::new(expected).file_name())
+                {
+                    return Err(format!("debugger map {field} does not match the target"));
+                }
+            } else if actual != expected {
+                return Err(format!("debugger map {field} does not match the target"));
+            }
+        }
+        let expected_binary = sha256_file_hex(binary)
+            .map_err(|error| format!("cannot hash debugger binary: {error}"))?;
+        let actual_binary = json_get(&root, "binary_sha256")
+            .and_then(json_str)
+            .ok_or_else(|| "debugger map has no binary_sha256".to_string())?;
+        if actual_binary != expected_binary {
+            return Err("debugger map does not match the debug binary".to_string());
+        }
+        let entries = json_get(&root, "entries")
+            .and_then(|value| match value {
+                jet_foundation::JSON::JSONValue::Array(values) => Some(values),
+                _ => None,
+            })
+            .ok_or_else(|| "debugger map has no entries".to_string())?;
+        let mut rust_to_jet = BTreeMap::new();
+        let mut jet_to_rust = HashMap::new();
+        for entry in entries {
+            let rust = json_get(entry, "rust")
+                .and_then(json_int)
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or_else(|| "debugger map has an invalid rust line".to_string())?;
+            let jet = json_get(entry, "jet")
+                .and_then(json_int)
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .ok_or_else(|| "debugger map has an invalid Jet line".to_string())?;
+            if rust_to_jet.insert(rust, jet).is_some() {
+                return Err("debugger map has duplicate line entries".to_string());
+            }
+            // Several generated statements may originate from one Jet line.
+            // Preserve the first stoppable Rust line, matching `build` and
+            // keeping source breakpoints deterministic.
+            jet_to_rust.entry(jet).or_insert(rust);
+        }
+        Ok(LineMap {
+            rust_to_jet,
+            jet_to_rust,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +260,50 @@ mod tests {
         assert_eq!(map.first_at_or_after(1), Some(3));
         assert_eq!(map.first_at_or_after(4), Some(5));
         assert_eq!(map.first_at_or_after(6), None);
+    }
+
+    #[test]
+    fn sidecar_round_trip_rejects_a_stale_binary() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-debug-map-test-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = std::fs::create_dir_all(&root);
+        let binary = root.join("program");
+        let map_path = root.join("program.jetmap");
+        let jet_src = "main() {\n  print(1)\n}\n";
+        let rust_src = "fn main() {\n// jet:line 2\nlet x = 1;\n}\n";
+        std::fs::write(&binary, b"debug-binary").unwrap();
+        LineMap::write_artifact(
+            &map_path,
+            "program.jet",
+            jet_src,
+            "program.rs",
+            rust_src,
+            &binary,
+        )
+        .unwrap();
+        let loaded = LineMap::load_verified(
+            &map_path,
+            "program.jet",
+            jet_src,
+            "program.rs",
+            rust_src,
+            &binary,
+        )
+        .unwrap();
+        assert_eq!(loaded.rust_line_for(2), Some(3));
+        std::fs::write(&binary, b"stale-binary").unwrap();
+        assert!(LineMap::load_verified(
+            &map_path,
+            "program.jet",
+            jet_src,
+            "program.rs",
+            rust_src,
+            &binary,
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

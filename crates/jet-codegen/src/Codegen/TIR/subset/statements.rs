@@ -1,36 +1,34 @@
-use crate::AST::{BinOp, BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm};
-use crate::Codegen::Cx;
-use crate::Diagnostics::Span;
+use super::refusal;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
-use crate::Codegen::TIR::add_pattern_binding_names;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::add_bin_match_pattern_binding_names;
+use crate::Codegen::TIR::add_pattern_binding_names;
 use crate::Codegen::TIR::add_str_match_pattern_binding_names;
 use crate::Codegen::TIR::add_struct_pattern_binding_names;
+use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_fallible_pattern;
+use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_is_plain_cond;
-use crate::Codegen::TIR::arm_bin_match_pattern;
-use crate::Codegen::TIR::arm_guarded_variant_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
-use crate::Codegen::TIR::is_data_event_variant;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::expr_in_subset;
-use crate::Codegen::TIR::orfallback_rhs_in_subset;
 use crate::Codegen::TIR::fallible_pattern_binding;
+use crate::Codegen::TIR::is_data_event_variant;
+use crate::Codegen::TIR::orfallback_rhs_in_subset;
 use crate::Codegen::TIR::struct_pattern_values_in_subset;
 use crate::Codegen::TIR::variant_pattern_enum;
+use crate::Diagnostics::Span;
 use crate::Syntax;
+use crate::AST::{
+    BinOp, BindPattern, Expr, ForKind, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm,
+};
 use std::collections::HashSet;
-use super::refusal;
 
-fn scoped_stmts_in_subset(
-    body: &[Stmt],
-    cx: &Cx,
-    locals: &HashSet<String>,
-) -> bool {
+fn scoped_stmts_in_subset(body: &[Stmt], cx: &Cx, locals: &HashSet<String>) -> bool {
     let mut scoped = locals.clone();
     body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
 }
@@ -133,7 +131,8 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
                         pattern,
                         Pattern::Variant { variant, .. }
                             if cx.variant_owner.contains_key(variant)
-                    ) => {
+                    ) =>
+                {
                     let ok = !b.is_comptime
                         && !b.uninit
                         && expr_in_subset(&b.init, cx, locals)
@@ -257,7 +256,12 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
             // integer expressions; the loop var `i` is an Int local in the body.
             // The two-binding `key, value` form is map iteration (a collection),
             // outside this phase.
-            ForKind::Range { start, end, step, exclusive: _ } if var2.is_none() => {
+            ForKind::Range {
+                start,
+                end,
+                step,
+                exclusive: _,
+            } if var2.is_none() => {
                 if !expr_in_subset(start, cx, locals) || !expr_in_subset(end, cx, locals) {
                     return false;
                 }
@@ -278,7 +282,10 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
             // body scope with an *unresolved* type (matching the AST slot's `jet_ty:
             // None`, so they never enable the overflow trap).
             ForKind::In { collection, step } => {
-                if step.as_ref().is_some_and(|step| !expr_in_subset(step, cx, locals)) {
+                if step
+                    .as_ref()
+                    .is_some_and(|step| !expr_in_subset(step, cx, locals))
+                {
                     return false;
                 }
                 // The TWO-BINDING map form (`loop (k, v) in map`) ALWAYS emits
@@ -381,8 +388,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
         Stmt::TaskGroup { name, body, .. } => {
             let mut scoped = locals.clone();
             scoped.insert(name.clone());
-            body
-                .iter()
+            body.iter()
                 .all(|statement| stmt_in_subset(statement, cx, &mut scoped))
         }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }`. UNLIKE `Region`/
@@ -714,7 +720,8 @@ pub(crate) fn switch_in_subset(
             }
             return else_body.as_ref().is_none_or(|body| {
                 let mut else_locals = locals.clone();
-                body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
+                body.iter()
+                    .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
             });
         }
         for arm in arms {
@@ -733,7 +740,8 @@ pub(crate) fn switch_in_subset(
         }
         return else_body.as_ref().is_none_or(|body| {
             let mut else_locals = locals.clone();
-            body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
+            body.iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
         });
     }
     // Shape A-GUARD: a variant-pattern switch with boolean guards on one or more

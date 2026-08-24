@@ -1,12 +1,12 @@
 #![allow(non_snake_case)]
 #![deny(warnings)]
 // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
-pub use jet_sema::{
-    CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema,
-    Syntax, TargetMachine, Traits, Policy, AST, SHA256,
-};
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
+pub use jet_sema::{
+    CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Policy,
+    Sema, Syntax, TargetMachine, Traits, AST, SHA256,
+};
 // `EncodingJson.rs` resolves exact-number validation through
 // `super::jet_json_number`; supply it at the root the same way `jet-jit` does.
 #[allow(unused_imports)]
@@ -15,8 +15,8 @@ pub(crate) use jet_foundation::JSONNumber as jet_json_number;
 pub(crate) mod jet_encoding_json {
     include!("../../jet-foundation/src/EncodingJson.rs");
 }
-pub mod Codegen;
 mod BrowserHost;
+pub mod Codegen;
 /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
 /// AOT code. Resident engines marshal source locations into their own report
 /// carrier, but depth policy stays in this Prelude part.
@@ -34,6 +34,136 @@ pub mod fault_injection {
 /// the same Prelude source that generated AOT programs embed.
 pub mod program_allocator {
     include!("Prelude/ProgramAllocator.rs");
+}
+/// D-DEVR-LAW1=A / I9: the one development receipt record. AOT embeds the
+/// same source through `Codegen::PRELUDE_PARTS`; resident engines include it
+/// from this seam and only marshal its bytes to their host store.
+pub mod development_receipt {
+    include!("Prelude/DevelopmentReceipt.rs");
+}
+
+#[cfg(test)]
+mod development_receipt_tests {
+    use super::development_receipt::{
+        is_content_address, jet_development_receipt_render, jet_production_failure_receipt_write,
+        JetDevelopmentReceipt, JetDevelopmentReceiptInput,
+        JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV,
+        JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV,
+        JET_DEVELOPMENT_RECEIPT_TARGET_ENV,
+    };
+
+    fn receipt(inputs: Vec<JetDevelopmentReceiptInput>) -> JetDevelopmentReceipt {
+        JetDevelopmentReceipt {
+            act: "package-realization".into(),
+            locked_closure:
+                "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            inputs,
+            planned_action:
+                "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            outputs: vec![JetDevelopmentReceiptInput {
+                name: "out".into(),
+                digest: "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    .into(),
+            }],
+            activation_proof: String::new(),
+            parent_generation: String::new(),
+            witness: "jetpack".into(),
+            outcome: "passed".into(),
+            failure_path: None,
+        }
+    }
+
+    #[test]
+    fn receipt_identity_is_content_addressed_and_order_stable() {
+        let first = receipt(vec![
+            JetDevelopmentReceiptInput {
+                name: "source".into(),
+                digest: "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    .into(),
+            },
+            JetDevelopmentReceiptInput {
+                name: "toolchain".into(),
+                digest: "sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                    .into(),
+            },
+        ]);
+        let second = receipt(vec![
+            JetDevelopmentReceiptInput {
+                name: "toolchain".into(),
+                digest: "sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                    .into(),
+            },
+            JetDevelopmentReceiptInput {
+                name: "source".into(),
+                digest: "sha256-dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    .into(),
+            },
+        ]);
+        assert_eq!(first.identity_bytes(), second.identity_bytes());
+        assert_eq!(
+            jet_development_receipt_render(&first),
+            jet_development_receipt_render(&second)
+        );
+        assert!(is_content_address(&first.locked_closure));
+        assert!(is_content_address(&first.inputs[0].digest));
+        assert!(!is_content_address("source-v1"));
+        assert!(!is_content_address(
+            "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        ));
+    }
+
+    #[test]
+    fn development_receipt_is_one_shared_source_across_tiers() {
+        let codegen = include_str!("Codegen/mod.rs");
+        let jit = include_str!("../../jet-jit/src/lib.rs");
+        assert_eq!(
+            codegen
+                .matches("include_str!(\"../Prelude/DevelopmentReceipt.rs\")")
+                .count(),
+            1
+        );
+        assert_eq!(
+            jit.matches("include!(\"../../jet-codegen/src/Prelude/DevelopmentReceipt.rs\")")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn production_failure_writer_redacts_dynamic_values() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-production-receipt-unit-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let digest = |byte| format!("sha256-{}", char::from(byte).to_string().repeat(64));
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV, &root);
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_ENTRY_ENV, "service.jet");
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV, digest(b'a'));
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV, digest(b'b'));
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV, digest(b'c'));
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV, "1");
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV, digest(b'd'));
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_TARGET_ENV, "native");
+        std::env::set_var(JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV, digest(b'e'));
+
+        let path = jet_production_failure_receipt_write(
+            "E3001",
+            "/outside/USER_DATA_SECRET.jet",
+            9,
+            "run",
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.starts_with("jet-development-receipt-v1\n"));
+        assert!(!text.contains("USER_DATA_SECRET"));
+        assert!(!text.contains("argv"));
+        assert!(text.contains("failure-path"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 /// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the
 /// generated program; this module compiles that same source for the Cranelift
@@ -152,14 +282,14 @@ pub mod terminal_runtime {
     include!("Prelude/Term.rs");
     include!("Prelude/Core/TermKey.rs");
 }
-/// Card #1751: the one 80x24 terminal default, read by both AOT's
-/// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
-#[path = "Prelude/TerminalDefault.rs"]
-pub mod terminal_default;
 /// D-PROCESS-SESSION1=A / #1181: shared native Unix PTY substrate used by the
 /// emitted process prelude and the resident JIT adapter.
 #[path = "Prelude/CoreLib/ProcessPty.rs"]
 pub mod process_pty;
+/// Card #1751: the one 80x24 terminal default, read by both AOT's
+/// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
+#[path = "Prelude/TerminalDefault.rs"]
+pub mod terminal_default;
 /// D-CMD-OVERRIDE1=C: command-suite values compile from the same Prelude
 /// source that AOT embeds in `mod jet_std`.
 pub mod command_suite {

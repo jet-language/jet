@@ -419,6 +419,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                 authority,
                 exit_code,
                 json,
+                None,
             ) {
                 exit(status);
             }
@@ -2139,6 +2140,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         members,
     })
 }
+
 
 fn reject_symlink_ancestors(path: &Path) -> Result<(), String> {
     let mut current = if path.is_absolute() {

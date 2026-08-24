@@ -58,15 +58,93 @@
       {
         "command": "jet.testFile",
         "title": "Jet: Test File"
+      },
+      {
+        "command": "jet.debugFile",
+        "title": "Jet: Debug File"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "jet",
+        "label": "Jet Debugger",
+        "languages": ["jet"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Jet source file to debug."
+              },
+              "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Arguments passed to the Jet program."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the Jet program."
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment overrides for the Jet program."
+              },
+              "showRawFrames": {
+                "type": "boolean",
+                "default": false,
+                "description": "Expert view: append generated Rust frames and scopes."
+              }
+            }
+          },
+          "attach": {
+            "required": ["program", "map", "processId"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Native debug binary for the local target."
+              },
+              "map": {
+                "type": "string",
+                "description": "Matching .jetmap sidecar for the native target."
+              },
+              "processId": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Local same-user process id."
+              },
+              "showRawFrames": {
+                "type": "boolean",
+                "description": "Append explicitly requested raw frames/scopes."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "jet",
+            "request": "launch",
+            "name": "Jet: Launch",
+            "program": "${file}"
+          }
+        ],
+        "breakpoints": [
+          { "languageIds": ["jet"] }
+        ]
       }
     ],
     "configuration": {
       "title": "Jet",
       "properties": {
+        "jet.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Jet executable used by the language server and debugger. Leave empty to discover the workspace debug binary, then `jet` on PATH."
+        },
         "jet.languageServerPath": {
           "type": "string",
           "default": "",
-          "description": "Path to a jet binary (must support `jet self lsp`). Leave empty to auto-discover: ${workspaceFolder}/target/debug/jet, then `jet` on PATH."
+          "description": "Legacy alias for jet.executablePath. Use jet.executablePath for new settings."
         },
         "jet.inlayHints.cloneHints": {
           "type": "boolean",

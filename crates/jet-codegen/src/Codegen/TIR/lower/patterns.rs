@@ -1,30 +1,30 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
-use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::mangle_path;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
-use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower::str_match_scan_closure;
+use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
+use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::variant_pattern_enum;
+use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TEnumArg;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::THandleOp;
-use crate::Codegen::TIR::TMatchArm;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TMatchArm;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
+use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 
 /// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
 /// `(name, type)` canonical hole list the SAME way sema did when it set this
@@ -96,8 +96,13 @@ pub(super) fn lower_reader_take_pattern(
         .filter_map(|p| match p {
             BinMatchPart::Hole { name, spec, .. } => {
                 let ty = match spec {
-                    BinSpec::Rest => Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
-                    BinSpec::Bits { width, .. } => crate::Codegen::TIR::lower::bin_bits_type(*width),
+                    BinSpec::Rest => Type::List(Box::new(Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    })),
+                    BinSpec::Bits { width, .. } => {
+                        crate::Codegen::TIR::lower::bin_bits_type(*width)
+                    }
                 };
                 Some((name.clone(), ty))
             }
@@ -157,7 +162,11 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr 
 /// `.parse()` — matching how struct-pattern value tests and bind fields are
 /// independently re-derived rather than shared), binds the whole result tuple
 /// to one temp, then projects each hole out of it by field index.
-pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+pub(super) fn lower_str_match_pattern_bindings(
+    pattern: &Pattern,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> Vec<TStmt> {
     let (_, holes) = str_match_scan_closure(pattern, cx);
     if holes.is_empty() {
         return Vec::new();
@@ -533,7 +542,9 @@ pub(crate) fn lower_range_switch<'a>(
         ranges.push((lo, hi));
         bodies.push(LowerBody::scoped(&arm.body, clone_env(env)));
     }
-    let else_body = else_body.as_ref().expect("range switch requires else (gate)");
+    let else_body = else_body
+        .as_ref()
+        .expect("range switch requires else (gate)");
     bodies.push(LowerBody::scoped(else_body, clone_env(env)));
     deferred_stmt(bodies, move |mut lowered| {
         let else_lowered = lowered.pop().unwrap();
@@ -569,7 +580,10 @@ pub(crate) fn tir_range_guard(pattern: &Pattern) -> Option<String> {
                     if let PatSlot::Range { lo, hi } = s {
                         Some(jet_format!(
                             "{jet_prefix}range_{} >= {} && {jet_prefix}range_{} <= {}",
-                            i, lo, i, hi
+                            i,
+                            lo,
+                            i,
+                            hi
                         ))
                     } else {
                         None
@@ -603,9 +617,15 @@ pub(crate) fn tir_add_pattern_bindings(
         } => {
             let hook_payload = match (subject_ty, variant.as_str()) {
                 (Some(Type::Apply { name, args }), "Continue" | "Transform")
-                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") => args.first().cloned(),
+                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") =>
+                {
+                    args.first().cloned()
+                }
                 (Some(Type::Apply { name, args }), "Fail")
-                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") => args.get(1).cloned(),
+                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") =>
+                {
+                    args.get(1).cloned()
+                }
                 _ => None,
             };
             // D-UNIONTYPE1=A: union arm binds the matching member type.
@@ -653,9 +673,7 @@ pub(crate) fn tir_add_pattern_bindings(
                                 .map(|field| format!("{variant}.{}", field.name)),
                             VariantPayload::Unit => None,
                         };
-                        edge.is_some_and(|edge| {
-                            cx.boxed_edges.contains(&(owner.to_string(), edge))
-                        })
+                        edge.is_some_and(|edge| cx.boxed_edges.contains(&(owner.to_string(), edge)))
                     });
                     let local = if boxed {
                         TLocal::user(name).through_ref()
@@ -743,7 +761,10 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if matches!(type_name, "EncodingFormat" | "EncodingErrorKind") {
         return in_std(type_name);
     }
-    if matches!(type_name, "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode") {
+    if matches!(
+        type_name,
+        "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode"
+    ) {
         return in_std(type_name);
     }
     // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`/
@@ -783,7 +804,10 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if type_name == "HookOutcome" {
         return in_std("JetHookOutcome");
     }
-    if matches!(type_name, "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError") {
+    if matches!(
+        type_name,
+        "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError"
+    ) {
         return at_root(&format!("Jet{type_name}"));
     }
     if type_name == "TLSClientTrust" {
@@ -792,14 +816,34 @@ pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
     if type_name == "TLSVersion" {
         return at_root("JetTLSVersion");
     }
-    if matches!(type_name, "IOError" | "IOOperation" | "ProcessResourceLimit") {
+    if matches!(
+        type_name,
+        "IOError" | "IOOperation" | "ProcessResourceLimit"
+    ) {
         return in_std(type_name);
     }
-    if matches!(type_name, "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPCorsOrigins" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPCompressEncoding") {
+    if matches!(
+        type_name,
+        "HTTPError"
+            | "HTTPOperation"
+            | "HTTPProxy"
+            | "HTTPCorsOrigins"
+            | "HTTPRedirectPolicy"
+            | "HTTPRetryPolicy"
+            | "HTTPCookieJar"
+            | "HTTPCompressEncoding"
+    ) {
         return at_root(&format!("Jet{type_name}"));
     }
-    if matches!(type_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "SMTPAuth" | "TLSTrust") {
-        let rust = if type_name == "EmailError" { "Error" } else { type_name };
+    if matches!(
+        type_name,
+        "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "SMTPAuth" | "TLSTrust"
+    ) {
+        let rust = if type_name == "EmailError" {
+            "Error"
+        } else {
+            type_name
+        };
         return (format!("{root}jet_email::{rust}"), true);
     }
     // D-PENDING1=B: `Loadable` is a Prelude carrier, not a generated Jet enum.
@@ -922,19 +966,12 @@ pub(crate) fn lower_enum_arg(
     let payload_expr = if mutable_view_payload {
         match e {
             Expr::Place(inner, _, span) => {
-                mutable_place = Expr::Place(
-                    inner.clone(),
-                    crate::AST::PlaceAccess::Write,
-                    *span,
-                );
+                mutable_place = Expr::Place(inner.clone(), crate::AST::PlaceAccess::Write, *span);
                 &mutable_place
             }
             Expr::Slice { span, .. } => {
-                mutable_place = Expr::Place(
-                    Box::new(e.clone()),
-                    crate::AST::PlaceAccess::Write,
-                    *span,
-                );
+                mutable_place =
+                    Expr::Place(Box::new(e.clone()), crate::AST::PlaceAccess::Write, *span);
                 &mutable_place
             }
             _ => e,

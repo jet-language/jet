@@ -111,8 +111,8 @@ fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
     assert_eq!(check.status.code(),Some(1),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&check.stdout),String::from_utf8_lossy(&check.stderr));
     let CanonicalJson::Object(check) = CanonicalJson::parse_canonical(&check.stdout).unwrap() else { panic!("command") };
     assert_eq!(check["status"],CanonicalJson::String("stale".into()));
-    assert_eq!(check["failure_kind"],CanonicalJson::String("evidence".into()));
-    let CanonicalJson::Array(results)=&check["results"] else { panic!("results") };
+    assert_eq!(*canonical_field(&check["budget"], "failure_kind"),CanonicalJson::String("evidence".into()));
+    let CanonicalJson::Array(results)=canonical_field(&check["budget"], "results") else { panic!("results") };
     let CanonicalJson::Object(result)=&results[0] else { panic!("result") };
     assert_eq!(result["stale"],CanonicalJson::Bool(true));
     assert_eq!(result["status"],CanonicalJson::String("stale".into()));
@@ -121,7 +121,7 @@ fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
     let CanonicalJson::String(reason)=&result["reason"] else { panic!("reason") };
     assert!(reason.contains("compatible history is stale"),"{reason}");
     assert!(reason.contains("policy limit is 2592000 seconds"),"{reason}");
-    let CanonicalJson::Object(report)=&check["report"] else { panic!("report") };
+    let CanonicalJson::Object(report)=canonical_field(&check["budget"], "report") else { panic!("report") };
     jet_foundation::PerformanceBudget::verify_budget_report(&CanonicalJson::Object(report.clone()).bytes()).unwrap();
     let CanonicalJson::Object(content)=&report["content"] else { panic!("content") };
     let CanonicalJson::Array(measurements)=&content["measurements"] else { panic!("measurements") };
@@ -144,9 +144,9 @@ fn budget_stale_history_is_persisted_rendered_and_bootstrap_appends() {
     let bootstrap = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","refresh stale benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(bootstrap.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&bootstrap.stdout),String::from_utf8_lossy(&bootstrap.stderr));
     let CanonicalJson::Object(bootstrap)=CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else { panic!("bootstrap") };
-    assert_eq!(bootstrap["applied"],CanonicalJson::Bool(true));
+    assert_eq!(*canonical_field(&bootstrap["budget"], "applied"),CanonicalJson::Bool(true));
     assert_eq!(bootstrap["status"],CanonicalJson::String("stale".into()));
-    let CanonicalJson::Object(report)=&bootstrap["report"] else { panic!("report") };
+    let CanonicalJson::Object(report)=canonical_field(&bootstrap["budget"], "report") else { panic!("report") };
     let CanonicalJson::String(second_id)=&report["report_id"] else { panic!("report id") };
     let manifest = CanonicalJson::parse_canonical(&fs::read(dir.join(".jet/perf/baselines/names/ci/linux.json")).unwrap()).unwrap();
     let CanonicalJson::Object(wrapper)=manifest else { panic!("manifest") };
@@ -278,7 +278,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert!(out.stderr.is_empty());
         let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
-        let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+        let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else { panic!("report object") };
         jet_foundation::PerformanceBudget::verify_budget_report(&CanonicalJson::Object(report.clone()).bytes()).unwrap();
         let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
         let CanonicalJson::Object(toolchain) = &content["toolchain"] else { panic!("toolchain object") };
@@ -335,8 +335,8 @@ fn budget_update_is_plan_first_and_yes_applies_once() {
     let plan = Command::new(jet()).args(args).current_dir(&dir).output().unwrap();
     assert_eq!(plan.status.code(), Some(0), "{}", String::from_utf8_lossy(&plan.stderr));
     let CanonicalJson::Object(plan)=jet_foundation::PerformanceBudget::CanonicalJson::parse_canonical(&plan.stdout).unwrap() else{panic!("command")};
-    assert_eq!(plan["applied"],CanonicalJson::Bool(false));
-    let CanonicalJson::Object(plan)=&plan["plan"] else{panic!("plan")};assert_eq!(plan["requires_confirmation"],CanonicalJson::Bool(false));let CanonicalJson::Array(rows)=&plan["rows"] else{panic!("rows")};assert_eq!(rows.len(),2);let CanonicalJson::Object(report)=&rows[0] else{panic!("report row")};let CanonicalJson::Object(baseline)=&rows[1] else{panic!("baseline row")};assert_eq!(report["operation"],CanonicalJson::String("create".into()));assert_eq!(report["artifact"],CanonicalJson::String("report".into()));assert_eq!(baseline["operation"],CanonicalJson::String("advance".into()));assert_eq!(baseline["artifact"],CanonicalJson::String("baseline".into()));
+    assert_eq!(*canonical_field(&plan["budget"], "applied"),CanonicalJson::Bool(false));
+    let CanonicalJson::Object(plan)=canonical_field(&plan["budget"], "plan") else{panic!("plan")};assert_eq!(plan["requires_confirmation"],CanonicalJson::Bool(false));let CanonicalJson::Array(rows)=&plan["rows"] else{panic!("rows")};assert_eq!(rows.len(),2);let CanonicalJson::Object(report)=&rows[0] else{panic!("report row")};let CanonicalJson::Object(baseline)=&rows[1] else{panic!("baseline row")};assert_eq!(report["operation"],CanonicalJson::String("create".into()));assert_eq!(report["artifact"],CanonicalJson::String("report".into()));assert_eq!(baseline["operation"],CanonicalJson::String("advance".into()));assert_eq!(baseline["artifact"],CanonicalJson::String("baseline".into()));
     assert!(!dir.join(".jet").exists(),"JSON plan-only mutated workspace");
 
     let applied = Command::new(jet()).args(args).arg("--yes").current_dir(&dir).output().unwrap();
@@ -360,7 +360,7 @@ fn build_artifact_receipt_collects_footprint_samples() {
     assert!(output.stderr.is_empty(), "JSON mode must keep diagnostics in stdout");
 
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&output.stdout).unwrap() else { panic!("command") };
-    let CanonicalJson::Object(report) = &command["report"] else { panic!("report") };
+        let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else { panic!("report") };
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
     assert_eq!(measurements.len(), 3);
@@ -395,8 +395,10 @@ fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stderr.is_empty());
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
-    assert_eq!(command.keys().map(String::as_str).collect::<Vec<_>>(), ["applied","command","diagnostics","exit_code","failure_kind","plan","report","report_path","results","schema","status","version"]);
-    let CanonicalJson::Array(results) = &command["results"] else { panic!("results") };
+    assert_eq!(command.keys().map(String::as_str).collect::<Vec<_>>(), ["action","budget","moment","ok","schema","status"]);
+    let CanonicalJson::Object(budget) = &command["budget"] else { panic!("budget") };
+    assert_eq!(budget.keys().map(String::as_str).collect::<Vec<_>>(), ["applied","diagnostics","exit_code","failure_kind","plan","report","report_path","results"]);
+    let CanonicalJson::Array(results) = &budget["results"] else { panic!("results") };
     let CanonicalJson::Object(result) = &results[0] else { panic!("result") };
     assert_eq!(result.keys().map(String::as_str).collect::<Vec<_>>(), ["baseline_report_ids","budget_id","comparison","diagnostic_code","direction","enforcement","evidence","lower95","metric","point","reason","source","stale","status","trend","unit","upper95"]);
     let CanonicalJson::Object(source) = &result["source"] else { panic!("source") };
@@ -409,8 +411,8 @@ fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     assert_eq!(invalid.status.code(), Some(1));
     assert!(invalid.stderr.is_empty());
     let CanonicalJson::Object(invalid) = CanonicalJson::parse_canonical(&invalid.stdout).unwrap() else { panic!("compiler failure object") };
-    assert_eq!(invalid["failure_kind"], CanonicalJson::String("compiler".into()));
-    let CanonicalJson::Array(diagnostics) = &invalid["diagnostics"] else { panic!("diagnostics") };
+    assert_eq!(*canonical_field(&invalid["budget"], "failure_kind"), CanonicalJson::String("compiler".into()));
+    let CanonicalJson::Array(diagnostics) = canonical_field(&invalid["budget"], "diagnostics") else { panic!("diagnostics") };
     let CanonicalJson::Object(diagnostic) = &diagnostics[0] else { panic!("diagnostic") };
     let CanonicalJson::Object(source) = &diagnostic["source"] else { panic!("diagnostic source") };
     assert_eq!(source.keys().map(String::as_str).collect::<Vec<_>>(), ["column","end_column","end_line","line","path"]);
@@ -424,10 +426,10 @@ fn budget_json_projection_is_exact_and_tool_failure_uses_null_report_fields() {
     assert!(failed.stderr.is_empty());
     let CanonicalJson::Object(failure) = CanonicalJson::parse_canonical(&failed.stdout).unwrap() else { panic!("failure object") };
     assert_eq!(failure["status"], CanonicalJson::String("fail".into()));
-    assert_eq!(failure["failure_kind"], CanonicalJson::String("tool".into()));
-    assert_eq!(failure["report"], CanonicalJson::Null);
-    assert_eq!(failure["report_path"], CanonicalJson::Null);
-    assert_eq!(failure["plan"], CanonicalJson::Null);
+    assert_eq!(*canonical_field(&failure["budget"], "failure_kind"), CanonicalJson::String("tool".into()));
+    assert_eq!(*canonical_field(&failure["budget"], "report"), CanonicalJson::Null);
+    assert_eq!(*canonical_field(&failure["budget"], "report_path"), CanonicalJson::Null);
+    assert_eq!(*canonical_field(&failure["budget"], "plan"), CanonicalJson::Null);
 }
 
 #[test]

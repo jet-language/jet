@@ -9,9 +9,10 @@
 
 use super::{entry_action_key, NarInfo, ProducerRecord, Roots, StoreEntry};
 use crate::TrustRoot::{
-    allow_cache_builder, cache_builder_identity, is_cache_builder_allowed,
-    is_cache_builder_revoked, os_random_bytes, pin_cache_key, verify_pinned_cache_key,
-    CacheProvenance, CacheReceipt, Signature, SystemTrustedClock, TrustKey,
+    allow_cache_builder, allow_cache_witness, cache_builder_identity, is_cache_builder_allowed,
+    is_cache_builder_revoked, is_cache_witness_allowed, os_random_bytes, pin_cache_key,
+    current_receipt_witness, verify_pinned_cache_key, CacheProvenance, CacheReceipt, Signature,
+    SystemTrustedClock, TrustKey,
 };
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -212,6 +213,7 @@ pub struct CacheTransferReport {
     pub provenance: String,
     /// The signed admission receipt accepted for this transfer, when the
     /// endpoint uses Jetpack's native cache receipt protocol.
+    pub witness: Option<String>,
     pub receipt_version: Option<u64>,
     pub receipt_expires_unix: Option<u64>,
     pub credential_provider: Option<String>,
@@ -520,6 +522,9 @@ pub fn publish_cache_entry(
             Ok(proof) => {
                 let builder = cache_builder_for_entry(&entry)?;
                 allow_cache_builder(&roots.root, role, &builder).map_err(io::Error::other)?;
+                if let Some(witness) = &proof.witness {
+                    allow_cache_witness(&roots.root, role, witness).map_err(io::Error::other)?;
+                }
                 return Ok(CacheTransferReport {
                     role: binding.role.clone(),
                     mirror: mirror.clone(),
@@ -530,6 +535,7 @@ pub fn publish_cache_entry(
                     signed_fingerprint: proof.signed_fingerprint,
                     builder: cache_builder_for_report(&entry),
                     provenance: cache_provenance_for_report(&entry),
+                    witness: proof.witness,
                     receipt_version: proof.receipt_version,
                     receipt_expires_unix: proof.receipt_expires_unix,
                     credential_provider: binding.credential_provider.clone(),
@@ -586,6 +592,7 @@ pub fn verify_cache_transfer(
                     signed_fingerprint: fingerprint_for_key(&key),
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    witness: None,
                     receipt_version: None,
                     receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
@@ -607,6 +614,7 @@ pub fn verify_cache_transfer(
                     signed_fingerprint: transfer.signed_fingerprint,
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    witness: None,
                     receipt_version: None,
                     receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
@@ -704,6 +712,7 @@ pub fn substitute_cache_entry(
                     signed_fingerprint: fingerprint_for_key(&key),
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    witness: None,
                     receipt_version: None,
                     receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
@@ -725,6 +734,7 @@ pub fn substitute_cache_entry(
                     signed_fingerprint: transfer.signed_fingerprint,
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
+                    witness: None,
                     receipt_version: None,
                     receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
@@ -767,6 +777,7 @@ pub fn substitute_cache_entry(
                             signed_fingerprint: fingerprint_for_info(&artifact.info),
                             builder: cache_builder_for_report(&expected),
                             provenance: cache_provenance_for_report(&expected),
+                            witness: Some(artifact.receipt.witness.clone()),
                             receipt_version: Some(artifact.receipt.version),
                             receipt_expires_unix: Some(artifact.receipt.expires_unix),
                             credential_provider: binding.credential_provider.clone(),
@@ -838,7 +849,7 @@ pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> Strin
         true,
         operation,
         &format!(
-            ",\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}",
+            ",\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"witness\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}",
             crate::JSON::quote(operation),
             crate::JSON::quote(&report.role),
             crate::JSON::quote(&report.mirror),
@@ -853,6 +864,11 @@ pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> Strin
             crate::JSON::quote(&report.signed_fingerprint),
             crate::JSON::quote(&report.builder),
             crate::JSON::quote(&report.provenance),
+            report
+                .witness
+                .as_deref()
+                .map(crate::JSON::quote)
+                .unwrap_or_else(|| "null".to_string()),
             report
                 .receipt_version
                 .map(|version| version.to_string())
@@ -1109,6 +1125,7 @@ fn report_for(
         provenance: expected
             .map(cache_provenance_for_report)
             .unwrap_or_default(),
+        witness: receipt.map(|receipt| receipt.witness.clone()),
         receipt_version: receipt.map(|receipt| receipt.version),
         receipt_expires_unix: receipt.map(|receipt| receipt.expires_unix),
         credential_provider: binding.credential_provider.clone(),
@@ -1517,7 +1534,9 @@ fn cache_receipt_for_publication(
         CacheEndpoint::Nix(_) | CacheEndpoint::Hangar => None,
     };
     if let Some(existing) = existing {
+        let current_witness = current_receipt_witness().map_err(io::Error::other)?;
         if existing.role == role
+            && existing.witness == current_witness
             && existing.provenance == provenance
             && existing.verify(key, &SystemTrustedClock).is_ok()
         {
@@ -1546,6 +1565,11 @@ fn cache_receipt_for_publication(
 }
 
 fn encode_cache_receipt(receipt: &CacheReceipt) -> io::Result<String> {
+    if receipt.witness.trim().is_empty() || receipt.witness.chars().any(char::is_control) {
+        return Err(invalid(
+            "cache trust receipt has an empty witness or control characters",
+        ));
+    }
     receipt
         .provenance
         .validate()
@@ -1553,6 +1577,7 @@ fn encode_cache_receipt(receipt: &CacheReceipt) -> io::Result<String> {
     let mut out = String::from(CACHE_RECEIPT_MAGIC);
     out.push('\n');
     line(&mut out, "role", &receipt.role)?;
+    line(&mut out, "witness", &receipt.witness)?;
     line(&mut out, "version", &receipt.version.to_string())?;
     line(&mut out, "issued", &receipt.issued_unix.to_string())?;
     line(&mut out, "expires", &receipt.expires_unix.to_string())?;
@@ -1599,6 +1624,7 @@ fn decode_cache_receipt(bytes: &[u8]) -> io::Result<CacheReceipt> {
     };
     let receipt = CacheReceipt {
         role: take("role")?,
+        witness: take("witness")?,
         version: take("version")?
             .parse()
             .map_err(|_| invalid("cache trust receipt version is not an integer"))?,
@@ -1676,6 +1702,18 @@ fn verify_cache_receipt(
     if receipt.provenance != expected_provenance {
         return Err(invalid(
             "cache trust receipt provenance does not match the requested output; mix-and-match rejected",
+        ));
+    }
+    let policy = format!("cache-witnesses/{role}.allow");
+    if !is_cache_witness_allowed(&roots.root, role, &receipt.witness).map_err(io::Error::other)? {
+        return Err(invalid(
+            &crate::TrustRoot::TrustError::CacheReceiptInvalid {
+                detail: format!(
+                    "cache receipt witness '{}' rejected by trust policy '{}'",
+                    receipt.witness, policy
+                ),
+            }
+            .to_string(),
         ));
     }
     let store_name = format!("{}-{}", expected.envelope.output_hash, expected.id);
@@ -1966,6 +2004,7 @@ fn endpoint_put(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result
 struct TransferProof {
     nix_nar_hash: Option<String>,
     signed_fingerprint: String,
+    witness: Option<String>,
     receipt_version: Option<u64>,
     receipt_expires_unix: Option<u64>,
 }
@@ -2001,6 +2040,7 @@ fn publish_endpoint(
             Ok(TransferProof {
                 nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_key(key),
+                witness: Some(receipt.witness.clone()),
                 receipt_version: Some(receipt.version),
                 receipt_expires_unix: Some(receipt.expires_unix),
             })
@@ -2041,6 +2081,7 @@ fn publish_endpoint(
             Ok(TransferProof {
                 nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_info(&signed),
+                witness: Some(receipt.witness.clone()),
                 receipt_version: Some(receipt.version),
                 receipt_expires_unix: Some(receipt.expires_unix),
             })
@@ -2279,6 +2320,7 @@ fn prove_nix_transfer(
     Ok(TransferProof {
         nix_nar_hash: Some(info.nar_hash.clone()),
         signed_fingerprint: nix_admission_fingerprint(uri, path, &info, key),
+        witness: None,
         receipt_version: None,
         receipt_expires_unix: None,
     })

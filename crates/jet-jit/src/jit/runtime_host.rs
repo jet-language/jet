@@ -591,6 +591,12 @@ impl JitRuntime {
             message,
             "",
         );
+        let _ = jet_codegen::development_receipt::jet_production_failure_receipt_write(
+            code,
+            &self.source_file,
+            line,
+            &self.current_function,
+        );
         self.stderr.push_str(&report.rendered);
         self.exit_code = Some(report.exit_code);
         self.store_trap(message);

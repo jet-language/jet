@@ -68,6 +68,18 @@ In order:
 `jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
 Rebuild with `cargo build` and reload Zed to pick up server changes.
 
+## Native debugging
+
+The extension does not register a Jet DAP adapter yet. Zed extension API
+0.7.0 cannot express the trust and authorization checks required by the
+native debugger. This keeps the Zed debug panel from starting a session that
+cannot report an honest authority state.
+
+Use the terminal command `jet debug <file.jet>` for the native debugger. Add
+`--raw-frames` only for the clearly marked generated-Rust expert view. The
+VS Code extension has the current DAP integration. Zed adapter registration
+will start after the required trust and authorization API is ratified.
+
 ## Verify
 
 ```bash

@@ -964,6 +964,7 @@ fn jet_runtime_stop_with_context(
         }));
     }
     jet_proof_record(2, 1, code, msg, file, line);
+    let _ = jet_production_failure_receipt_write(code, file, line, fn_name);
     let report =
         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
     if jet_runtime_should_unwind() {
@@ -1134,6 +1135,7 @@ fn jet_panic_rich(
         }));
     }
     jet_proof_record(2, 1, "E3001", msg, file, line);
+    let _ = jet_production_failure_receipt_write("E3001", file, line, fn_name);
     let report = jet_runtime_stop_report(
         "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
     );

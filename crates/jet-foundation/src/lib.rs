@@ -42,6 +42,7 @@ pub mod RingLayer;
 pub mod RegexSyntax;
 pub mod Registry;
 pub mod Report;
+pub mod MachineOutput;
 pub mod Reflection;
 pub mod ServiceTree;
 pub mod SHA256;

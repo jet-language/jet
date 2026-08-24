@@ -36,14 +36,45 @@ No workspace file and no settings are needed.
 
 In order:
 
-1. The `jet.languageServerPath` setting, if set (supports `${workspaceFolder}` and `~`).
-2. `<workspaceFolder>/target/debug/jet` — covers working on this repo.
-3. `jet` on PATH — covers an installed jet (`nix profile install .#jet`) or an
+1. The `jet.executablePath` setting, if set (supports `${workspaceFolder}` and `~`).
+2. The legacy `jet.languageServerPath` setting, if set.
+3. `<workspaceFolder>/target/debug/jet` — covers working on this repo.
+4. `jet` on PATH — covers an installed jet (`nix profile install .#jet`) or an
    editor launched from the dev shell.
 
 `jet self lsp` only runs the front end (no rustc), so the plain cargo binary works.
 After `cargo build` the running server picks up the new binary via
 **Jet: Restart Language Server** (or reload the window).
+
+## Native debugging
+
+The extension registers the `jet` DAP adapter. Use **Jet: Debug File** or press
+F5 with a `.jet` file open. The adapter runs `jet debug --dap <file>` and maps
+source breakpoints, stepping, pause, stack frames, and Jet locals through the
+same native debugger path as the terminal command. LLDB must be on `PATH`.
+The adapter starts the selected Jet executable with direct argv. It does not
+run a shell. Set `jet.executablePath` when the editor must use a specific
+build.
+
+Optional `.vscode/launch.json` configuration:
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "jet",
+      "request": "launch",
+      "name": "Jet: Launch",
+      "program": "${file}",
+      "showRawFrames": false
+    }
+  ]
+}
+```
+
+Set `showRawFrames` to `true` only when you need clearly marked generated-Rust
+frames and scopes; the default projection stays in Jet terms.
 
 ## Manual install
 

@@ -86,7 +86,8 @@ pub fn refresh_registry_metadata(
     // visible in the checkout (and therefore cannot be committed by accident).
     let mut touched = vec![transparency_log_path(repo), checkpoint_path(repo)];
     for name in grouped.keys() {
-        touched.push(sparse_metadata_path(repo, name).map_err(|error| metadata_diagnostic(&error))?);
+        touched
+            .push(sparse_metadata_path(repo, name).map_err(|error| metadata_diagnostic(&error))?);
     }
     touched.sort();
     touched.dedup();
@@ -101,11 +102,7 @@ pub fn refresh_registry_metadata(
             .iter()
             .map(|record| record.entry.to_jsonl())
             .collect::<BTreeSet<_>>();
-        let mut current = grouped
-            .values()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut current = grouped.values().flatten().cloned().collect::<Vec<_>>();
         current.sort_by(|left, right| {
             left.name
                 .cmp(&right.name)
@@ -179,8 +176,8 @@ pub fn verify_registry_package(
             "sparse package metadata points at a different transparency checkpoint",
         )));
     }
-    let mut indexed = Index::read_entries(repo, name)
-        .map_err(|error| metadata_diagnostic(&error))?;
+    let mut indexed =
+        Index::read_entries(repo, name).map_err(|error| metadata_diagnostic(&error))?;
     validate_entries(name, &mut indexed).map_err(|error| metadata_diagnostic(&error))?;
     if metadata.entries != indexed {
         return Err(metadata_diagnostic(&io::Error::new(
@@ -241,7 +238,9 @@ fn all_index_entries(repo: &Path) -> io::Result<BTreeMap<String, Vec<IndexEntry>
         }
         let metadata = std::fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(invalid("registry index contains a non-directory package entry"));
+            return Err(invalid(
+                "registry index contains a non-directory package entry",
+            ));
         }
         let entries = Index::read_entries(repo, &name)?;
         if !entries.is_empty() {
@@ -295,12 +294,17 @@ fn read_sparse_metadata(repo: &Path, name: &str) -> io::Result<SparseMetadata> {
         if key != "entry" && key != "referrer" && fields.contains_key(key) {
             return Err(invalid("registry sparse metadata has a duplicate field"));
         }
-        fields.entry(key.to_string()).or_default().push(value.to_string());
+        fields
+            .entry(key.to_string())
+            .or_default()
+            .push(value.to_string());
     }
     let encoded_name = one_field(&fields, "name")?;
     let parsed_name = decode_text(encoded_name)?;
     if parsed_name != name {
-        return Err(invalid("registry sparse metadata name disagrees with its path"));
+        return Err(invalid(
+            "registry sparse metadata name disagrees with its path",
+        ));
     }
     let mut entries = Vec::new();
     for encoded in fields.get("entry").cloned().unwrap_or_default() {
@@ -322,7 +326,9 @@ fn read_sparse_metadata(repo: &Path, name: &str) -> io::Result<SparseMetadata> {
                 .insert(version.to_string(), digest.to_string())
                 .is_some()
         {
-            return Err(invalid("registry sparse metadata has a duplicate referrer binding"));
+            return Err(invalid(
+                "registry sparse metadata has a duplicate referrer binding",
+            ));
         }
     }
     Ok(SparseMetadata {
@@ -340,7 +346,10 @@ fn verify_sparse_metadata(metadata: &SparseMetadata) -> io::Result<()> {
     validate_entries(&metadata.name, &mut entries)?;
     validate_referrers(&entries, &metadata.referrers)?;
     if metadata.public_key.len() != 64
-        || !metadata.public_key.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || !metadata
+            .public_key
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
         || metadata.signature.is_empty()
     {
         return Err(invalid("registry sparse metadata has no usable signature"));
@@ -380,10 +389,7 @@ fn sparse_unsigned(
     out
 }
 
-fn referrer_digests(
-    repo: &Path,
-    entries: &[IndexEntry],
-) -> io::Result<BTreeMap<String, String>> {
+fn referrer_digests(repo: &Path, entries: &[IndexEntry]) -> io::Result<BTreeMap<String, String>> {
     let mut referrers = BTreeMap::new();
     for entry in entries {
         super::Registry::verify_oci_referrers(repo, entry)?;
@@ -465,8 +471,15 @@ fn read_log(repo: &Path) -> io::Result<Vec<LogRecord>> {
     Ok(records)
 }
 
-fn next_log_record(records: &[LogRecord], operation: &str, entry: IndexEntry) -> io::Result<LogRecord> {
-    let sequence = records.last().map(|record| record.sequence + 1).unwrap_or(1);
+fn next_log_record(
+    records: &[LogRecord],
+    operation: &str,
+    entry: IndexEntry,
+) -> io::Result<LogRecord> {
+    let sequence = records
+        .last()
+        .map(|record| record.sequence + 1)
+        .unwrap_or(1);
     let previous = records
         .last()
         .map(|record| record.leaf.clone())
@@ -589,7 +602,9 @@ fn read_checkpoint(repo: &Path) -> io::Result<Checkpoint> {
         if !matches!(key, "sequence" | "root" | "public_key" | "signature")
             || fields.insert(key.to_string(), value.to_string()).is_some()
         {
-            return Err(invalid("registry checkpoint has an unknown or duplicate field"));
+            return Err(invalid(
+                "registry checkpoint has an unknown or duplicate field",
+            ));
         }
     }
     Ok(Checkpoint {
@@ -615,14 +630,20 @@ fn verify_checkpoint(
         .unwrap_or_else(empty_log_root);
     let expected_sequence = records.last().map(|record| record.sequence).unwrap_or(0);
     if checkpoint.root != expected_root || checkpoint.sequence != expected_sequence {
-        return Err(invalid("registry checkpoint disagrees with its transparency log"));
+        return Err(invalid(
+            "registry checkpoint disagrees with its transparency log",
+        ));
     }
     if checkpoint.public_key != root_key {
         return Err(invalid("registry checkpoint has an invalid public key"));
     }
     verify_payload(
         &checkpoint.public_key,
-        &checkpoint_unsigned(checkpoint.sequence, &checkpoint.root, &checkpoint.public_key),
+        &checkpoint_unsigned(
+            checkpoint.sequence,
+            &checkpoint.root,
+            &checkpoint.public_key,
+        ),
         &checkpoint.signature,
     )
 }
@@ -633,16 +654,14 @@ fn checkpoint_contains_entry(repo: &Path, expected: &IndexEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn accept_checkpoint(
-    registry_name: &str,
-    repo: &Path,
-    checkpoint: &Checkpoint,
-) -> io::Result<()> {
+fn accept_checkpoint(registry_name: &str, repo: &Path, checkpoint: &Checkpoint) -> io::Result<()> {
     let path = crate::Publish::registry_checkpoint_path(registry_name);
     with_checkpoint_lock(&path, || {
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() || !metadata.is_file() {
-                return Err(invalid("accepted registry checkpoint is not a regular file"));
+                return Err(invalid(
+                    "accepted registry checkpoint is not a regular file",
+                ));
             }
             let text = read_bounded(&path, 1024)?;
             let mut lines = text.lines();
@@ -679,7 +698,9 @@ fn accept_checkpoint(
             .ok_or_else(|| invalid("accepted registry checkpoint has no parent"))?;
         if let Ok(metadata) = std::fs::symlink_metadata(parent) {
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(invalid("accepted registry checkpoint parent is not a directory"));
+                return Err(invalid(
+                    "accepted registry checkpoint parent is not a directory",
+                ));
             }
         } else {
             std::fs::create_dir_all(parent)?;
@@ -738,7 +759,12 @@ fn with_checkpoint_lock<T>(state: &Path, action: impl FnOnce() -> io::Result<T>)
     result
 }
 
-fn log_record_unsigned(sequence: u64, operation: &str, entry: &IndexEntry, previous: &str) -> String {
+fn log_record_unsigned(
+    sequence: u64,
+    operation: &str,
+    entry: &IndexEntry,
+    previous: &str,
+) -> String {
     format!(
         "{LOG_MAGIC}-record\nsequence={sequence}\noperation={operation}\nentry={}\nprevious={previous}\n",
         encode_text(&entry.to_jsonl())
@@ -763,8 +789,7 @@ fn sign_payload(seed: &Path, payload: &str) -> io::Result<String> {
         )));
     }
     let message = format!("sha256-{}", SHA256::sha256_hex(payload.as_bytes()));
-    crate::Publish::Sign::sign(seed, &message)
-        .map_err(|diagnostic| invalid(&diagnostic.what))
+    crate::Publish::Sign::sign(seed, &message).map_err(|diagnostic| invalid(&diagnostic.what))
 }
 
 fn verify_payload(public_key: &str, payload: &str, signature: &str) -> io::Result<()> {
@@ -780,7 +805,9 @@ fn verify_payload(public_key: &str, payload: &str, signature: &str) -> io::Resul
 
 fn validate_entries(name: &str, entries: &mut Vec<IndexEntry>) -> io::Result<()> {
     if name.is_empty() {
-        return Err(invalid("registry sparse metadata has an empty package name"));
+        return Err(invalid(
+            "registry sparse metadata has an empty package name",
+        ));
     }
     entries.sort_by(|left, right| left.version.cmp(&right.version));
     for entry in entries.iter() {
@@ -788,15 +815,23 @@ fn validate_entries(name: &str, entries: &mut Vec<IndexEntry>) -> io::Result<()>
             return Err(invalid("registry sparse metadata contains another package"));
         }
     }
-    if entries.windows(2).any(|pair| pair[0].version == pair[1].version) {
-        return Err(invalid("registry sparse metadata contains a duplicate version"));
+    if entries
+        .windows(2)
+        .any(|pair| pair[0].version == pair[1].version)
+    {
+        return Err(invalid(
+            "registry sparse metadata contains a duplicate version",
+        ));
     }
     Ok(())
 }
 
 fn sparse_metadata_path(repo: &Path, name: &str) -> io::Result<PathBuf> {
     let index = Index::index_entry_path(repo, name)?;
-    Ok(repo.join("metadata").join(format!("{}.json", index.file_stem().and_then(|v| v.to_str()).unwrap_or(name))))
+    Ok(repo.join("metadata").join(format!(
+        "{}.json",
+        index.file_stem().and_then(|v| v.to_str()).unwrap_or(name)
+    )))
 }
 
 pub fn registry_package_metadata_path(repo: &Path, name: &str) -> io::Result<PathBuf> {
@@ -845,9 +880,9 @@ fn restore_snapshots(snapshots: &[FileSnapshot]) -> io::Result<()> {
         let result = match &snapshot.bytes {
             Some(bytes) => atomic_write(&snapshot.path, bytes),
             None => match std::fs::symlink_metadata(&snapshot.path) {
-                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-                    Err(invalid("registry metadata rollback destination is not a regular file"))
-                }
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
+                    invalid("registry metadata rollback destination is not a regular file"),
+                ),
                 Ok(_) => std::fs::remove_file(&snapshot.path),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(error),
@@ -866,7 +901,9 @@ fn restore_snapshots(snapshots: &[FileSnapshot]) -> io::Result<()> {
 fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Ok(metadata) = std::fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(invalid("registry metadata destination is not a regular file"));
+            return Err(invalid(
+                "registry metadata destination is not a regular file",
+            ));
         }
     }
     let parent = path
@@ -885,7 +922,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
     let partial = parent.join(format!(
         ".{}.partial-{}-{}",
-        path.file_name().and_then(|value| value.to_str()).unwrap_or("metadata"),
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("metadata"),
         std::process::id(),
         unique_suffix()
     ));
@@ -907,7 +946,9 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 fn line(output: &mut String, key: &str, value: &str) -> io::Result<()> {
     if key.is_empty()
-        || key.bytes().any(|byte| byte == b'=' || byte == b'\n' || byte == b'\r')
+        || key
+            .bytes()
+            .any(|byte| byte == b'=' || byte == b'\n' || byte == b'\r')
         || value.bytes().any(|byte| byte == b'\n' || byte == b'\r')
     {
         return Err(invalid("registry metadata contains an unsafe field"));
@@ -959,7 +1000,10 @@ fn decode_text(value: &str) -> io::Result<String> {
 }
 
 fn empty_log_root() -> String {
-    format!("sha256-{}", SHA256::sha256_hex(b"jet-transparency-empty-v1"))
+    format!(
+        "sha256-{}",
+        SHA256::sha256_hex(b"jet-transparency-empty-v1")
+    )
 }
 
 fn unique_suffix() -> String {

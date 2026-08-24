@@ -600,7 +600,7 @@ fn expand_caret(p: Partial) -> Option<Vec<Comparator>> {
     } else {
         // major == 0
         match p.minor {
-            None => ver(1, 0, 0),                    // ^0
+            None => ver(1, 0, 0),                            // ^0
             Some(mi) if mi > 0 => ver(0, successor(mi)?, 0), // ^0.2 / ^0.2.3
             Some(mi) => match p.patch {
                 Some(pa) => ver(0, mi, successor(pa)?), // ^0.0.3

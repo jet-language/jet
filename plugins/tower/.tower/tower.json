@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2165,
-    "rev": 43624,
+    "rev": 43641,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20,16 +20,13 @@
         "radar-frozen",
         "radar-sq",
         "radar:e4",
-        "board-ideas",
         "radar:e9",
-        "radar:e5",
         "radar:e3",
         "radar:e6",
-        "radar:e10",
         "radar:e8",
         "radar:e7",
-        "radar:e11",
-        "radar:e12"
+        "radar:e12",
+        "radar:e11"
       ]
     },
     "completionCursor": "2026-08-24T13:53:12.597Z"
@@ -140139,7 +140136,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Integration note from Main (2026-08-24). The jet status surface was landed as a CONSUMER of an API that was never built, so it could not compile. Source/CmdStatus.rs (586 lines) imported jet_foundation::DevelopmentReceipt::{DevelopmentReceipt, ReceiptGrade, ReceiptStore} and none of those three exist anywhere in the tree: the Prelude module crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs exports only JetDevelopmentReceipt, JetDevelopmentReceiptInput, JetDevelopmentReceiptPath and jet_development_receipt_render. Meanwhile a sibling lane landed Source/ReceiptStore.rs with a different vocabulary for the same concept: Receipt, ReceiptClaim, ReceiptInput, ReceiptStore, where Receipt has claim/status/stdout/stderr/digest and no grade, and ReceiptStore has no list(). So two lanes invented two names for one fact. To keep the tree green the consumer is parked at .claude/parked/CmdStatus.rs and the status verb now reports E2101 naming this card. What is still owed: one agreed receipt vocabulary, a ReceiptStore listing operation, and a grade concept with its Met variant defined where the criteria require. Source/CmdProve.rs::target_input_sha256 was removed with it; its doc said it existed so the status renderer would reuse the proof commands exact closure hashing rather than duplicating identity rules, so re-add that seam when the surface is rebuilt."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -140185,8 +140188,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-20T19:18:50.859Z",
-      "updated": "2026-08-23T01:05:39.688Z",
-      "updatedBy": "mse10"
+      "updated": "2026-08-24T15:07:25.375Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0fd2x01",
@@ -192765,9 +192768,192 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-24T13:34:07.968Z"
+    },
+    {
+      "id": "b9d67wdm",
+      "text": "examples/features/tooling/compiler_api.jet -> Why is buildplan an error type? That doesnt make sense. It should be the required output type with an additional optional error definition if anything. Probably should just be a special build error type by default",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:22:30.439Z"
+    },
+    {
+      "id": "baka5idp",
+      "text": "examples/features/tooling/output_callable.jet -> app declaration shape should not work, it should be ```app ::Output.Executable{...}``` also why does it have a semicolon???",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:26:39.022Z"
+    },
+    {
+      "id": "bbdi37us",
+      "text": "examples/features/tooling/provenance_track.jet -> Shouldnt compiler/metadata be accessed with @? like speed.@origin?",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:29:34.931Z"
+    },
+    {
+      "id": "bcqav25a",
+      "text": "examples/features/tooling/service_authority.jet -> Where do these come from, what do they do, and what the fuck are the enum names... those seem like terrible names",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:31:20.191Z"
+    },
+    {
+      "id": "bdzg0oj2",
+      "text": "examples/features/tooling/service_runtime.jet -> Need to have some kind of lint for simplifying returns in if tables. ex. outcome labels fn, there should simply be an else branch that returns unknown instead of checking a couple then exiting the if then returning if no early return. Also, for these, it should be supported that the last expression/statement should be returned automatically, so you technically shouldnt even need the return keyword in that function since there's one if pattern match table and all of them yield a string and there are no other statements or expressions, so the if statement simply returns the selected string and because it is the sole top level expression/statement, it should be able to auto return",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:36:40.730Z"
+    },
+    {
+      "id": "beq88dw9",
+      "text": "False unused import warning in examples/features/tooling/solve_puzzle.jet",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:40:39.619Z"
+    },
+    {
+      "id": "bfrc25nv",
+      "text": "Why would ! be acceptable bare in a function declaration? The point is to allow override to a specific error type not to type erase the error?? Need to block this",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:47:37.628Z"
+    },
+    {
+      "id": "bgeb2f5o",
+      "text": "examples/features/tooling/declared_text_head.jet -> ```marker Pattern on [.Text]``` rather than ```marker Pattern(@sites: [.Text])``` should not have divergent and multiple declaration forms",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T14:58:18.991Z"
+    },
+    {
+      "id": "bhb1rlc4",
+      "text": "Also for examples/features/tooling/declared_text_head.jet -> this seems like a type declaration not marker. how are we passing markers around and using them as types? the marker isnt even using the #...",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T15:00:16.341Z"
+    },
+    {
+      "id": "bisro98p",
+      "text": "Should dead end typestates be allowed? I would think so... Why: Typestate (D-STATE-DECL): a state with no `#Transition(Confirmed, …)` is a dead end — a value that reaches it can never advance further.  Fix: Add `#Transition(Confirmed, NextState) fn …`, or remove `Confirmed` from the declaration.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T15:03:02.847Z"
+    },
+    {
+      "id": "bjvvrinb",
+      "text": "Should typestate be defined IN a type? there seems like there should be a namespace collision in examples/features/reflection/fact_reads.jet with Order. we define state Order and struct Order. They should either be unified or have rejected collision",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T15:04:38.814Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-24T15:07:25.375Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04ohasg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-24T15:04:38.814Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bjvvrinb",
+      "note": "Should typestate be defined IN a type? there seems like ther"
+    },
+    {
+      "at": "2026-08-24T15:03:02.847Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bisro98p",
+      "note": "Should dead end typestates be allowed? I would think so... W"
+    },
+    {
+      "at": "2026-08-24T15:00:16.341Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bhb1rlc4",
+      "note": "Also for examples/features/tooling/declared_text_head.jet ->"
+    },
+    {
+      "at": "2026-08-24T14:58:18.991Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bgeb2f5o",
+      "note": "examples/features/tooling/declared_text_head.jet -> ```marke"
+    },
+    {
+      "at": "2026-08-24T14:47:37.628Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bfrc25nv",
+      "note": "Why would ! be acceptable bare in a function declaration? Th"
+    },
+    {
+      "at": "2026-08-24T14:40:39.619Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "beq88dw9",
+      "note": "False unused import warning in examples/features/tooling/sol"
+    },
+    {
+      "at": "2026-08-24T14:36:40.730Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bdzg0oj2",
+      "note": "examples/features/tooling/service_runtime.jet -> Need to hav"
+    },
+    {
+      "at": "2026-08-24T14:31:20.191Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bcqav25a",
+      "note": "examples/features/tooling/service_authority.jet -> Where do "
+    },
+    {
+      "at": "2026-08-24T14:29:34.931Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bbdi37us",
+      "note": "examples/features/tooling/provenance_track.jet -> Shouldnt c"
+    },
+    {
+      "at": "2026-08-24T14:26:39.022Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "baka5idp",
+      "note": "examples/features/tooling/output_callable.jet -> app declara"
+    },
+    {
+      "at": "2026-08-24T14:22:30.439Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b9d67wdm",
+      "note": "examples/features/tooling/compiler_api.jet -> Why is buildpl"
+    },
     {
       "at": "2026-08-24T13:55:05.738Z",
       "by": "Main",
@@ -196183,90 +196369,6 @@
       "action": "card.criteria-meet",
       "ref": "c0esw9hj",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-23T20:39:16.011Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pvrl7q",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T20:39:15.255Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pvrl7q",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T20:39:14.879Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pvrl7q",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T20:39:14.510Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pvrl7q",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T20:39:14.175Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pvrl7q",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T20:39:13.796Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pvrl7q",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T20:39:13.162Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00307he",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T20:39:12.399Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00307he",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T20:39:11.778Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ewd6kd",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T20:39:11.044Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ewd6kd",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T20:39:10.666Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ewd6kd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T20:39:10.327Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ewd6kd",
-      "note": "#3"
     }
   ],
   "nextNum": 368,

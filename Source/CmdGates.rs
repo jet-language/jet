@@ -246,7 +246,7 @@ fn trust_decision_label(decision: jet::Package::TrustDecision) -> &'static str {
     }
 }
 
-fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]) {
+pub(crate) fn append_external_writers(ledger: &mut GateLedger, root: &Path, args: &[String]) {
     if let Some(Ok(facts)) = jet::Package::PackageFacts::load(root) {
         append_authority_entries(ledger, &facts.authority, "package.jet");
         for effect in &facts.build_allow {

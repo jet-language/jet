@@ -7,6 +7,8 @@ use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::JetTrace::TRACE_VERSION;
+use jet_foundation::Report::render_status_json;
 
 use crate::OutputMode;
 
@@ -16,7 +18,6 @@ const MAX_TRACE_IDENTITIES: usize = 65_536;
 const MAX_TRACE_SITES: usize = 4_096;
 const MAX_TRACE_AGE_MS: u64 = 30 * 24 * 60 * 60 * 1_000;
 const TRACE_SCHEMA: &str = "jet.gc.trace";
-const TRACE_VERSION: u64 = 1;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Identity {
@@ -200,7 +201,7 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
     if string_field(root, "schema")? != TRACE_SCHEMA {
         return Err(TraceError::new(ErrorKind::Incompatible, "GC trace schema is not supported"));
     }
-    if uint_field(root, "version")? != TRACE_VERSION {
+    if uint_field(root, "version")? != u64::from(TRACE_VERSION) {
         return Err(TraceError::new(ErrorKind::Incompatible, "GC trace version is not supported"));
     }
     if expected_project.len() > MAX_TRACE_FIELD_BYTES
@@ -452,11 +453,12 @@ fn render_json(trace: &Trace) -> String {
             site.identities.len(), retained, identities, json_escape(&recommendation(site))
         )
     }).collect::<Vec<_>>().join(",");
-    format!(
+    let payload = format!(
         "{{\"schema\":\"jet.gc.report\",\"version\":1,\"project\":\"{}\",\"pid\":{},\"started_unix_ms\":{},\"updated_unix_ms\":{},\"collections\":{},\"summary\":{{\"sites\":{},\"allocations\":{},\"retained\":{}}},\"sites\":[{}]}}",
         json_escape(&trace.project), trace.pid, trace.started_unix_ms, trace.updated_unix_ms,
         trace.collections, trace.sites.len(), allocations, retained, sites
-    )
+    );
+    render_status_json("ok", true, "gc.report", &format!(",\"gc\":{payload}"))
 }
 
 fn paint(value: &str, code: &str, enabled: bool) -> String {

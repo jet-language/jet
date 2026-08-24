@@ -1,11 +1,11 @@
-use crate::jet_generated_format as jet_format;
 use super::*;
+use crate::jet_generated_format as jet_format;
+use crate::Codegen::TIR::{SerdeCodec, TFunc, TFuncKind};
 use crate::Generics;
 use crate::AST::{
     ConstAttr, DistinctDef, EnumDef, Expr, Field, Func, ImplDef, Item, Marker, Param,
     RustConstKind, StrPart, StructDef, TraitImplBlock, Type, VariantPayload,
 };
-use crate::Codegen::TIR::{SerdeCodec, TFunc, TFuncKind};
 use std::collections::HashMap;
 
 /// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
@@ -88,12 +88,9 @@ fn emit_struct_command_entry(
     let mut command_specs = Vec::new();
     let mut spec_defs = String::new();
     for command in &schema.commands {
-        let Some(target) = jet_foundation::CLISchema::command_target(
-            structure,
-            command,
-            items,
-            &structure.name,
-        ) else {
+        let Some(target) =
+            jet_foundation::CLISchema::command_target(structure, command, items, &structure.name)
+        else {
             unreachable!("canonical CLI command has no owning callable");
         };
         let variable = cli_helper_name(
@@ -145,18 +142,19 @@ fn emit_struct_command_entry(
         let params: Vec<&Param> = payload_params.iter().collect();
         let inputs: Vec<&jet_foundation::CLISchema::CLIInputSchema> = params
             .iter()
-            .map(|param| command.inputs.iter().find(|input| input.field == param.name))
+            .map(|param| {
+                command
+                    .inputs
+                    .iter()
+                    .find(|input| input.field == param.name)
+            })
             .collect::<Option<Vec<_>>>()
             .expect("canonical CLI command input is missing");
         let variables: Vec<String> = (0..params.len())
             .map(|index| jet_name_format!("{name_prefix}cli_arg_{index}"))
             .collect();
         let mut decode_lines = String::new();
-        for ((param, input), variable) in params
-            .iter()
-            .zip(inputs.iter())
-            .zip(variables.iter())
-        {
+        for ((param, input), variable) in params.iter().zip(inputs.iter()).zip(variables.iter()) {
             decode_lines.push_str(&cli_decode_input_line(
                 cx,
                 input,
@@ -201,7 +199,10 @@ fn emit_struct_command_entry(
         let invoke = emit_entry_invocation(
             &callable,
             Some(&call_args),
-            function.return_type.as_ref().and_then(|ty| entry_error(cx, ty)),
+            function
+                .return_type
+                .as_ref()
+                .and_then(|ty| entry_error(cx, ty)),
             function
                 .return_type
                 .as_ref()
@@ -494,7 +495,8 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
                 .or_default()
                 .extend(v.iter().cloned());
         }
-        let mut debug_tp_bounds = Generics::rust_type_param_list(&s.type_params, &debug_impl_bounds);
+        let mut debug_tp_bounds =
+            Generics::rust_type_param_list(&s.type_params, &debug_impl_bounds);
         if has_view_field {
             debug_tp_bounds = add_view_lifetime_generic(debug_tp_bounds);
         }
@@ -902,7 +904,12 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
             "    let __s = {root}jet_args_description(__s, &{description:?}.to_string());\n"
         ));
     }
-    spec_body.push_str(&cli_standard_spec_lines(root, schema.standard, None, "    "));
+    spec_body.push_str(&cli_standard_spec_lines(
+        root,
+        schema.standard,
+        None,
+        "    ",
+    ));
     let mut decode_lines = String::new();
 
     // CLISchema is the checked projection shared with `jet inspect dossier`.
@@ -932,9 +939,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     "    let {m}: bool = {root}jet_parsed_flag(&__parsed, &{flag:?}.to_string());\n"
                 ));
             }
-            jet_foundation::CLISchema::CLIInputShape::Value {
-                optional: true, ..
-            } => {
+            jet_foundation::CLISchema::CLIInputShape::Value { optional: true, .. } => {
                 let Type::Option(inner) = &f.ty else {
                     unreachable!("optional CLISchema input comes from an Option field")
                 };
@@ -1058,10 +1063,7 @@ fn emit_struct_patchable(cx: &Cx, s: &StructDef, out: &mut String) {
     if let Some(memo_fields) = cx.memo_fields.get(&s.name) {
         for field in memo_fields.keys() {
             let storage = crate::Syntax::memo_storage_name(field);
-            apply_fields.push(format!(
-                "{storage}: {}JetMemo::new()",
-                cx.root_prefix
-            ));
+            apply_fields.push(format!("{storage}: {}JetMemo::new()", cx.root_prefix));
         }
     }
 
@@ -1116,7 +1118,12 @@ fn emit_direct_cli_entry(
             "        let __s = jet_args_description(__s, &{description:?}.to_string());\n"
         ));
     }
-    spec_body.push_str(&cli_standard_spec_lines("", schema.standard, version, "        "));
+    spec_body.push_str(&cli_standard_spec_lines(
+        "",
+        schema.standard,
+        version,
+        "        ",
+    ));
     spec_body.push_str(&cli_input_spec_lines("", &schema.inputs, "        "));
     spec_body.push_str("        __s\n");
 
@@ -1124,11 +1131,7 @@ fn emit_direct_cli_entry(
         .map(|index| jet_name_format!("{name_prefix}cli_arg_{index}"))
         .collect();
     let mut decode_lines = String::new();
-    for ((param, input), variable) in params
-        .iter()
-        .zip(inputs.iter())
-        .zip(variables.iter())
-    {
+    for ((param, input), variable) in params.iter().zip(inputs.iter()).zip(variables.iter()) {
         decode_lines.push_str(&cli_decode_input_line(
             cx,
             input,
@@ -1196,7 +1199,10 @@ pub(crate) fn emit_cli_entry_if_needed(
         _ => None,
     });
     let output = items.iter().find_map(|item| match item {
-        Item::Const(value) => value.resolved_output.as_ref().filter(|output| output.selected),
+        Item::Const(value) => value
+            .resolved_output
+            .as_ref()
+            .filter(|output| output.selected),
         _ => None,
     });
     let (callable, params, entry_error, serve_app, service_target) = if let Some(output) = output {
@@ -1207,7 +1213,10 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .return_type
                 .as_ref()
                 .and_then(|ty| entry_error(cx, ty)),
-            output.return_type.as_ref().is_some_and(crate::AST::type_is_app),
+            output
+                .return_type
+                .as_ref()
+                .is_some_and(crate::AST::type_is_app),
             output.kind == crate::AST::OutputKind::Service,
         )
     } else if let Some(run_fn) = run_fn {
@@ -1225,7 +1234,10 @@ pub(crate) fn emit_cli_entry_if_needed(
                 .return_type
                 .as_ref()
                 .and_then(|ty| entry_error(cx, ty)),
-            run_fn.return_type.as_ref().is_some_and(crate::AST::type_is_app),
+            run_fn
+                .return_type
+                .as_ref()
+                .is_some_and(crate::AST::type_is_app),
             false,
         )
     } else {
@@ -1378,7 +1390,6 @@ pub(crate) fn emit_cli_entry_if_needed(
         }
         return;
     }
-
 }
 
 fn emit_job_dispatch(
@@ -1416,9 +1427,9 @@ fn emit_job_dispatch(
             Some(crate::AST::EverySchedule::Duration { nanos }) => {
                 format!("Some(JetJobSchedule::Duration {{ nanos: {nanos} }})")
             }
-            Some(crate::AST::EverySchedule::WallClockTime { hour, minute }) => format!(
-                "Some(JetJobSchedule::WallClockTime {{ hour: {hour}, minute: {minute} }})"
-            ),
+            Some(crate::AST::EverySchedule::WallClockTime { hour, minute }) => {
+                format!("Some(JetJobSchedule::WallClockTime {{ hour: {hour}, minute: {minute} }})")
+            }
             None => "None".to_string(),
         };
         entries.push_str(&format!(
@@ -1458,7 +1469,9 @@ fn emit_job_wrapper(
         .return_type
         .as_ref()
         .is_some_and(crate::AST::type_is_app);
-    out.push_str(&format!("fn {wrapper}(__program: &str, __argv: &[String]) {{\n"));
+    out.push_str(&format!(
+        "fn {wrapper}(__program: &str, __argv: &[String]) {{\n"
+    ));
     if params.is_empty() {
         out.push_str("    if __argv.get(1).is_some_and(|arg| arg == \"--help\") {\n        println!(\"Usage: {}\", jet_args_source_program_name(__program));\n        return;\n    }\n");
         out.push_str(&emit_entry_invocation(
@@ -1540,7 +1553,10 @@ fn emit_entry_invocation(
     service_target: bool,
     indent: &str,
 ) -> String {
-    let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
+    let call = argument.map_or_else(
+        || format!("{callable}()"),
+        |arg| format!("{callable}({arg})"),
+    );
     let error_text = |error: &str| match entry_error {
         Some(EntryError::Jet) => format!("jet_entry_error_text_jet(&{error})"),
         Some(EntryError::JetShow) => format!("jet_entry_error_text_show(&{error})"),
@@ -1615,17 +1631,11 @@ fn jet_showable_type(cx: &Cx, ty: &Type) -> bool {
         | Type::Tagged { inner, .. }
         | Type::InlineRange { base: inner, .. }
         | Type::Quantity { base: inner, .. } => jet_showable_type(cx, inner),
-        Type::Result { ok, err } => {
-            jet_showable_type(cx, ok) && jet_showable_type(cx, err)
-        }
-        Type::Map { key, value, .. } => {
-            jet_showable_type(cx, key) && jet_showable_type(cx, value)
-        }
+        Type::Result { ok, err } => jet_showable_type(cx, ok) && jet_showable_type(cx, err),
+        Type::Map { key, value, .. } => jet_showable_type(cx, key) && jet_showable_type(cx, value),
         Type::Union(members) => members.iter().all(|member| jet_showable_type(cx, member)),
         Type::Named(name) => {
-            name == "str"
-                || cx.has_auto_printable_type(name)
-                || cx.is_distinct_type_name(name)
+            name == "str" || cx.has_auto_printable_type(name) || cx.is_distinct_type_name(name)
         }
         Type::Apply { name, args } => {
             let native_composite = matches!(
@@ -1670,9 +1680,7 @@ fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
         | Type::Tagged { inner, .. }
         | Type::InlineRange { base: inner, .. }
         | Type::Quantity { base: inner, .. } => jet_debuggable_type(cx, inner),
-        Type::Result { ok, err } => {
-            jet_debuggable_type(cx, ok) && jet_debuggable_type(cx, err)
-        }
+        Type::Result { ok, err } => jet_debuggable_type(cx, ok) && jet_debuggable_type(cx, err),
         Type::Map { key, value, .. } => {
             jet_debuggable_type(cx, key) && jet_debuggable_type(cx, value)
         }
@@ -1680,13 +1688,10 @@ fn jet_debuggable_type(cx: &Cx, ty: &Type) -> bool {
         // per member), so a nested union payload always resolves.
         Type::Union(_) => true,
         Type::Named(name) => {
-            name == "str"
-                || cx.has_auto_debug_type(name)
-                || cx.is_distinct_type_name(name)
+            name == "str" || cx.has_auto_debug_type(name) || cx.is_distinct_type_name(name)
         }
         Type::Apply { name, args } => {
-            cx.has_auto_debug_type(name)
-                && args.iter().all(|arg| jet_debuggable_type(cx, arg))
+            cx.has_auto_debug_type(name) && args.iter().all(|arg| jet_debuggable_type(cx, arg))
         }
         Type::TraitObject(_)
         | Type::Tuple(_)
@@ -1704,26 +1709,32 @@ fn entry_error(cx: &Cx, ty: &Type) -> Option<EntryError> {
         Type::Named(name) | Type::Apply { name, .. } => cx.has_display_type(name),
         _ => false,
     };
-    Some(if matches!(
-        err.as_ref(),
-        Type::List(inner)
-            if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
-    ) {
-        EntryError::JetShow
-    } else if uses_jet_display {
-        EntryError::Jet
-    } else if jet_showable_type(cx, err) {
-        EntryError::JetShow
-    } else {
-        EntryError::Rust
-    })
+    Some(
+        if matches!(
+            err.as_ref(),
+            Type::List(inner)
+                if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
+        ) {
+            EntryError::JetShow
+        } else if uses_jet_display {
+            EntryError::Jet
+        } else if jet_showable_type(cx, err) {
+            EntryError::JetShow
+        } else {
+            EntryError::Rust
+        },
+    )
 }
 
 /// D-UNIONTYPE1=A: emit one compiler-generated enum per canonical anonymous
 /// union used in the program. Variant tags are member type names.
 pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     let mut seen = std::collections::BTreeSet::new();
-    fn walk(ty: &Type, seen: &mut std::collections::BTreeSet<String>, out_members: &mut Vec<Vec<Type>>) {
+    fn walk(
+        ty: &Type,
+        seen: &mut std::collections::BTreeSet<String>,
+        out_members: &mut Vec<Vec<Type>>,
+    ) {
         match ty {
             Type::Union(members) => {
                 let name = crate::AST::union_enum_name(members);
@@ -1739,10 +1750,12 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             | Type::Option(inner)
             | Type::Tagged { inner, .. }
             | Type::InlineRange { base: inner, .. }
-            | Type::Quantity { base: inner, .. } => {
-                walk(inner, seen, out_members)
-            }
-            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            | Type::Quantity { base: inner, .. } => walk(inner, seen, out_members),
+            Type::Map { key, value, .. }
+            | Type::Result {
+                ok: key,
+                err: value,
+            } => {
                 walk(key, seen, out_members);
                 walk(value, seen, out_members);
             }
@@ -1768,7 +1781,11 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             _ => {}
         }
     }
-    fn walk_item(item: &Item, seen: &mut std::collections::BTreeSet<String>, out_members: &mut Vec<Vec<Type>>) {
+    fn walk_item(
+        item: &Item,
+        seen: &mut std::collections::BTreeSet<String>,
+        out_members: &mut Vec<Vec<Type>>,
+    ) {
         match item {
             Item::Struct(s) => {
                 for f in &s.fields {
@@ -1940,10 +1957,14 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     if let Some(tag) = e.c_layout_tag() {
         let repr = match tag {
             crate::AST::CEnumTag::CInt => "C",
-            crate::AST::CEnumTag::U8 => "C, u8", crate::AST::CEnumTag::I8 => "C, i8",
-            crate::AST::CEnumTag::U16 => "C, u16", crate::AST::CEnumTag::I16 => "C, i16",
-            crate::AST::CEnumTag::U32 => "C, u32", crate::AST::CEnumTag::I32 => "C, i32",
-            crate::AST::CEnumTag::U64 => "C, u64", crate::AST::CEnumTag::I64 => "C, i64",
+            crate::AST::CEnumTag::U8 => "C, u8",
+            crate::AST::CEnumTag::I8 => "C, i8",
+            crate::AST::CEnumTag::U16 => "C, u16",
+            crate::AST::CEnumTag::I16 => "C, i16",
+            crate::AST::CEnumTag::U32 => "C, u32",
+            crate::AST::CEnumTag::I32 => "C, i32",
+            crate::AST::CEnumTag::U64 => "C, u64",
+            crate::AST::CEnumTag::I64 => "C, i64",
         };
         emit_c_enum_declaration(e, tag, out);
         out.push_str(&format!("#[repr({repr})]\n"));
@@ -1968,7 +1989,10 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             }
             VariantPayload::Single(t, _) => {
                 let ty = cx.enum_field_rust_with_view_lifetime(&e.name, &v.name, t);
-                let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
+                let d = v
+                    .discriminant
+                    .map(|n| format!(" = {n}"))
+                    .unwrap_or_default();
                 out.push_str(&format!("    {}({}){},\n", mangle_path(&v.name), ty, d));
             }
             VariantPayload::Named(fs) => {
@@ -1978,7 +2002,10 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
                     let ty = cx.enum_field_rust_with_view_lifetime(&e.name, &key, &f.ty);
                     out.push_str(&format!("        {}: {},\n", mangle(&f.name), ty));
                 }
-                let d = v.discriminant.map(|n| format!(" = {n}")).unwrap_or_default();
+                let d = v
+                    .discriminant
+                    .map(|n| format!(" = {n}"))
+                    .unwrap_or_default();
                 out.push_str(&format!("    }}{},\n", d));
             }
         }
@@ -2027,11 +2054,14 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
 
 fn c_decl_type(ty: &Type) -> String {
     match ty {
-        Type::Int => "long long".into(), Type::Float => "double".into(),
-        Type::Bool => "_Bool".into(), Type::Char => "uint32_t".into(),
+        Type::Int => "long long".into(),
+        Type::Float => "double".into(),
+        Type::Bool => "_Bool".into(),
+        Type::Char => "uint32_t".into(),
         Type::IntN { signed, bits } => format!("{}int{}_t", if *signed { "" } else { "u" }, bits),
         Type::InlineRange { base, .. } => c_decl_type(base),
-        Type::Float32 => "float".into(), Type::Named(n) => n.clone(),
+        Type::Float32 => "float".into(),
+        Type::Named(n) => n.clone(),
         Type::Tagged { inner, .. } => c_decl_type(inner),
         _ => "/* rejected by sema */ void".into(),
     }
@@ -2040,28 +2070,68 @@ fn c_decl_type(ty: &Type) -> String {
 /// D-REPRC2: exact C declaration carried beside generated Rust so bindgen/header
 /// extraction can copy it byte-for-byte. This is compilable C, not a prose sketch.
 fn emit_c_enum_declaration(e: &EnumDef, tag: crate::AST::CEnumTag, out: &mut String) {
-    let payload = e.variants.iter().any(|v| !matches!(v.payload, VariantPayload::Unit));
+    let payload = e
+        .variants
+        .iter()
+        .any(|v| !matches!(v.payload, VariantPayload::Unit));
     out.push_str("/* D-REPRC2-C-DECL\n#include <stdint.h>\n#include <stdbool.h>\n");
     if !payload && tag == crate::AST::CEnumTag::CInt {
         out.push_str(&format!("typedef enum {} {{\n", e.name));
         for (i, v) in e.variants.iter().enumerate() {
             let d = v.discriminant.unwrap_or(i as i64);
-            out.push_str(&format!("  {}_{} = {},\n", e.name, v.name.replace('.', "_"), d));
+            out.push_str(&format!(
+                "  {}_{} = {},\n",
+                e.name,
+                v.name.replace('.', "_"),
+                d
+            ));
         }
         out.push_str(&format!("}} {};\n", e.name));
     } else {
-        let tag_ty = match tag { crate::AST::CEnumTag::CInt => "int", crate::AST::CEnumTag::U8 => "uint8_t", crate::AST::CEnumTag::I8 => "int8_t", crate::AST::CEnumTag::U16 => "uint16_t", crate::AST::CEnumTag::I16 => "int16_t", crate::AST::CEnumTag::U32 => "uint32_t", crate::AST::CEnumTag::I32 => "int32_t", crate::AST::CEnumTag::U64 => "uint64_t", crate::AST::CEnumTag::I64 => "int64_t" };
+        let tag_ty = match tag {
+            crate::AST::CEnumTag::CInt => "int",
+            crate::AST::CEnumTag::U8 => "uint8_t",
+            crate::AST::CEnumTag::I8 => "int8_t",
+            crate::AST::CEnumTag::U16 => "uint16_t",
+            crate::AST::CEnumTag::I16 => "int16_t",
+            crate::AST::CEnumTag::U32 => "uint32_t",
+            crate::AST::CEnumTag::I32 => "int32_t",
+            crate::AST::CEnumTag::U64 => "uint64_t",
+            crate::AST::CEnumTag::I64 => "int64_t",
+        };
         out.push_str(&format!("typedef {} {}_Tag;\nenum {{\n", tag_ty, e.name));
-        for (i, v) in e.variants.iter().enumerate() { out.push_str(&format!("  {}_{} = {},\n", e.name, v.name.replace('.', "_"), v.discriminant.unwrap_or(i as i64))); }
+        for (i, v) in e.variants.iter().enumerate() {
+            out.push_str(&format!(
+                "  {}_{} = {},\n",
+                e.name,
+                v.name.replace('.', "_"),
+                v.discriminant.unwrap_or(i as i64)
+            ));
+        }
         out.push_str("};\n");
         if payload {
             out.push_str(&format!("typedef union {}_Payload {{\n", e.name));
-            for v in &e.variants { match &v.payload {
-                VariantPayload::Unit => {}
-                VariantPayload::Single(t, _) => out.push_str(&format!("  {} {};\n", c_decl_type(t), v.name.replace('.', "_"))),
-                VariantPayload::Named(fs) => { out.push_str("  struct {\n"); for f in fs { out.push_str(&format!("    {} {};\n", c_decl_type(&f.ty), f.name)); } out.push_str(&format!("  }} {};\n", v.name.replace('.', "_"))); }
-            }}
-            out.push_str(&format!("}} {}_Payload;\ntypedef struct {} {{ {}_Tag tag; {}_Payload payload; }} {};\n", e.name, e.name, e.name, e.name, e.name));
+            for v in &e.variants {
+                match &v.payload {
+                    VariantPayload::Unit => {}
+                    VariantPayload::Single(t, _) => out.push_str(&format!(
+                        "  {} {};\n",
+                        c_decl_type(t),
+                        v.name.replace('.', "_")
+                    )),
+                    VariantPayload::Named(fs) => {
+                        out.push_str("  struct {\n");
+                        for f in fs {
+                            out.push_str(&format!("    {} {};\n", c_decl_type(&f.ty), f.name));
+                        }
+                        out.push_str(&format!("  }} {};\n", v.name.replace('.', "_")));
+                    }
+                }
+            }
+            out.push_str(&format!(
+                "}} {}_Payload;\ntypedef struct {} {{ {}_Tag tag; {}_Payload payload; }} {};\n",
+                e.name, e.name, e.name, e.name, e.name
+            ));
         }
     }
     out.push_str("D-REPRC2-C-DECL */\n");
@@ -2152,11 +2222,7 @@ pub(super) fn migration_blocks<'a>(
 /// current struct's `#[Rename]`/`RenameAll` treatment when the name is a
 /// current field, else the container casing style applied to the bare name
 /// (fields that only exist in historical shapes can't carry markers).
-pub(super) fn migration_wire_key(
-    style: Option<&str>,
-    s: &StructDef,
-    name: &str,
-) -> String {
+pub(super) fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String {
     if let Some(f) = s.fields.iter().find(|f| f.name == name) {
         return field_wire_key(style, f);
     }
@@ -2220,7 +2286,9 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
         "    // D-MIGRATE4: #PublishedSchema migration chain — v1..v{} are historical shapes.\n",
         k
     ));
-    out.push_str("    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {\n");
+    out.push_str(
+        "    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {\n",
+    );
     out.push_str("        let __err = match Self::__jet_migrate_decode_current(__t) {\n");
     out.push_str("            Ok(__v) => return Ok(__v),\n");
     out.push_str("            Err(__e) => __e,\n");
@@ -2351,12 +2419,9 @@ pub(crate) fn emit_type_impl(
     if methods.is_empty() {
         return;
     }
-    let previous_type_params = cx.current_type_params.replace(
-        type_params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect(),
-    );
+    let previous_type_params = cx
+        .current_type_params
+        .replace(type_params.iter().map(|param| param.name.clone()).collect());
     let mut lowered = Vec::with_capacity(methods.len());
     for method in methods {
         if !TIR::tir_covers_method(method, type_name, cx) {
@@ -2370,8 +2435,10 @@ pub(crate) fn emit_type_impl(
         }
         lowered.push(TIR::lower_method(method, type_name, cx));
     }
-    let param_names: std::collections::HashSet<&str> =
-        type_params.iter().map(|param| param.name.as_str()).collect();
+    let param_names: std::collections::HashSet<&str> = type_params
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect();
     for method in &mut lowered {
         let mut clone_params = std::collections::HashSet::new();
         for ty in &method.clone_types {
@@ -2470,14 +2537,15 @@ pub(crate) fn emit_trait_impl(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| nominal_shape_types(cx, type_name));
-        for (name, bounds) in
-            Generics::rust_extra_clone_bounds_for_types(type_params, &clone_shape)
+        for (name, bounds) in Generics::rust_extra_clone_bounds_for_types(type_params, &clone_shape)
         {
             extra.entry(name).or_default().extend(bounds);
         }
     }
-    let param_names: std::collections::HashSet<&str> =
-        type_params.iter().map(|param| param.name.as_str()).collect();
+    let param_names: std::collections::HashSet<&str> = type_params
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect();
     for method in &lowered_methods {
         let mut mentions = std::collections::HashSet::new();
         for ty in &method.clone_types {
@@ -2487,10 +2555,16 @@ pub(crate) fn emit_trait_impl(
             extra.entry(name).or_default().push("Clone".to_string());
         }
     }
-    if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) {
+    if matches!(
+        block.trait_name.as_str(),
+        crate::Generics::ENCODE | crate::Generics::DECODE
+    ) {
         if let Some(wire) = cx.serde_wire_params.get(type_name) {
             for name in wire {
-                extra.entry(name.clone()).or_default().push(block.trait_name.clone());
+                extra
+                    .entry(name.clone())
+                    .or_default()
+                    .push(block.trait_name.clone());
             }
         }
     }
@@ -2609,10 +2683,7 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
         .iter()
         .map(|f| {
             if f.redact {
-                format!(
-                    "({:?}.to_string(), \"[redacted]\".to_string())",
-                    f.name
-                )
+                format!("({:?}.to_string(), \"[redacted]\".to_string())", f.name)
             } else {
                 format!(
                     "({:?}.to_string(), ({}).jet_debug())",
@@ -2636,13 +2707,21 @@ pub(crate) fn emit_external_trait_impl(
     out: &mut String,
 ) {
     let trait_name = i.trait_name.as_deref().unwrap_or("");
-    let impl_params = if matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE) {
-        i.methods.first().map(|m| m.type_params.as_slice()).unwrap_or(&[])
+    let impl_params = if matches!(
+        trait_name,
+        crate::Generics::ENCODE | crate::Generics::DECODE
+    ) {
+        i.methods
+            .first()
+            .map(|m| m.type_params.as_slice())
+            .unwrap_or(&[])
     } else {
         // A top-level trait impl inherits its target's generic parameters.
         // This is the same owner scope used by an in-type trait block and by
         // a typed derive body expanded into this item.
-        struct_def.map(|definition| definition.type_params.as_slice()).unwrap_or(&[])
+        struct_def
+            .map(|definition| definition.type_params.as_slice())
+            .unwrap_or(&[])
     };
     let tp_use = Generics::type_param_rust_list(impl_params);
     let tp_impl = if impl_params.is_empty() {
@@ -2652,7 +2731,10 @@ pub(crate) fn emit_external_trait_impl(
             std::collections::HashMap::new();
         if let Some(wire) = cx.serde_wire_params.get(&i.type_name) {
             for name in wire {
-                extra.entry(name.clone()).or_default().push(trait_name.to_string());
+                extra
+                    .entry(name.clone())
+                    .or_default()
+                    .push(trait_name.to_string());
             }
         }
         let clone_shape = struct_def
@@ -2665,16 +2747,14 @@ pub(crate) fn emit_external_trait_impl(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        for (name, bounds) in
-            Generics::rust_extra_clone_bounds_for_types(impl_params, &clone_shape)
+        for (name, bounds) in Generics::rust_extra_clone_bounds_for_types(impl_params, &clone_shape)
         {
             extra.entry(name).or_default().extend(bounds);
         }
         Generics::rust_type_param_list(impl_params, &extra)
     };
-    let migration_struct = struct_def.filter(|s| {
-        trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some()
-    });
+    let migration_struct = struct_def
+        .filter(|s| trait_name == crate::Generics::DECODE && migration_blocks(cx, s).is_some());
     let migration_style = migration_struct.and_then(|s| container_rename_all(&s.serde_markers));
     if migration_struct.is_some() {
         out.push_str(&format!(
@@ -2874,8 +2954,7 @@ fn emit_trait_method(
         let tir = TIR::lower_trait_method(f, type_name, cx, trait_name);
         if let Some(name) = helper_name {
             if let TFuncKind::TraitMethod {
-                serde: Some(codec),
-                ..
+                serde: Some(codec), ..
             } = &tir.kind
             {
                 TIR::emit_tir_serde_method_named(&tir, *codec, cx, out, name);
@@ -2948,7 +3027,11 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         display_name = d.name
     ));
     // .raw() method: unwrap to the base type.
-    let raw_value = if base_is_copy { "self.0" } else { "self.0.clone()" };
+    let raw_value = if base_is_copy {
+        "self.0"
+    } else {
+        "self.0.clone()"
+    };
     out.push_str(&format!(
         "impl {rust_name} {{\n    pub fn raw(&self) -> {base} {{ {raw} }}\n}}\n\n",
         base = base_rust,

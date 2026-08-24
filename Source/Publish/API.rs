@@ -42,10 +42,8 @@ pub fn extract_public_api_for_package(src: &str, file: &str, package: &str) -> V
         Ok(b) => b,
         Err(_) => return vec![],
     };
-    let (_, facts) = crate::Sema::check_bundle_with_effect_facts(
-        &mut bundle,
-        crate::Sema::CompileMode::Check,
-    );
+    let (_, facts) =
+        crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
     let _ = src; // bundle already loaded
 
     let mut out = Vec::new();
@@ -175,13 +173,14 @@ fn public_api_of_item(
             }
             let signature = format_fn_sig(
                 f,
-                solved.get(&format!(
-                    "{module_alias}::{}",
-                    semantic_module
-                        .map(|module| crate::AST::member_name(module, &f.name))
-                        .unwrap_or_else(|| f.name.clone())
-                ))
-                .or_else(|| solved.get(&f.name)),
+                solved
+                    .get(&format!(
+                        "{module_alias}::{}",
+                        semantic_module
+                            .map(|module| crate::AST::member_name(module, &f.name))
+                            .unwrap_or_else(|| f.name.clone())
+                    ))
+                    .or_else(|| solved.get(&f.name)),
                 dimensions,
             );
             Some(ApiItem {
@@ -243,7 +242,10 @@ fn format_fn_sig(
     crate::Sema::ApiFreeze::canonical_fn_signature_with_effects(f, inferred, dimensions)
 }
 
-fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions) -> String {
+fn format_struct_sig(
+    s: &crate::AST::StructDef,
+    dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions,
+) -> String {
     let is_cli = s
         .derives
         .iter()
@@ -286,7 +288,12 @@ fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFre
 }
 
 fn format_enum_sig(e: &crate::AST::EnumDef) -> String {
-    let variants: Vec<String> = e.variants.iter().filter(|v| supported_public_name(&v.name)).map(|v| v.name.clone()).collect();
+    let variants: Vec<String> = e
+        .variants
+        .iter()
+        .filter(|v| supported_public_name(&v.name))
+        .map(|v| v.name.clone())
+        .collect();
     format!("enum {} {{ {} }}", e.name, variants.join(", "))
 }
 
@@ -298,9 +305,7 @@ fn format_trait_sig(
         .methods
         .iter()
         .filter(|method| supported_public_name(&method.name))
-        .map(|method| {
-            crate::Sema::ApiFreeze::trait_method_signature(&t.name, method, dimensions)
-        })
+        .map(|method| crate::Sema::ApiFreeze::trait_method_signature(&t.name, method, dimensions))
         .collect();
     format!("trait {} {{ {} }}", t.name, methods.join(", "))
 }

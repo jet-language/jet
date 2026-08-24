@@ -111,7 +111,7 @@ impl<'a> Parser<'a> {
                             format!("put it before the statement: `#{} <statement>`", head.name),
                             Some(head.span),
                         )),
-                        // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed hole — valid in any
+                        // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed goal — valid in any
                         // expression position; sema fills `expected_type`; codegen emits a
                         // panic.
                         Syntax::KW_TODO => Ok(Expr::Todo {

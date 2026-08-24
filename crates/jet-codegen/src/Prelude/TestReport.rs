@@ -35,7 +35,7 @@ impl JetTestReport {
     }
 
     pub fn json(&self) -> String {
-        format!(
+        let payload = format!(
             "{{\"failed\":{},\"passed\":{},\"skipped\":{},\"selected\":{},\"expectedFailures\":{},\"unexpectedPasses\":{}}}",
             self.failed,
             self.passed,
@@ -43,6 +43,16 @@ impl JetTestReport {
             self.selected(),
             self.expected_failures,
             self.unexpected_passes
+        );
+        render_status_json(
+            if self.failed == 0 && self.unexpected_passes == 0 {
+                "ok"
+            } else {
+                "fail"
+            },
+            self.failed == 0 && self.unexpected_passes == 0,
+            "test",
+            &format!(",\"test\":{payload}"),
         )
     }
 

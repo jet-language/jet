@@ -1,23 +1,26 @@
-use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
-use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_lambda_block;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::fork_panic;
-use crate::Codegen::TIR::JitSpawnCapture;
 use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::lambda_body_ty_expecting;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::lower_expr;
-use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower::lambda_block_tail;
 use crate::Codegen::TIR::lower::{
     prepare_interrupt_callback_local_expr, prepare_interrupt_callback_locals,
 };
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_stmts;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::view_copy_owned_type;
+use crate::Codegen::TIR::view_copy_symbol;
+use crate::Codegen::TIR::with_lambda_body_expr_cache;
+use crate::Codegen::TIR::JitSpawnCapture;
+use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TJitSpawnBody;
@@ -25,11 +28,8 @@ use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::TLambdaBody;
 use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::view_copy_owned_type;
-use crate::Codegen::TIR::view_copy_symbol;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::with_lambda_body_expr_cache;
+use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -184,9 +184,7 @@ fn lower_lambda_expecting_with_host_borrow(
         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
         let reads = match &lam.body {
             LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
-            LambdaBody::Expr(e) => {
-                crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())])
-            }
+            LambdaBody::Expr(e) => crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())]),
         };
         for name in reads {
             if param_names.contains(name.as_str())
@@ -198,19 +196,14 @@ fn lower_lambda_expecting_with_host_borrow(
             if !env.locals.contains_key(&name) {
                 continue;
             }
-            let needs_clone = env.is_borrowed(&name)
-                || matches!(env.ty_of(&name), Some(Type::Fn { .. }));
+            let needs_clone =
+                env.is_borrowed(&name) || matches!(env.ty_of(&name), Some(Type::Fn { .. }));
             if needs_clone {
                 extra_cloned.push(name);
             }
         }
     }
-    for name in lam
-        .meta
-        .cloned_captures
-        .iter()
-        .chain(extra_cloned.iter())
-    {
+    for name in lam.meta.cloned_captures.iter().chain(extra_cloned.iter()) {
         let cap = reactive_capture_name(name);
         // Clone temps must be `mut` when the closure body assigns through them
         // (FnMut / captured `:=` locals). Always emit `let mut` for cloned
@@ -330,10 +323,9 @@ fn lower_lambda_expecting_with_host_borrow(
                             if write { "&mut " } else { "&" },
                             cx.rust_type(&t)
                         ),
-                        (false, None) => format!(
-                            ": {}",
-                            rust_param_type(cx, AccessConvention::Read, &t)
-                        ),
+                        (false, None) => {
+                            format!(": {}", rust_param_type(cx, AccessConvention::Read, &t))
+                        }
                     })
                     .unwrap_or_default();
             format!("{}{}", mangle(&p.name), ty)
@@ -357,7 +349,10 @@ fn lower_lambda_expecting_with_host_borrow(
             // An expression-bodied lambda returns an owned value, just like an
             // explicit `return`; clone a borrowed non-scalar parameter here.
             let lowered = lower_owned_expr(e, cx, &mut lam_env);
-            (emit_tir_expr(&lowered, cx), TLambdaBody::Expr(Box::new(lowered)))
+            (
+                emit_tir_expr(&lowered, cx),
+                TLambdaBody::Expr(Box::new(lowered)),
+            )
         }
         LambdaBody::Block(stmts) => {
             if let Some(shared) = shared_body.as_ref() {
@@ -385,8 +380,7 @@ fn lower_lambda_expecting_with_host_borrow(
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         jit_name: lambda_jit_name(lam.span.start, lam.span.end),
         param_types,
-        ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit"))
-            .then_some(body_ty),
+        ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit")).then_some(body_ty),
         is_move,
         boxed: lam.meta.escapes,
         // Native callback helpers consume the closure as an ordinary `Fn` value.
@@ -483,8 +477,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
                 .materialized_captures
                 .iter()
                 .any(|capture| capture == &source)
-                || (shared_body.is_some()
-                    && materialized_capture_kind(&source, env).is_some());
+                || (shared_body.is_some() && materialized_capture_kind(&source, env).is_some());
             let source_ty = env
                 .split_view_handle(&source)
                 .or_else(|| env.ty_of(&source))
@@ -527,11 +520,10 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
         lam_env.bind(&cap.name, slot, Some(cap.ty.clone()));
     }
     for (i, p) in lam.params.iter().enumerate() {
-        let ty = p
-            .ty
-            .clone()
-            .or_else(|| expected_params.get(i).cloned())
-            .or_else(|| Some(Type::Int));
+        let ty =
+            p.ty.clone()
+                .or_else(|| expected_params.get(i).cloned())
+                .or_else(|| Some(Type::Int));
         lam_env.bind(&p.name, TLocal::user(&p.name), ty);
     }
 
@@ -586,8 +578,7 @@ fn lower_spawn_lambda_for_jit_expecting_with_body(
             .map(|(i, p)| {
                 (
                     p.name.clone(),
-                    p.ty
-                        .clone()
+                    p.ty.clone()
                         .or_else(|| expected_params.get(i).cloned())
                         .unwrap_or_else(|| Type::Int),
                 )
@@ -636,13 +627,7 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
     lam_env.txn_undo_needed = None;
     let mut prep = String::new();
     let mut cloned_captures = lam.meta.cloned_captures.clone();
-    cloned_captures.retain(|capture| {
-        !lam
-            .meta
-            .moved_captures
-            .iter()
-            .any(|moved| moved == capture)
-    });
+    cloned_captures.retain(|capture| !lam.meta.moved_captures.iter().any(|moved| moved == capture));
     // Sema sees the parser's compiler-private `task` receiver before it is
     // rewritten to the active lexical group. The AOT body is rendered after
     // that rewrite, so a nested `task.*` call would otherwise move the parent

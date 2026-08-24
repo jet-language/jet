@@ -544,9 +544,12 @@ pub fn facts_report_json() -> String {
             format!("{{{}}}", fields.join(","))
         })
         .collect();
-    format!(
-        "{{\"schema_version\":1,\"rows\":[{}]}}",
-        rows.join(",")
+    let payload = format!("{{\"rows\":[{}]}}", rows.join(","));
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "inspect.facts",
+        &format!(",\"facts\":{payload}"),
     )
 }
 

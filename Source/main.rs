@@ -1,4 +1,4 @@
-//! jet CLI: check / build / run / test / new / fmt / lsp +
+//! jet CLI: check / build / run / test / new / fmt / try / lsp +
 //!          add / remove / fetch / update / hangar (M12.1 package manager).
 //!
 //! The driver owns invariant I2: rustc's voice never reaches the user as
@@ -26,12 +26,14 @@ static JET_HOST_ALLOCATOR: jet::program_allocator::JetHostProgramAllocator =
     jet::program_allocator::JetHostProgramAllocator;
 
 mod CmdCodemod;
+mod CmdTry;
 mod CmdBudget;
 mod CmdCompile;
 mod CmdDevTools;
 mod CmdNotebook;
 mod CmdDossier;
 mod CmdExec;
+mod CmdFill;
 mod CmdInspect;
 mod CmdExpand;
 mod CmdGc;
@@ -44,6 +46,8 @@ mod CmdProve;
 mod ProveReplay;
 mod ProveSolver;
 mod CmdReport;
+mod ProductionReceipt;
+mod CmdReview;
 mod CmdRemote;
 mod CmdSchema;
 mod CmdSemIndex;
@@ -56,6 +60,7 @@ mod EngineDispatch;
 mod NativeLinker;
 
 use CmdCodemod::run_codemod;
+use CmdTry::run_try;
 use CmdCompile::{
     resolve_named_profile, run_build_query, run_compiler_api, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web,
     run_fix, run_fmt, run_fuzz, run_new, run_jobs, run_test_opts, run_test_package,
@@ -67,6 +72,7 @@ use CmdDevTools::{
 };
 use CmdDossier::{run_dossier, run_module_explain};
 use CmdExec::run_exec;
+use CmdFill::run_fill;
 use CmdExpand::run_expand;
 use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
 use CmdStructure::run_structure;
@@ -76,9 +82,10 @@ use CmdPkg::{
 };
 use CmdProve::run_prove;
 use CmdReport::run_report;
+use CmdReview::run_review;
 use CmdRemote::run_remote;
 use CmdSchema::run_schema;
-use CmdSemIndex::run_semindex;
+use CmdSemIndex::{run_find, run_semindex};
 use CmdSupply::{
     run_audit, run_copy_audit, run_key_backup, run_keygen, run_publish, run_sbom, run_vendor, run_yank,
 };
@@ -1446,7 +1453,7 @@ fn main() {
             }
             // `--project <dir>` swallows its value too (#2038): a project
             // directory is never the positional file/program arg.
-            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" || a == "--project" {
+            if a == "-p" || a == "--output" || a == "--gate" || a == "--scope" || a == "--kind" || a == "--set" || a == "--target" || a == "--project" || a == "--base-receipt" || a == "--receipt" || a == "--head-receipt" || a == "--after-receipt" {
                 skip_next = true;
                 continue;
             }
@@ -1650,19 +1657,21 @@ fn main() {
         exit(ExitCodes::OK);
     }
 
-    // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its
-    // pinned `jet` toolchain before any manifest-driven verb runs. A running
-    // `jet` in the pinned channel runs natively; a genuine version mismatch
-    // realizes the pinned prebuilt (never a source build) and re-execs into it.
-    if matches!(cmd, "run" | "build" | "test" | "check" | "jobs") {
-        maybe_dispatch_pinned_toolchain(&raw);
-    }
-
     // Validate flags against the registry; an unknown/half-typed flag is E2102.
     // Skipped for commands that own a bespoke flag vocabulary or forward flags
     // downstream (so their flags aren't measured against the global set).
     if !owns_flags {
         check_flags(jet_argv, cmd);
+    }
+    if let Some(status) = jet::ReceiptStore::run_if_needed(&raw) {
+        exit(status);
+    }
+    // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its
+    // pinned `jet` toolchain before any manifest-driven verb runs. A running
+    // `jet` in the pinned channel runs natively; a genuine version mismatch
+    // realizes the pinned prebuilt (never a source build) and re-execs into it.
+    if matches!(cmd, "run" | "build" | "test" | "check" | "fill" | "jobs") {
+        maybe_dispatch_pinned_toolchain(&raw);
     }
     // Commands with no required positional target.
     match cmd {
@@ -1708,6 +1717,12 @@ fn main() {
         "budget" => {
             exit(CmdBudget::run(&raw));
         }
+        // D-DEVR-STATUS1=A: project truth has one read-only home. It consumes
+        // receipts; it never runs a producer to manufacture a green answer.
+        "status" => {
+            crate::cli_error!("E2101", "`jet status` is not built yet: its receipt grading API is unimplemented (Tower #2113)");
+            exit(ExitCodes::USAGE);
+        }
         "parts" => run_project_parts(&raw, mode),
         "reserved" => {
             if mode.json {
@@ -1732,8 +1747,17 @@ fn main() {
             run_prove(&prove_args, mode.json);
             return;
         }
+        "fill" => {
+            let target = args.get(1).map(|arg| arg.as_str()).unwrap_or_else(|| {
+                eprint!("{}", command_help("fill"));
+                exit(ExitCodes::USAGE);
+            });
+            run_fill(target, mode);
+            return;
+        }
         "diff" => { run_diff(&raw); return; }
         "merge" => { run_merge(&raw); return; }
+        "review" => { run_review(&raw, mode.json); return; }
         "report" => exit(run_report(&raw[1..])),
         "remote" => run_remote(&raw, mode),
         "help" => {
@@ -2000,6 +2024,11 @@ fn main() {
             // D-SEMINDEX1: stable semantic-index JSON smoke surface.
             let semindex_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_semindex(&semindex_args, mode.json);
+            return;
+        }
+        "find" => {
+            let find_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_find(&find_args, mode.json);
             return;
         }
         "dossier" => {
@@ -2465,12 +2494,16 @@ fn main() {
                 }
             };
             let resolved = resolve_source_path(&file);
-            if let Some(path) = debug_replay.as_deref() {
-                let _authority = crate::ProveReplay::open_named_replay(&resolved, path, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
+            let replay_recording = debug_replay.as_deref().map(|path| {
+                crate::ProveReplay::open_named_replay(&resolved, path, mode.json)
+                    .unwrap_or_else(|status| exit(status))
+                    .recorded_run
+            });
             let use_native = dap || jet::Debug::needs_native(&resolved).unwrap_or(false);
             if !use_native {
+                if let Some(recording) = replay_recording {
+                    exit(jet::Debug::run_debug_with_recording(&resolved, recording));
+                }
                 exit(jet::Debug::run_debug(&resolved));
             }
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
@@ -2724,6 +2757,10 @@ fn main() {
     };
 
     match cmd {
+        "try" => {
+            let keep = jet_argv.iter().any(|arg| arg == "--keep");
+            run_try(target, keep, mode.json);
+        }
         "fix" => {
             let edition = jet_argv
                 .iter()

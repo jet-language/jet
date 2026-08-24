@@ -32,9 +32,8 @@ mod emit;
 mod eval;
 pub use eval::{
     install_comptime_bridge, lower_interp_program, new_memo_state, run_named_func,
-    run_named_func_with_memos, run_program,
-    run_program_with_structs, set_native_call_hook, stable_memo_field_slot,
-    stable_place_address, tir_place_address_key, MemoState, NativeCallHook,
+    run_named_func_with_memos, run_program, run_program_with_structs, set_native_call_hook,
+    stable_memo_field_slot, stable_place_address, tir_place_address_key, MemoState, NativeCallHook,
 };
 
 /// Resolve a reflected row through its enclosing generic owner. AOT, Web, and
@@ -64,14 +63,14 @@ mod subset;
 // `#[cfg(test)] mod tests` block (which uses `super::*`) keep resolving unchanged.
 pub(crate) use emit::*;
 pub(crate) use lower::*;
-pub(crate) use subset::*;
 pub use subset::is_civil_time_method_name;
+pub(crate) use subset::*;
 
+use crate::Codegen::{mangle, mangle_path};
 use crate::AST::{
     AccessConvention, BinOp, CtValue, Expr, Item, Pattern, ProgramBundle, Type, UnOp,
     VariantPayload,
 };
-use crate::Codegen::{mangle, mangle_path};
 
 /// D-FACT-ENUM-TIR: derive expansion replaces a typed fact read with a
 /// `ComptimeName` carrying its enum value before sema sees the generated body.
@@ -79,12 +78,8 @@ use crate::Codegen::{mangle, mangle_path};
 /// compiler-substituted fact rather than an ordinary user enum.
 fn compiler_owned_unit_enum(
     type_name: &str,
-) -> Option<
-    std::collections::HashMap<
-        String,
-        (crate::Diagnostics::Span, crate::AST::VariantPayload),
-    >,
-> {
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     if is_eval_fragment() {
         return None;
     }
@@ -132,17 +127,11 @@ fn compiler_fact_enum_value(expr: &Expr) -> Option<(&str, &str)> {
 /// Fold equality between compiler-owned fact enum values before any engine or
 /// Rust emission sees them. The caller must use this predicate as its coverage
 /// proof and its lowering decision so a fact cannot re-enter runtime dispatch.
-pub(crate) fn fold_typed_fact_enum_equality(
-    op: BinOp,
-    lhs: &Expr,
-    rhs: &Expr,
-) -> Option<bool> {
+pub(crate) fn fold_typed_fact_enum_equality(op: BinOp, lhs: &Expr, rhs: &Expr) -> Option<bool> {
     if !matches!(op, BinOp::Eq | BinOp::Ne) {
         return None;
     }
-    if compiler_fact_enum_value(lhs).is_none()
-        && compiler_fact_enum_value(rhs).is_none()
-    {
+    if compiler_fact_enum_value(lhs).is_none() && compiler_fact_enum_value(rhs).is_none() {
         return None;
     }
     let (left_type, left_variant) = typed_unit_enum_value(lhs)?;
@@ -151,12 +140,7 @@ pub(crate) fn fold_typed_fact_enum_equality(
         return None;
     }
     let variants = compiler_owned_unit_enum(left_type)?;
-    let is_unit = |variant: &str| {
-        matches!(
-            variants.get(variant),
-            Some((_, VariantPayload::Unit))
-        )
-    };
+    let is_unit = |variant: &str| matches!(variants.get(variant), Some((_, VariantPayload::Unit)));
     if !is_unit(left_variant) || !is_unit(right_variant) {
         return None;
     }
@@ -169,15 +153,10 @@ pub(crate) fn fold_typed_fact_enum_equality(
 
 /// The parser represents `value == .Variant` as a pattern test rather than a
 /// binary expression. Fold that generated fact shape at the same typed boundary.
-pub(crate) fn fold_typed_fact_enum_pattern(
-    subject: &Expr,
-    pattern: &Pattern,
-) -> Option<bool> {
+pub(crate) fn fold_typed_fact_enum_pattern(subject: &Expr, pattern: &Pattern) -> Option<bool> {
     let (type_name, value_variant) = compiler_fact_enum_value(subject)?;
     let Pattern::Variant {
-        variant,
-        bindings,
-        ..
+        variant, bindings, ..
     } = pattern
     else {
         return None;
@@ -186,12 +165,7 @@ pub(crate) fn fold_typed_fact_enum_pattern(
         return None;
     }
     let variants = compiler_owned_unit_enum(type_name)?;
-    let is_unit = |variant: &str| {
-        matches!(
-            variants.get(variant),
-            Some((_, VariantPayload::Unit))
-        )
-    };
+    let is_unit = |variant: &str| matches!(variants.get(variant), Some((_, VariantPayload::Unit)));
     if !is_unit(value_variant) || !is_unit(variant) {
         return None;
     }
@@ -243,7 +217,9 @@ pub struct TirWorklist<T> {
 
 impl<T> TirWorklist<T> {
     pub fn new() -> Self {
-        Self { pending: Vec::new() }
+        Self {
+            pending: Vec::new(),
+        }
     }
 
     pub fn from_reversed<I>(items: I) -> Self
@@ -349,11 +325,9 @@ pub struct JitProgram {
     /// ordinary lowered `Decode` body.
     pub codec_migrations: std::collections::HashMap<String, TCodecMigrationPlan>,
     /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
-    pub trait_method_owners:
-        std::collections::HashMap<(String, String), Vec<String>>,
+    pub trait_method_owners: std::collections::HashMap<(String, String), Vec<String>>,
     /// Sema-resolved `(collection, iterator) -> Iterable.Item` facts.
-    pub iterable_item_types:
-        std::collections::HashMap<(String, String), Type>,
+    pub iterable_item_types: std::collections::HashMap<(String, String), Type>,
 }
 
 fn published_schema_unknown_field(s: &crate::AST::StructDef) -> bool {
@@ -424,15 +398,27 @@ pub struct InstanceProvenance {
 }
 
 pub fn instance_provenance(bundle: &ProgramBundle) -> Vec<InstanceProvenance> {
-    bundle.modules.iter().flat_map(|module| module.items.iter().filter_map(|item| {
-        let Item::CodeModule(instance) = item else { return None };
-        let identity = instance.instance_identity.as_ref()?;
-        Some(InstanceProvenance {
-            canonical_module: instance.name.clone(),
-            fingerprint: identity.fingerprint.clone(),
-            full_key_hex: identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect(),
+    bundle
+        .modules
+        .iter()
+        .flat_map(|module| {
+            module.items.iter().filter_map(|item| {
+                let Item::CodeModule(instance) = item else {
+                    return None;
+                };
+                let identity = instance.instance_identity.as_ref()?;
+                Some(InstanceProvenance {
+                    canonical_module: instance.name.clone(),
+                    fingerprint: identity.fingerprint.clone(),
+                    full_key_hex: identity
+                        .full_key
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                })
+            })
         })
-    })).collect()
+        .collect()
 }
 
 fn payload_types_for_variant(payload: &VariantPayload) -> Vec<Type> {
@@ -480,11 +466,7 @@ fn register_imported_enum_variants(
             .collect(),
     );
     for variant in variants {
-        let pattern = format!(
-            "{}::{}",
-            mangle_path(&identity),
-            mangle_path(&variant.name)
-        );
+        let pattern = format!("{}::{}", mangle_path(&identity), mangle_path(&variant.name));
         let payload = payload_types_for_variant(&variant.payload)
             .into_iter()
             .map(|ty| crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, &ty))
@@ -504,47 +486,26 @@ fn compile_codec_migrations(
             continue;
         };
         let style = super::Items::container_rename_all(&def.serde_markers);
-        let historical_shapes =
-            super::Items::migration_shapes(style.as_deref(), def, blocks);
+        let historical_shapes = super::Items::migration_shapes(style.as_deref(), def, blocks);
         let mut steps = Vec::with_capacity(blocks.len());
         for block in blocks {
             let mut lowered = Vec::with_capacity(block.ops.len());
             for op in &block.ops {
                 lowered.push(match op {
-                    crate::AST::MigrationOp::Rename { from, to, .. } => {
-                        TCodecMigrationOp::Rename {
-                            from_key: super::Items::migration_wire_key(
-                                style.as_deref(),
-                                def,
-                                from,
-                            ),
-                            to_key: super::Items::migration_wire_key(
-                                style.as_deref(),
-                                def,
-                                to,
-                            ),
-                        }
-                    }
-                    crate::AST::MigrationOp::Remove { field, .. } => {
-                        TCodecMigrationOp::Remove {
-                            key: super::Items::migration_wire_key(
-                                style.as_deref(),
-                                def,
-                                field,
-                            ),
-                        }
-                    }
+                    crate::AST::MigrationOp::Rename { from, to, .. } => TCodecMigrationOp::Rename {
+                        from_key: super::Items::migration_wire_key(style.as_deref(), def, from),
+                        to_key: super::Items::migration_wire_key(style.as_deref(), def, to),
+                    },
+                    crate::AST::MigrationOp::Remove { field, .. } => TCodecMigrationOp::Remove {
+                        key: super::Items::migration_wire_key(style.as_deref(), def, field),
+                    },
                     crate::AST::MigrationOp::Add {
                         field,
                         ty,
                         default_fn,
                         ..
                     } => TCodecMigrationOp::Add {
-                        key: super::Items::migration_wire_key(
-                            style.as_deref(),
-                            def,
-                            field,
-                        ),
+                        key: super::Items::migration_wire_key(style.as_deref(), def, field),
                         ty: ty.clone(),
                         default_fn: default_fn.clone()?,
                     },
@@ -555,11 +516,7 @@ fn compile_codec_migrations(
                         conv_fn,
                         ..
                     } => TCodecMigrationOp::Change {
-                        key: super::Items::migration_wire_key(
-                            style.as_deref(),
-                            def,
-                            field,
-                        ),
+                        key: super::Items::migration_wire_key(style.as_deref(), def, field),
                         from_ty: from_ty.clone(),
                         to_ty: to_ty.clone(),
                         converter_fn: conv_fn.clone()?,
@@ -587,12 +544,9 @@ fn register_union_type(
     match ty {
         Type::Union(members) => {
             let name = crate::AST::union_enum_name(members);
-            enum_variants.entry(name.clone()).or_insert_with(|| {
-                members
-                    .iter()
-                    .map(crate::AST::union_member_tag)
-                    .collect()
-            });
+            enum_variants
+                .entry(name.clone())
+                .or_insert_with(|| members.iter().map(crate::AST::union_member_tag).collect());
             for member in members {
                 let tag = crate::AST::union_member_tag(member);
                 enum_variant_payload_types
@@ -608,7 +562,11 @@ fn register_union_type(
         | Type::FixedList { elem: inner, .. } => {
             register_union_type(inner, enum_variants, enum_variant_payload_types)
         }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             register_union_type(key, enum_variants, enum_variant_payload_types);
             register_union_type(value, enum_variants, enum_variant_payload_types);
         }
@@ -843,10 +801,7 @@ impl TMethodRef {
         }
     }
 
-    pub fn trait_method(
-        trait_owner: impl Into<String>,
-        name: impl Into<String>,
-    ) -> TMethodRef {
+    pub fn trait_method(trait_owner: impl Into<String>, name: impl Into<String>) -> TMethodRef {
         TMethodRef {
             name: name.into(),
             mangled: false,
@@ -923,11 +878,7 @@ fn demand_serde_codec(
 
 /// Stable symbol key for one concrete method instance. Empty method arguments
 /// retain the historical `Owner<Args>::method` key used by serde demands.
-pub fn generic_method_instance_key(
-    owner: &Type,
-    method: &str,
-    type_args: &[Type],
-) -> String {
+pub fn generic_method_instance_key(owner: &Type, method: &str, type_args: &[Type]) -> String {
     let base = format!("{}::{method}", owner.name());
     if type_args.is_empty() {
         return base;
@@ -1049,9 +1000,7 @@ fn collect_serde_codec_demands(
     ) {
         match stmt {
             TStmt::ExprStmt(e) | TStmt::Return(Some(e)) => walk_expr(e, demands),
-            TStmt::Let { init, .. } | TStmt::Assign { value: init, .. } => {
-                walk_expr(init, demands)
-            }
+            TStmt::Let { init, .. } | TStmt::Assign { value: init, .. } => walk_expr(init, demands),
             TStmt::RefutableBind { init, fallback, .. } => {
                 walk_expr(init, demands);
                 for stmt in fallback {
@@ -1122,9 +1071,7 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                     };
                     match &imp.trait_name {
                         None => (method, None, false),
-                        Some(t)
-                            if t == crate::Generics::ENCODE || t == crate::Generics::DECODE =>
-                        {
+                        Some(t) if t == crate::Generics::ENCODE || t == crate::Generics::DECODE => {
                             (method, Some(t.as_str()), imp.is_generated_serde)
                         }
                         Some(_) => continue,
@@ -1143,9 +1090,9 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 )
             }) && !owner_subst.is_empty()
                 && method
-                .type_params
-                .iter()
-                .all(|param| owner_subst.contains_key(&param.name));
+                    .type_params
+                    .iter()
+                    .all(|param| owner_subst.contains_key(&param.name));
             if owner_binds_method_params {
                 if !method_type_args.is_empty() {
                     continue;
@@ -1203,8 +1150,7 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 // Bind `self` as `Wrap<Int>` so field reads substitute `T` → arg.
                 // Encode is an ordinary instance method; Decode stays on the static
                 // trait-method ABI (`tree` only, no receiver).
-                if trait_name == crate::Generics::ENCODE
-                    && matches!(&owner_ty, Type::Apply { .. })
+                if trait_name == crate::Generics::ENCODE && matches!(&owner_ty, Type::Apply { .. })
                 {
                     lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
                 } else {
@@ -1261,9 +1207,11 @@ pub(crate) fn bind_generic_type(
             if bind_generic_type(inner, actual_inner, params, subst)),
         Type::Option(inner) => matches!(actual, Type::Option(actual_inner)
             if bind_generic_type(inner, actual_inner, params, subst)),
-        Type::Result { ok, err } => matches!(actual, Type::Result { ok: actual_ok, err: actual_err }
+        Type::Result { ok, err } => {
+            matches!(actual, Type::Result { ok: actual_ok, err: actual_err }
             if bind_generic_type(ok, actual_ok, params, subst)
-                && bind_generic_type(err, actual_err, params, subst)),
+                && bind_generic_type(err, actual_err, params, subst))
+        }
         Type::Tagged { inner, .. } => bind_generic_type(inner, actual, params, subst),
         _ => template == actual,
     }
@@ -1297,9 +1245,7 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
                 continue;
             };
             (
-                crate::Codegen::VariadicBound::build_variadic_bound_func(
-                    source, bounds, arity,
-                ),
+                crate::Codegen::VariadicBound::build_variadic_bound_func(source, bounds, arity),
                 called_name.clone(),
             )
         } else {
@@ -1324,8 +1270,11 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             } else {
                 continue;
             };
-        let names: std::collections::HashSet<String> =
-            template.type_params.iter().map(|param| param.name.clone()).collect();
+        let names: std::collections::HashSet<String> = template
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
         let mut subst = std::collections::HashMap::new();
         for (param, actual) in template.type_params.iter().zip(explicit_actuals) {
             subst.insert(param.name.clone(), actual.clone());
@@ -1366,10 +1315,7 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
 /// JIT can compile multi-function programs (calls between covered helpers).
 fn memo_dependency_facts(
     cx: &Cx,
-) -> std::collections::HashMap<
-    String,
-    std::collections::HashMap<String, Vec<String>>,
-> {
+) -> std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>> {
     cx.memo_dependencies
         .iter()
         .map(|(owner, sources)| {
@@ -1492,440 +1438,100 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
 
 fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
-    LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
-    let module = bundle.modules.get(bundle.entry)?;
-    let extern_funcs = bundle_extern_funcs(bundle);
-    let mut cx = build_cx_items(
-        &module.items,
-        &module.source,
-        &module.display,
-        None,
-        &extern_funcs,
-    );
-    populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let type_shapes = collect_type_shapes(&module.items);
-    let mut funcs = Vec::new();
-    let zero_arg_entry = module.items.iter().find_map(|item| {
-        let Item::Const(value) = item else { return None };
-        value.resolved_output.as_ref().and_then(|output| {
-            (output.selected
-                && output.module == bundle.entry
-                && output.params.is_empty())
-            .then(|| output.semantic_name.clone())
-        })
-    })
-    .or_else(|| {
-        module.items.iter().find_map(|item| match item {
-            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-                Some("run".to_string())
-            }
-            _ => None,
-        })
-    });
-    let cli_schema = zero_arg_entry
-        .is_none()
-        .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
-        .flatten();
-    let cli_run = cli_schema.as_ref().and_then(|_| {
-        module.items.iter().find_map(|item| match item {
-            Item::Func(function) if function.name == "run" => Some(function.name.clone()),
-            Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
-                (output.selected
-                    && output.module == bundle.entry
-                    && output.params.len() == 1)
-                    .then(|| output.semantic_name.clone())
-            }),
-            _ => None,
-        })
-    });
-    let entry_name = match (zero_arg_entry, cli_run, cli_schema.is_some()) {
-        (Some(name), _, _) => name,
-        (None, Some(_), _) | (None, None, true) => super::mangle_generated("cli_main"),
-        (None, None, false) => return None,
-    };
-    cx.jit_spawn_lambdas.borrow_mut().clear();
-    cx.jit_spawn_sites.borrow_mut().clear();
-    cx.jit_method_calls.borrow_mut().clear();
-    cx.jit_generic_calls.borrow_mut().clear();
-    cx.jit_canonical_deopt.borrow_mut().clear();
-    cx.jit_canonical_calls.borrow_mut().clear();
-    for item in &module.items {
-        match item {
-            Item::Func(f) => {
-                // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
-                if f.inline_foreign.is_some() {
-                    continue;
-                }
-                let covered = tir_covers(f, &cx);
-                if std::env::var_os("JET_DEBUG_TIR_CALLS").is_some() && !covered {
-                    eprintln!("skip TIR fn {}: {}", f.name, subset::refusal::describe(&cx));
-                }
-                if !f.type_params.is_empty() || !covered {
-                    continue;
-                }
-                let lowered = lower_func(f, &cx);
-                funcs.push(lowered);
-            }
-            Item::ErrorConv(ec) => {
-                if !tir_covers_error_conv_body(&ec.body, &cx) {
-                    continue;
-                }
-                funcs.push(lower_error_conv(ec, &cx));
-            }
-            Item::Struct(s) => {
-                if s.type_params.is_empty() {
-                    for m in &s.methods {
-                        if !tir_covers_method(m, &s.name, &cx) {
-                            continue;
-                        }
-                        let mut lowered = lower_method(m, &s.name, &cx);
-                        lowered.name = format!("{}::{}", s.name, m.name);
-                        funcs.push(lowered);
-                    }
-                    for implementation in &s.trait_impls {
-                        if matches!(
-                            implementation.trait_name.as_str(),
-                            crate::Generics::ENCODE | crate::Generics::DECODE
-                        ) {
-                            continue;
-                        }
-                        for method in &implementation.methods {
-                            if !tir_covers_trait_method(
-                                method,
-                                &s.name,
-                                &cx,
-                                &implementation.trait_name,
-                            ) && !(implementation.compiler_generated
-                                && tir_covers_compiler_derive_method(method, &cx))
-                            {
-                                continue;
-                            }
-                            let mut lowered = lower_trait_method(
-                                method,
-                                &s.name,
-                                &cx,
-                                &implementation.trait_name,
-                            );
-                            lowered.name = format!("{}::{}", s.name, method.name);
-                            funcs.push(lowered);
-                        }
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                if e.type_params.is_empty() {
-                    for method in &e.methods {
-                        if !tir_covers_method(method, &e.name, &cx) {
-                            continue;
-                        }
-                        let mut lowered = lower_method(method, &e.name, &cx);
-                        lowered.name = format!("{}::{}", e.name, method.name);
-                        funcs.push(lowered);
-                    }
-                    for implementation in &e.trait_impls {
-                        if matches!(
-                            implementation.trait_name.as_str(),
-                            crate::Generics::ENCODE | crate::Generics::DECODE
-                        ) {
-                            continue;
-                        }
-                        for method in &implementation.methods {
-                            if !tir_covers_trait_method(
-                                method,
-                                &e.name,
-                                &cx,
-                                &implementation.trait_name,
-                            ) && !(implementation.compiler_generated
-                                && tir_covers_compiler_derive_method(method, &cx))
-                            {
-                                continue;
-                            }
-                            let mut lowered = lower_trait_method(
-                                method,
-                                &e.name,
-                                &cx,
-                                &implementation.trait_name,
-                            );
-                            lowered.name = format!("{}::{}", e.name, method.name);
-                            funcs.push(lowered);
-                        }
-                    }
-                }
-            }
-            Item::Impl(imp) => {
-                let owner_params = module
-                    .items
-                    .iter()
-                    .find_map(|item| match item {
-                        Item::Struct(s) if s.name == imp.type_name => {
-                            Some(s.type_params.as_slice())
-                        }
-                        Item::Enum(e) if e.name == imp.type_name => Some(e.type_params.as_slice()),
-                        _ => None,
-                    })
-                    .unwrap_or(&[]);
-                let owners = if imp.trait_name.is_none() && !owner_params.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![Type::Named(imp.type_name.clone())]
-                };
-                for owner_ty in owners {
-                    let subst = match &owner_ty {
-                        Type::Apply { args, .. } => owner_params
-                            .iter()
-                            .zip(args)
-                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                            .collect(),
-                        _ => std::collections::HashMap::new(),
-                    };
-                    for method in &imp.methods {
-                        let specialized = if subst.is_empty() {
-                            method.clone()
-                        } else {
-                            crate::Sema::specialize_function_types(method.clone(), &subst)
-                        };
-                        if !specialized.type_params.is_empty() {
-                            continue;
-                        }
-                        let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                            // D-SERDE2=A / I9: a generated codec's provenance is the
-                            // coverage authority in every execution tier, exactly as it
-                            // is in the AOT emitter (Codegen/Items.rs::emit_trait_method).
-                            // Dropping it here would leave the Cranelift JIT and the
-                            // interpreter without a method AOT emits.
-                            if !imp.is_generated_serde
-                                && !tir_covers_trait_method(
-                                    &specialized,
-                                    &imp.type_name,
-                                    &cx,
-                                    trait_name,
-                                )
-                            {
-                                continue;
-                            }
-                            lower_trait_method(&specialized, &imp.type_name, &cx, trait_name)
-                        } else {
-                            if !tir_covers_method(&specialized, &imp.type_name, &cx) {
-                                continue;
-                            }
-                            lower_method_for_owner(
-                                &specialized,
-                                &imp.type_name,
-                                owner_ty.clone(),
-                                &cx,
-                            )
-                        };
-                        lowered.name = format!("{}::{}", owner_ty.name(), method.name);
-                        funcs.push(lowered);
-                    }
-                }
-            }
-            Item::CodeModule(cm) => {
-                let Some(body) = &cm.body else { continue };
-                let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
-                for inner in body {
-                    match inner {
-                        Item::Func(f) => {
-                            if !f.type_params.is_empty() || !tir_covers(f, &cx) {
-                                continue;
-                            }
-                            // Match the AOT inline-module path: lower against the
-                            // emitted module-qualified function name so body-local
-                            // import scopes select `cm__function` while preserving
-                            // the same canonical TIR call form for tier 0.
-                            let member = jet_foundation::Names::member_name(&cm.name, &f.name);
-                            let mut mangled_f = f.clone();
-                            mangled_f.name = member.clone();
-                            let mut lowered = lower_func(&mangled_f, &cx);
-                            lowered.name = member;                            funcs.push(lowered);
-                        }
-                        Item::Struct(s) => {
-                            let type_name = if s.name.starts_with(&member_prefix) {
-                                s.name.clone()
-                            } else {
-                                jet_foundation::Names::member_name(&cm.name, &s.name)
-                            };
-                            for method in &s.methods {
-                                if !tir_covers_method(method, &type_name, &cx) {
-                                    continue;
-                                }
-                                let mut lowered = lower_method(method, &type_name, &cx);
-                                lowered.name = format!("{}::{}", type_name, method.name);
-                                funcs.push(lowered);
-                            }
-                        }
-                        Item::Impl(imp) => {
-                            let type_name = if imp
-                                .type_name
-                                .starts_with(&member_prefix)
-                            {
-                                imp.type_name.clone()
-                            } else {
-                                jet_foundation::Names::member_name(&cm.name, &imp.type_name)
-                            };
-                            for method in &imp.methods {
-                                let mut lowered = if let Some(trait_name) = &imp.trait_name {
-                                    // D-SERDE2=A / I9: same generated-codec provenance
-                                    // authority as the top-level impl arm above.
-                                    if !imp.is_generated_serde
-                                        && !tir_covers_trait_method(
-                                            method,
-                                            &type_name,
-                                            &cx,
-                                            trait_name,
-                                        )
-                                    {
-                                        continue;
-                                    }
-                                    lower_trait_method(method, &type_name, &cx, trait_name)
-                                } else {
-                                    if !tir_covers_method(method, &type_name, &cx) {
-                                        continue;
-                                    }
-                                    lower_method(method, &type_name, &cx)
-                                };
-                                lowered.name = format!("{}::{}", type_name, method.name);
-                                funcs.push(lowered);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    lower_imported_generated_codecs(bundle, &cx, &mut funcs);
-    lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
-    specialize_generic_free_functions(&module.items, &cx, &mut funcs);
-    let entry_ok = if entry_name == super::mangle_generated("cli_main") {
-        // A program-struct CLI has no literal `run`: argv selects one of its
-        // lowered methods or bound functions at execution time. `cli::prepare`
-        // resolves that target from the checked schema, and the evaluator
-        // reports a missing selected TIR entry instead of rejecting the whole
-        // program before dispatch.
-        cli_schema.is_some() || funcs.iter().any(|function| function.name == "run")
-    } else {
-        funcs.iter().any(|function| function.name == entry_name)
-    };
-    if !entry_ok {
-        return None;
-    }
-    let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
-    let mut reflect_paths = cx.reflect_paths.clone();
-    let mut memo_dependencies = memo_dependency_facts(&cx);
-    // File-module calls carry their already-resolved Rust path in TIR. Give the
-    // resident JIT the same qualified target instead of forcing the whole
-    // program through the interpreter, which cannot execute foreign binders.
-    for (module_idx, imported) in bundle.modules.iter().enumerate() {
-        if module_idx == bundle.entry {
-            continue;
-        }
-        let imported_owner = bundle
-            .name_ledger
-            .module_identity(module_idx)
-            .expect("name ledger must contain every loaded module");
-        let mut imported_cx = build_cx_items(
-            &imported.items,
-            &imported.source,
-            &imported.display,
+        LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
+        let module = bundle.modules.get(bundle.entry)?;
+        let extern_funcs = bundle_extern_funcs(bundle);
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
             None,
             &extern_funcs,
         );
-        populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
-        imported_cx.jit_local_call_prefix =
-            Some(format!("{}::", mangle(&imported.alias)));
-        for (owner, sources) in memo_dependency_facts(&imported_cx) {
-            let target = memo_dependencies.entry(owner).or_default();
-            for (source, fields) in sources {
-                target.entry(source).or_insert(fields);
-            }
-        }
-        for (name, path) in imported_cx.reflect_paths.iter() {
-            reflect_paths
-                .entry(name.clone())
-                .or_insert_with(|| path.clone());
-        }
-        imported_cx.jit_spawn_site_base = spawn_lambdas.len();
-        for item in &imported.items {
+        populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+        let type_shapes = collect_type_shapes(&module.items);
+        let mut funcs = Vec::new();
+        let zero_arg_entry = module
+            .items
+            .iter()
+            .find_map(|item| {
+                let Item::Const(value) = item else {
+                    return None;
+                };
+                value.resolved_output.as_ref().and_then(|output| {
+                    (output.selected && output.module == bundle.entry && output.params.is_empty())
+                        .then(|| output.semantic_name.clone())
+                })
+            })
+            .or_else(|| {
+                module.items.iter().find_map(|item| match item {
+                    Item::Func(function)
+                        if function.name == "run" && function.params.is_empty() =>
+                    {
+                        Some("run".to_string())
+                    }
+                    _ => None,
+                })
+            });
+        let cli_schema = zero_arg_entry
+            .is_none()
+            .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
+            .flatten();
+        let cli_run = cli_schema.as_ref().and_then(|_| {
+            module.items.iter().find_map(|item| match item {
+                Item::Func(function) if function.name == "run" => Some(function.name.clone()),
+                Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
+                    (output.selected && output.module == bundle.entry && output.params.len() == 1)
+                        .then(|| output.semantic_name.clone())
+                }),
+                _ => None,
+            })
+        });
+        let entry_name = match (zero_arg_entry, cli_run, cli_schema.is_some()) {
+            (Some(name), _, _) => name,
+            (None, Some(_), _) | (None, None, true) => super::mangle_generated("cli_main"),
+            (None, None, false) => return None,
+        };
+        cx.jit_spawn_lambdas.borrow_mut().clear();
+        cx.jit_spawn_sites.borrow_mut().clear();
+        cx.jit_method_calls.borrow_mut().clear();
+        cx.jit_generic_calls.borrow_mut().clear();
+        cx.jit_canonical_deopt.borrow_mut().clear();
+        cx.jit_canonical_calls.borrow_mut().clear();
+        for item in &module.items {
             match item {
-                Item::Func(function)
-                    if function.type_params.is_empty() && tir_covers(function, &imported_cx) =>
-                {
-                    imported_cx.jit_local_call_prefix =
-                        Some(format!("{}::", mangle(&imported.alias)));
-                    let mut lowered = lower_func(function, &imported_cx);
-                    lowered.name =
-                        format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
+                Item::Func(f) => {
+                    // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
+                    if f.inline_foreign.is_some() {
+                        continue;
+                    }
+                    let covered = tir_covers(f, &cx);
+                    if std::env::var_os("JET_DEBUG_TIR_CALLS").is_some() && !covered {
+                        eprintln!("skip TIR fn {}: {}", f.name, subset::refusal::describe(&cx));
+                    }
+                    if !f.type_params.is_empty() || !covered {
+                        continue;
+                    }
+                    let lowered = lower_func(f, &cx);
                     funcs.push(lowered);
                 }
-                Item::CodeModule(code_module) => {
-                    let Some(body) = &code_module.body else {
+                Item::ErrorConv(ec) => {
+                    if !tir_covers_error_conv_body(&ec.body, &cx) {
                         continue;
-                    };
-                    for inner in body {
-                        let Item::Func(function) = inner else {
-                            continue;
-                        };
-                        if !function.type_params.is_empty()
-                            || !tir_covers(function, &imported_cx)
-                        {
-                            continue;
-                        }
-                        imported_cx.jit_local_call_prefix =
-                            Some(format!("{}::", mangle(&code_module.name)));
-                        // Keep inline body-local import lookup aligned with the
-                        // emitted `code_module__function` name. The final TIR
-                        // symbol remains the imported module's Rust-qualified ABI.
-                        let mut mangled_function = function.clone();
-                        mangled_function.name =
-                            jet_foundation::Names::member_name(&code_module.name, &function.name);
-                        let mut lowered = lower_func(&mangled_function, &imported_cx);
-                        lowered.name =
-                            format!("{}::{}", mangle(&code_module.name), mangle(&function.name));
-                        funcs.push(lowered);
                     }
+                    funcs.push(lower_error_conv(ec, &cx));
                 }
-                item @ (Item::Struct(_) | Item::Enum(_)) => {
-                    let (name, type_params, methods, trait_impls) = match item {
-                        Item::Struct(definition) => (
-                            &definition.name,
-                            &definition.type_params,
-                            &definition.methods,
-                            &definition.trait_impls,
-                        ),
-                        Item::Enum(definition) => (
-                            &definition.name,
-                            &definition.type_params,
-                            &definition.methods,
-                            &definition.trait_impls,
-                        ),
-                        _ => unreachable!("nominal item gate"),
-                    };
-                    if !type_params.is_empty() {
-                        continue;
-                    }
-                    imported_cx.jit_local_call_prefix =
-                        Some(format!("{}::", mangle(&imported.alias)));
-                    for owner in imported_type_owners(bundle, module_idx) {
-                        let qualified = imported_type_name(&owner, name);
-                        for method in methods {
-                            if !tir_covers_method(method, &qualified, &imported_cx) {
+                Item::Struct(s) => {
+                    if s.type_params.is_empty() {
+                        for m in &s.methods {
+                            if !tir_covers_method(m, &s.name, &cx) {
                                 continue;
                             }
-                            let mut lowered = lower_method_for_owner(
-                                method,
-                                &qualified,
-                                Type::Named(qualified.clone()),
-                                &imported_cx,
-                            );
-                            lowered.ret = lowered.ret.as_ref().map(|ty| {
-                                qualify_imported_type(bundle, module_idx, &owner, ty)
-                            });
-                            lowered.name = format!("{}::{}", qualified, method.name);
+                            let mut lowered = lower_method(m, &s.name, &cx);
+                            lowered.name = format!("{}::{}", s.name, m.name);
                             funcs.push(lowered);
                         }
-                        for implementation in trait_impls {
+                        for implementation in &s.trait_impls {
                             if matches!(
                                 implementation.trait_name.as_str(),
                                 crate::Generics::ENCODE | crate::Generics::DECODE
@@ -1935,19 +1541,334 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                             for method in &implementation.methods {
                                 if !tir_covers_trait_method(
                                     method,
-                                    &qualified,
-                                    &imported_cx,
+                                    &s.name,
+                                    &cx,
                                     &implementation.trait_name,
                                 ) && !(implementation.compiler_generated
-                                    && tir_covers_compiler_derive_method(method, &imported_cx))
+                                    && tir_covers_compiler_derive_method(method, &cx))
                                 {
                                     continue;
                                 }
                                 let mut lowered = lower_trait_method(
                                     method,
-                                    &qualified,
-                                    &imported_cx,
+                                    &s.name,
+                                    &cx,
                                     &implementation.trait_name,
+                                );
+                                lowered.name = format!("{}::{}", s.name, method.name);
+                                funcs.push(lowered);
+                            }
+                        }
+                    }
+                }
+                Item::Enum(e) => {
+                    if e.type_params.is_empty() {
+                        for method in &e.methods {
+                            if !tir_covers_method(method, &e.name, &cx) {
+                                continue;
+                            }
+                            let mut lowered = lower_method(method, &e.name, &cx);
+                            lowered.name = format!("{}::{}", e.name, method.name);
+                            funcs.push(lowered);
+                        }
+                        for implementation in &e.trait_impls {
+                            if matches!(
+                                implementation.trait_name.as_str(),
+                                crate::Generics::ENCODE | crate::Generics::DECODE
+                            ) {
+                                continue;
+                            }
+                            for method in &implementation.methods {
+                                if !tir_covers_trait_method(
+                                    method,
+                                    &e.name,
+                                    &cx,
+                                    &implementation.trait_name,
+                                ) && !(implementation.compiler_generated
+                                    && tir_covers_compiler_derive_method(method, &cx))
+                                {
+                                    continue;
+                                }
+                                let mut lowered = lower_trait_method(
+                                    method,
+                                    &e.name,
+                                    &cx,
+                                    &implementation.trait_name,
+                                );
+                                lowered.name = format!("{}::{}", e.name, method.name);
+                                funcs.push(lowered);
+                            }
+                        }
+                    }
+                }
+                Item::Impl(imp) => {
+                    let owner_params = module
+                        .items
+                        .iter()
+                        .find_map(|item| match item {
+                            Item::Struct(s) if s.name == imp.type_name => {
+                                Some(s.type_params.as_slice())
+                            }
+                            Item::Enum(e) if e.name == imp.type_name => {
+                                Some(e.type_params.as_slice())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or(&[]);
+                    let owners = if imp.trait_name.is_none() && !owner_params.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![Type::Named(imp.type_name.clone())]
+                    };
+                    for owner_ty in owners {
+                        let subst = match &owner_ty {
+                            Type::Apply { args, .. } => owner_params
+                                .iter()
+                                .zip(args)
+                                .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                                .collect(),
+                            _ => std::collections::HashMap::new(),
+                        };
+                        for method in &imp.methods {
+                            let specialized = if subst.is_empty() {
+                                method.clone()
+                            } else {
+                                crate::Sema::specialize_function_types(method.clone(), &subst)
+                            };
+                            if !specialized.type_params.is_empty() {
+                                continue;
+                            }
+                            let mut lowered = if let Some(trait_name) = &imp.trait_name {
+                                // D-SERDE2=A / I9: a generated codec's provenance is the
+                                // coverage authority in every execution tier, exactly as it
+                                // is in the AOT emitter (Codegen/Items.rs::emit_trait_method).
+                                // Dropping it here would leave the Cranelift JIT and the
+                                // interpreter without a method AOT emits.
+                                if !imp.is_generated_serde
+                                    && !tir_covers_trait_method(
+                                        &specialized,
+                                        &imp.type_name,
+                                        &cx,
+                                        trait_name,
+                                    )
+                                {
+                                    continue;
+                                }
+                                lower_trait_method(&specialized, &imp.type_name, &cx, trait_name)
+                            } else {
+                                if !tir_covers_method(&specialized, &imp.type_name, &cx) {
+                                    continue;
+                                }
+                                lower_method_for_owner(
+                                    &specialized,
+                                    &imp.type_name,
+                                    owner_ty.clone(),
+                                    &cx,
+                                )
+                            };
+                            lowered.name = format!("{}::{}", owner_ty.name(), method.name);
+                            funcs.push(lowered);
+                        }
+                    }
+                }
+                Item::CodeModule(cm) => {
+                    let Some(body) = &cm.body else { continue };
+                    let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
+                    for inner in body {
+                        match inner {
+                            Item::Func(f) => {
+                                if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+                                    continue;
+                                }
+                                // Match the AOT inline-module path: lower against the
+                                // emitted module-qualified function name so body-local
+                                // import scopes select `cm__function` while preserving
+                                // the same canonical TIR call form for tier 0.
+                                let member = jet_foundation::Names::member_name(&cm.name, &f.name);
+                                let mut mangled_f = f.clone();
+                                mangled_f.name = member.clone();
+                                let mut lowered = lower_func(&mangled_f, &cx);
+                                lowered.name = member;
+                                funcs.push(lowered);
+                            }
+                            Item::Struct(s) => {
+                                let type_name = if s.name.starts_with(&member_prefix) {
+                                    s.name.clone()
+                                } else {
+                                    jet_foundation::Names::member_name(&cm.name, &s.name)
+                                };
+                                for method in &s.methods {
+                                    if !tir_covers_method(method, &type_name, &cx) {
+                                        continue;
+                                    }
+                                    let mut lowered = lower_method(method, &type_name, &cx);
+                                    lowered.name = format!("{}::{}", type_name, method.name);
+                                    funcs.push(lowered);
+                                }
+                            }
+                            Item::Impl(imp) => {
+                                let type_name = if imp.type_name.starts_with(&member_prefix) {
+                                    imp.type_name.clone()
+                                } else {
+                                    jet_foundation::Names::member_name(&cm.name, &imp.type_name)
+                                };
+                                for method in &imp.methods {
+                                    let mut lowered = if let Some(trait_name) = &imp.trait_name {
+                                        // D-SERDE2=A / I9: same generated-codec provenance
+                                        // authority as the top-level impl arm above.
+                                        if !imp.is_generated_serde
+                                            && !tir_covers_trait_method(
+                                                method, &type_name, &cx, trait_name,
+                                            )
+                                        {
+                                            continue;
+                                        }
+                                        lower_trait_method(method, &type_name, &cx, trait_name)
+                                    } else {
+                                        if !tir_covers_method(method, &type_name, &cx) {
+                                            continue;
+                                        }
+                                        lower_method(method, &type_name, &cx)
+                                    };
+                                    lowered.name = format!("{}::{}", type_name, method.name);
+                                    funcs.push(lowered);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        lower_imported_generated_codecs(bundle, &cx, &mut funcs);
+        lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
+        specialize_generic_free_functions(&module.items, &cx, &mut funcs);
+        let entry_ok = if entry_name == super::mangle_generated("cli_main") {
+            // A program-struct CLI has no literal `run`: argv selects one of its
+            // lowered methods or bound functions at execution time. `cli::prepare`
+            // resolves that target from the checked schema, and the evaluator
+            // reports a missing selected TIR entry instead of rejecting the whole
+            // program before dispatch.
+            cli_schema.is_some() || funcs.iter().any(|function| function.name == "run")
+        } else {
+            funcs.iter().any(|function| function.name == entry_name)
+        };
+        if !entry_ok {
+            return None;
+        }
+        let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+        let mut reflect_paths = cx.reflect_paths.clone();
+        let mut memo_dependencies = memo_dependency_facts(&cx);
+        // File-module calls carry their already-resolved Rust path in TIR. Give the
+        // resident JIT the same qualified target instead of forcing the whole
+        // program through the interpreter, which cannot execute foreign binders.
+        for (module_idx, imported) in bundle.modules.iter().enumerate() {
+            if module_idx == bundle.entry {
+                continue;
+            }
+            let imported_owner = bundle
+                .name_ledger
+                .module_identity(module_idx)
+                .expect("name ledger must contain every loaded module");
+            let mut imported_cx = build_cx_items(
+                &imported.items,
+                &imported.source,
+                &imported.display,
+                None,
+                &extern_funcs,
+            );
+            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
+            for (owner, sources) in memo_dependency_facts(&imported_cx) {
+                let target = memo_dependencies.entry(owner).or_default();
+                for (source, fields) in sources {
+                    target.entry(source).or_insert(fields);
+                }
+            }
+            for (name, path) in imported_cx.reflect_paths.iter() {
+                reflect_paths
+                    .entry(name.clone())
+                    .or_insert_with(|| path.clone());
+            }
+            imported_cx.jit_spawn_site_base = spawn_lambdas.len();
+            for item in &imported.items {
+                match item {
+                    Item::Func(function)
+                        if function.type_params.is_empty()
+                            && tir_covers(function, &imported_cx) =>
+                    {
+                        imported_cx.jit_local_call_prefix =
+                            Some(format!("{}::", mangle(&imported.alias)));
+                        let mut lowered = lower_func(function, &imported_cx);
+                        lowered.name =
+                            format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
+                        funcs.push(lowered);
+                    }
+                    Item::CodeModule(code_module) => {
+                        let Some(body) = &code_module.body else {
+                            continue;
+                        };
+                        for inner in body {
+                            let Item::Func(function) = inner else {
+                                continue;
+                            };
+                            if !function.type_params.is_empty()
+                                || !tir_covers(function, &imported_cx)
+                            {
+                                continue;
+                            }
+                            imported_cx.jit_local_call_prefix =
+                                Some(format!("{}::", mangle(&code_module.name)));
+                            // Keep inline body-local import lookup aligned with the
+                            // emitted `code_module__function` name. The final TIR
+                            // symbol remains the imported module's Rust-qualified ABI.
+                            let mut mangled_function = function.clone();
+                            mangled_function.name = jet_foundation::Names::member_name(
+                                &code_module.name,
+                                &function.name,
+                            );
+                            let mut lowered = lower_func(&mangled_function, &imported_cx);
+                            lowered.name = format!(
+                                "{}::{}",
+                                mangle(&code_module.name),
+                                mangle(&function.name)
+                            );
+                            funcs.push(lowered);
+                        }
+                    }
+                    item @ (Item::Struct(_) | Item::Enum(_)) => {
+                        let (name, type_params, methods, trait_impls) = match item {
+                            Item::Struct(definition) => (
+                                &definition.name,
+                                &definition.type_params,
+                                &definition.methods,
+                                &definition.trait_impls,
+                            ),
+                            Item::Enum(definition) => (
+                                &definition.name,
+                                &definition.type_params,
+                                &definition.methods,
+                                &definition.trait_impls,
+                            ),
+                            _ => unreachable!("nominal item gate"),
+                        };
+                        if !type_params.is_empty() {
+                            continue;
+                        }
+                        imported_cx.jit_local_call_prefix =
+                            Some(format!("{}::", mangle(&imported.alias)));
+                        for owner in imported_type_owners(bundle, module_idx) {
+                            let qualified = imported_type_name(&owner, name);
+                            for method in methods {
+                                if !tir_covers_method(method, &qualified, &imported_cx) {
+                                    continue;
+                                }
+                                let mut lowered = lower_method_for_owner(
+                                    method,
+                                    &qualified,
+                                    Type::Named(qualified.clone()),
+                                    &imported_cx,
                                 );
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
                                     qualify_imported_type(bundle, module_idx, &owner, ty)
@@ -1955,345 +1876,173 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 lowered.name = format!("{}::{}", qualified, method.name);
                                 funcs.push(lowered);
                             }
+                            for implementation in trait_impls {
+                                if matches!(
+                                    implementation.trait_name.as_str(),
+                                    crate::Generics::ENCODE | crate::Generics::DECODE
+                                ) {
+                                    continue;
+                                }
+                                for method in &implementation.methods {
+                                    if !tir_covers_trait_method(
+                                        method,
+                                        &qualified,
+                                        &imported_cx,
+                                        &implementation.trait_name,
+                                    ) && !(implementation.compiler_generated
+                                        && tir_covers_compiler_derive_method(method, &imported_cx))
+                                    {
+                                        continue;
+                                    }
+                                    let mut lowered = lower_trait_method(
+                                        method,
+                                        &qualified,
+                                        &imported_cx,
+                                        &implementation.trait_name,
+                                    );
+                                    lowered.ret = lowered.ret.as_ref().map(|ty| {
+                                        qualify_imported_type(bundle, module_idx, &owner, ty)
+                                    });
+                                    lowered.name = format!("{}::{}", qualified, method.name);
+                                    funcs.push(lowered);
+                                }
+                            }
                         }
                     }
-                }
-                Item::Impl(implementation)
-                    if implementation.trait_name.as_deref()
-                        == Some(crate::Syntax::TRAIT_DISPLAY)
-                        && imported_cx
-                            .unit_labels
-                            .contains_key(&implementation.type_name) =>
-                {
-                    for method in &implementation.methods {
-                        if !tir_covers_trait_method(
-                            method,
-                            &implementation.type_name,
-                            &imported_cx,
-                            crate::Syntax::TRAIT_DISPLAY,
-                        ) {
-                            continue;
-                        }
-                        let mut lowered = lower_trait_method(
-                            method,
-                            &implementation.type_name,
-                            &imported_cx,
-                            crate::Syntax::TRAIT_DISPLAY,
-                        );
-                        lowered.name = format!(
-                            "{}::{}::{}",
-                            imported_owner, implementation.type_name, method.name
-                        );
-                        funcs.push(lowered);
-                    }
-                }
-                _ => {}
-            }
-        }
-        spawn_lambdas.extend(std::mem::take(
-            &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
-        ));
-    }
-    let mut struct_fields = std::collections::HashMap::new();
-    let mut struct_field_types = std::collections::HashMap::new();
-    let mut reflection_fields = std::collections::HashMap::new();
-    let mut struct_type_params = std::collections::HashMap::new();
-    let mut enum_variants = std::collections::HashMap::new();
-    let mut enum_variant_payload_types = std::collections::HashMap::new();
-    enum_variants.insert(
-        crate::Syntax::TYPE_ORDERING.to_string(),
-        ["Less", "Equal", "Greater"]
-            .into_iter()
-            .map(mangle)
-            .collect(),
-    );
-    // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
-    // packed JIT/AOT shape even when the source only reaches it through
-    // `Task<T>.join()` and never constructs a variant explicitly.
-    enum_variants.insert(
-        crate::Syntax::TYPE_TASK_FAILURE.to_string(),
-        ["Cancelled", "DeadlineBlown", "Panicked"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-    );
-    enum_variant_payload_types.insert(
-        format!(
-            "{}::Panicked",
-            crate::Syntax::TYPE_TASK_FAILURE
-        ),
-        vec![Type::String],
-    );
-    // D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: workflow activity calls carry
-    // the service result/status enums even though their Prelude definitions
-    // are emitted only for programs that use the service surface.
-    enum_variants.insert(
-        "TaskOutcome".to_string(),
-        ["Finished", "Panicked", "Cancelled", "DeadlineBlown"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-    );
-    enum_variant_payload_types.insert(
-        "TaskOutcome::Panicked".to_string(),
-        vec![Type::String],
-    );
-    enum_variants.insert(
-        "TaskStatus".to_string(),
-        ["Running", "Paused", "CancelRequested"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-    );
-    // stdlib-api-laws D4 (#2055): `WatchEvent.domain`/`.kind` are Prelude enums
-    // reached only through `core.watcher` polling, never constructed in source —
-    // register their packed JIT/AOT shape for the same reason as `TaskFailure`.
-    // Declaration order must match `Prelude/CoreLib/JetStd/CommonTypes.rs`.
-    enum_variants.insert(
-        "WatchDomain".to_string(),
-        ["File", "Process", "Port"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-    );
-    enum_variants.insert(
-        "WatchKind".to_string(),
-        ["Created", "Modified", "Removed", "Error", "Exited", "Ready"]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-    );
-    let mut int_constants = std::collections::HashMap::new();
-    let mut constants = std::collections::HashMap::new();
-    // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
-    let persist_prep = jet_foundation::Persist::prepare_bundle(bundle);
-    for msg in &persist_prep.messages {
-        eprintln!("{msg}");
-    }
-    let persist_overrides = persist_prep.by_name;
-    for item in &module.items {
-        match item {
-            Item::Struct(s) => {
-                struct_type_params.insert(
-                    s.name.clone(),
-                    s.type_params.iter().map(|param| param.name.clone()).collect(),
-                );
-                struct_fields.insert(
-                    s.name.clone(),
+                    Item::Impl(implementation)
+                        if implementation.trait_name.as_deref()
+                            == Some(crate::Syntax::TRAIT_DISPLAY)
+                            && imported_cx
+                                .unit_labels
+                                .contains_key(&implementation.type_name) =>
                     {
+                        for method in &implementation.methods {
+                            if !tir_covers_trait_method(
+                                method,
+                                &implementation.type_name,
+                                &imported_cx,
+                                crate::Syntax::TRAIT_DISPLAY,
+                            ) {
+                                continue;
+                            }
+                            let mut lowered = lower_trait_method(
+                                method,
+                                &implementation.type_name,
+                                &imported_cx,
+                                crate::Syntax::TRAIT_DISPLAY,
+                            );
+                            lowered.name = format!(
+                                "{}::{}::{}",
+                                imported_owner, implementation.type_name, method.name
+                            );
+                            funcs.push(lowered);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            spawn_lambdas.extend(std::mem::take(
+                &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
+            ));
+        }
+        let mut struct_fields = std::collections::HashMap::new();
+        let mut struct_field_types = std::collections::HashMap::new();
+        let mut reflection_fields = std::collections::HashMap::new();
+        let mut struct_type_params = std::collections::HashMap::new();
+        let mut enum_variants = std::collections::HashMap::new();
+        let mut enum_variant_payload_types = std::collections::HashMap::new();
+        enum_variants.insert(
+            crate::Syntax::TYPE_ORDERING.to_string(),
+            ["Less", "Equal", "Greater"]
+                .into_iter()
+                .map(mangle)
+                .collect(),
+        );
+        // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
+        // packed JIT/AOT shape even when the source only reaches it through
+        // `Task<T>.join()` and never constructs a variant explicitly.
+        enum_variants.insert(
+            crate::Syntax::TYPE_TASK_FAILURE.to_string(),
+            ["Cancelled", "DeadlineBlown", "Panicked"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        enum_variant_payload_types.insert(
+            format!("{}::Panicked", crate::Syntax::TYPE_TASK_FAILURE),
+            vec![Type::String],
+        );
+        // D-SERVICE-WORKFLOW1=D / D-CONC-OUTCOME1: workflow activity calls carry
+        // the service result/status enums even though their Prelude definitions
+        // are emitted only for programs that use the service surface.
+        enum_variants.insert(
+            "TaskOutcome".to_string(),
+            ["Finished", "Panicked", "Cancelled", "DeadlineBlown"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        enum_variant_payload_types.insert("TaskOutcome::Panicked".to_string(), vec![Type::String]);
+        enum_variants.insert(
+            "TaskStatus".to_string(),
+            ["Running", "Paused", "CancelRequested"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        // stdlib-api-laws D4 (#2055): `WatchEvent.domain`/`.kind` are Prelude enums
+        // reached only through `core.watcher` polling, never constructed in source —
+        // register their packed JIT/AOT shape for the same reason as `TaskFailure`.
+        // Declaration order must match `Prelude/CoreLib/JetStd/CommonTypes.rs`.
+        enum_variants.insert(
+            "WatchDomain".to_string(),
+            ["File", "Process", "Port"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        enum_variants.insert(
+            "WatchKind".to_string(),
+            ["Created", "Modified", "Removed", "Error", "Exited", "Ready"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        );
+        let mut int_constants = std::collections::HashMap::new();
+        let mut constants = std::collections::HashMap::new();
+        // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
+        let persist_prep = jet_foundation::Persist::prepare_bundle(bundle);
+        for msg in &persist_prep.messages {
+            eprintln!("{msg}");
+        }
+        let persist_overrides = persist_prep.by_name;
+        for item in &module.items {
+            match item {
+                Item::Struct(s) => {
+                    struct_type_params.insert(
+                        s.name.clone(),
+                        s.type_params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect(),
+                    );
+                    struct_fields.insert(s.name.clone(), {
                         let mut fields = s
                             .reflection_fields()
                             .map(|f| mangle(&f.name))
                             .collect::<Vec<_>>();
                         add_published_schema_field(s, &mut fields);
                         fields
-                    },
-                );
-                struct_field_types.insert(
-                    s.name.clone(),
-                    {
+                    });
+                    struct_field_types.insert(s.name.clone(), {
                         let mut types = s
                             .reflection_fields()
                             .map(|f| f.ty.clone())
                             .collect::<Vec<_>>();
                         add_published_schema_field_type(s, &mut types);
                         types
-                    },
-                );
-                reflection_fields.insert(
-                    s.name.clone(),
-                    jet_foundation::Reflection::fields(s),
-                );
-                for field in &s.fields {
-                    register_union_type(
-                        &field.ty,
-                        &mut enum_variants,
-                        &mut enum_variant_payload_types,
-                    );
-                }
-            }
-            Item::Enum(e) if e.type_params.is_empty() => {
-                register_enum_variants(
-                    &e.name,
-                    &e.variants,
-                    &mut enum_variants,
-                    &mut enum_variant_payload_types,
-                );
-            }
-            Item::Func(function) => {
-                for param in &function.params {
-                    register_union_type(
-                        &param.ty,
-                        &mut enum_variants,
-                        &mut enum_variant_payload_types,
-                    );
-                }
-                if let Some(ret) = &function.return_type {
-                    register_union_type(
-                        ret,
-                        &mut enum_variants,
-                        &mut enum_variant_payload_types,
-                    );
-                }
-            }
-            Item::Const(c) => {
-                let persisted = c
-                    .is_persist
-                    .then(|| persist_overrides.get(&c.name).cloned())
-                    .flatten();
-                if let Some(value) = persisted.clone().or_else(|| c.ct.clone()) {
-                    constants.insert(c.name.clone(), value);
-                }
-                let value = match persisted.or_else(|| c.ct.clone()) {
-                    Some(crate::AST::CtValue::Int(value)) => Some(value),
-                    Some(_) => None,
-                    None => match &c.value {
-                        crate::AST::Expr::Int(value, _, _, _) => Some(*value),
-                        _ => None,
-                    },
-                };
-                if let Some(value) = value {
-                    int_constants.insert(c.name.clone(), value);
-                }
-            }
-            Item::CodeModule(cm) => {
-                if let Some(body) = &cm.body {
-                    let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
-                    for inner in body {
-                        match inner {
-                            Item::Struct(s) if s.type_params.is_empty() => {
-                                let name = if s.name.starts_with(&member_prefix) {
-                                    s.name.clone()
-                                } else {
-                                    jet_foundation::Names::member_name(&cm.name, &s.name)
-                                };
-                                struct_fields.insert(
-                                    name.clone(),
-                                    {
-                                        let mut fields = s
-                                            .reflection_fields()
-                                            .map(|f| mangle(&f.name))
-                                            .collect::<Vec<_>>();
-                                        add_published_schema_field(s, &mut fields);
-                                        fields
-                                    },
-                                );
-                                struct_field_types.insert(
-                                    name.clone(),
-                                    {
-                                        let mut types = s
-                                            .reflection_fields()
-                                            .map(|f| f.ty.clone())
-                                            .collect::<Vec<_>>();
-                                        add_published_schema_field_type(s, &mut types);
-                                        types
-                                    },
-                                );
-                                reflection_fields.insert(
-                                    name,
-                                    jet_foundation::Reflection::fields(s),
-                                );
-                            }
-                            Item::Enum(e) if e.type_params.is_empty() => {
-                                let name = if e.name.starts_with(&member_prefix) {
-                                    e.name.clone()
-                                } else {
-                                    jet_foundation::Names::member_name(&cm.name, &e.name)
-                                };
-                                register_enum_variants(
-                                    &name,
-                                    &e.variants,
-                                    &mut enum_variants,
-                                    &mut enum_variant_payload_types,
-                                );
-                            }
-                            Item::Const(c) => {
-                                if let Some(value) = &c.ct {
-                                    constants.insert(
-                                        jet_foundation::Names::member_name(&cm.name, &c.name),
-                                        value.clone(),
-                                    );
-                                }
-                                let value = match &c.ct {
-                                    Some(crate::AST::CtValue::Int(value)) => Some(*value),
-                                    _ => match &c.value {
-                                        crate::AST::Expr::Int(value, _, _, _) => Some(*value),
-                                        _ => None,
-                                    },
-                                };
-                                if let Some(value) = value {
-                                    int_constants.insert(
-                                        jet_foundation::Names::member_name(&cm.name, &c.name),
-                                        value,
-                                    );
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    for (module_idx, imported) in bundle.modules.iter().enumerate() {
-        if module_idx == bundle.entry {
-            continue;
-        }
-        for item in &imported.items {
-            match item {
-                Item::Struct(s) => {
-                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
-                        let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
-                        struct_type_params.insert(
-                            name.clone(),
-                            s.type_params.iter().map(|param| param.name.clone()).collect(),
-                        );
-                        struct_fields.insert(
-                            name.clone(),
-                            {
-                                let mut fields = s
-                                    .reflection_fields()
-                                    .map(|field| mangle(&field.name))
-                                    .collect::<Vec<_>>();
-                                add_published_schema_field(s, &mut fields);
-                                fields
-                            },
-                        );
-                        struct_field_types.insert(
-                            name.clone(),
-                            {
-                                let mut types = s
-                                    .reflection_fields()
-                                    .map(|field| {
-                                        crate::Codegen::TIR::qualify_imported_type(
-                                            bundle,
-                                            module_idx,
-                                            &owner,
-                                            &field.ty,
-                                        )
-                                    })
-                                    .collect::<Vec<_>>();
-                                add_published_schema_field_type(s, &mut types);
-                                types
-                            },
-                        );
-                        reflection_fields.insert(
-                            name,
-                            jet_foundation::Reflection::fields(s)
-                                .into_iter()
-                                .map(|mut field| {
-                                    field.ty = crate::Codegen::TIR::qualify_imported_type(
-                                        bundle,
-                                        module_idx,
-                                        &owner,
-                                        &field.ty,
-                                    );
-                                    field
-                                })
-                                .collect(),
-                        );
-                    }
+                    });
+                    reflection_fields.insert(s.name.clone(), jet_foundation::Reflection::fields(s));
                     for field in &s.fields {
                         register_union_type(
                             &field.ty,
@@ -2303,171 +2052,341 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                     }
                 }
                 Item::Enum(e) if e.type_params.is_empty() => {
-                    for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
-                        register_imported_enum_variants(
-                            bundle,
-                            module_idx,
-                            &owner,
-                            &e.name,
-                            &e.variants,
+                    register_enum_variants(
+                        &e.name,
+                        &e.variants,
+                        &mut enum_variants,
+                        &mut enum_variant_payload_types,
+                    );
+                }
+                Item::Func(function) => {
+                    for param in &function.params {
+                        register_union_type(
+                            &param.ty,
+                            &mut enum_variants,
+                            &mut enum_variant_payload_types,
+                        );
+                    }
+                    if let Some(ret) = &function.return_type {
+                        register_union_type(
+                            ret,
                             &mut enum_variants,
                             &mut enum_variant_payload_types,
                         );
                     }
                 }
-                Item::CodeModule(code_module) => {
-                    let Some(body) = &code_module.body else {
-                        continue;
+                Item::Const(c) => {
+                    let persisted = c
+                        .is_persist
+                        .then(|| persist_overrides.get(&c.name).cloned())
+                        .flatten();
+                    if let Some(value) = persisted.clone().or_else(|| c.ct.clone()) {
+                        constants.insert(c.name.clone(), value);
+                    }
+                    let value = match persisted.or_else(|| c.ct.clone()) {
+                        Some(crate::AST::CtValue::Int(value)) => Some(value),
+                        Some(_) => None,
+                        None => match &c.value {
+                            crate::AST::Expr::Int(value, _, _, _) => Some(*value),
+                            _ => None,
+                        },
                     };
-                    for inner in body {
-                        match inner {
-                            Item::Struct(s) if s.type_params.is_empty() => {
-                                struct_fields.insert(
-                                    s.name.clone(),
-                                    s.reflection_fields()
-                                        .map(|field| mangle(&field.name))
-                                        .collect(),
-                                );
-                                struct_field_types.insert(
-                                    s.name.clone(),
-                                    s.reflection_fields()
-                                        .map(|field| field.ty.clone())
-                                        .collect(),
-                                );
-                                reflection_fields.insert(
-                                    s.name.clone(),
-                                    jet_foundation::Reflection::fields(s),
-                                );
-                                for field in &s.fields {
-                                    register_union_type(
-                                        &field.ty,
+                    if let Some(value) = value {
+                        int_constants.insert(c.name.clone(), value);
+                    }
+                }
+                Item::CodeModule(cm) => {
+                    if let Some(body) = &cm.body {
+                        let member_prefix = jet_foundation::Names::member_name(&cm.name, "");
+                        for inner in body {
+                            match inner {
+                                Item::Struct(s) if s.type_params.is_empty() => {
+                                    let name = if s.name.starts_with(&member_prefix) {
+                                        s.name.clone()
+                                    } else {
+                                        jet_foundation::Names::member_name(&cm.name, &s.name)
+                                    };
+                                    struct_fields.insert(name.clone(), {
+                                        let mut fields = s
+                                            .reflection_fields()
+                                            .map(|f| mangle(&f.name))
+                                            .collect::<Vec<_>>();
+                                        add_published_schema_field(s, &mut fields);
+                                        fields
+                                    });
+                                    struct_field_types.insert(name.clone(), {
+                                        let mut types = s
+                                            .reflection_fields()
+                                            .map(|f| f.ty.clone())
+                                            .collect::<Vec<_>>();
+                                        add_published_schema_field_type(s, &mut types);
+                                        types
+                                    });
+                                    reflection_fields
+                                        .insert(name, jet_foundation::Reflection::fields(s));
+                                }
+                                Item::Enum(e) if e.type_params.is_empty() => {
+                                    let name = if e.name.starts_with(&member_prefix) {
+                                        e.name.clone()
+                                    } else {
+                                        jet_foundation::Names::member_name(&cm.name, &e.name)
+                                    };
+                                    register_enum_variants(
+                                        &name,
+                                        &e.variants,
                                         &mut enum_variants,
                                         &mut enum_variant_payload_types,
                                     );
                                 }
+                                Item::Const(c) => {
+                                    if let Some(value) = &c.ct {
+                                        constants.insert(
+                                            jet_foundation::Names::member_name(&cm.name, &c.name),
+                                            value.clone(),
+                                        );
+                                    }
+                                    let value = match &c.ct {
+                                        Some(crate::AST::CtValue::Int(value)) => Some(*value),
+                                        _ => match &c.value {
+                                            crate::AST::Expr::Int(value, _, _, _) => Some(*value),
+                                            _ => None,
+                                        },
+                                    };
+                                    if let Some(value) = value {
+                                        int_constants.insert(
+                                            jet_foundation::Names::member_name(&cm.name, &c.name),
+                                            value,
+                                        );
+                                    }
+                                }
+                                _ => {}
                             }
-                            Item::Enum(e) if e.type_params.is_empty() => {
-                                register_enum_variants(
-                                    &e.name,
-                                    &e.variants,
-                                    &mut enum_variants,
-                                    &mut enum_variant_payload_types,
-                                );
-                            }
-                            _ => {}
                         }
                     }
                 }
                 _ => {}
             }
         }
-    }
-    for (_, fields) in type_shapes.tuples {
-        let tuple_ty = Type::Tuple(
-            fields
-                .iter()
-                .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
-                .collect(),
-        );
-        struct_fields.insert(
-            tuple_ty.name(),
-            fields
-                .iter()
-                .map(|(name, _)| mangle(name))
-                .collect(),
-        );
-        struct_field_types.insert(
-            tuple_ty.name(),
-            fields.iter().map(|(_, ty)| ty.clone()).collect(),
-        );
-    }
-    let distinct_bases = cx
-        .distinct_types
-        .iter()
-        .map(|(name, (base, _))| (name.clone(), base.clone()))
-        .collect();
-    let mut trait_method_owners =
-        std::collections::HashMap::<(String, String), Vec<String>>::new();
-    for item in &module.items {
-        let mut record = |trait_name: &str, owner: &str, methods: &[crate::AST::Func]| {
-            for method in methods {
-                trait_method_owners
-                    .entry((trait_name.to_string(), method.name.clone()))
-                    .or_default()
-                    .push(owner.to_string());
+        for (module_idx, imported) in bundle.modules.iter().enumerate() {
+            if module_idx == bundle.entry {
+                continue;
             }
-        };
-        match item {
-            Item::Struct(def) => {
-                for implementation in &def.trait_impls {
-                    record(
-                        &implementation.trait_name,
-                        &def.name,
-                        &implementation.methods,
-                    );
+            for item in &imported.items {
+                match item {
+                    Item::Struct(s) => {
+                        for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                            let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
+                            struct_type_params.insert(
+                                name.clone(),
+                                s.type_params
+                                    .iter()
+                                    .map(|param| param.name.clone())
+                                    .collect(),
+                            );
+                            struct_fields.insert(name.clone(), {
+                                let mut fields = s
+                                    .reflection_fields()
+                                    .map(|field| mangle(&field.name))
+                                    .collect::<Vec<_>>();
+                                add_published_schema_field(s, &mut fields);
+                                fields
+                            });
+                            struct_field_types.insert(name.clone(), {
+                                let mut types = s
+                                    .reflection_fields()
+                                    .map(|field| {
+                                        crate::Codegen::TIR::qualify_imported_type(
+                                            bundle, module_idx, &owner, &field.ty,
+                                        )
+                                    })
+                                    .collect::<Vec<_>>();
+                                add_published_schema_field_type(s, &mut types);
+                                types
+                            });
+                            reflection_fields.insert(
+                                name,
+                                jet_foundation::Reflection::fields(s)
+                                    .into_iter()
+                                    .map(|mut field| {
+                                        field.ty = crate::Codegen::TIR::qualify_imported_type(
+                                            bundle, module_idx, &owner, &field.ty,
+                                        );
+                                        field
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        for field in &s.fields {
+                            register_union_type(
+                                &field.ty,
+                                &mut enum_variants,
+                                &mut enum_variant_payload_types,
+                            );
+                        }
+                    }
+                    Item::Enum(e) if e.type_params.is_empty() => {
+                        for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
+                            register_imported_enum_variants(
+                                bundle,
+                                module_idx,
+                                &owner,
+                                &e.name,
+                                &e.variants,
+                                &mut enum_variants,
+                                &mut enum_variant_payload_types,
+                            );
+                        }
+                    }
+                    Item::CodeModule(code_module) => {
+                        let Some(body) = &code_module.body else {
+                            continue;
+                        };
+                        for inner in body {
+                            match inner {
+                                Item::Struct(s) if s.type_params.is_empty() => {
+                                    struct_fields.insert(
+                                        s.name.clone(),
+                                        s.reflection_fields()
+                                            .map(|field| mangle(&field.name))
+                                            .collect(),
+                                    );
+                                    struct_field_types.insert(
+                                        s.name.clone(),
+                                        s.reflection_fields()
+                                            .map(|field| field.ty.clone())
+                                            .collect(),
+                                    );
+                                    reflection_fields.insert(
+                                        s.name.clone(),
+                                        jet_foundation::Reflection::fields(s),
+                                    );
+                                    for field in &s.fields {
+                                        register_union_type(
+                                            &field.ty,
+                                            &mut enum_variants,
+                                            &mut enum_variant_payload_types,
+                                        );
+                                    }
+                                }
+                                Item::Enum(e) if e.type_params.is_empty() => {
+                                    register_enum_variants(
+                                        &e.name,
+                                        &e.variants,
+                                        &mut enum_variants,
+                                        &mut enum_variant_payload_types,
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
-            Item::Enum(def) => {
-                for implementation in &def.trait_impls {
-                    record(
-                        &implementation.trait_name,
-                        &def.name,
-                        &implementation.methods,
-                    );
-                }
-            }
-            Item::Impl(implementation) => {
-                if let Some(trait_name) = &implementation.trait_name {
-                    record(
-                        trait_name,
-                        &implementation.type_name,
-                        &implementation.methods,
-                    );
-                }
-            }
-            _ => {}
         }
-    }
-    let iterable_item_types = cx
-        .iterable_hooks
-        .iter()
-        .map(|(collection, hook)| {
-            (
-                (collection.clone(), hook.iter_type.clone()),
-                hook.item_type.clone(),
-            )
+        for (_, fields) in type_shapes.tuples {
+            let tuple_ty = Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                    .collect(),
+            );
+            struct_fields.insert(
+                tuple_ty.name(),
+                fields.iter().map(|(name, _)| mangle(name)).collect(),
+            );
+            struct_field_types.insert(
+                tuple_ty.name(),
+                fields.iter().map(|(_, ty)| ty.clone()).collect(),
+            );
+        }
+        let distinct_bases = cx
+            .distinct_types
+            .iter()
+            .map(|(name, (base, _))| (name.clone(), base.clone()))
+            .collect();
+        let mut trait_method_owners =
+            std::collections::HashMap::<(String, String), Vec<String>>::new();
+        for item in &module.items {
+            let mut record = |trait_name: &str, owner: &str, methods: &[crate::AST::Func]| {
+                for method in methods {
+                    trait_method_owners
+                        .entry((trait_name.to_string(), method.name.clone()))
+                        .or_default()
+                        .push(owner.to_string());
+                }
+            };
+            match item {
+                Item::Struct(def) => {
+                    for implementation in &def.trait_impls {
+                        record(
+                            &implementation.trait_name,
+                            &def.name,
+                            &implementation.methods,
+                        );
+                    }
+                }
+                Item::Enum(def) => {
+                    for implementation in &def.trait_impls {
+                        record(
+                            &implementation.trait_name,
+                            &def.name,
+                            &implementation.methods,
+                        );
+                    }
+                }
+                Item::Impl(implementation) => {
+                    if let Some(trait_name) = &implementation.trait_name {
+                        record(
+                            trait_name,
+                            &implementation.type_name,
+                            &implementation.methods,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        let iterable_item_types = cx
+            .iterable_hooks
+            .iter()
+            .map(|(collection, hook)| {
+                (
+                    (collection.clone(), hook.iter_type.clone()),
+                    hook.item_type.clone(),
+                )
+            })
+            .collect();
+        let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
+        let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
+        let canonical_calls = cx.jit_canonical_calls.borrow().clone();
+        Some(JitProgram {
+            instance_provenance: instance_provenance(bundle),
+            source_file: module.display.clone(),
+            source_text: module.source.clone(),
+            package_hardened: bundle.package_guarantees.harden,
+            edition: bundle.edition.clone(),
+            entry: entry_name,
+            funcs,
+            spawn_lambdas,
+            struct_fields,
+            struct_field_types,
+            memo_dependencies,
+            reflection_fields,
+            reflect_paths,
+            struct_type_params,
+            enum_variants,
+            enum_variant_payload_types,
+            canonical_deopt,
+            canonical_calls,
+            int_constants,
+            constants,
+            distinct_bases,
+            distinct_ranges: cx.distinct_ranges.clone(),
+            codec_migrations,
+            trait_method_owners,
+            iterable_item_types,
         })
-        .collect();
-    let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
-    let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
-    let canonical_calls = cx.jit_canonical_calls.borrow().clone();
-    Some(JitProgram {
-        instance_provenance: instance_provenance(bundle),
-        source_file: module.display.clone(),
-        source_text: module.source.clone(),
-        package_hardened: bundle.package_guarantees.harden,
-        edition: bundle.edition.clone(),
-        entry: entry_name,
-        funcs,
-        spawn_lambdas,
-        struct_fields,
-        struct_field_types,
-        memo_dependencies,
-        reflection_fields,
-        reflect_paths,
-        struct_type_params,
-        enum_variants,
-        enum_variant_payload_types,
-        canonical_deopt,
-        canonical_calls,
-        int_constants,
-        constants,
-        distinct_bases,
-        distinct_ranges: cx.distinct_ranges.clone(),
-        codec_migrations,
-        trait_method_owners,
-        iterable_item_types,
-    })
     })
 }
 
@@ -2498,20 +2417,25 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         &extern_funcs,
     );
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let selected = module.items.iter().find_map(|item| match item {
+    let selected = module
+        .items
+        .iter()
+        .find_map(|item| match item {
             Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
-                (output.selected
-                    && output.module == bundle.entry
-                    && output.params.is_empty())
-                .then(|| output.semantic_name.clone())
+                (output.selected && output.module == bundle.entry && output.params.is_empty())
+                    .then(|| output.semantic_name.clone())
             }),
             _ => None,
-        }).or_else(|| module.items.iter().find_map(|item| match item {
-            Item::Func(function) if function.name == "run" && function.params.is_empty() => {
-                Some("run".to_string())
-            }
-            _ => None,
-        })).or_else(|| {
+        })
+        .or_else(|| {
+            module.items.iter().find_map(|item| match item {
+                Item::Func(function) if function.name == "run" && function.params.is_empty() => {
+                    Some("run".to_string())
+                }
+                _ => None,
+            })
+        })
+        .or_else(|| {
             jet_foundation::CLISchema::entry_schema_for_bundle(bundle)
                 .map(|_| super::mangle_generated("cli_main"))
         });
@@ -2824,8 +2748,13 @@ pub enum TIfCond {
         pattern: TPattern,
         subj: TExpr,
     },
-    IsNone { subj: TExpr },
-    Matches { pattern: TPattern, subj: TExpr },
+    IsNone {
+        subj: TExpr,
+    },
+    Matches {
+        pattern: TPattern,
+        subj: TExpr,
+    },
 }
 
 /// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
@@ -2867,7 +2796,6 @@ pub struct TIndexFieldAssign {
     pub line: usize,
 }
 
-
 /// Injected prelude struct fields (HTTPRequest route metadata). Emit spells lines.
 #[derive(Clone)]
 pub enum TStructExtra {
@@ -2878,10 +2806,7 @@ pub enum TStructExtra {
 /// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
 pub enum THostCall {
     /// `{root}{helper}({args…})` with per-arg wrap style.
-    Helper {
-        helper: String,
-        args: Vec<THostArg>,
-    },
+    Helper { helper: String, args: Vec<THostArg> },
     /// `(recv).{method}({args})`
     Method {
         recv: Box<TExpr>,
@@ -2931,9 +2856,7 @@ pub enum THostCall {
         kind: TGcEditKind,
     },
     /// GC local read: `jet_gc::runtime_or_exit(root.read(|__jet_value| __jet_value.clone()))`.
-    GcRead {
-        root: String,
-    },
+    GcRead { root: String },
     /// Option/pattern projection helpers: `(inner).is_some()` / `.unwrap()` / field project.
     OptionProbe {
         inner: Box<TExpr>,
@@ -2950,20 +2873,13 @@ pub enum THostCall {
         probe: TMatchProbe,
     },
     /// Tuple element project: `(base).{index}` (after str/bin-match unwrap).
-    TupleIndex {
-        base: Box<TExpr>,
-        index: usize,
-    },
+    TupleIndex { base: Box<TExpr>, index: usize },
     /// Struct-pattern subject field: `((*__jet_switch_subject).{field})`
-    SwitchSubjectField {
-        field: String,
-    },
+    SwitchSubjectField { field: String },
     /// The already-evaluated subject of the enclosing `MixedSwitch`.
     SwitchSubjectValue,
     /// Generator `yield e` → `__jet_yield_tx.send(e)`.
-    YieldSend {
-        value: Box<TExpr>,
-    },
+    YieldSend { value: Box<TExpr> },
     /// SQL/HTML/Sh and URL/Path/DateTime typed constructors from literals + hole exprs.
     TypedTextInterp {
         kind: TTypedTextInterpKind,
@@ -2982,10 +2898,7 @@ pub enum THostCall {
         loc: TPanicLoc,
     },
     /// Numeric bounds constant: `{rust_type(ty)}::{member}`.
-    NumericBounds {
-        ty: Type,
-        member: String,
-    },
+    NumericBounds { ty: Type, member: String },
     /// `ExpiringSecret::<T>::new(value, ttl.ms, clock observer)`.
     ExpiringSecretNew {
         value: Box<TExpr>,
@@ -3134,14 +3047,9 @@ pub enum TRequireKind {
         msg: Option<Box<TExpr>>,
     },
     /// `assert_eq(left, right)`
-    RequireEq {
-        left: Box<TExpr>,
-        right: Box<TExpr>,
-    },
+    RequireEq { left: Box<TExpr>, right: Box<TExpr> },
     /// `panic(msg)` / `?? panic(msg)`
-    Panic {
-        msg: Box<TExpr>,
-    },
+    Panic { msg: Box<TExpr> },
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
@@ -4306,7 +4214,7 @@ pub enum TExprKind {
         else_body: Vec<TStmt>,
         else_value: Box<TExpr>,
     },
-    /// D-FAIL-BREACH1=A: a `#Todo` typed hole (`Expr::Todo`, D-TOOL2, E2-M11)
+    /// D-FAIL-BREACH1=A: a `#Todo` typed goal (`Expr::Todo`, D-TOOL2, E2-M11)
     /// emits the registered E3011 Prelude stop. The `expected_type` is the total
     /// sema fact; `line` is the source line resolved at lowering.
     Todo {
@@ -4713,17 +4621,11 @@ pub enum TNumericOp {
     },
     /// Checked f64/Float to f32/F32 narrowing. Values outside F32's finite
     /// range fail instead of becoming infinity.
-    FloatNarrow {
-        dst_spelling: String,
-    },
+    FloatNarrow { dst_spelling: String },
     /// D-TYPE2-SPELL1: check an `Int` against an inline structural range. The
     /// range is carried by the resolved op; TIR and every engine erase the
     /// destination to the ordinary `Int` carrier.
-    InlineRange {
-        lo: i64,
-        hi: i64,
-        fallible: bool,
-    },
+    InlineRange { lo: i64, hi: i64, fallible: bool },
     /// `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string`
     /// arm of `emit_builtin_method`, which fires for any receiver type).
     ToShow,
@@ -4761,7 +4663,9 @@ pub enum TClosureOp {
     MapFold,
     MapFlatMap,
     ListBinarySearchBy,
-    ListMinMaxBy { tuple_struct: String },
+    ListMinMaxBy {
+        tuple_struct: String,
+    },
     /// `find` — `jet_list_find((recv).clone(), f)`.
     Find,
     /// `any` — `jet_list_any((recv).clone(), f)`.
@@ -4800,7 +4704,9 @@ pub enum TClosureOp {
     /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.
     CountBy,
     /// `partition(f)` — inline emit; struct name embedded. `TupleStruct` is `JetTup_<hash>`.
-    Partition { tuple_struct: String },
+    Partition {
+        tuple_struct: String,
+    },
     // #1479
     /// `dedup_by(f)` — `jet_iter_dedup_by({as_iter}, f)`.
     DedupBy,
@@ -4814,7 +4720,9 @@ pub enum TClosureOp {
     // D-PARCAPTURE1=D: explicit `para_` adapters.
     ParaMap,
     ParaFilter,
-    ParaPartition { tuple_struct: String },
+    ParaPartition {
+        tuple_struct: String,
+    },
     ParaFold,
     // D-HOLE1: Option combinators.
     /// `map` on `T?` — `(recv).as_ref().map(f)` (Rust's native `Option::map`, no
@@ -5039,10 +4947,18 @@ pub enum TBuiltinOp {
     OrderingReverse,
     /// `join(sep)` → `(recv).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join((a0).as_str())`.
     JoinSep,
-    Sum { float: bool },
-    Product { float: bool },
-    Min { float: bool },
-    Max { float: bool },
+    Sum {
+        float: bool,
+    },
+    Product {
+        float: bool,
+    },
+    Min {
+        float: bool,
+    },
+    Max {
+        float: bool,
+    },
     Flatten,
     Intersperse,
     Unzip {
@@ -5158,11 +5074,15 @@ pub enum TBuiltinOp {
     /// `last_index_of(v)` → `jet_iter_last_index_of({as_iter}, v)`.
     IterLastIndexOf,
     /// `average()` → `jet_iter_average_{int,float}({as_iter})`.
-    IterAverage { float: bool },
+    IterAverage {
+        float: bool,
+    },
     /// `compare(other)` → `jet_iter_compare({as_iter}, other)`.
     IterCompare,
     /// `split(n)` → `jet_iter_split_at({as_iter}, n, |l,r| Struct{…})`.
-    IterSplit { tuple_struct: String },
+    IterSplit {
+        tuple_struct: String,
+    },
     // #1477 List/Map non-closure surface
     ListSlice,
     ListCopy,
@@ -5172,11 +5092,15 @@ pub enum TBuiltinOp {
     ListIntersection,
     ListDifference,
     ListRandom,
-    ListMinMax { tuple_struct: String },
+    ListMinMax {
+        tuple_struct: String,
+    },
     MapCopy,
     MapEqual,
     MapFirst,
-    MapToList { tuple_struct: String },
+    MapToList {
+        tuple_struct: String,
+    },
     MapMin,
     MapMax,
     MapIntersection,

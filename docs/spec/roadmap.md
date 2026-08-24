@@ -98,8 +98,9 @@ source-map markers and rich panics as the pre-cursor.
 source-level step debugger over the existing tree-walking interpreter (the same
 engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
 `step`/`next`/`continue`/`finish`, `break`/`print`/`locals`/`backtrace`, `<- here`
-caret, all in Jet terms (I2). It declines unsteppable native features with E2203,
-pointing at the real build. Step 2's native DAP/lldb backend shipped; remaining
+caret, all in Jet terms (I2). It declines unsteppable native features at the
+interpreter API boundary with E2203. Step 2's native DAP/lldb backend now
+launches those programs through the same Jet source mapping; remaining
 editor/platform conformance is tracked by Tower #12, which the owner moved to
 Epoch 8 on 2026-07-12.
 
@@ -277,7 +278,9 @@ duplicated here:
   Manual workaround today: use `jet debug <file>` (source-level step debugger,
   D-DBG3) with breakpoints/watch, or add temporary `Log.debug(x)` calls at the
   points where history matters — the interpreter re-run is cheap enough for
-  most debugging sessions. No standing per-variable history buffer exists.
+  most debugging sessions. D-DEVR-CAUSE1=A adds read-only `why` and `when`
+  queries over an existing `.jetproof-replay` receipt; no standing per-variable
+  history buffer exists.
 
 When a deferred item is promoted, add a milestone slot in the appropriate epoch
 README and ratify any new syntax in `syntax-decisions.md` before implementation.

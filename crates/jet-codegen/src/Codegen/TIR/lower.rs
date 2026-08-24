@@ -23,30 +23,30 @@ pub(crate) fn is_eval_fragment() -> bool {
     EVAL_FRAGMENT.with(Cell::get)
 }
 
-mod env;
-mod functions;
-mod statements;
+mod builtins;
+mod call_args;
 mod control_flow;
-mod patterns;
-mod panic;
+mod core_calls;
+mod env;
 mod expressions;
 mod fields;
-mod method_calls;
-mod core_calls;
-mod call_args;
-mod builtins;
+mod functions;
 mod lambdas;
+mod method_calls;
+mod panic;
+mod patterns;
+mod statements;
 
-pub(crate) use env::*;
-pub(crate) use functions::*;
-pub(crate) use statements::*;
+pub(crate) use builtins::*;
+pub(crate) use call_args::*;
 pub(crate) use control_flow::*;
-pub(crate) use patterns::*;
-pub(crate) use panic::*;
+pub(crate) use core_calls::*;
+pub(crate) use env::*;
 pub(crate) use expressions::*;
 pub(crate) use fields::*;
-pub(crate) use method_calls::*;
-pub(crate) use core_calls::*;
-pub(crate) use call_args::*;
-pub(crate) use builtins::*;
+pub(crate) use functions::*;
 pub(crate) use lambdas::*;
+pub(crate) use method_calls::*;
+pub(crate) use panic::*;
+pub(crate) use patterns::*;
+pub(crate) use statements::*;

@@ -1,11 +1,12 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
-use crate::Codegen::Cx;
 use crate::Codegen::mangle;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda_expecting;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::with_lambda_body_expr_cache;
+use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TEnumArg;
 use crate::Codegen::TIR::TEnumPayload;
@@ -14,8 +15,7 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnCoerce;
 use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::with_lambda_body_expr_cache;
+use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 
 /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
 pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
@@ -58,8 +58,10 @@ fn callback_fn_type(ty: &Type) -> Option<&Type> {
     match ty {
         Type::Fn { .. } => Some(ty),
         Type::Tagged { marker, inner }
-            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi))
-                && matches!(inner.as_ref(), Type::Fn { .. }) =>
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)
+            ) && matches!(inner.as_ref(), Type::Fn { .. }) =>
         {
             Some(inner)
         }
@@ -154,9 +156,7 @@ pub(crate) fn lambda_body_ty_expecting(
             if let Some((_, tail)) = lambda_block_tail(stmts) {
                 let mut lam_env = bind_params(lam, env, expected_params);
                 match tail {
-                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => {
-                        lower_expr(e, cx, &mut lam_env).ty
-                    }
+                    Stmt::Return(Some(e), _) | Stmt::Expr(e) => lower_expr(e, cx, &mut lam_env).ty,
                     _ => unit_type(),
                 }
             } else {
@@ -206,10 +206,7 @@ pub(crate) fn lower_call_arg_value(
     let site = a.flags.binder_site.unwrap_or(a.span.start as u32);
     for (name, slot, ty) in &a.flags.binder_refs {
         let temp = jet_format!("{jet_prefix}arg{site}_{slot}");
-        env.binder_refs.insert(
-            name.clone(),
-            (temp, ty.clone()),
-        );
+        env.binder_refs.insert(name.clone(), (temp, ty.clone()));
     }
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
@@ -222,10 +219,15 @@ pub(crate) fn lower_call_arg_value(
             }
         }
         (Expr::Ident(name, _), Some((_, ty)))
-            if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() => TExpr {
-            ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
-            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(name.clone()))),
-        },
+            if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
+        {
+            TExpr {
+                ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(
+                    name.clone(),
+                ))),
+            }
+        }
         (Expr::Lambda(lam), Some((_, ty)))
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
         {
@@ -233,11 +235,7 @@ pub(crate) fn lower_call_arg_value(
                 unreachable!()
             };
             let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
-            let name = mangle(&format!(
-                "c_callback_{}_{}",
-                lam.span.start,
-                lam.span.end
-            ));
+            let name = mangle(&format!("c_callback_{}_{}", lam.span.start, lam.span.end));
             TExpr {
                 ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::CCallback {
@@ -301,10 +299,7 @@ pub(crate) fn lower_one_call_arg(
                 ty: value.ty,
                 kind: TExprKind::Local(local),
             }),
-        (_, kind) => TExpr {
-            ty: value.ty,
-            kind,
-        },
+        (_, kind) => TExpr { ty: value.ty, kind },
     };
     // Decide this before `preserve_typed_list_shape` retags the local read to
     // the callee's growable-list type. The source expression is still the
@@ -327,7 +322,10 @@ pub(crate) fn lower_one_call_arg(
     // head collapse) all need a concrete element type, so nothing is lost.
     let value = match (&conv, value) {
         (Some((_, want @ Type::List(_))), v)
-            if !crate::Generics::free_type_params(want).is_empty() => v,
+            if !crate::Generics::free_type_params(want).is_empty() =>
+        {
+            v
+        }
         (Some((_, want @ (Type::List(_) | Type::FixedList { .. }))), v) => {
             super::preserve_typed_list_shape(v, want, cx)
         }
@@ -341,13 +339,13 @@ pub(crate) fn lower_one_call_arg(
         };
     let clone = !resource_move
         && (web_noncopy_int
-        || a.flags.implicit_clone
-        || matches!(
-            (&a.expr, conv.as_ref()),
-            (Expr::Ident(name, _), None | Some((AccessConvention::Move, _)))
-                if env.is_borrowed(name)
-                    && env.ty_of(name).is_some_and(|ty| !ty.is_scalar())
-        ));
+            || a.flags.implicit_clone
+            || matches!(
+                (&a.expr, conv.as_ref()),
+                (Expr::Ident(name, _), None | Some((AccessConvention::Move, _)))
+                    if env.is_borrowed(name)
+                        && env.ty_of(name).is_some_and(|ty| !ty.is_scalar())
+            ));
     let arc_clone = a.flags.shared_auto_clone;
     // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
     let fn_coerce = match &conv {
@@ -406,8 +404,7 @@ pub(crate) fn lower_one_call_arg(
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
     let (borrow, mut_borrow) = match &conv {
         Some((AccessConvention::Read, t))
-            if !t.is_scalar()
-                && !(a.flags.c_callback_symbol && callback_fn_type(t).is_some()) =>
+            if !t.is_scalar() && !(a.flags.c_callback_symbol && callback_fn_type(t).is_some()) =>
         {
             (true, false)
         }
@@ -462,9 +459,9 @@ pub(crate) fn lower_extern_call_arg(
     // D-CABI-CALLBACK1: the C bridge is still an extern call, but its callback
     // argument needs the same stable function item / lambda wrapper as a direct
     // C call. Preserve sema's fact instead of re-boxing it as `dyn Fn`.
-    let c_callback = conv.as_ref().is_some_and(|(_, ty)| {
-        a.flags.c_callback_symbol && callback_fn_type(ty).is_some()
-    });
+    let c_callback = conv
+        .as_ref()
+        .is_some_and(|(_, ty)| a.flags.c_callback_symbol && callback_fn_type(ty).is_some());
     let value = if c_callback {
         lower_one_call_arg(a, conv.clone(), env, cx).value
     } else {
@@ -584,9 +581,9 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
 
     match e {
         Expr::Paren(inner, _) => tir_recv_jet_ty(inner, env),
-        Expr::Binary(crate::AST::BinOp::Compare, _, _, _) => Some(Type::Named(
-            crate::Syntax::TYPE_ORDERING.to_string(),
-        )),
+        Expr::Binary(crate::AST::BinOp::Compare, _, _, _) => {
+            Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string()))
+        }
         Expr::Ident(name, _) => env.ty_of(name).map(builtin_dispatch_ty),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),

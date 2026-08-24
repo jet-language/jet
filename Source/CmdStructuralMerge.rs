@@ -7,7 +7,11 @@ use std::process::{exit, Command};
 
 use jet::Diagnostics::json_str as json_string;
 use jet_foundation::ExitCodes;
-use jet_semindex::{open_structural_with_overlays, DefinitionFact, SemIndexError};
+use jet_foundation::Report::render_status_json;
+use jet_semindex::{
+    open_structural_with_overlays, semantic_ops_for_file, DefinitionFact, SemIndexError,
+    SemanticOp,
+};
 
 #[derive(Clone)]
 struct Unit {
@@ -19,6 +23,8 @@ struct Unit {
 struct Document {
     units: Vec<Unit>,
     suffix: String,
+    source_hash: String,
+    semantic_ops: Vec<SemanticOp>,
 }
 
 struct UnitMatches {
@@ -39,6 +45,7 @@ struct Change {
     stable_id: String,
     before: Option<String>,
     after: Option<String>,
+    semantic_op: Option<SemanticOp>,
 }
 
 #[derive(Clone)]
@@ -62,13 +69,21 @@ pub(crate) fn run_diff(args: &[String]) {
     if paths.len() != 2 { fail("`jet diff --structural` needs two checked Jet files", "jet diff --structural before.jet after.jet"); }
     let before = load(Path::new(&paths[0]));
     let after = load(Path::new(&paths[1]));
-    let changes = structural_diff(&before.units, &after.units);
+    let ops = transition_ops(&before, &after);
+    let changes = structural_diff(&before.units, &after.units, &ops);
     let report = report_mode(args);
     if report == "text" {
         if changes.is_empty() { println!("no structural changes"); }
         for change in changes { println!("{}: {} [{}]", change.kind.name(), change.after.as_deref().or(change.before.as_deref()).unwrap_or("definition"), change.stable_id); }
     } else {
-        println!("{{\"schema_version\":1,\"kind\":\"structural_diff\",\"changes\":[{}]}}", changes.iter().map(change_json).collect::<Vec<_>>().join(","));
+        let payload = format!(
+            "{{\"changes\":[{}]}}",
+            changes.iter().map(change_json).collect::<Vec<_>>().join(",")
+        );
+        println!(
+            "{}",
+            render_status_json("ok", true, "diff.structural", &format!(",\"structural_diff\":{payload}"))
+        );
     }
 }
 
@@ -105,7 +120,16 @@ pub(crate) fn run_merge(args: &[String]) {
     if let Err(err) = open_structural_with_overlays(&output_path, &overlays) { render_index_error("merged output did not pass parser and sema", err); }
     if let Err(err) = fs::write(&output_path, formatted.as_bytes()) { fail(&format!("could not write `{}`: {err}", output_path.display()), "choose a writable --out path"); }
     if report_mode(args) == "text" { println!("merged: {}", output_path.display()); }
-    else { println!("{{\"schema_version\":1,\"kind\":\"structural_merge\",\"status\":\"merged\",\"output\":{}}}", json_string(&output_path.display().to_string())); }
+    else {
+        let payload = format!(
+            "{{\"output\":{}}}",
+            json_string(&output_path.display().to_string())
+        );
+        println!(
+            "{}",
+            render_status_json("merged", true, "merge.structural", &format!(",\"structural_merge\":{payload}"))
+        );
+    }
 }
 
 pub(crate) fn structural_help(command: &str) -> Option<&'static str> {
@@ -130,11 +154,18 @@ fn load(path: &Path) -> Document {
         unit.leading = source.get(cursor..unit.fact.span.start).unwrap_or("").to_string();
         cursor = unit.fact.span.end;
     }
-    Document { units, suffix: source.get(cursor..).unwrap_or("").to_string() }
+    let source_hash = jet::SHA256::sha256_hex(source.as_bytes());
+    let semantic_ops = semantic_ops_for_file(path, &source_hash);
+    Document {
+        units,
+        suffix: source.get(cursor..).unwrap_or("").to_string(),
+        source_hash,
+        semantic_ops,
+    }
 }
 
-fn structural_diff(before: &[Unit], after: &[Unit]) -> Vec<Change> {
-    let matches = match_units(before, after);
+fn structural_diff(before: &[Unit], after: &[Unit], ops: &[SemanticOp]) -> Vec<Change> {
+    let matches = match_units(before, after, ops);
     let mut used = BTreeSet::new();
     let mut changes = Vec::new();
     for (left, right) in before.iter().enumerate().map(|(i, unit)| (unit, matches.matched.get(&i).copied().flatten())) {
@@ -143,16 +174,23 @@ fn structural_diff(before: &[Unit], after: &[Unit]) -> Vec<Change> {
             Some(index) => {
                 used.insert(index);
                 let right = &after[index];
-                let renamed = left.fact.name != right.fact.name;
+                let rename = semantic_rename(left, right, ops);
                 let signature_changed = left.fact.signature_id != right.fact.signature_id;
                 let content_changed = left.fact.content_id != right.fact.content_id;
-                if renamed { changes.push(change(ChangeKind::Renamed, left, Some(right))); }
+                if rename.is_some() {
+                    changes.push(change_with_op(
+                        ChangeKind::Renamed,
+                        left,
+                        Some(right),
+                        rename,
+                    ));
+                }
                 // Comparing two standalone paths is often how editors present
                 // an unsaved/formatted buffer. A path change is a semantic move
                 // only when the declaration also changed; identical checked
                 // definitions do not manufacture move churn.
                 if left.fact.module_path != right.fact.module_path
-                    && (renamed || signature_changed || content_changed)
+                    && (rename.is_some() || signature_changed || content_changed)
                 {
                     changes.push(change(ChangeKind::Moved, left, Some(right)));
                 }
@@ -167,10 +205,29 @@ fn structural_diff(before: &[Unit], after: &[Unit]) -> Vec<Change> {
 }
 
 fn change(kind: ChangeKind, before: &Unit, after: Option<&Unit>) -> Change {
-    Change { kind, stable_id: after.map(|u| u.fact.stable_id.clone()).unwrap_or_else(|| before.fact.stable_id.clone()), before: Some(before.fact.human_identity.clone()), after: after.map(|u| u.fact.human_identity.clone()) }
+    change_with_op(kind, before, after, None)
 }
 
-fn match_units(base: &[Unit], side: &[Unit]) -> UnitMatches {
+fn change_with_op(
+    kind: ChangeKind,
+    before: &Unit,
+    after: Option<&Unit>,
+    semantic_op: Option<&SemanticOp>,
+) -> Change {
+    let stable_id = semantic_op
+        .and_then(|op| op.targets.first().map(|target| target.stable_id.clone()))
+        .or_else(|| after.map(|unit| unit.fact.stable_id.clone()))
+        .unwrap_or_else(|| before.fact.stable_id.clone());
+    Change {
+        kind,
+        stable_id,
+        before: Some(before.fact.human_identity.clone()),
+        after: after.map(|u| u.fact.human_identity.clone()),
+        semantic_op: semantic_op.cloned(),
+    }
+}
+
+fn match_units(base: &[Unit], side: &[Unit], ops: &[SemanticOp]) -> UnitMatches {
     let mut result = BTreeMap::new();
     let mut ambiguous = BTreeMap::new();
     let mut used = BTreeSet::new();
@@ -191,10 +248,15 @@ fn match_units(base: &[Unit], side: &[Unit]) -> UnitMatches {
 
     for (index, unit) in base.iter().enumerate() {
         if result.contains_key(&index) { continue; }
-        let renamed = candidates(side, &used, |candidate| rename_key(candidate) == rename_key(unit));
+        let semantic = candidates(side, &used, |candidate| {
+            semantic_rename(unit, candidate, ops).is_some()
+        });
         let signature = candidates(side, &used, |candidate| candidate.fact.signature_id == unit.fact.signature_id);
         let ancestry = candidates(side, &used, |candidate| candidate.fact.stable_id == unit.fact.stable_id);
-        let selected = [renamed, signature, ancestry].into_iter().find(|set| !set.is_empty()).unwrap_or_default();
+        let selected = [semantic, signature, ancestry]
+            .into_iter()
+            .find(|set| !set.is_empty())
+            .unwrap_or_default();
         if selected.len() == 1 {
             used.insert(selected[0]);
             result.insert(index, Some(selected[0]));
@@ -213,25 +275,29 @@ where F: Fn(&Unit) -> bool {
     side.iter().enumerate().filter(|(i, candidate)| !used.contains(i) && predicate(candidate)).map(|(i, _)| i).collect()
 }
 
-fn rename_key(unit: &Unit) -> String {
-    let mut out = String::new();
-    let mut chars = unit.source.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '/' && chars.peek() == Some(&'/') {
-            chars.next();
-            for next in chars.by_ref() { if next == '\n' { break; } }
-        } else if ch.is_alphabetic() || ch == '_' {
-            let mut word = ch.to_string();
-            while chars.peek().is_some_and(|next| next.is_alphanumeric() || *next == '_') { word.push(chars.next().unwrap()); }
-            if word == unit.fact.name { out.push('_'); } else { out.push_str(&word); }
-        } else if !ch.is_whitespace() { out.push(ch); }
-    }
-    out
+fn semantic_rename<'a>(
+    before: &Unit,
+    after: &Unit,
+    ops: &'a [SemanticOp],
+) -> Option<&'a SemanticOp> {
+    ops.iter().find(|op| {
+        op.kind == "rename"
+            && op.from.as_deref() == Some(before.fact.name.as_str())
+            && op.to.as_deref() == Some(after.fact.name.as_str())
+            && op.targets.iter().any(|target| {
+                target.stable_id == before.fact.stable_id
+                    || target.before == before.fact.human_identity
+                    || (target.kind == before.fact.kind
+                        && target.module_path == before.fact.module_path)
+            })
+    })
 }
 
 fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, Vec<Conflict>) {
-    let ours_matches = match_units(&base.units, &ours.units);
-    let theirs_matches = match_units(&base.units, &theirs.units);
+    let ours_ops = transition_ops(base, ours);
+    let theirs_ops = transition_ops(base, theirs);
+    let ours_matches = match_units(&base.units, &ours.units, &ours_ops);
+    let theirs_matches = match_units(&base.units, &theirs.units, &theirs_ops);
     let mut ours_used = BTreeSet::new();
     let mut theirs_used = BTreeSet::new();
     let mut merged = String::new();
@@ -265,7 +331,13 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
             (Some(o), Some(t)) if o.fact.content_id == original.fact.content_id => push_unit(&mut merged, &leading, &t.source),
             (Some(o), Some(t)) if t.fact.content_id == original.fact.content_id => push_unit(&mut merged, &leading, &o.source),
             (Some(o), None) | (None, Some(o)) => conflicts.push(conflict("delete_edit", original, o, o)),
-            (Some(o), Some(t)) => conflicts.push(conflict("overlapping_edit", original, o, t)),
+            (Some(o), Some(t)) => {
+                if let Some(source) = merge_recorded_rename(original, o, t, &ours_ops, &theirs_ops) {
+                    push_unit(&mut merged, &leading, &source);
+                } else {
+                    conflicts.push(conflict("overlapping_edit", original, o, t));
+                }
+            }
         }
     }
     let ours_added: Vec<&Unit> = ours.units.iter().enumerate().filter(|(i, _)| !ours_used.contains(i)).map(|(_, u)| u).collect();
@@ -312,6 +384,70 @@ fn merge_units(base: &Document, ours: &Document, theirs: &Document) -> (String, 
     let suffix = merge_shell("suffix", &base.suffix, &ours.suffix, &theirs.suffix, &mut conflicts);
     merged.push_str(&suffix);
     (merged, conflicts)
+}
+
+fn transition_ops(before: &Document, after: &Document) -> Vec<SemanticOp> {
+    let mut out = Vec::new();
+    for op in before
+        .semantic_ops
+        .iter()
+        .chain(after.semantic_ops.iter())
+        .filter(|op| op.matches_transition(&before.source_hash, &after.source_hash))
+    {
+        if !out.contains(op) {
+            out.push(op.clone());
+        }
+    }
+    out
+}
+
+fn merge_recorded_rename(
+    base: &Unit,
+    ours: &Unit,
+    theirs: &Unit,
+    ours_ops: &[SemanticOp],
+    theirs_ops: &[SemanticOp],
+) -> Option<String> {
+    let ours_rename = semantic_rename(base, ours, ours_ops);
+    let theirs_rename = semantic_rename(base, theirs, theirs_ops);
+    let (from, to) = match (ours_rename.as_ref(), theirs_rename.as_ref()) {
+        (Some(ours), Some(theirs)) if ours.to == theirs.to => {
+            (base.fact.name.as_str(), ours.to.as_deref()?)
+        }
+        (Some(ours), None) => (base.fact.name.as_str(), ours.to.as_deref()?),
+        (None, Some(theirs)) => (base.fact.name.as_str(), theirs.to.as_deref()?),
+        _ => return None,
+    };
+    let renamed_base = rename_source(&base.source, from, to)?;
+    let other = if ours_rename.is_some() && theirs_rename.is_none() {
+        rename_source(&theirs.source, from, to)?
+    } else if theirs_rename.is_some() && ours_rename.is_none() {
+        rename_source(&ours.source, from, to)?
+    } else {
+        theirs.source.clone()
+    };
+    if ours.source == theirs.source {
+        Some(ours.source.clone())
+    } else if ours.source == renamed_base {
+        Some(other)
+    } else if theirs.source == renamed_base {
+        Some(ours.source.clone())
+    } else {
+        None
+    }
+}
+
+fn rename_source(source: &str, from: &str, to: &str) -> Option<String> {
+    let (start, _) = source.match_indices(from).find(|(start, _)| {
+        let before = source[..*start].chars().next_back();
+        let end = *start + from.len();
+        let after = source[end..].chars().next();
+        before.is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
+            && after.is_none_or(|ch| !ch.is_alphanumeric() && ch != '_')
+    })?;
+    let mut renamed = source.to_string();
+    renamed.replace_range(start..start + from.len(), to);
+    Some(renamed)
 }
 
 fn push_unit(output: &mut String, leading: &str, source: &str) {
@@ -380,7 +516,14 @@ fn render_conflicts(conflicts: &[Conflict], mode: &str) {
         for conflict in conflicts { eprintln!("conflict: {} ({})\n stable id: {}\n ours: {}\n theirs: {}", conflict.human_identity, conflict.kind, conflict.stable_id, conflict.ours, conflict.theirs); }
         eprintln!("merge stopped: resolve conflicts manually; no output was written");
     } else {
-        eprintln!("{{\"schema_version\":1,\"kind\":\"structural_merge\",\"status\":\"conflict\",\"conflicts\":[{}]}}", conflicts.iter().map(conflict_json).collect::<Vec<_>>().join(","));
+        let payload = format!(
+            "{{\"conflicts\":[{}]}}",
+            conflicts.iter().map(conflict_json).collect::<Vec<_>>().join(",")
+        );
+        eprintln!(
+            "{}",
+            render_status_json("conflict", false, "merge.structural", &format!(",\"structural_merge\":{payload}"))
+        );
     }
 }
 
@@ -459,7 +602,39 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
     out
 }
-fn change_json(change: &Change) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"before\":{},\"after\":{}}}", json_string(change.kind.name()), json_string(&change.stable_id), change.before.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()), change.after.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into())) }
+fn change_json(change: &Change) -> String {
+    let semantic_op = change
+        .semantic_op
+        .as_ref()
+        .map(semantic_op_json)
+        .unwrap_or_else(|| "null".to_string());
+    format!(
+        "{{\"kind\":{},\"stable_id\":{},\"before\":{},\"after\":{},\"semantic_op\":{}}}",
+        json_string(change.kind.name()),
+        json_string(&change.stable_id),
+        change.before.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()),
+        change.after.as_ref().map(|v| json_string(v)).unwrap_or_else(|| "null".into()),
+        semantic_op,
+    )
+}
+fn semantic_op_json(op: &SemanticOp) -> String {
+    let optional = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(|value| json_string(value))
+            .unwrap_or_else(|| "null".to_string())
+    };
+    format!(
+        "{{\"kind\":{},\"rule_id\":{},\"from\":{},\"to\":{},\"node\":{},\"match\":{},\"replace\":{}}}",
+        json_string(&op.kind),
+        optional(&op.rule_id),
+        optional(&op.from),
+        optional(&op.to),
+        optional(&op.node),
+        optional(&op.match_template),
+        optional(&op.replace_template),
+    )
+}
 fn conflict_json(conflict: &Conflict) -> String { format!("{{\"kind\":{},\"stable_id\":{},\"human_identity\":{},\"ours\":{},\"theirs\":{}}}", json_string(conflict.kind), json_string(&conflict.stable_id), json_string(&conflict.human_identity), json_string(&conflict.ours), json_string(&conflict.theirs)) }
 fn render_index_error(context: &str, error: SemIndexError) -> ! { crate::cli_error!(@fix "E2105", context, "correct source errors; structural tools never merge unchecked code"); let SemIndexError::Load(diags) = error; for diagnostic in diags { eprintln!("  {}: {}", diagnostic.code, diagnostic.what); } exit(ExitCodes::USER_ERROR) }
 fn fail(message: &str, fix: &str) -> ! { crate::cli_error!(@fix "E2104", message, fix); exit(ExitCodes::USAGE) }

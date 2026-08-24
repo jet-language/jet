@@ -4,6 +4,8 @@
 // same source. CLI, LSP, Foundation JSON, and generated test reports all
 // serialize this envelope instead of maintaining separate protocol shapes.
 
+pub const REPORT_NAME: &str = "jet.report";
+pub const REPORT_VERSION: u32 = 1;
 pub const REPORT_SCHEMA: &str = "jet.report/v1";
 
 /// Render one command result through the shared machine-report surface.
@@ -36,6 +38,7 @@ mod tests {
             "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"plan\",\"ok\":true,\"action\":\"a\\\"ction\",\"applied\":false}"
         );
     }
+
 }
 
 /// D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.

@@ -596,7 +596,7 @@ reports, not compiler warnings.
 | E3004 | runtime | task cancelled at a cooperative wait point (D-CANCELMODEL1) |
 | E3005 | runtime | a `#Pre`/`#Post` contract clause failed — checked in every build, not a debug/release split (D-PREPOST1) |
 | E3010 | runtime | an arithmetic or bounds operation has no valid result |
-| E3011 | runtime | a `#Todo` hole was reached at runtime |
+| E3011 | runtime | a `#Todo` goal was reached at runtime |
 | E3012 | runtime | call depth exceeded Jet's safe runtime limit |
 | R0801 | runtime | a raw access used an address outside the allocation provenance tracked by its active `#Unsafe` gate (D-MEM-SENTRY1) |
 | R0802 | runtime | a raw access used storage after the allocator quarantined and poisoned it (D-MEM-SENTRY1) |
@@ -927,10 +927,20 @@ reports, not compiler warnings.
 | E2111 | sema  | collector-owned graph escapes into an ownership-only function (D-OPTGC1, card #658) |
 | E2201 | interp | `jet dev` can't interpret a feature (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (E2-M4, D-DEV1) |
 | E2202 | interp | `jet dev` interpreter step budget exhausted — likely an unbounded loop (E2-M4) |
-| E2203 | interp | `jet debug` can't step through a feature its interpreter doesn't cover (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (D-DBG3) |
+| E2203 | interp | an interpreter-only debug session can't step through a feature outside its safe boundary; the native `jet debug` CLI routes these programs to LLDB (D-DBG3) |
 | E2204 | interp | `jet debug` session ended early — the user typed `quit` at the `(jet)` prompt before the program finished (D-DBG3) |
 | E2210 | interp | a `jet dev` edit changed a type surface, so the dev loop restarts instead of swapping (c77, D-HOTSWAP1) |
 | E2211 | jit   | *retired by D-LENS-RUN2=A / #778* (was: resident Cranelift gap hard-stopped `jet run`; gaps now silent-deopt to the canonical interpreter; use `--trace-tiers`) |
+| E2230 | debug | native debugger setup failed (D-DBG-DIAG1) |
+| E2231 | debug | native debugger attach target failed identity or map verification (D-DBG-DIAG1) |
+| E2232 | debug | native debugger request is invalid in the current lifecycle or stop generation (D-DBG-DIAG1) |
+| E2233 | debug | native debugger backend timed out (D-DBG-DIAG1) |
+| E2234 | debug | supported native debugger backend is unavailable or unsupported (D-DBG-DIAG1) |
+| E2235 | debug | no stoppable Jet statement has a verified native mapping (D-DBG-DIAG1) |
+| E2236 | debug | native debugger editor configuration is invalid (D-DBG-DIAG1) |
+| E2237 | debug | native debugger connection was lost before cleanup was proven (D-DBG-DIAG1) |
+| E2238 | debug | native debugger object reference is stale after execution resumed (D-DBG-DIAG1) |
+| E2239 | debug | native debugger invariant failed (D-DBG-DIAG1) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
 | L2101 | jet   | `jet self doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
@@ -1115,8 +1125,26 @@ build path; it never silently falls back to a different answer.
 |------|------|-----|-----|
 | E2201 | `jet dev` can't interpret this program yet — it uses a feature the dev interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `#Unsafe`/`core.mem` region, or a native-only core module like files/clock/random/environment/process). | The dev interpreter runs a deterministic, pure-enough subset for instant feedback; features that touch threads, foreign code, raw memory, or the outside world need the real native build. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` keeps showing checks live. Opt in with `jet dev <file> --try-anyway` to attempt execution past the boundary, with no guarantees (D-DEV1). |
 | E2202 | A program ran too long for `jet dev` to keep interpreting (the step budget was exhausted). | `jet dev` interprets your program; a run that never finishes is almost always a loop whose condition never becomes false. | Check the loop near the pointed-at line for a condition that never ends; `jet run` executes the real build with no step limit. |
-| E2203 | `jet debug` can't step through this program yet — it uses a feature the debugger's interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `#Unsafe`/`core.mem` region, or a native-only core module like files/clock/random/environment/process). | `jet debug` steps your program in the same interpreter `jet dev` uses; features that touch threads, foreign code, raw memory, or the outside world can't be stepped at the Jet source level yet. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; for a step-through, remove the unsupported feature or wait for the native-debugger milestone (D-DBG3 step 2). |
+| E2203 | an interpreter-only debug session can't step through this program — it uses a feature outside the safe interpreter boundary (a task/channel, `extern rust`/C FFI, an `#Unsafe`/`core.mem` region, or native-only core such as files/clock/random/environment/process). | The interpreter debugger cannot model threads, foreign code, raw memory, or host state. The native `jet debug` CLI normally selects the LLDB backend for this program. | Use the native `jet debug <file>` path with LLDB installed, or use `jet run <file>` when native debugging is unavailable. |
 | E2204 | The `jet debug` session ended before the program finished — you typed `quit` at the `(jet)` prompt. | Quitting the debugger stops the interpreted run; the program did not run to completion. | Run `jet debug <file>` again and use `continue` (or `c`) to run to the end, or `jet run <file>` to run it without the debugger. |
+
+Native DAP failures use the same stable Jet diagnostic record in the response
+body (`jet.diagnostic/v1`). The DAP `error.id` is the protocol class; clients
+must use the Jet code, not backend text, for automation.
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E2230 | debug setup failed | The requested Jet debug build or launch setup did not complete. | Fix the earlier Jet diagnostic, then start a new debug session. |
+| E2231 | debugger could not attach to the authorized process | The process identity, executable, source hashes, or `.jetmap` did not remain verified. | Stop the target or choose the matching local Jet build, then attach again. |
+| E2232 | debugger request is invalid in the current state | The DAP lifecycle or stop generation does not permit the request. | Wait for the stated lifecycle event, then retry. |
+| E2233 | native debugger timed out | The backend did not answer before the bounded read deadline. | Check the target process and start a new session. |
+| E2234 | native debugger is unavailable | The supported local backend is missing, lost, or returned an unsupported result. | Install or repair the supported backend, then retry. |
+| E2235 | no stoppable Jet statement at `{file}:{line}` | The source line has no verified Jet-to-native mapping. | Move the breakpoint to a mapped Jet statement. |
+| E2236 | Jet debug configuration is invalid | A request field violates the debugger's bounded local contract. | Correct the field named in the diagnostic, then retry. |
+| E2237 | debug session connection was lost | The editor, adapter, or debugger control channel closed before cleanup was proven. | Check the target process, then start a new debug session. |
+| E2238 | debug view is from an earlier stop | A frame, scope, or variable reference expired when execution resumed. | Refresh the editor's stack and variables after the next stop. |
+| E2239 | internal debugger error | Jet could not preserve a debugger invariant. | Start a new session and report the diagnostic if it repeats. |
+
 | E2210 | This edit changed a type, so `jet dev` is restarting instead of swapping (the message names what changed — a struct field, an enum variant, or a function signature). | A hot swap re-applies code while the program's types stay the same; changing the shape of your data means the running code is rebuilt cleanly from the new types. | Nothing to fix — `jet dev` restarted with the new types; this note just explains why the swap became a restart. Type-stable edits (function bodies, statements) swap without a restart. |
 | E2211 | *retired by D-LENS-RUN2=A / #778* — was: Jet JIT has a compiler gap for this checked program. | Coverage gaps no longer hard-stop `jet run`; the function deopts to the canonical interpreter. | Use `jet run --trace-tiers` to see per-function tier, reason, and timing. |
 
@@ -1384,12 +1412,12 @@ server built on top. E28xx is the block for M10.
 
 ## Testing and tooling diagnostics (E2-M11)
 
-Quality workflows: doctests, snapshot testing, `todo` typed holes, measured claims via `jet test --measure`, and authority summaries. E29xx is the block for M11.
+Quality workflows: doctests, snapshot testing, `todo` typed goals, measured claims via `jet test --measure`, and authority summaries. E29xx is the block for M11.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2901 | Doctest output mismatch. Expected: `{expected}` Got: `{actual}` | The example in the doc comment claims a different result from what the code produces. Docs cannot lie (D-TEST4/I5 generalized to user code). | Run `jet test --update-snapshots` to update the golden output, or fix the code to match the claimed output. |
-| E2902 | `#Todo` at `{file}:{line}` — expected `{type}` | A `#Todo` typed hole was reached at runtime. The hole compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `#Todo` with a real implementation. |
+| E2902 | `#Todo` at `{file}:{line}` — expected `{type}` | A `#Todo` typed goal was reached at runtime. The goal compiles anywhere and type-checks, but panics when executed (D-TOOL2). | Replace `#Todo` with a real implementation. |
 | E2903 | performance budget `{name}` is not valid | One grammar rule, typed value, unit, direction, comparison, or applicability constraint is invalid. | Use the one legal typed budget form named by the diagnostic. |
 | E2904 | performance budgets `{a}` and `{b}` overlap | Both declarations cover the same effective metric, scope, provider, target, profile, and applicability key. | Remove one declaration or make their applicability disjoint. |
 | E2905 | performance budget `{name}` cannot resolve `{attachment}` | The attachment has zero or multiple canonical matches. | Name one qualified scope, target, profile, or provider identity. |

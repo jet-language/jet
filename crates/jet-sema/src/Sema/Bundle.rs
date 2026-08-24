@@ -47,12 +47,13 @@ use Validation::{
     apply_helper_layer_inference, qualified_effect_facts, taint_check_item,
 };
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IncrementalSemaStats {
     pub hits: u64,
     pub recomputes: u64,
     pub live_items: usize,
     pub live_item_bytes: usize,
+    pub recomputed_items: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -679,6 +680,7 @@ pub struct IncrementalSemaCache {
     functions: HashMap<String, CachedFunctionBody>,
     hits: u64,
     recomputes: u64,
+    measurement_recomputed_items: Vec<String>,
 }
 
 impl IncrementalSemaCache {
@@ -720,7 +722,15 @@ impl IncrementalSemaCache {
                             + format!("{:?}", entry.pending_diagnostics).len()
                     })
                     .sum::<usize>(),
+            recomputed_items: self.measurement_recomputed_items.clone(),
         }
+    }
+
+    /// Start one measured re-verdict window. The cumulative counters stay
+    /// available for existing clients; this list names only work in the next
+    /// window so a receipt can show the edit's actual cone.
+    pub fn clear_measurement(&mut self) {
+        self.measurement_recomputed_items.clear();
     }
 
     pub fn clear(&mut self) {
@@ -728,6 +738,7 @@ impl IncrementalSemaCache {
         self.module_interfaces.clear();
         self.module_dependencies.clear();
         self.functions.clear();
+        self.measurement_recomputed_items.clear();
     }
 
     fn begin_bundle(&mut self, bundle: &ProgramBundle) {
@@ -800,8 +811,13 @@ impl IncrementalSemaCache {
     }
 
     pub(super) fn store(&mut self, key: String, entry: CachedFunctionBody) {
-        self.recomputes += 1;
+        self.record_recompute(key.clone());
         self.functions.insert(key, entry);
+    }
+
+    pub(super) fn record_recompute(&mut self, key: String) {
+        self.recomputes += 1;
+        self.measurement_recomputed_items.push(key);
     }
 }
 

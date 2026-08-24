@@ -1,12 +1,10 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::Type;
-use crate::Codegen::Cx;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_path;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
-use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -20,15 +18,15 @@ use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStrPart;
+use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
+use crate::AST::Type;
 
 /// The Rust pattern a `TPattern` spells. The position decides which of codegen's
 /// three pattern shapes applies; the pattern and its owning enum are the only
 /// other facts, both already resolved at lowering.
 pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
     match &pattern.position {
-        TPatternPosition::Binding => {
-            crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern)
-        }
+        TPatternPosition::Binding => crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern),
         TPatternPosition::OptionBinding => match &pattern.pattern {
             crate::AST::Pattern::Present { binding, .. } => {
                 format!("Ok({})", mangle(binding))
@@ -36,11 +34,9 @@ pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
             crate::AST::Pattern::Absent(_) => "Err(_)".to_string(),
             _ => crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern),
         },
-        TPatternPosition::Arm => crate::Codegen::emit_match_pattern(
-            cx,
-            &pattern.pattern,
-            pattern.enum_type.as_deref(),
-        ),
+        TPatternPosition::Arm => {
+            crate::Codegen::emit_match_pattern(cx, &pattern.pattern, pattern.enum_type.as_deref())
+        }
         // A variant of a resolved enum layout compares against the bare variant
         // path (no payload slots) — `tir_enum_lit_prefix` owns that spelling.
         TPatternPosition::VariantPath => {
@@ -107,9 +103,7 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 {
                     Some(format!("({}).as_array_mut()", local.rust_place()))
                 }
-                crate::Codegen::TIR::TExprKind::Local(local)
-                    if local.uninit_fixed && a.borrow =>
-                {
+                crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed && a.borrow => {
                     Some(format!("({}).as_array()", local.rust_place()))
                 }
                 _ => None,
@@ -255,8 +249,7 @@ pub(super) fn collect_select_arms(builder: &TExpr, cx: &Cx) -> (Vec<String>, Vec
                 let duration = emit_tir_expr(duration, cx);
                 let ms = format!(
                     "{}jet_std_time_duration_to_millis(({}).ns)",
-                    cx.root_prefix,
-                    duration
+                    cx.root_prefix, duration
                 );
                 let value = value
                     .as_ref()
@@ -295,7 +288,12 @@ pub(super) fn collect_select_after_durations(builder: &TExpr, cx: &Cx) -> Vec<St
 }
 
 /// D-SWIZZLE1: render a read swizzle as lane extract(s) and optional `VecN` ctor.
-pub(super) fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lanes: &[u8]) -> String {
+pub(super) fn emit_math_swizzle_read(
+    cx: &Cx,
+    type_name: &str,
+    recv: &TExpr,
+    lanes: &[u8],
+) -> String {
     let r = emit_tir_expr(recv, cx);
     if lanes.len() == 1 {
         return format!("({r}).0[{}]", lanes[0] as usize);
@@ -345,7 +343,12 @@ pub(super) fn emit_math_swizzle_read(cx: &Cx, type_name: &str, recv: &TExpr, lan
 }
 
 /// D-SWIZZLE1: render a write swizzle as ordered lane stores.
-pub(super) fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: &[u8], value: &str) -> String {
+pub(super) fn emit_math_swizzle_assign_stmt(
+    base: &str,
+    type_name: &str,
+    lanes: &[u8],
+    value: &str,
+) -> String {
     if lanes.len() == 1 {
         let lane = lanes[0] as usize;
         let val = if type_name == "F32x4" {
@@ -413,13 +416,18 @@ pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
                 .unwrap_or(ordinary);
             format!(": {send}")
         }
-        TLetTy::Annotated { ty, mut_fn, wrapper } => {
+        TLetTy::Annotated {
+            ty,
+            mut_fn,
+            wrapper,
+        } => {
             let base = if let Type::Fn {
                 params,
                 ret,
                 return_view_provenance,
                 ..
-            } = ty {
+            } = ty
+            {
                 cx.rust_fn_trait(
                     params,
                     ret.as_deref(),
@@ -491,11 +499,7 @@ fn emit_panic_rich_stmt(cond: &str, msg: &str, loc: &TPanicLoc, cx: &Cx) -> Stri
     )
 }
 
-pub(crate) fn emit_require_stop(
-    kind: &TRequireKind,
-    loc: &TPanicLoc,
-    cx: &Cx,
-) -> String {
+pub(crate) fn emit_require_stop(kind: &TRequireKind, loc: &TPanicLoc, cx: &Cx) -> String {
     match kind {
         TRequireKind::Require { cond, msg } => {
             let cond_s = emit_tir_expr(cond, cx);

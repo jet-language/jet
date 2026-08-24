@@ -102,11 +102,14 @@ fn compiler_identity() -> String {
                 Ok(m) => format!(
                     "{}:{}:{:?}",
                     m.len(),
-                    m.modified().ok().map(|t| {
-                        t.duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0)
-                    }).unwrap_or(0),
+                    m.modified()
+                        .ok()
+                        .map(|t| {
+                            t.duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0)
+                        })
+                        .unwrap_or(0),
                     std::env::current_exe().ok()
                 ),
                 Err(_) => "unavailable".into(),
@@ -137,11 +140,7 @@ fn path_digest(path: &Path) -> String {
         Ok(bytes) => sha256_hex(&bytes),
         Err(_) => {
             let stamp = PathStamp::capture(path);
-            format!(
-                "missing:{}:{:?}",
-                stamp.exists,
-                stamp.len.unwrap_or(0)
-            )
+            format!("missing:{}:{:?}", stamp.exists, stamp.len.unwrap_or(0))
         }
     }
 }
@@ -153,7 +152,11 @@ pub fn run_cache_key(entry: &Path, program_args: &[&str]) -> String {
         Err(diagnostic) => {
             // Fail closed: an authority error yields a key no healthy run can
             // produce, so the cache misses and the real run reports it.
-            return format!("jet-run-cache-v1:discover-error:{}:{}", entry.display(), diagnostic.code);
+            return format!(
+                "jet-run-cache-v1:discover-error:{}:{}",
+                entry.display(),
+                diagnostic.code
+            );
         }
     };
     graph.refresh_stamps();
@@ -187,7 +190,10 @@ fn entry_dir(key: &str) -> PathBuf {
 }
 
 /// Try a warm tier-1 module hit. On success returns the run outcome.
-pub fn try_warm_run(entry: &Path, program_args: &[&str]) -> Option<jet_foundation::JitBackend::RunOutcome> {
+pub fn try_warm_run(
+    entry: &Path,
+    program_args: &[&str],
+) -> Option<jet_foundation::JitBackend::RunOutcome> {
     let key = run_cache_key(entry, program_args);
     let dir = entry_dir(&key);
     let artifact_path = dir.join("module.bin");

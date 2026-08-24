@@ -1,5 +1,5 @@
-use crate::jet_generated_format as jet_format;
 use super::*;
+use crate::jet_generated_format as jet_format;
 use crate::Syntax;
 use crate::AST::{AccessConvention, Pattern, Type, VariantPayload};
 
@@ -23,7 +23,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     });
     let etype = resolved_type.as_deref().or(enum_type);
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
-    let is_email = etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
+    let is_email =
+        etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
     let is_service_receipt = etype == Some("ServiceReceipt");
     let is_service_error = etype == Some("ServiceError");
@@ -54,7 +55,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         None if is_key => (format!("{}JetKey", cx.root_prefix), true),
         None => (mangle("TYPE"), false),
     };
-    let vname = |v: &str| -> String { crate::Codegen::TIR::tir_enum_variant_rust_name(v, raw_variants) };
+    let vname =
+        |v: &str| -> String { crate::Codegen::TIR::tir_enum_variant_rust_name(v, raw_variants) };
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
@@ -142,7 +144,11 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
         // D-PATR arm-head: range patterns go through mixed-switch; shouldn't appear here.
         Pattern::Range { lo, hi, .. } => {
-            jet_format!("_ if {jet_prefix}subject >= {} && {jet_prefix}subject <= {}", lo, hi)
+            jet_format!(
+                "_ if {jet_prefix}subject >= {} && {jet_prefix}subject <= {}",
+                lo,
+                hi
+            )
         }
         // D-PATO: or-pattern in exhaustive match → `A(x) | B(x)`.
         Pattern::Or(alts, _) => {
@@ -232,9 +238,7 @@ pub(crate) fn variant_binding_types_for_enum(
             "Float" => Some(vec![Type::Float]),
             "Text" | "Key" => Some(vec![Type::String]),
             "Bytes" => Some(vec![Type::List(Box::new(Type::Int))]),
-            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => {
-                Some(Vec::new())
-            }
+            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some(Vec::new()),
             _ => None,
         };
     }
@@ -289,7 +293,15 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .collect();
                 if let Some(names) = variant_field_names(cx, variant) {
                     let plain = cx.variant_owner.get(variant).is_some_and(|owner| {
-                        matches!(owner.as_str(), "EmailError" | "SMTPAuth" | "TLSTrust" | "AuthError" | "ServiceReceipt" | "ServiceError")
+                        matches!(
+                            owner.as_str(),
+                            "EmailError"
+                                | "SMTPAuth"
+                                | "TLSTrust"
+                                | "AuthError"
+                                | "ServiceReceipt"
+                                | "ServiceError"
+                        )
                     });
                     let fields = names
                         .iter()
@@ -346,12 +358,7 @@ pub(crate) fn emit_named_fn_value_sync(cx: &Cx, name: &str, ft: &Type) -> String
     emit_named_fn_value_with_storage(cx, name, ft, true)
 }
 
-fn emit_named_fn_value_with_storage(
-    cx: &Cx,
-    name: &str,
-    ft: &Type,
-    send_sync: bool,
-) -> String {
+fn emit_named_fn_value_with_storage(cx: &Cx, name: &str, ft: &Type, send_sync: bool) -> String {
     let rust_name = mangle(name);
     let Type::Fn { params, ret, .. } = ft else {
         return rust_name;
@@ -374,11 +381,7 @@ fn emit_named_fn_value_with_storage(
     } else {
         cx.rust_type(ft)
     };
-    if !middleware
-        && ret
-            .as_deref()
-            .is_some_and(|ret| cx.type_contains_view(ret))
-    {
+    if !middleware && ret.as_deref().is_some_and(|ret| cx.type_contains_view(ret)) {
         return format!("{wrap}({rust_name}) as {rust_type}");
     }
     let arg_decls: Vec<String> = params

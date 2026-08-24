@@ -10,7 +10,7 @@ use crate::SHA256;
 use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
-pub const TRACE_VERSION: &str = "1";
+pub const TRACE_VERSION: u32 = 1;
 pub const CAPTURE_POLICY_SCHEMA: &str = "5";
 pub const TRACE_BROWSER_ROW_LIMIT: u64 = 4096;
 pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
@@ -756,7 +756,7 @@ pub fn jettrace_artifact(content: CanonicalJson) -> CanonicalJson {
         ("trace_id".into(), CanonicalJson::String(trace_id)),
         (
             "version".into(),
-            CanonicalJson::Integer(TRACE_VERSION.into()),
+            CanonicalJson::Integer(TRACE_VERSION.to_string()),
         ),
     ])
     .expect("fixed jettrace wrapper keys are unique")
@@ -781,7 +781,7 @@ pub fn verify_jettrace(bytes: &[u8]) -> Result<CanonicalJson, String> {
         return Err(format!("unsupported jettrace schema (need {TRACE_SCHEMA})"));
     }
     match fields.get("version") {
-        Some(CanonicalJson::Integer(version)) if version == TRACE_VERSION => {}
+        Some(CanonicalJson::Integer(version)) if version == &TRACE_VERSION.to_string() => {}
         Some(CanonicalJson::Integer(version)) => {
             return Err(format!(
                 "jettrace version {version} needs a newer jet toolchain (this reader supports {TRACE_VERSION})"

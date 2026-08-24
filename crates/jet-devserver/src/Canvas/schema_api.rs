@@ -5,7 +5,7 @@ use std::process::Command;
 
 use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::SHA256;
-use jet_semindex::SourceSpan;
+use jet_semindex::{semantic_ops_for_file, SemanticOp, SourceSpan};
 
 use super::debug_source_git::{
     canonical_path, debug_diagnostics_error, debug_error, debug_ok, debug_stop_ok, git_output,
@@ -614,12 +614,14 @@ pub fn core_catalog_json_for_entry(entry: &Path, query: &str) -> Result<String, 
 /// Report Git text truth for Canvas source-control UI.
 pub fn source_control_json_for_file(path: &Path) -> String {
     let src = fs::read_to_string(path).unwrap_or_default();
+    let semantic_ops = semantic_ops_json(path, &src);
     let Some(root) = git_root(path) else {
         return format!(
-            "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{},\"available\":false,\"dirty\":false,\"status\":{},\"diff\":{},\"history\":[]}}",
+            "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{},\"available\":false,\"dirty\":false,\"status\":{},\"diff\":{},\"history\":[],\"semantic_ops\":[{}]}}",
             json_str(&source_revision(&src)),
             json_str("not a Git worktree"),
-            json_str("")
+            json_str(""),
+            semantic_ops
         );
     };
     let rel = git_relative_path(&root, path);
@@ -640,12 +642,57 @@ pub fn source_control_json_for_file(path: &Path) -> String {
         .join(",");
     let dirty = !status.trim().is_empty() || !diff.trim().is_empty();
     format!(
-        "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{},\"available\":true,\"dirty\":{},\"status\":{},\"diff\":{},\"history\":[{}]}}",
+        "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{},\"available\":true,\"dirty\":{},\"status\":{},\"diff\":{},\"history\":[{}],\"semantic_ops\":[{}]}}",
         json_str(&source_revision(&src)),
         if dirty { "true" } else { "false" },
         json_str(status.trim()),
         json_str(&diff),
-        history
+        history,
+        semantic_ops
+    )
+}
+
+fn semantic_ops_json(path: &Path, source: &str) -> String {
+    let source_hash = SHA256::sha256_hex(source.as_bytes());
+    semantic_ops_for_file(path, &source_hash)
+        .iter()
+        .map(semantic_op_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn semantic_op_json(op: &SemanticOp) -> String {
+    let optional = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(json_str)
+            .unwrap_or_else(|| "null".to_string())
+    };
+    let targets = op
+        .targets
+        .iter()
+        .map(|target| {
+            format!(
+                "{{\"stable_id\":{},\"before\":{},\"after\":{},\"kind\":{},\"module_path\":{}}}",
+                json_str(&target.stable_id),
+                json_str(&target.before),
+                json_str(&target.after),
+                json_str(&target.kind),
+                json_str(&target.module_path),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"kind\":{},\"rule_id\":{},\"from\":{},\"to\":{},\"node\":{},\"match\":{},\"replace\":{},\"targets\":[{}]}}",
+        json_str(&op.kind),
+        optional(&op.rule_id),
+        optional(&op.from),
+        optional(&op.to),
+        optional(&op.node),
+        optional(&op.match_template),
+        optional(&op.replace_template),
+        targets,
     )
 }
 
@@ -689,15 +736,17 @@ fn source_control_json_for_entry_inner(path: &Path) -> String {
             if dirty {
                 dirty_files += 1;
             }
+            let semantic_ops = semantic_ops_json(&abs, &src);
             format!(
-                "{{\"path\":{},\"revision\":{},\"kind\":{},\"available\":{},\"dirty\":{},\"status\":{},\"diff\":{}}}",
+                "{{\"path\":{},\"revision\":{},\"kind\":{},\"available\":{},\"dirty\":{},\"status\":{},\"diff\":{},\"semantic_ops\":[{}]}}",
                 json_str(&file.path),
                 json_str(&file.revision),
                 json_str(&file.kind),
                 if git_root.is_some() { "true" } else { "false" },
                 if dirty { "true" } else { "false" },
                 json_str(status.trim()),
-                json_str(&diff)
+                json_str(&diff),
+                semantic_ops
             )
         })
         .collect::<Vec<_>>()

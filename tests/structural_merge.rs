@@ -17,6 +17,28 @@ fn write(dir: &Path, name: &str, source: &str) -> PathBuf { let path = dir.join(
 fn run(args: &[&str]) -> Output { Command::new(jet()).args(args).output().unwrap() }
 fn run_in(dir: &Path, args: &[&str]) -> Output { Command::new(jet()).current_dir(dir).args(args).output().unwrap() }
 fn git(dir: &Path, args: &[&str]) -> Output { Command::new("git").current_dir(dir).args(args).output().unwrap() }
+fn semantic_rename_receipt(root: &Path, path: &Path, before: &str, after: &str, from: &str, to: &str) {
+    let dir = root.join(".jet/codemods");
+    fs::create_dir_all(&dir).unwrap();
+    let before_hash = jet::SHA256::sha256_hex(before.as_bytes());
+    let after_hash = jet::SHA256::sha256_hex(after.as_bytes());
+    let receipt = format!(
+        "{{\"schema\":2,\"name\":\"recorded-rename\",\"project\":\"{}\",\"semantic_ops\":[{{\"kind\":\"rename\",\"from\":\"{}\",\"to\":\"{}\",\"targets\":[{{\"stable_id\":\"def:recorded\",\"before\":\"{}\",\"after\":\"{}\",\"kind\":\"function\",\"module_path\":\"{}\"}}],\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\"}}]}}],\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\"}}]}}\n",
+        root.display(),
+        from,
+        to,
+        from,
+        to,
+        path.display(),
+        path.display(),
+        before_hash,
+        after_hash,
+        path.display(),
+        before_hash,
+        after_hash,
+    );
+    fs::write(dir.join("recorded-rename.log.json"), receipt).unwrap();
+}
 
 const BASE: &str = "fn left() Int -[]> {\n    return 1\n}\n\nfn right() Int -[]> {\n    return 2\n}\n\nfn run() {\n    print(left() + right())\n}\n";
 
@@ -25,12 +47,38 @@ fn structural_diff_classifies_body_and_rename_with_stable_ids() {
     let root = dir("diff");
     let before = write(&root, "before.jet", BASE);
     let after = write(&root, "after.jet", "fn first() Int -[]> { return 1 }\nfn right() Int -[]> { return 3 }\nfn run() { print(first() + right()) }\n");
+    semantic_rename_receipt(
+        &root,
+        &before,
+        BASE,
+        &fs::read_to_string(&after).unwrap(),
+        "left",
+        "first",
+    );
     let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(report.contains("\"kind\":\"renamed\""), "{report}");
     assert!(report.contains("\"kind\":\"body_changed\""), "{report}");
     assert!(report.contains("\"stable_id\":\"def:"), "{report}");
+}
+
+#[test]
+fn structural_diff_does_not_infer_a_rename_from_hand_text() {
+    let root = dir("hand_edit");
+    let before = write(&root, "before.jet", "fn report() Int -[]> { return 1 }\nfn run() { print(report()) }\n");
+    let after = write(&root, "after.jet", "fn summarize() Int -[]> { return 1 }\nfn run() { print(summarize()) }\n");
+    let output = run(&[
+        "diff",
+        "--structural",
+        before.to_str().unwrap(),
+        after.to_str().unwrap(),
+        "--report",
+        "json",
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(!report.contains("\"kind\":\"renamed\""), "{report}");
 }
 
 #[test]
@@ -84,6 +132,33 @@ fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
     assert!(source.contains("return 20"), "{source}");
     assert!(source.contains("retained file header"), "{source}");
     assert!(run(&["check", merged.to_str().unwrap()]).status.success());
+}
+
+#[test]
+fn structural_merge_applies_recorded_rename_to_a_parallel_body_edit() {
+    let root = dir("recorded_rename_merge");
+    let base_source = "fn report() Int -[]> { return 1 }\nfn run() { print(report()) }\n";
+    let ours_source = "fn summarize() Int -[]> { return 1 }\nfn run() { print(summarize()) }\n";
+    let theirs_source = "fn report() Int -[]> { return 2 }\nfn run() { print(report()) }\n";
+    let base = write(&root, "base.jet", base_source);
+    let ours = write(&root, "ours.jet", ours_source);
+    let theirs = write(&root, "theirs.jet", theirs_source);
+    semantic_rename_receipt(&root, &base, base_source, ours_source, "report", "summarize");
+    let merged = root.join("merged.jet");
+    let output = run(&[
+        "merge",
+        "--structural",
+        base.to_str().unwrap(),
+        ours.to_str().unwrap(),
+        theirs.to_str().unwrap(),
+        "--out",
+        merged.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let source = fs::read_to_string(&merged).unwrap();
+    assert!(source.contains("fn summarize"), "{source}");
+    assert!(source.contains("return 2"), "{source}");
+    assert!(!source.contains("fn report"), "{source}");
 }
 
 #[test]

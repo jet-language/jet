@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::AST::CtValue;
+use crate::Codegen::TIR::TExpr;
 use crate::Comptime::apply_core_call;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Codegen::TIR::TExpr;
+use crate::AST::CtValue;
 
 use super::EvalCtx;
 
@@ -42,12 +42,9 @@ impl<'a> EvalCtx<'a> {
             argv.push(self.eval_expr(a, scope)?);
         }
         if matches!(module, "core.service" | "core.services") && method == "runtime" {
-            if let Some(result) = crate::Comptime::try_ambient_core_call(
-                module,
-                method,
-                argv.clone(),
-                source_span,
-            ) {
+            if let Some(result) =
+                crate::Comptime::try_ambient_core_call(module, method, argv.clone(), source_span)
+            {
                 return result;
             }
             return crate::Comptime::ServicesLite::with_workflow_wait(workflow_wait, || {

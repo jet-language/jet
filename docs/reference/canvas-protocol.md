@@ -418,9 +418,10 @@ Diagnostic failure response:
 ```
 
 Every successful write runs through `jet fmt`, re-checks through the front end,
-then reprojects from source. Canvas does not own a parser, checker, graph asset,
-or semantic sidecar.
-No semantic sidecars carry source meaning.
+then reprojects from source. Canvas does not own a parser, checker, or graph
+asset. Toolchain refactors may publish a checkpointed semantic-op receipt;
+Canvas only reads a receipt whose file path and source revision match. A hand
+edit never inherits an older receipt.
 The final publish is compare-and-publish against the request's source snapshot.
 If the source changes after validation, the transaction returns `kind:"conflict"`
 without replacing it; the successful response's `source_text` is the committed
@@ -611,7 +612,7 @@ asset source of truth.
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.source_control","schema_version":1,"ok":true,"revision":"sha256-...","project_revision":"sha256-...","project_root":"/repo","available":true,"dirty":true,"dirty_files":2,"status":"M packages/app/main.jet\n?? packages/app/helper.jet","diff":"","history":["abc123 initial"],"files":[{"path":"packages/app/main.jet","revision":"sha256-...","kind":"source","available":true,"dirty":true,"status":"M packages/app/main.jet","diff":"diff --git ..."}]}
+{"protocol":"jet.canvas.source_control","schema_version":1,"ok":true,"revision":"sha256-...","project_revision":"sha256-...","project_root":"/repo","available":true,"dirty":true,"dirty_files":2,"status":"M packages/app/main.jet\n?? packages/app/helper.jet","diff":"","history":["abc123 initial"],"files":[{"path":"packages/app/main.jet","revision":"sha256-...","kind":"source","available":true,"dirty":true,"status":"M packages/app/main.jet","diff":"diff --git ...","semantic_ops":[{"kind":"rename","from":"report","to":"summarize"}]}]}
 ```
 
 ## Review Lens M3
@@ -620,12 +621,15 @@ The Review lens reads this response and keeps the text diff first. Git already
 defines file and hunk additions and deletions, so Canvas does not need a custom
 binary-asset diff model. Each current added or modified hunk may link to a
 source span and graph node when the current graph exposes an overlapping span.
+When `semantic_ops` contains a checkpoint-matching receipt, Review shows the
+recorded operation and its targets. It does not infer a rename from similar
+text.
 
 Review marks deleted text as deleted because it has no current source span. It
 marks other changes without a matching current node as text only. These labels
-keep source truth visible without fabricating graph history or semantic
-sidecars. Refresh reads the response and current graph again; Review actions do
-not write Jet source or Git state.
+keep source truth visible without fabricating graph history. Refresh reads the
+response and current graph again; Review actions do not write Jet source or Git
+state.
 
 ## Proof V1
 

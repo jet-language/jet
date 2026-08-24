@@ -1,9 +1,9 @@
-use crate::AST::{Expr, LValue, Stmt, Type};
-use crate::Codegen::TIR::{TBindingOrigin, TLocal};
 use crate::Codegen::TIR::TirWorklist;
+use crate::Codegen::TIR::{TBindingOrigin, TLocal};
+use crate::AST::{Expr, LValue, Stmt, Type};
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Per-function lowering environment: a local name -> (structured slot, type).
@@ -144,7 +144,9 @@ impl LowerEnv {
     /// this fact with their enclosing lowering pass.
     pub(super) fn resource_take_place(&mut self, name: &str) -> String {
         let place = self.rust_name_of(name);
-        self.resource_take_targets.borrow_mut().insert(place.clone());
+        self.resource_take_targets
+            .borrow_mut()
+            .insert(place.clone());
         place
     }
     pub(super) fn resource_take_targets(&self) -> HashSet<String> {
@@ -409,7 +411,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Reactive { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }

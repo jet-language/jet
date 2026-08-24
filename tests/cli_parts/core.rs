@@ -653,7 +653,8 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
     assert!(out.stderr.is_empty());
     let value = jet_foundation::PerformanceBudget::CanonicalJson::parse_canonical(&out.stdout).unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("\"schema\":\"jet.budget-command\""));
+    assert!(text.contains("\"schema\":\"jet.report/v1\""));
+    assert!(text.contains("\"budget\":{"));
     assert!(text.contains("\"budget_id\":\"package:public-api\""));
     assert!(text.contains("\"num\":1"), "public API count must be measured: {text}");
     let reports = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().collect::<Result<Vec<_>,_>>().unwrap();
@@ -661,7 +662,7 @@ fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
     let bytes = fs::read(reports[0].path()).unwrap();
     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
     let command = match &value { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("command JSON is not an object") };
-    let report = match &command["report"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("report is not an object") };
+    let report = match canonical_field(&command["budget"], "report") { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("report is not an object") };
     let content = match &report["content"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("content is not an object") };
     let tool = match &content["toolchain"] { jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value, _ => panic!("toolchain is not an object") };
     for key in ["compiler_build_id", "stdlib_id", "runner_id"] {
@@ -698,7 +699,7 @@ fn budget_build_artifact_measures_real_selected_binary() {
     assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.stderr.is_empty());
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
-    let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+    let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else { panic!("report object") };
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
     let CanonicalJson::Object(subject) = &content["subject"] else { panic!("subject object") };
     let CanonicalJson::Object(artifact) = &subject["artifact"] else { panic!("artifact identity") };
@@ -726,7 +727,7 @@ fn budget_report_collects_mixed_providers_measurement_locally() {
     assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.stderr.is_empty());
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&out.stdout).unwrap() else { panic!("command object") };
-    let CanonicalJson::Object(report) = &command["report"] else { panic!("report object") };
+    let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else { panic!("report object") };
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content object") };
     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
     assert_eq!(measurements.len(), 2);
@@ -799,7 +800,7 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     let bootstrap = Command::new(jet()).args(["budget","update","--baseline","ci/linux","--bootstrap","--reason","initial benchmark","--yes","--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(bootstrap.status.code(),Some(0),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&bootstrap.stdout),String::from_utf8_lossy(&bootstrap.stderr));
     let CanonicalJson::Object(first)=CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else{panic!("command")};
-    let CanonicalJson::Object(report)=&first["report"] else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};
+    let CanonicalJson::Object(report)=canonical_field(&first["budget"], "report") else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};
     let CanonicalJson::Array(samples)=&measurement["samples"] else{panic!("samples")};assert_eq!(samples.len(),20);assert!(matches!(measurement["statistics"],CanonicalJson::Object(_)));assert!(matches!(measurement["policy"],CanonicalJson::Object(_)));assert_eq!(measurement["history"],CanonicalJson::Null);assert_eq!(measurement["baseline"],CanonicalJson::Null);
     let CanonicalJson::Object(provider)=&measurement["provider"] else{panic!("provider")};assert_eq!(provider["kind"],CanonicalJson::String("BenchMeasurement".into()));assert_eq!(provider["identity"],CanonicalJson::String("parse".into()));
     let first_id=match &report["report_id"]{CanonicalJson::String(value)=>value.clone(),_=>panic!("report id")};
@@ -807,8 +808,8 @@ fn budget_bench_measurement_bootstraps_then_consumes_compatible_history() {
     let check=Command::new(jet()).args(["budget","check","--json"]).current_dir(&dir).output().unwrap();
     assert!(matches!(check.status.code(),Some(0)|Some(1)),"stdout: {}\nstderr: {}",String::from_utf8_lossy(&check.stdout),String::from_utf8_lossy(&check.stderr));
     let CanonicalJson::Object(second)=CanonicalJson::parse_canonical(&check.stdout).unwrap() else{panic!("command")};
-    let CanonicalJson::Object(report)=&second["report"] else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};let CanonicalJson::Object(history)=&measurement["history"] else{panic!("history")};let CanonicalJson::Array(ids)=&history["report_ids"] else{panic!("ids")};assert_eq!(ids, &vec![CanonicalJson::String(first_id.clone())]);let CanonicalJson::Object(baseline)=&measurement["baseline"] else{panic!("baseline")};let CanonicalJson::Array(pooled)=&baseline["pooled_samples"] else{panic!("pooled")};assert_eq!(pooled.len(),20);let CanonicalJson::Object(decision)=&measurement["decision"] else{panic!("decision")};assert_ne!(decision["evidence"],CanonicalJson::String("unavailable".into()));
-    let CanonicalJson::Array(results)=&second["results"] else{panic!("results")};let CanonicalJson::Object(result)=&results[0] else{panic!("result")};
+    let CanonicalJson::Object(report)=canonical_field(&second["budget"], "report") else{panic!("report")};let CanonicalJson::Object(content)=&report["content"] else{panic!("content")};let CanonicalJson::Array(measurements)=&content["measurements"] else{panic!("measurements")};let CanonicalJson::Object(measurement)=&measurements[0] else{panic!("measurement")};let CanonicalJson::Object(history)=&measurement["history"] else{panic!("history")};let CanonicalJson::Array(ids)=&history["report_ids"] else{panic!("ids")};assert_eq!(ids, &vec![CanonicalJson::String(first_id.clone())]);let CanonicalJson::Object(baseline)=&measurement["baseline"] else{panic!("baseline")};let CanonicalJson::Array(pooled)=&baseline["pooled_samples"] else{panic!("pooled")};assert_eq!(pooled.len(),20);let CanonicalJson::Object(decision)=&measurement["decision"] else{panic!("decision")};assert_ne!(decision["evidence"],CanonicalJson::String("unavailable".into()));
+    let CanonicalJson::Array(results)=canonical_field(&second["budget"], "results") else{panic!("results")};let CanonicalJson::Object(result)=&results[0] else{panic!("result")};
     assert_eq!(result["baseline_report_ids"],CanonicalJson::Array(vec![CanonicalJson::String(first_id)]));
     assert_eq!(result["metric"],measurement["metric"]);
     assert_eq!(result["lower95"],decision["lower95"]);assert_eq!(result["upper95"],decision["upper95"]);assert_eq!(result["trend"],decision["trend"]);assert_eq!(result["reason"],decision["reason"]);

@@ -1,25 +1,25 @@
-use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Stmt, Type};
-use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::emit_tir_stmts;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower::prepare_interrupt_callback_locals;
+use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::resolve_self_ty;
+use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TUnsafeGate;
+use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Codegen::TIR::{
     TContract, TContractDisposition, TContractKind, TExpr, TExprKind, TStmt,
 };
-use crate::Codegen::TIR::TWebParamReconstruction;
-use crate::Codegen::TIR::TUnsafeGate;
 use crate::Syntax;
+use crate::AST::{AccessConvention, BinOp, ContractClause, Expr, Func, Param, Stmt, Type};
 use std::collections::HashMap;
 
 /// D-COV1: 1-based line number of a byte offset in the source, for coverage probes.
@@ -106,8 +106,8 @@ fn bind_resource_param(
                 kind: TExprKind::Local(TLocal::user(source_name)),
             })),
         },
-                gc_promotion: None,
-                gc_transferred: false,
+        gc_promotion: None,
+        gc_transferred: false,
     });
     env.bind(
         source_name,
@@ -136,10 +136,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     lower_func_with_web_boundary(f, cx, false)
 }
 
-pub(crate) fn lower_error_conv(
-    conversion: &crate::AST::ErrorConvDef,
-    cx: &Cx,
-) -> TFunc {
+pub(crate) fn lower_error_conv(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
     let name = crate::Sema::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty);
     let from_ty = Type::Named(conversion.from_ty.clone());
     let to_ty = Type::Named(conversion.to_ty.clone());
@@ -224,9 +221,9 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
             if let Type::Named(type_name) = &param_ty {
                 if let Some(fields) = cx.struct_fields.get(type_name) {
                     if !fields.is_empty()
-                        && fields
-                            .iter()
-                            .all(|(_, ty)| matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. }))
+                        && fields.iter().all(|(_, ty)| {
+                            matches!(ty, Type::Int | Type::IntN { .. } | Type::InlineRange { .. })
+                        })
                     {
                         let flat_fields = fields
                             .iter()
@@ -350,11 +347,7 @@ fn lower_contract_cond(
     lower_expr(cond, cx, &mut env)
 }
 
-fn contract_interval(
-    expr: &Expr,
-    bindings: &HashMap<String, Type>,
-    cx: &Cx,
-) -> Option<(i64, i64)> {
+fn contract_interval(expr: &Expr, bindings: &HashMap<String, Type>, cx: &Cx) -> Option<(i64, i64)> {
     match expr {
         Expr::Int(value, ..) => Some((*value, *value)),
         Expr::Ident(name, _) => match bindings.get(name)? {
@@ -392,20 +385,14 @@ fn interval_comparison(op: BinOp, left: (i64, i64), right: (i64, i64)) -> bool {
 /// D-FAIL-TIER1: a range fact is a proof disposition, not an engine-local
 /// optimization.  The resulting `Proven` node is retained in TIR so every
 /// backend honors the same erasure disposition.
-pub(crate) fn contract_expr_proven(
-    expr: &Expr,
-    bindings: &HashMap<String, Type>,
-    cx: &Cx,
-) -> bool {
+pub(crate) fn contract_expr_proven(expr: &Expr, bindings: &HashMap<String, Type>, cx: &Cx) -> bool {
     match expr {
         Expr::Bool(value, _) => *value,
         Expr::Binary(BinOp::And, left, right, _) => {
-            contract_expr_proven(left, bindings, cx)
-                && contract_expr_proven(right, bindings, cx)
+            contract_expr_proven(left, bindings, cx) && contract_expr_proven(right, bindings, cx)
         }
         Expr::Binary(BinOp::Or, left, right, _) => {
-            contract_expr_proven(left, bindings, cx)
-                || contract_expr_proven(right, bindings, cx)
+            contract_expr_proven(left, bindings, cx) || contract_expr_proven(right, bindings, cx)
         }
         Expr::Binary(op, left, right, _) if op.is_comparison() => {
             match (
@@ -416,10 +403,8 @@ pub(crate) fn contract_expr_proven(
                 _ => false,
             }
         }
-        Expr::CompareChain { operands, ops, .. } => operands
-            .windows(2)
-            .zip(ops)
-            .all(|(pair, op)| {
+        Expr::CompareChain { operands, ops, .. } => {
+            operands.windows(2).zip(ops).all(|(pair, op)| {
                 match (
                     contract_interval(&pair[0], bindings, cx),
                     contract_interval(&pair[1], bindings, cx),
@@ -427,7 +412,8 @@ pub(crate) fn contract_expr_proven(
                     (Some(left), Some(right)) => interval_comparison(*op, left, right),
                     _ => false,
                 }
-            }),
+            })
+        }
         _ => false,
     }
 }
@@ -483,11 +469,7 @@ fn lower_contract_clause(
     }
 }
 
-fn lower_post_contracts_for_owner(
-    f: &Func,
-    owner_type: Option<&str>,
-    cx: &Cx,
-) -> Vec<TContract> {
+fn lower_post_contracts_for_owner(f: &Func, owner_type: Option<&str>, cx: &Cx) -> Vec<TContract> {
     let ret_ty = f
         .return_type
         .as_ref()
@@ -662,7 +644,11 @@ fn collect_signature_clone_types(ty: &Type, cx: &Cx, out: &mut Vec<Type>) {
         | Type::InlineRange { base: inner, .. } => {
             collect_signature_clone_types(inner, cx, out);
         }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             collect_signature_clone_types(key, cx, out);
             collect_signature_clone_types(value, cx, out);
         }
@@ -712,12 +698,7 @@ pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
     lower_method_for_owner(f, type_name, owner_ty, cx)
 }
 
-pub(crate) fn lower_method_for_owner(
-    f: &Func,
-    type_name: &str,
-    owner_ty: Type,
-    cx: &Cx,
-) -> TFunc {
+pub(crate) fn lower_method_for_owner(f: &Func, type_name: &str, owner_ty: Type, cx: &Cx) -> TFunc {
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
@@ -887,11 +868,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             } else {
                 TLocal::generated("self")
             };
-            env.bind(
-                Syntax::KW_SELF,
-                place,
-                Some(owner_ty.clone()),
-            );
+            env.bind(Syntax::KW_SELF, place, Some(owner_ty.clone()));
             if matches!(p.convention, AccessConvention::Read) {
                 env.mark_borrowed(Syntax::KW_SELF);
             }
@@ -1115,9 +1092,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
 pub(crate) fn param_place(name: &str, p: &Param) -> TLocal {
     let deref = match p.convention {
-        AccessConvention::Read if p.ty.is_scalar() => {
-            false
-        }
+        AccessConvention::Read if p.ty.is_scalar() => false,
         AccessConvention::Read => true,
         AccessConvention::Write => true,
         AccessConvention::Move => false,

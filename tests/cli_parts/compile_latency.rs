@@ -25,8 +25,8 @@ fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
     let bootstrap = Command::new(jet()).args(["budget", "update", "--baseline", "ci/linux-x64", "--bootstrap", "--reason", "initial compile latency", "--yes", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(bootstrap.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&bootstrap.stdout), String::from_utf8_lossy(&bootstrap.stderr));
     let CanonicalJson::Object(bootstrap_command) = CanonicalJson::parse_canonical(&bootstrap.stdout).unwrap() else { panic!("bootstrap command") };
-    assert_eq!(bootstrap_command["applied"], CanonicalJson::Bool(true));
-    let CanonicalJson::Object(bootstrap_report) = &bootstrap_command["report"] else { panic!("bootstrap report") };
+    assert_eq!(*canonical_field(&bootstrap_command["budget"], "applied"), CanonicalJson::Bool(true));
+    let CanonicalJson::Object(bootstrap_report) = canonical_field(&bootstrap_command["budget"], "report") else { panic!("bootstrap report") };
     let CanonicalJson::Object(bootstrap_content) = &bootstrap_report["content"] else { panic!("bootstrap content") };
     let CanonicalJson::Array(bootstrap_measurements) = &bootstrap_content["measurements"] else { panic!("bootstrap measurements") };
     assert_eq!(bootstrap_measurements.len(), 3);
@@ -39,7 +39,7 @@ fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
     let check = Command::new(jet()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap();
     assert_eq!(check.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&check.stdout), String::from_utf8_lossy(&check.stderr));
     let CanonicalJson::Object(command) = CanonicalJson::parse_canonical(&check.stdout).unwrap() else { panic!("command") };
-    let CanonicalJson::Object(report) = &command["report"] else { panic!("report") };
+    let CanonicalJson::Object(report) = canonical_field(&command["budget"], "report") else { panic!("report") };
     let CanonicalJson::Object(content) = &report["content"] else { panic!("content") };
     let CanonicalJson::Array(measurements) = &content["measurements"] else { panic!("measurements") };
     assert_eq!(measurements.len(), 3);

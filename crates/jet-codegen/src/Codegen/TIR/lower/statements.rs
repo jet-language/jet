@@ -1,53 +1,56 @@
 use crate::jet_generated_format as jet_format;
-use crate::AST::{BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, PatSlot, Pattern, PlaceAccess, Stmt, Type, UnOp};
-use crate::Codegen::Cx;
-use crate::Codegen::mangle_generated;
 #[cfg(test)]
 use crate::Codegen::build_cx;
-#[cfg(test)]
-use crate::Diagnostics::Span;
 use crate::Codegen::mangle;
+use crate::Codegen::mangle_generated;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::label_name;
 use crate::Codegen::TIR::lower::collect_txn_mut_roots;
 use crate::Codegen::TIR::lower::encoding_reader_item_type;
 use crate::Codegen::TIR::lower::in_own_frame;
-use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::lower_expr;
-use crate::Codegen::TIR::lower_owned_expr;
-use crate::Codegen::TIR::lower_forin_collection;
+use crate::Codegen::TIR::lower::lower_comptime_scalar;
+use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
+use crate::Codegen::TIR::lower::lower_panic_stop;
+use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
 use crate::Codegen::TIR::lower::lower_string_view_init;
 use crate::Codegen::TIR::lower::reactive_block_env;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
-use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
-use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
-use crate::Codegen::TIR::lower::lower_panic_stop;
+use crate::Codegen::TIR::lower::tracked_float_slot;
+use crate::Codegen::TIR::lower_expr;
+use crate::Codegen::TIR::lower_forin_collection;
+use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
-use crate::Codegen::TIR::lower::tracked_float_slot;
 use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::ScopeMemberKind;
-use crate::Codegen::TIR::TExpr;
-use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TBindingOrigin;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TCoreClosureKind;
-use crate::Codegen::TIR::TirWorklist;
-use crate::Codegen::TIR::TLetTy;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
+use crate::Codegen::TIR::TLetTy;
 use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::TBindingOrigin;
-use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TUnsafeGate;
-use crate::Codegen::TIR::lower::lower_comptime_scalar;
-use crate::Codegen::TIR::unit_type;
+use crate::Codegen::TIR::TirWorklist;
+#[cfg(test)]
+use crate::Diagnostics::Span;
 use crate::Syntax;
+use crate::AST::{
+    BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, PatSlot, Pattern, PlaceAccess, Stmt,
+    Type, UnOp,
+};
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -78,10 +81,7 @@ fn bake_comptime_value_with_type(
             CtValue::Enum {
                 type_name: enum_name,
                 variant: crate::AST::union_member_tag(member),
-                args: vec![(
-                    None,
-                    bake_comptime_value_with_type(value, member, cx),
-                )],
+                args: vec![(None, bake_comptime_value_with_type(value, member, cx))],
             }
         }
         Type::Named(_) | Type::Apply { .. } => {
@@ -91,9 +91,8 @@ fn bake_comptime_value_with_type(
             let typed_fields = fields
                 .iter()
                 .map(|(field, value)| {
-                    let field_ty = struct_field_type(cx, ty, field).or_else(|| {
-                        struct_field_type(cx, &Type::Named(type_name.clone()), field)
-                    });
+                    let field_ty = struct_field_type(cx, ty, field)
+                        .or_else(|| struct_field_type(cx, &Type::Named(type_name.clone()), field));
                     let value = field_ty
                         .as_ref()
                         .map(|field_ty| bake_comptime_value_with_type(value, field_ty, cx))
@@ -158,11 +157,7 @@ enum InterruptScanTask<'a> {
     Stmts(&'a [Stmt]),
 }
 
-fn collect_interrupt_callback_names_expr(
-    expr: &Expr,
-    cx: &Cx,
-    names: &mut HashSet<String>,
-) {
+fn collect_interrupt_callback_names_expr(expr: &Expr, cx: &Cx, names: &mut HashSet<String>) {
     collect_interrupt_callback_scan(InterruptScanTask::Expr(expr), cx, names);
 }
 
@@ -215,15 +210,16 @@ fn collect_interrupt_callback_scan(
                 // A normal lambda is its own function boundary. Its body gets one scan
                 // when that lambda is lowered; collecting/result loops are inline blocks
                 // in the current function and therefore remain part of this scan.
-                Expr::Lambda(lam)
-                    if lam.meta.collecting_loop || lam.meta.result_loop => match &lam.body {
-                    crate::AST::LambdaBody::Expr(body) => {
-                        work.push(InterruptScanTask::Expr(body));
+                Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop => {
+                    match &lam.body {
+                        crate::AST::LambdaBody::Expr(body) => {
+                            work.push(InterruptScanTask::Expr(body));
+                        }
+                        crate::AST::LambdaBody::Block(body) => {
+                            work.push(InterruptScanTask::Stmts(body));
+                        }
                     }
-                    crate::AST::LambdaBody::Block(body) => {
-                        work.push(InterruptScanTask::Stmts(body));
-                    }
-                },
+                }
                 Expr::Lambda(_) => {}
                 Expr::Paren(inner, _)
                 | Expr::Unary(_, inner, _)
@@ -369,8 +365,7 @@ fn collect_interrupt_callback_scan(
             InterruptScanTask::Stmts(stmts) => {
                 for stmt in stmts.iter().rev() {
                     match stmt {
-                        Stmt::Expr(expr)
-                        | Stmt::DeferClose { close: expr, .. } => {
+                        Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
                             work.push(InterruptScanTask::Expr(expr))
                         }
                         Stmt::Val(binding) => {
@@ -437,9 +432,9 @@ fn collect_interrupt_callback_scan(
                         } => {
                             work.push(InterruptScanTask::Stmts(body));
                             if let Some(step) = step {
-                                work.push(InterruptScanTask::Stmts(
-                                    std::slice::from_ref(step.as_ref()),
-                                ));
+                                work.push(InterruptScanTask::Stmts(std::slice::from_ref(
+                                    step.as_ref(),
+                                )));
                             }
                             work.push(InterruptScanTask::Expr(cond));
                             work.push(InterruptScanTask::Expr(&init.init));
@@ -487,9 +482,7 @@ fn collect_interrupt_callback_scan(
 fn collect_interrupt_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String)>) {
     match expr {
         Expr::Lambda(lambda) => match &lambda.body {
-            crate::AST::LambdaBody::Expr(body) => {
-                collect_interrupt_aliases_expr(body, aliases)
-            }
+            crate::AST::LambdaBody::Expr(body) => collect_interrupt_aliases_expr(body, aliases),
             crate::AST::LambdaBody::Block(body) => collect_interrupt_aliases(body, aliases),
         },
         Expr::MethodCall { receiver, args, .. } => {
@@ -558,10 +551,7 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                     collect_interrupt_aliases_expr(&binding.init, aliases);
                 }
                 Stmt::CountedLoop {
-                    init,
-                    step,
-                    body,
-                    ..
+                    init, step, body, ..
                 } => {
                     if let Some(source) = interrupt_callback_ident(&init.init) {
                         aliases.push((init.name.clone(), source.to_string()));
@@ -597,7 +587,9 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Transact { body, .. }
                 | Stmt::ComptimeBlock { body, .. } => work.push(body),
-                Stmt::Switch { arms, else_body, .. } => {
+                Stmt::Switch {
+                    arms, else_body, ..
+                } => {
                     for arm in arms {
                         work.push(&arm.body);
                     }
@@ -737,7 +729,9 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
             Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
                 collect_interrupt_lambda_captures_expr(value, captures)
             }
-            Stmt::CountedLoop { init, step, body, .. } => {
+            Stmt::CountedLoop {
+                init, step, body, ..
+            } => {
                 if let Some(lam) = interrupt_lambda(&init.init) {
                     for capture in interrupt_lambda_captures(lam) {
                         captures.push((init.name.clone(), capture));
@@ -775,10 +769,10 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::Transact { body, .. }
-            | Stmt::ComptimeBlock { body, .. } => {
-                collect_interrupt_lambda_captures(body, captures)
-            }
-            Stmt::Switch { arms, else_body, .. } => {
+            | Stmt::ComptimeBlock { body, .. } => collect_interrupt_lambda_captures(body, captures),
+            Stmt::Switch {
+                arms, else_body, ..
+            } => {
                 for arm in arms {
                     collect_interrupt_lambda_captures(&arm.body, captures);
                 }
@@ -797,7 +791,9 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
                 }
             }
             Stmt::ScopeMember { body, .. } => collect_interrupt_lambda_captures(body, captures),
-            Stmt::ComptimeSwitch { arms, else_body, .. } => {
+            Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            } => {
                 for arm in arms {
                     collect_interrupt_lambda_captures(&arm.body, captures);
                 }
@@ -972,10 +968,7 @@ impl<'a> LowerBody<'a> {
         }
     }
 
-    pub(crate) fn prepare(
-        mut self,
-        prepare: impl FnOnce(&Cx, &mut LowerEnv) + 'a,
-    ) -> Self {
+    pub(crate) fn prepare(mut self, prepare: impl FnOnce(&Cx, &mut LowerEnv) + 'a) -> Self {
         self.prepare = Some(Box::new(prepare));
         self
     }
@@ -1300,7 +1293,9 @@ fn mark_resource_binding_mutability(stmt: &mut TStmt, targets: &HashSet<String>)
             }
         }
         TStmt::Reactive { executable, .. } => {
-            if let crate::Codegen::TIR::TLambdaBody::Block(body) = &mut executable.as_mut().executable {
+            if let crate::Codegen::TIR::TLambdaBody::Block(body) =
+                &mut executable.as_mut().executable
+            {
                 mark_resource_bindings_mutable(body, targets);
             }
         }
@@ -1440,10 +1435,7 @@ fn split_owner_root(expr: &Expr) -> Option<String> {
 /// lowers it through the same path as a written `Expr::Place`, which is what
 /// keeps the interpreter and JIT aliasing behaviour identical to AOT (I9).
 /// Returns the windowed place and its access when `init` is either spelling.
-pub(crate) fn place_window_init<'a>(
-    init: &'a Expr,
-    cx: &Cx,
-) -> Option<(&'a Expr, PlaceAccess)> {
+pub(crate) fn place_window_init<'a>(init: &'a Expr, cx: &Cx) -> Option<(&'a Expr, PlaceAccess)> {
     match init {
         Expr::Place(inner, access, _) => Some((inner.as_ref(), *access)),
         Expr::MethodCall {
@@ -1525,11 +1517,7 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
     })
 }
 
-fn split_view_plan(
-    stmts: &[Stmt],
-    cx: &Cx,
-    env: &LowerEnv,
-) -> HashMap<usize, PlannedSplitView> {
+fn split_view_plan(stmts: &[Stmt], cx: &Cx, env: &LowerEnv) -> HashMap<usize, PlannedSplitView> {
     // The planner emits Rust slice operations. Compute windows use
     // checked Prelude handles instead, so resolve block-local owners before
     // planning and leave those bindings on the normal `Expr::Place` path.
@@ -1646,8 +1634,7 @@ fn split_view_plan(
         for (step, candidate_index) in group.into_iter().enumerate() {
             let candidate = candidates[candidate_index].clone();
             let Some(region_index) = regions.iter().position(|region| {
-                candidate.start >= region.start
-                    && region.end.is_none_or(|end| candidate.end <= end)
+                candidate.start >= region.start && region.end.is_none_or(|end| candidate.end <= end)
             }) else {
                 continue;
             };
@@ -1722,7 +1709,10 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
     // Rust integer suffix. Sema may leave bare `IntLit(_, None)` when the list
     // type comes from the head alone; retag from the expected element type so
     // emit produces `104u8` rather than `104i64` (I2).
-    if matches!(expected_elem, Type::IntN { .. } | Type::InlineRange { .. } | Type::List(_) | Type::FixedList { .. }) {
+    if matches!(
+        expected_elem,
+        Type::IntN { .. } | Type::InlineRange { .. } | Type::List(_) | Type::FixedList { .. }
+    ) {
         if let TExprKind::ListLit(elems) = &mut expr.kind {
             for elem in elems.iter_mut() {
                 match (&mut elem.kind, expected_elem) {
@@ -1737,10 +1727,13 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
                     // A nested list literal (`[[U8]]`) drives suffixes one
                     // dimension down with the same rule.
                     (TExprKind::ListLit(_), Type::List(_) | Type::FixedList { .. }) => {
-                        let inner = std::mem::replace(elem, TExpr {
-                            ty: Type::Int,
-                            kind: TExprKind::ListLit(Vec::new()),
-                        });
+                        let inner = std::mem::replace(
+                            elem,
+                            TExpr {
+                                ty: Type::Int,
+                                kind: TExprKind::ListLit(Vec::new()),
+                            },
+                        );
                         *elem = preserve_typed_list_shape(inner, expected_elem, cx);
                     }
                     _ => {}
@@ -1769,8 +1762,7 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
             Type::Apply { name, .. } => Some(name.clone()),
             _ => None,
         };
-        let (Some(concrete), TExprKind::StructLit { as_trait, .. }) =
-            (concrete, &mut elem.kind)
+        let (Some(concrete), TExprKind::StructLit { as_trait, .. }) = (concrete, &mut elem.kind)
         else {
             continue;
         };
@@ -1825,16 +1817,14 @@ fn is_direct_refutable_pattern(pattern: &Pattern, cx: &Cx) -> bool {
     )
 }
 
-fn lower_refutable_fallback(
-    fallback: &OrFallback,
-    cx: &Cx,
-    env: &LowerEnv,
-) -> Vec<TStmt> {
+fn lower_refutable_fallback(fallback: &OrFallback, cx: &Cx, env: &LowerEnv) -> Vec<TStmt> {
     let mut fallback_env = clone_env(env);
-    let unreachable = || TStmt::ExprStmt(TExpr {
-        ty: unit_type(),
-        kind: TExprKind::Unreachable { line: 0 },
-    });
+    let unreachable = || {
+        TStmt::ExprStmt(TExpr {
+            ty: unit_type(),
+            kind: TExprKind::Unreachable { line: 0 },
+        })
+    };
     match fallback {
         OrFallback::Return(value, _) => vec![TStmt::Return(
             value
@@ -1905,11 +1895,9 @@ fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type>) -> Optio
             Syntax::LIT_ERR,
             [crate::AST::EnumLitArg::Positional(value)],
         ) if *leading_dot => Some(Expr::Err(Box::new(value.clone()), *span)),
-        (
-            Some(Type::Option(_)),
-            Syntax::LIT_VALUE,
-            [crate::AST::EnumLitArg::Positional(value)],
-        ) => Some(Expr::Present(Box::new(value.clone()), *span)),
+        (Some(Type::Option(_)), Syntax::LIT_VALUE, [crate::AST::EnumLitArg::Positional(value)]) => {
+            Some(Expr::Present(Box::new(value.clone()), *span))
+        }
         (Some(Type::Option(_)), Syntax::LIT_NULL, []) => Some(Expr::Absent(*span)),
         _ => None,
     }
@@ -1924,12 +1912,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
     if let Stmt::Assign { target, value, .. } = s {
         let root_name = match target {
             LValue::Local { name, .. } => Some(name.as_str()),
-            LValue::Index { base, .. } | LValue::Field { base, .. } => {
-                match base.as_ref() {
-                    Expr::Ident(name, _) => Some(name.as_str()),
-                    _ => None,
-                }
-            }
+            LValue::Index { base, .. } | LValue::Field { base, .. } => match base.as_ref() {
+                Expr::Ident(name, _) => Some(name.as_str()),
+                _ => None,
+            },
         };
         if let Some(name) = root_name.filter(|name| env.is_gc(name)) {
             return in_own_frame(|| {
@@ -1941,31 +1927,30 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     LValue::Index { span, .. } => format!("index:{}", span.start),
                 };
                 let mut lowered_source = s.clone();
-                let index_temp = if let (
-                    LValue::Index { index, span, .. },
-                    Stmt::Assign { target, .. },
-                ) = (target, &mut lowered_source)
-                {
-                    let lowered = lower_expr(index, cx, env);
-                    let source_name = jet_format!("{jet_prefix}gc_index_{}", span.start);
-                    let rust_name = source_name.clone();
-                    let LValue::Index {
-                        index: lowered_index,
-                        ..
-                    } = target
-                    else {
-                        unreachable!("matched index assignment")
+                let index_temp =
+                    if let (LValue::Index { index, span, .. }, Stmt::Assign { target, .. }) =
+                        (target, &mut lowered_source)
+                    {
+                        let lowered = lower_expr(index, cx, env);
+                        let source_name = jet_format!("{jet_prefix}gc_index_{}", span.start);
+                        let rust_name = source_name.clone();
+                        let LValue::Index {
+                            index: lowered_index,
+                            ..
+                        } = target
+                        else {
+                            unreachable!("matched index assignment")
+                        };
+                        *lowered_index = Box::new(Expr::Ident(source_name.clone(), *span));
+                        env.bind(
+                            &source_name,
+                            TLocal::generated(&rust_name),
+                            Some(lowered.ty.clone()),
+                        );
+                        Some((rust_name, lowered))
+                    } else {
+                        None
                     };
-                    *lowered_index = Box::new(Expr::Ident(source_name.clone(), *span));
-                    env.bind(
-                        &source_name,
-                        TLocal::generated(&rust_name),
-                        Some(lowered.ty.clone()),
-                    );
-                    Some((rust_name, lowered))
-                } else {
-                    None
-                };
                 let saved = env.locals.get(name).cloned();
                 env.gc_locals.remove(name);
                 env.bind(
@@ -2060,15 +2045,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         ("value".to_string(), Type::Named("Tensor".to_string())),
                         (
                             "pull".to_string(),
-                            struct_field_type(cx, &init.ty, "pull")
-                                .unwrap_or_else(|| Type::Fn {
-                                    params: vec![Type::Named("Tensor".to_string())],
-                                    ret: Some(Box::new(args[0].clone())),
-                                    effect_bound: None,
-                                    param_contract: None,
-                    call_metadata: None,
-                                    return_view_provenance: None,
-                                }),
+                            struct_field_type(cx, &init.ty, "pull").unwrap_or_else(|| Type::Fn {
+                                params: vec![Type::Named("Tensor".to_string())],
+                                ret: Some(Box::new(args[0].clone())),
+                                effect_bound: None,
+                                param_contract: None,
+                                call_metadata: None,
+                                return_view_provenance: None,
+                            }),
                         ),
                     ]
                     .into_iter()
@@ -2088,8 +2072,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let mut binds = Vec::new();
                 for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
                     let elem_rust = mangle(&e.name).to_string();
-                    let field_rust = crate::Codegen::TIR::core_struct_field_rust_name(cx, &init.ty, fname)
-                        .unwrap_or_else(|| mangle(fname).to_string());
+                    let field_rust =
+                        crate::Codegen::TIR::core_struct_field_rust_name(cx, &init.ty, fname)
+                            .unwrap_or_else(|| mangle(fname).to_string());
                     binds.push((elem_rust, field_rust));
                     env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
                 }
@@ -2143,7 +2128,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 &b.pattern,
                 Some(BindPattern::Refutable { pattern, .. })
                     if is_refutable_unwrap_pattern(pattern)
-            ) => {
+            ) =>
+        {
             return in_own_frame(|| {
                 // D-CHOOSE-TEST1=A: a successful `Ok`/`value` pattern test is the
                 // canonical fallible unwrap already used by `??`. The miss route
@@ -2153,9 +2139,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // its raw contextual variant is normalized from the lowered
                 // carrier type here; sema remains authoritative for validity.
                 let Some(BindPattern::Refutable {
-                    pattern,
-                    fallback,
-                    ..
+                    pattern, fallback, ..
                 }) = &b.pattern
                 else {
                     unreachable!("refutable-binding guard lost its pattern")
@@ -2179,12 +2163,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 &b.pattern,
                 Some(BindPattern::Refutable { pattern, .. })
                     if is_direct_refutable_pattern(pattern, cx)
-            ) => {
+            ) =>
+        {
             return in_own_frame(|| {
                 let Some(BindPattern::Refutable {
-                    pattern,
-                    fallback,
-                    ..
+                    pattern, fallback, ..
                 }) = &b.pattern
                 else {
                     unreachable!("direct refutable-binding guard lost its pattern")
@@ -2207,389 +2190,415 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             });
         }
         Stmt::Val(b) => {
-            return in_own_frame(|| LowerStmtPlan::ready({
-                // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: lower
-                // `name := T.{ uninit }` to
-                //   `let mut name: T = unsafe { std::mem::MaybeUninit::<T>::uninit().assume_init() };`
-                // The source's `use core.mem` + `Type.{ uninit }` is the expert-tier opt-in (I1: no
-                // `unsafe` in generated code without a source-level gate). Sema proved
-                // write-before-read (E0420), so every subsequent read is post-write — the
-                // `assume_init()` at declaration yields garbage bytes that are always
-                // overwritten before any read. The `is_pod_uninit_type` guard in sema
-                // (E0423) ensures T has no Drop glue, so no destructor ever reads the garbage.
-                if b.uninit {
-                    return in_own_frame(|| {
-                        let ty =
-                            b.ty.as_ref()
-                                .expect("E0421 ensures a `Type.{ uninit }` binding has a type");
-                        let ty = ty.without_user_tags();
-                        let slot = if matches!(ty, Type::FixedList { .. }) {
-                            env.mark_uninit_fixed(&b.name);
-                            TLocal::user(&b.name).as_uninit_fixed()
-                        } else {
-                            TLocal::user(&b.name).as_uninit_scalar()
-                        };
-                        let slot = tracked_float_slot(b, ty, slot);
-                        env.bind(&b.name, slot, b.ty.clone());
-                        ready_return!(TStmt::Let {
-                            name: b.name.clone(),
-                            kw: "let mut",
-                            let_ty: crate::Codegen::TIR::let_ty_for_opt(Some(ty), cx, false, false, false),
-                            init: TExpr {
-                                ty: ty.clone(),
-                                kind: TExprKind::Uninit,
-                            },
-                        gc_promotion: None,
-                        gc_transferred: false,
-                        });
-                    });
-                }
-                // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
-                // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
-                // NEVER `let mut` — a view is a non-reassignable `&mut T`) and binds a DEREF'd
-                // slot (reads go through `(*x)`). Reproduce it exactly: a `Let` with `kw: "let"`,
-                // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
-                if b.arena_view {
-                    return in_own_frame(|| {
-                        let init = lower_expr(&b.init, cx, env);
-                        let slot = tracked_float_slot(
-                            b,
-                            b.ty.as_ref().unwrap_or(&init.ty),
-                            TLocal::user(&b.name).through_ref(),
-                        );
-                        env.bind(&b.name, slot, b.ty.clone());
-                        ready_return!(TStmt::Let {
-                            name: b.name.clone(),
-                            kw: "let",
-                            let_ty: TLetTy::Inferred,
-                            init,
-                        gc_promotion: None,
-                        gc_transferred: false,
-                        });
-                    });
-                }
-                // D-SHAPE-PLACE1=A: local place windows are references with no
-                // written Rust type clause. Range windows already behave as slices;
-                // whole/field/index windows bind a dereferenced transparent slot.
-                let moved_view = if let Some((inner, _)) = place_window_init(&b.init, cx) {
-                    let moved = lower_owned_expr(inner, cx, env);
-                    if matches!(
-                        &moved.ty,
-                        Type::Apply { name, .. }
-                            if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
-                    ) {
-                        Some(moved)
-                    } else {
-                        let init = lower_expr(&b.init, cx, env);
-                        let range = matches!(inner, Expr::Slice { .. });
-                        let slot = if range {
-                            TLocal::user(&b.name)
-                        } else {
-                            TLocal::user(&b.name).through_ref()
-                        };
-                        let slot = tracked_float_slot(
-                            b,
-                            b.ty.as_ref().unwrap_or(&init.ty),
-                            slot,
-                        );
-                        let binding_ty = if init.ty.is_compute_view_mut() {
-                            Some(init.ty.clone())
-                        } else {
-                            b.ty.clone()
-                        };
-                        env.bind(&b.name, slot, binding_ty);
-                        ready_return!(TStmt::Let {
-                            name: b.name.clone(),
-                            kw: if init.ty.is_compute_view_mut() {
-                                "let mut"
+            return in_own_frame(|| {
+                LowerStmtPlan::ready({
+                    // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: lower
+                    // `name := T.{ uninit }` to
+                    //   `let mut name: T = unsafe { std::mem::MaybeUninit::<T>::uninit().assume_init() };`
+                    // The source's `use core.mem` + `Type.{ uninit }` is the expert-tier opt-in (I1: no
+                    // `unsafe` in generated code without a source-level gate). Sema proved
+                    // write-before-read (E0420), so every subsequent read is post-write — the
+                    // `assume_init()` at declaration yields garbage bytes that are always
+                    // overwritten before any read. The `is_pod_uninit_type` guard in sema
+                    // (E0423) ensures T has no Drop glue, so no destructor ever reads the garbage.
+                    if b.uninit {
+                        return in_own_frame(|| {
+                            let ty =
+                                b.ty.as_ref()
+                                    .expect("E0421 ensures a `Type.{ uninit }` binding has a type");
+                            let ty = ty.without_user_tags();
+                            let slot = if matches!(ty, Type::FixedList { .. }) {
+                                env.mark_uninit_fixed(&b.name);
+                                TLocal::user(&b.name).as_uninit_fixed()
                             } else {
-                                "let"
-                            },
-                            let_ty: TLetTy::Inferred,
-                            init,
-                            gc_promotion: None,
-                            gc_transferred: false,
+                                TLocal::user(&b.name).as_uninit_scalar()
+                            };
+                            let slot = tracked_float_slot(b, ty, slot);
+                            env.bind(&b.name, slot, b.ty.clone());
+                            ready_return!(TStmt::Let {
+                                name: b.name.clone(),
+                                kw: "let mut",
+                                let_ty: crate::Codegen::TIR::let_ty_for_opt(
+                                    Some(ty),
+                                    cx,
+                                    false,
+                                    false,
+                                    false
+                                ),
+                                init: TExpr {
+                                    ty: ty.clone(),
+                                    kind: TExprKind::Uninit,
+                                },
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            });
                         });
                     }
-                } else {
-                    None
-                };
-                // D-MEM1/D-MEM-COPYSEM1: a string-view binding (`x :: s.trim()` /
-                // `x :: s.after(sep)` / `x :: s.before(sep)`; sema sets
-                // `string_view` after proving the local view fact is sound — see
-                // `CheckerCore.rs`'s binding check). An owning destination copies
-                // this binding later through the shared Prelude.
-                // Unlike `arena_view` this binds a plain `&str` (no deref needed to
-                // read it): `ty_clause: ": &str"`, `kw: "let"` (non-reassignable,
-                // non-escaping local, I8, same as arena/list views), and the init
-                // goes through the borrowed `_view` builtin op instead of
-                // `resolve_builtin_op`'s owned default.
-                if b.string_view {
-                    return in_own_frame(|| {
-                        let init = lower_string_view_init(&b.init, cx, env);
-                        env.bind(&b.name, TLocal::user(&b.name), Some(Type::String));
-                        env.mark_string_view(&b.name);
-                        ready_return!(TStmt::Let {
-                            name: b.name.clone(),
-                            kw: "let",
-                            let_ty: TLetTy::StrView,
-                            init,
-                        gc_promotion: None,
-                        gc_transferred: false,
+                    // c109 Phase 19: an arena `view` binding (`x :: arena.alloc(v)`). The AST
+                    // `emit_let`'s `arena_view` branch emits `let <x> = <init>;` (NO type clause,
+                    // NEVER `let mut` — a view is a non-reassignable `&mut T`) and binds a DEREF'd
+                    // slot (reads go through `(*x)`). Reproduce it exactly: a `Let` with `kw: "let"`,
+                    // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
+                    if b.arena_view {
+                        return in_own_frame(|| {
+                            let init = lower_expr(&b.init, cx, env);
+                            let slot = tracked_float_slot(
+                                b,
+                                b.ty.as_ref().unwrap_or(&init.ty),
+                                TLocal::user(&b.name).through_ref(),
+                            );
+                            env.bind(&b.name, slot, b.ty.clone());
+                            ready_return!(TStmt::Let {
+                                name: b.name.clone(),
+                                kw: "let",
+                                let_ty: TLetTy::Inferred,
+                                init,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            });
                         });
-                    });
-                }
-                // c109 (S57/M9.5): a comptime LOCAL `@name :: expr`. The AST `emit_let`
-                // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
-                // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
-                // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
-                // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
-                // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
-                // facts are pre-resolved (I3): no inference here.
-                // A comptime local inside a `@ { … }` block is evaluated by
-                // the interpreter itself, so sema never pre-resolves `b.ct`. There
-                // the binding is an ordinary one whose init runs now; only a
-                // pre-resolved value becomes literal data.
-                // D-FIXARR1: `[T#N]` must emit a Rust array. `CtValue::serialize` always
-                // prints lists as `vec![…]`, so skip the comptime shortcut and lower the
-                // source literal (retag below) instead of baking a CtLit.
-                // D-SG9: same for `[U8]`/`[I32]`/… — serialize always suffixes `i64`, which
-                // rustc rejects against `Vec<u8>` (I2). Lower + preserve_typed_list_shape.
-                // Trait-object elements (`[Shape].{ Circle.{…}, Square.{…} }`) need the
-                // same skip: `CtValue::serialize`/`bake_comptime_value_with_type` have no
-                // concept of `Box<dyn Trait>` boxing, so a comptime-baked `CtLit` emits
-                // bare struct literals where rustc expects `Box::new(...)` (I2). Lower +
-                // preserve_typed_list_shape instead, which already boxes trait elements.
-                let is_trait_elem = |elem: &Type| {
-                    matches!(elem, Type::TraitObject(_))
-                        || matches!(elem, Type::Named(name) if cx.trait_names.contains(name))
-                };
-                let binding_ty = b.ty.as_ref().map(Type::without_user_tags);
-                // Recursive: `[[U8]]` and deeper nestings need the same skip as
-                // `[U8]` — serialize suffixes every level `i64`.
-                fn list_needs_lowering(ty: &Type, is_trait_elem: &impl Fn(&Type) -> bool) -> bool {
-                    match ty {
-                        Type::FixedList { .. } => true,
-                        Type::List(elem) => {
-                            matches!(elem.as_ref(), Type::IntN { .. })
-                                || is_trait_elem(elem)
-                                || list_needs_lowering(elem, is_trait_elem)
+                    }
+                    // D-SHAPE-PLACE1=A: local place windows are references with no
+                    // written Rust type clause. Range windows already behave as slices;
+                    // whole/field/index windows bind a dereferenced transparent slot.
+                    let moved_view = if let Some((inner, _)) = place_window_init(&b.init, cx) {
+                        let moved = lower_owned_expr(inner, cx, env);
+                        if matches!(
+                            &moved.ty,
+                            Type::Apply { name, .. }
+                                if matches!(name.as_str(), "ViewMut" | "ComputeViewMut")
+                        ) {
+                            Some(moved)
+                        } else {
+                            let init = lower_expr(&b.init, cx, env);
+                            let range = matches!(inner, Expr::Slice { .. });
+                            let slot = if range {
+                                TLocal::user(&b.name)
+                            } else {
+                                TLocal::user(&b.name).through_ref()
+                            };
+                            let slot =
+                                tracked_float_slot(b, b.ty.as_ref().unwrap_or(&init.ty), slot);
+                            let binding_ty = if init.ty.is_compute_view_mut() {
+                                Some(init.ty.clone())
+                            } else {
+                                b.ty.clone()
+                            };
+                            env.bind(&b.name, slot, binding_ty);
+                            ready_return!(TStmt::Let {
+                                name: b.name.clone(),
+                                kw: if init.ty.is_compute_view_mut() {
+                                    "let mut"
+                                } else {
+                                    "let"
+                                },
+                                let_ty: TLetTy::Inferred,
+                                init,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            });
                         }
-                        _ => false,
+                    } else {
+                        None
+                    };
+                    // D-MEM1/D-MEM-COPYSEM1: a string-view binding (`x :: s.trim()` /
+                    // `x :: s.after(sep)` / `x :: s.before(sep)`; sema sets
+                    // `string_view` after proving the local view fact is sound — see
+                    // `CheckerCore.rs`'s binding check). An owning destination copies
+                    // this binding later through the shared Prelude.
+                    // Unlike `arena_view` this binds a plain `&str` (no deref needed to
+                    // read it): `ty_clause: ": &str"`, `kw: "let"` (non-reassignable,
+                    // non-escaping local, I8, same as arena/list views), and the init
+                    // goes through the borrowed `_view` builtin op instead of
+                    // `resolve_builtin_op`'s owned default.
+                    if b.string_view {
+                        return in_own_frame(|| {
+                            let init = lower_string_view_init(&b.init, cx, env);
+                            env.bind(&b.name, TLocal::user(&b.name), Some(Type::String));
+                            env.mark_string_view(&b.name);
+                            ready_return!(TStmt::Let {
+                                name: b.name.clone(),
+                                kw: "let",
+                                let_ty: TLetTy::StrView,
+                                init,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            });
+                        });
                     }
-                }
-                let skip_ct_list_bake =
-                    binding_ty.is_some_and(|ty| list_needs_lowering(ty, &is_trait_elem));
-                let skip_ct_view_bake = binding_ty.is_some_and(|ty| cx.type_contains_view(ty));
-                let skip_ct_boxed_bake =
-                    binding_ty.is_some_and(|ty| cx.type_contains_boxed_edge(ty));
-                let skip_ct_typed_literal_bake = binding_ty
-                    .is_some_and(|ty| cx.type_contains_typed_literal_edge(ty));
-                // Enum literals need the TIR enum-prefix resolver: a comptime enum
-                // serialization preserves the Jet dotted variant (`Fire.Burn`) but
-                // does not know the flat Rust variant spelling.
-                let skip_ct_enum_bake =
-                    matches!(b.ct, Some(crate::AST::CtValue::Enum { .. }));
-                if b.ct.is_some()
-                    && !skip_ct_list_bake
-                    && !skip_ct_view_bake
-                    && !skip_ct_boxed_bake
-                    && !skip_ct_typed_literal_bake
-                    && !skip_ct_enum_bake
-                {
-                    return in_own_frame(|| {
-                        let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
-                        let init_ty = b
+                    // c109 (S57/M9.5): a comptime LOCAL `@name :: expr`. The AST `emit_let`
+                    // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
+                    // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
+                    // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
+                    // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
+                    // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
+                    // facts are pre-resolved (I3): no inference here.
+                    // A comptime local inside a `@ { … }` block is evaluated by
+                    // the interpreter itself, so sema never pre-resolves `b.ct`. There
+                    // the binding is an ordinary one whose init runs now; only a
+                    // pre-resolved value becomes literal data.
+                    // D-FIXARR1: `[T#N]` must emit a Rust array. `CtValue::serialize` always
+                    // prints lists as `vec![…]`, so skip the comptime shortcut and lower the
+                    // source literal (retag below) instead of baking a CtLit.
+                    // D-SG9: same for `[U8]`/`[I32]`/… — serialize always suffixes `i64`, which
+                    // rustc rejects against `Vec<u8>` (I2). Lower + preserve_typed_list_shape.
+                    // Trait-object elements (`[Shape].{ Circle.{…}, Square.{…} }`) need the
+                    // same skip: `CtValue::serialize`/`bake_comptime_value_with_type` have no
+                    // concept of `Box<dyn Trait>` boxing, so a comptime-baked `CtLit` emits
+                    // bare struct literals where rustc expects `Box::new(...)` (I2). Lower +
+                    // preserve_typed_list_shape instead, which already boxes trait elements.
+                    let is_trait_elem = |elem: &Type| {
+                        matches!(elem, Type::TraitObject(_))
+                            || matches!(elem, Type::Named(name) if cx.trait_names.contains(name))
+                    };
+                    let binding_ty = b.ty.as_ref().map(Type::without_user_tags);
+                    // Recursive: `[[U8]]` and deeper nestings need the same skip as
+                    // `[U8]` — serialize suffixes every level `i64`.
+                    fn list_needs_lowering(
+                        ty: &Type,
+                        is_trait_elem: &impl Fn(&Type) -> bool,
+                    ) -> bool {
+                        match ty {
+                            Type::FixedList { .. } => true,
+                            Type::List(elem) => {
+                                matches!(elem.as_ref(), Type::IntN { .. })
+                                    || is_trait_elem(elem)
+                                    || list_needs_lowering(elem, is_trait_elem)
+                            }
+                            _ => false,
+                        }
+                    }
+                    let skip_ct_list_bake =
+                        binding_ty.is_some_and(|ty| list_needs_lowering(ty, &is_trait_elem));
+                    let skip_ct_view_bake = binding_ty.is_some_and(|ty| cx.type_contains_view(ty));
+                    let skip_ct_boxed_bake =
+                        binding_ty.is_some_and(|ty| cx.type_contains_boxed_edge(ty));
+                    let skip_ct_typed_literal_bake =
+                        binding_ty.is_some_and(|ty| cx.type_contains_typed_literal_edge(ty));
+                    // Enum literals need the TIR enum-prefix resolver: a comptime enum
+                    // serialization preserves the Jet dotted variant (`Fire.Burn`) but
+                    // does not know the flat Rust variant spelling.
+                    let skip_ct_enum_bake = matches!(b.ct, Some(crate::AST::CtValue::Enum { .. }));
+                    if b.ct.is_some()
+                        && !skip_ct_list_bake
+                        && !skip_ct_view_bake
+                        && !skip_ct_boxed_bake
+                        && !skip_ct_typed_literal_bake
+                        && !skip_ct_enum_bake
+                    {
+                        return in_own_frame(|| {
+                            let let_ty = crate::Codegen::TIR::let_ty_for_opt(
+                                b.ty.as_ref(),
+                                cx,
+                                false,
+                                false,
+                                false,
+                            );
+                            let init_ty =
+                                b.ty.as_ref()
+                                    .map(|ty| ty.without_user_tags().clone())
+                                    .unwrap_or(Type::Int);
+                            let init = TExpr {
+                                ty: init_ty,
+                                kind: lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref())
+                                    .unwrap_or_else(|| {
+                                        b.ct.as_ref()
+                                            .map(|v| {
+                                                let value = b.ty.as_ref().map_or_else(
+                                                    || v.clone(),
+                                                    |ty| {
+                                                        bake_comptime_value_with_type(
+                                                            v,
+                                                            ty.without_user_tags(),
+                                                            cx,
+                                                        )
+                                                    },
+                                                );
+                                                TExprKind::CtLit(value)
+                                            })
+                                            .unwrap_or(TExprKind::DefaultLit)
+                                    }),
+                            };
+                            let slot = tracked_float_slot(
+                                b,
+                                b.ty.as_ref().unwrap_or(&init.ty),
+                                TLocal::user(&b.name),
+                            );
+                            env.bind(&b.name, slot, b.ty.clone());
+                            ready_return!(TStmt::Let {
+                                name: b.name.clone(),
+                                kw: "let",
+                                let_ty,
+                                init,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            });
+                        });
+                    }
+                    in_own_frame(|| {
+                        let mut init =
+                            moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
+                        // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
+                        // even though the source surface names only `T AllocError!`.
+                        // Keep that internal carrier through TIR so every tier returns and
+                        // binds the same reference, rather than materializing a copy.
+                        let allocator_carrier =
+                            init.ty.is_allocator_view() || init.ty.is_allocator_result();
+                        // D-CONC-SPAWN1: a fallible task body's closure returns the
+                        // internal carrier `Task<T E!>` (`spawn_body_result_ty`),
+                        // while sema's surface binding type stays `Task<T>`. Keep
+                        // the carrier through TIR — bind and annotate with the
+                        // lowered spawn type so the Rust `let` matches its init —
+                        // exactly the allocator-carrier precedent above.
+                        let spawn_carrier = matches!(
+                            &init.kind,
+                            TExprKind::CoreClosureCall {
+                                kind: TCoreClosureKind::Spawn { .. }
+                            }
+                        ) && matches!(
+                            &init.ty,
+                            Type::Apply { name, args }
+                                if name == "Task"
+                                    && matches!(
+                                        args.first(),
+                                        Some(Type::Result { .. }) | Some(Type::Option(_))
+                                    )
+                        ) && b
                             .ty
                             .as_ref()
-                            .map(|ty| ty.without_user_tags().clone())
-                            .unwrap_or(Type::Int);
-                        let init = TExpr {
-                            ty: init_ty,
-                            kind: lower_comptime_scalar(b.ct.as_ref(), b.ty.as_ref()).unwrap_or_else(|| {
-                                b.ct
-                                    .as_ref()
-                                    .map(|v| {
-                                        let value = b.ty.as_ref().map_or_else(
-                                            || v.clone(),
-                                            |ty| bake_comptime_value_with_type(v, ty.without_user_tags(), cx),
-                                        );
-                                        TExprKind::CtLit(value)
-                                    })
-                                    .unwrap_or(TExprKind::DefaultLit)
-                            }),
+                            .is_some_and(|ty| ty.without_user_tags() != &init.ty);
+                        // No declared `b.ty`? A typed list head (`[Shape].{ Circle.{…}, … }`)
+                        // still carries its own resolved element type on `init.ty` — reuse it
+                        // self-referentially so trait-object elements still get boxed
+                        // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
+                        // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
+                        // binding got, and rustc rejected the un-boxed struct literals (I2).
+                        let want = if allocator_carrier || spawn_carrier {
+                            init.ty.clone()
+                        } else {
+                            b.ty.as_ref()
+                                .map(|ty| ty.without_user_tags().clone())
+                                .unwrap_or_else(|| init.ty.clone())
                         };
-                        let slot = tracked_float_slot(
-                            b,
-                            b.ty.as_ref().unwrap_or(&init.ty),
-                            TLocal::user(&b.name),
-                        );
-                        env.bind(&b.name, slot, b.ty.clone());
-                        ready_return!(TStmt::Let {
-                            name: b.name.clone(),
-                            kw: "let",
-                            let_ty,
-                            init,
-                        gc_promotion: None,
-                        gc_transferred: false,
-                        });
-                    });
-                }
-                in_own_frame(|| {
-                    let mut init =
-                        moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
-                    // D-ALLOCFAIL1=A: a fallible allocator result carries a live view
-                    // even though the source surface names only `T AllocError!`.
-                    // Keep that internal carrier through TIR so every tier returns and
-                    // binds the same reference, rather than materializing a copy.
-                    let allocator_carrier = init.ty.is_allocator_view() || init.ty.is_allocator_result();
-                    // D-CONC-SPAWN1: a fallible task body's closure returns the
-                    // internal carrier `Task<T E!>` (`spawn_body_result_ty`),
-                    // while sema's surface binding type stays `Task<T>`. Keep
-                    // the carrier through TIR — bind and annotate with the
-                    // lowered spawn type so the Rust `let` matches its init —
-                    // exactly the allocator-carrier precedent above.
-                    let spawn_carrier = matches!(
-                        &init.kind,
-                        TExprKind::CoreClosureCall {
-                            kind: TCoreClosureKind::Spawn { .. }
+                        init = preserve_typed_list_shape(init, &want, cx);
+                        // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
+                        // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
+                        // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.
+                        if let Some(fl @ Type::FixedList { .. }) =
+                            b.ty.as_ref().map(Type::without_user_tags)
+                        {
+                            init.ty = fl.clone();
                         }
-                    ) && matches!(
-                        &init.ty,
-                        Type::Apply { name, args }
-                            if name == "Task"
-                                && matches!(
-                                    args.first(),
-                                    Some(Type::Result { .. }) | Some(Type::Option(_))
-                                )
-                    ) && b
-                        .ty
-                        .as_ref()
-                        .is_some_and(|ty| ty.without_user_tags() != &init.ty);
-                    // No declared `b.ty`? A typed list head (`[Shape].{ Circle.{…}, … }`)
-                    // still carries its own resolved element type on `init.ty` — reuse it
-                    // self-referentially so trait-object elements still get boxed
-                    // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
-                    // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
-                    // binding got, and rustc rejected the un-boxed struct literals (I2).
-                    let want = if allocator_carrier || spawn_carrier {
-                        init.ty.clone()
-                    } else {
-                        b.ty
-                            .as_ref()
-                            .map(|ty| ty.without_user_tags().clone())
-                            .unwrap_or_else(|| init.ty.clone())
-                    };
-                    init = preserve_typed_list_shape(init, &want, cx);
-                    // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
-                    // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
-                    // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.
-                    if let Some(fl @ Type::FixedList { .. }) = b.ty.as_ref().map(Type::without_user_tags) {
-                        init.ty = fl.clone();
-                    }
-                    // D-UNIONTYPE1=A: member → union inject at the binding boundary.
-                    if let Some(want) = b.ty.as_ref().map(Type::without_user_tags) {
-                        init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want);
-                    }
-                    // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
-                    // with an Int placeholder element type (no element to infer from), so it
-                    // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
-                    // columnar empty constructor (`JetColumnList<S>::from_aos(vec![])`, one
-                    // empty column per stored field) using the binding's declared type.
-                    if let Some(decl @ Type::List(inner)) = b.ty.as_ref().map(Type::without_user_tags) {
-                        if let Some(columns_ty) = cx.columnar_list_type(inner) {
-                            if matches!(&init.kind, TExprKind::ListLit(es) if es.is_empty()) {
+                        // D-UNIONTYPE1=A: member → union inject at the binding boundary.
+                        if let Some(want) = b.ty.as_ref().map(Type::without_user_tags) {
+                            init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want);
+                        }
+                        // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
+                        // with an Int placeholder element type (no element to infer from), so it
+                        // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
+                        // columnar empty constructor (`JetColumnList<S>::from_aos(vec![])`, one
+                        // empty column per stored field) using the binding's declared type.
+                        if let Some(decl @ Type::List(inner)) =
+                            b.ty.as_ref().map(Type::without_user_tags)
+                        {
+                            if let Some(columns_ty) = cx.columnar_list_type(inner) {
+                                if matches!(&init.kind, TExprKind::ListLit(es) if es.is_empty()) {
+                                    init = TExpr {
+                                        ty: decl.clone(),
+                                        kind: TExprKind::ColumnarListLit {
+                                            columns_ty,
+                                            elems: Vec::new(),
+                                        },
+                                    };
+                                }
+                            }
+                        }
+                        // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
+                        // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
+                        // a `: <fn-trait(mut)>` annotation. Decided here from `Lambda.meta`.
+                        let mut_fn = matches!(
+                            &b.init,
+                            Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
+                        );
+                        if mut_fn {
+                            if let Some(Type::Fn {
+                                params,
+                                ret,
+                                return_view_provenance,
+                                ..
+                            }) = &b.ty
+                            {
+                                let coerced = format!(
+                                    "{} as {}",
+                                    emit_tir_expr(&init, cx),
+                                    cx.rust_fn_trait(
+                                        params,
+                                        ret.as_deref(),
+                                        return_view_provenance.as_ref(),
+                                        true,
+                                    )
+                                );
+                                let init_ty = init.ty.clone();
+                                let lambda =
+                                    match std::mem::replace(&mut init.kind, TExprKind::Unit) {
+                                        TExprKind::Lambda(lambda) => Some(lambda),
+                                        other => {
+                                            init.kind = other;
+                                            None
+                                        }
+                                    };
                                 init = TExpr {
-                                    ty: decl.clone(),
-                                    kind: TExprKind::ColumnarListLit {
-                                        columns_ty,
-                                        elems: Vec::new(),
+                                    ty: init_ty,
+                                    kind: TExprKind::FnValue {
+                                        kind: TFnValueKind::NamedFn {
+                                            wrapper: coerced,
+                                            name: None,
+                                            lambda,
+                                        },
                                     },
                                 };
                             }
                         }
-                    }
-                    // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — an escaping FnMut
-                    // lambda binding gets `let mut` AND an `as <fn-trait(mut)>` init coercion +
-                    // a `: <fn-trait(mut)>` annotation. Decided here from `Lambda.meta`.
-                    let mut_fn = matches!(
-                        &b.init,
-                        Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
-                    );
-                    if mut_fn {
-                        if let Some(Type::Fn {
-                            params,
-                            ret,
-                            return_view_provenance,
-                            ..
-                        }) = &b.ty {
-                            let coerced = format!(
-                                "{} as {}",
-                                emit_tir_expr(&init, cx),
-                                cx.rust_fn_trait(
-                                    params,
-                                    ret.as_deref(),
-                                    return_view_provenance.as_ref(),
-                                    true,
-                                )
-                            );
-                            let init_ty = init.ty.clone();
-                            let lambda = match std::mem::replace(&mut init.kind, TExprKind::Unit) {
-                                TExprKind::Lambda(lambda) => Some(lambda),
-                                other => {
-                                    init.kind = other;
-                                    None
-                                }
-                            };
+                        // Totality: if the source omitted the type, infer it ONCE here from
+                        // the init's already-resolved type. Codegen never infers.
+                        // A written Tensor place has an internal carrier that keeps the
+                        // owner/range for the shared Prelude window setter. It must stay
+                        // inferred; the source-facing ViewMut spelling is a sema type,
+                        // not the generated Rust carrier.
+                        let ty = if allocator_carrier
+                            || spawn_carrier
+                            || init.ty.is_compute_view_mut()
+                        {
+                            init.ty.clone()
+                        } else {
+                            b.ty.as_ref()
+                                .map(|ty| ty.without_user_tags().clone())
+                                .unwrap_or_else(|| init.ty.clone())
+                        };
+                        let send_fn =
+                            env.is_send_fn(&b.name) && matches!(&ty, Type::Fn { .. }) && !mut_fn;
+                        if send_fn {
+                            init = force_interrupt_callback_value(init, cx);
+                        }
+                        let is_resource = match &ty {
+                            Type::Named(name) | Type::Apply { name, .. } => {
+                                cx.close_types.contains(name)
+                            }
+                            _ => false,
+                        };
+                        if is_resource {
                             init = TExpr {
-                                ty: init_ty,
-                                kind: TExprKind::FnValue {
-                                    kind: TFnValueKind::NamedFn {
-                                        wrapper: coerced,
-                                        name: None,
-                                        lambda,
-                                    },
-                                },
+                                ty: ty.clone(),
+                                kind: TExprKind::ResourceNew(Box::new(init)),
                             };
                         }
-                    }
-                    // Totality: if the source omitted the type, infer it ONCE here from
-                    // the init's already-resolved type. Codegen never infers.
-                    // A written Tensor place has an internal carrier that keeps the
-                    // owner/range for the shared Prelude window setter. It must stay
-                    // inferred; the source-facing ViewMut spelling is a sema type,
-                    // not the generated Rust carrier.
-                    let ty = if allocator_carrier || spawn_carrier || init.ty.is_compute_view_mut() {
-                        init.ty.clone()
-                    } else {
-                        b.ty
-                            .as_ref()
-                            .map(|ty| ty.without_user_tags().clone())
-                            .unwrap_or_else(|| init.ty.clone())
-                    };
-                    let send_fn = env.is_send_fn(&b.name)
-                        && matches!(&ty, Type::Fn { .. })
-                        && !mut_fn;
-                    if send_fn {
-                        init = force_interrupt_callback_value(init, cx);
-                    }
-                    let is_resource = match &ty {
-                        Type::Named(name) | Type::Apply { name, .. } => cx.close_types.contains(name),
-                        _ => false,
-                    };
-                    if is_resource {
-                        init = TExpr {
-                            ty: ty.clone(),
-                            kind: TExprKind::ResourceNew(Box::new(init)),
-                        };
-                    }
-                    // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
-                    // when bound immutably (its methods take `&mut self`). Mirror
-                    // `emit_let`'s `is_file_handle` set exactly.
-                    // card #1859: `Mailer` (`jet_email::Mailer::send`, Prelude/CoreLib/Email.rs)
-                    // takes `&mut self` too and was missing from this set, so a `mailer ::
-                    // email.smtp(…)` local kept `let` and rustc rejected `.send()` (E0596, I2).
-                    let is_file_handle = matches!(
+                        // E2-M7/E2-M10/D-ALLOC1/D-ROUTE1: a handle binding forces `let mut` even
+                        // when bound immutably (its methods take `&mut self`). Mirror
+                        // `emit_let`'s `is_file_handle` set exactly.
+                        // card #1859: `Mailer` (`jet_email::Mailer::send`, Prelude/CoreLib/Email.rs)
+                        // takes `&mut self` too and was missing from this set, so a `mailer ::
+                        // email.smtp(…)` local kept `let` and rustc rejected `.send()` (E0596, I2).
+                        let is_file_handle = matches!(
                         &ty,
                         Type::Named(n) if n == "FileReader" || n == "FileWriter"
                             || n == "JSONReader" || n == "JSONWriter"
@@ -2627,73 +2636,74 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                         if name == Syntax::TYPE_SHARED_GUARD
                                 )
                     );
-                    let kw = if (b.mutable && !b.is_comptime)
-                        || mut_fn
-                        || is_file_handle
-                        || cx.type_contains_mutable_view(&ty)
-                    {
-                        "let mut"
-                    } else {
-                        "let"
-                    };
-                    // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
-                    // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
-                    // inferred binding.
-                    let let_ty = if allocator_carrier {
-                        crate::Codegen::TIR::TLetTy::plain(ty.clone())
-                    } else if spawn_carrier || ty.is_compute_view_mut() {
-                        // D-CONC-SPAWN1: the fallible spawn carrier binds
-                        // UNANNOTATED. The closure fully pins the type
-                        // (`Ok::<_, E>(…)` tail + widened `?` sites), and
-                        // spelling the lowered type here would name tuple
-                        // typedefs (`__jet_JetTup_<hash>`) derived from
-                        // lowering-side spellings that the AST-walk tuple
-                        // collector (Tuples.rs) never registered — rustc
-                        // E0425 on a tuple-tail task body (I2).
-                        TLetTy::Inferred
-                    } else if send_fn {
-                        TLetTy::SendFn(ty.clone())
-                    } else {
-                        crate::Codegen::TIR::let_ty_for_opt(
-                            b.ty.as_ref(),
-                            cx,
-                            mut_fn,
-                            is_resource,
-                            b.gc_promotion.is_some() || b.gc_transferred,
-                        )
-                    };
-                    let binding_name = if is_resource {
-                        mangle_generated(&format!("resource_{}_{}", b.name, b.name_span.start))
-                    } else {
-                        b.name.clone()
-                    };
-                    let slot = if is_resource {
-                        TLocal::user(&binding_name).through_ref()
-                    } else if ty.is_allocator_view() {
-                        TLocal::user(&binding_name).through_ref()
-                    } else if kw == "let mut" {
-                        TLocal::user(&binding_name).as_mutable()
-                    } else {
-                        TLocal::user(&binding_name)
-                    };
-                    let slot = tracked_float_slot(b, &ty, slot);
-                    env.bind(&b.name, slot, Some(ty));
-                    if b.gc_promotion.is_some() || b.gc_transferred {
-                        env.mark_gc(&b.name);
-                    }
-                    if is_resource {
-                        env.mark_resource(&b.name);
-                    }
-                    TStmt::Let {
-                        name: binding_name,
-                        kw,
-                        let_ty,
-                        init,
-                        gc_promotion: b.gc_promotion.clone(),
-                        gc_transferred: b.gc_transferred,
-                    }
+                        let kw = if (b.mutable && !b.is_comptime)
+                            || mut_fn
+                            || is_file_handle
+                            || cx.type_contains_mutable_view(&ty)
+                        {
+                            "let mut"
+                        } else {
+                            "let"
+                        };
+                        // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
+                        // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
+                        // inferred binding.
+                        let let_ty = if allocator_carrier {
+                            crate::Codegen::TIR::TLetTy::plain(ty.clone())
+                        } else if spawn_carrier || ty.is_compute_view_mut() {
+                            // D-CONC-SPAWN1: the fallible spawn carrier binds
+                            // UNANNOTATED. The closure fully pins the type
+                            // (`Ok::<_, E>(…)` tail + widened `?` sites), and
+                            // spelling the lowered type here would name tuple
+                            // typedefs (`__jet_JetTup_<hash>`) derived from
+                            // lowering-side spellings that the AST-walk tuple
+                            // collector (Tuples.rs) never registered — rustc
+                            // E0425 on a tuple-tail task body (I2).
+                            TLetTy::Inferred
+                        } else if send_fn {
+                            TLetTy::SendFn(ty.clone())
+                        } else {
+                            crate::Codegen::TIR::let_ty_for_opt(
+                                b.ty.as_ref(),
+                                cx,
+                                mut_fn,
+                                is_resource,
+                                b.gc_promotion.is_some() || b.gc_transferred,
+                            )
+                        };
+                        let binding_name = if is_resource {
+                            mangle_generated(&format!("resource_{}_{}", b.name, b.name_span.start))
+                        } else {
+                            b.name.clone()
+                        };
+                        let slot = if is_resource {
+                            TLocal::user(&binding_name).through_ref()
+                        } else if ty.is_allocator_view() {
+                            TLocal::user(&binding_name).through_ref()
+                        } else if kw == "let mut" {
+                            TLocal::user(&binding_name).as_mutable()
+                        } else {
+                            TLocal::user(&binding_name)
+                        };
+                        let slot = tracked_float_slot(b, &ty, slot);
+                        env.bind(&b.name, slot, Some(ty));
+                        if b.gc_promotion.is_some() || b.gc_transferred {
+                            env.mark_gc(&b.name);
+                        }
+                        if is_resource {
+                            env.mark_resource(&b.name);
+                        }
+                        TStmt::Let {
+                            name: binding_name,
+                            kw,
+                            let_ty,
+                            init,
+                            gc_promotion: b.gc_promotion.clone(),
+                            gc_transferred: b.gc_transferred,
+                        }
+                    })
                 })
-            }));
+            });
         }
         Stmt::Assign {
             target,
@@ -2702,33 +2712,37 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             value,
         } => match target {
             LValue::Local { name, .. } => {
-                return in_own_frame(|| LowerStmtPlan::ready({
-                    // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
-                    // ident on the RHS would move out of a shared reference (E0507, I2).
-                    let clone_value = if let Expr::Ident(vname, _) = value {
-                        env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-                    } else {
-                        false
-                    };
-                    let mut value_t = lower_expr(value, cx, env);
-                    if env.is_send_fn(name) && matches!(&value_t.ty, Type::Fn { .. }) {
-                        // Keep every write to an indirect callback in the same
-                        // canonical representation as its declaration. Otherwise
-                        // a later hot-swapped registration could load an ordinary
-                        // Rc/raw function value into the Send crossing.
-                        value_t = force_interrupt_callback_value(value_t, cx);
-                    }
-                    TStmt::Assign {
-                        place: TPlace::Local(
-                            cx.persistent_local(name)
-                                .unwrap_or_else(|| env.local_of(name)),
-                        ),
-                        op: *op,
-                        value: value_t,
-                        clone_value,
-                        line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
-                    }
-                }));
+                return in_own_frame(|| {
+                    LowerStmtPlan::ready({
+                        // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
+                        // ident on the RHS would move out of a shared reference (E0507, I2).
+                        let clone_value = if let Expr::Ident(vname, _) = value {
+                            env.is_borrowed(vname)
+                                && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                        } else {
+                            false
+                        };
+                        let mut value_t = lower_expr(value, cx, env);
+                        if env.is_send_fn(name) && matches!(&value_t.ty, Type::Fn { .. }) {
+                            // Keep every write to an indirect callback in the same
+                            // canonical representation as its declaration. Otherwise
+                            // a later hot-swapped registration could load an ordinary
+                            // Rc/raw function value into the Send crossing.
+                            value_t = force_interrupt_callback_value(value_t, cx);
+                        }
+                        TStmt::Assign {
+                            place: TPlace::Local(
+                                cx.persistent_local(name)
+                                    .unwrap_or_else(|| env.local_of(name)),
+                            ),
+                            op: *op,
+                            value: value_t,
+                            clone_value,
+                            line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0
+                                as u32,
+                        }
+                    })
+                });
             }
             // c109 Phase 5: `coll[i] = v`. The `IndexKind` is resolved by sema; carry
             // it as the total `is_map` fact (the gate excluded `Unknown`). No compound
@@ -2739,79 +2753,82 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 kind,
                 span,
             } => {
-                return in_own_frame(|| LowerStmtPlan::ready({
-                    debug_assert!(
-                        super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
-                        "sema-to-TIR handoff violated"
-                    );
-                    // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the
-                    // subset gate must have already excluded `IndexKind::Unknown` before
-                    // routing here — an `Unknown` default reaching lowering means sema
-                    // left an index kind unresolved and the gate missed it.
-                    debug_assert!(
-                        super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
-                        "sema-to-TIR handoff violated: unresolved index kind"
-                    );
-                    let kind = if matches!(kind, IndexKind::Unknown) {
-                        &IndexKind::List
-                    } else {
-                        kind
-                    };
-                    let base_t = lower_expr(base, cx, env);
-                    let index_t = lower_expr(index, cx, env);
-                    let value_t = lower_expr(value, cx, env);
-                    if let IndexKind::User(type_name) = kind {
-                        return in_own_frame(|| {
-                            ready_return!(TStmt::IndexHookAssign {
-                                type_name: type_name.clone(),
-                                base: base_t,
-                                index: index_t,
-                                value: value_t,
+                return in_own_frame(|| {
+                    LowerStmtPlan::ready({
+                        debug_assert!(
+                            super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
+                            "sema-to-TIR handoff violated"
+                        );
+                        // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the
+                        // subset gate must have already excluded `IndexKind::Unknown` before
+                        // routing here — an `Unknown` default reaching lowering means sema
+                        // left an index kind unresolved and the gate missed it.
+                        debug_assert!(
+                            super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
+                            "sema-to-TIR handoff violated: unresolved index kind"
+                        );
+                        let kind = if matches!(kind, IndexKind::Unknown) {
+                            &IndexKind::List
+                        } else {
+                            kind
+                        };
+                        let base_t = lower_expr(base, cx, env);
+                        let index_t = lower_expr(index, cx, env);
+                        let value_t = lower_expr(value, cx, env);
+                        if let IndexKind::User(type_name) = kind {
+                            return in_own_frame(|| {
+                                ready_return!(TStmt::IndexHookAssign {
+                                    type_name: type_name.clone(),
+                                    base: base_t,
+                                    index: index_t,
+                                    value: value_t,
+                                });
                             });
-                        });
-                    }
-                    // D-MEM1 S6: `pool[id] = v` — a genuine mutable place through
-                    // `jet_pool_get_mut` (generation-checked, panics on a stale `id`),
-                    // not a value round-trip. Reuses the plain `TStmt::Assign` (a raw
-                    // Rust place string) rather than `IndexAssign`'s bool-keyed
-                    // List/Map dispatch, since Pool needs its own helper + panic text.
-                    if matches!(kind, IndexKind::Pool) {
-                        return in_own_frame(|| {
-                            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-                            let src_line = cx
-                                .src
-                                .lines()
-                                .nth(line.saturating_sub(1))
-                                .unwrap_or_default()
-                                .to_string();
-                            let elem_ty = value_t.ty.clone();
-                            ready_return!(TStmt::Assign {
-                                place: TPlace::Expr(Box::new(TExpr {
-                                    ty: elem_ty,
-                                    kind: TExprKind::PoolSlot {
-                                        pool: Box::new(base_t),
-                                        id: Box::new(index_t),
-                                        mutable: true,
-                                        field: None,
-                                        line,
-                                        src_line,
-                                    },
-                                })),
-                                op: *op,
-                                value: value_t,
-                                clone_value: false,
-                                line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
+                        }
+                        // D-MEM1 S6: `pool[id] = v` — a genuine mutable place through
+                        // `jet_pool_get_mut` (generation-checked, panics on a stale `id`),
+                        // not a value round-trip. Reuses the plain `TStmt::Assign` (a raw
+                        // Rust place string) rather than `IndexAssign`'s bool-keyed
+                        // List/Map dispatch, since Pool needs its own helper + panic text.
+                        if matches!(kind, IndexKind::Pool) {
+                            return in_own_frame(|| {
+                                let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                                let src_line = cx
+                                    .src
+                                    .lines()
+                                    .nth(line.saturating_sub(1))
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let elem_ty = value_t.ty.clone();
+                                ready_return!(TStmt::Assign {
+                                    place: TPlace::Expr(Box::new(TExpr {
+                                        ty: elem_ty,
+                                        kind: TExprKind::PoolSlot {
+                                            pool: Box::new(base_t),
+                                            id: Box::new(index_t),
+                                            mutable: true,
+                                            field: None,
+                                            line,
+                                            src_line,
+                                        },
+                                    })),
+                                    op: *op,
+                                    value: value_t,
+                                    clone_value: false,
+                                    line: crate::Diagnostics::span_line_col(&cx.src, op_span.start)
+                                        .0 as u32,
+                                });
                             });
-                        });
-                    }
-                    TStmt::IndexAssign {
-                        uninit: matches!(base.as_ref(), Expr::Ident(name, _) if env.is_uninit_fixed(name)),
-                        base: base_t,
-                        index: index_t,
-                        is_map: matches!(kind, IndexKind::Map),
-                        value: value_t,
-                    }
-                }));
+                        }
+                        TStmt::IndexAssign {
+                            uninit: matches!(base.as_ref(), Expr::Ident(name, _) if env.is_uninit_fixed(name)),
+                            base: base_t,
+                            index: index_t,
+                            is_map: matches!(kind, IndexKind::Map),
+                            value: value_t,
+                        }
+                    })
+                });
             }
             // D-MUTSELF1: a field-assignment `place.field [op]= v`. The place is the
             // field READ lowered to its resolved Rust string (`((*self)).field` once
@@ -2819,170 +2836,181 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             // read path uses — byte-for-byte the AST `LValue::Field` form. Carried as a
             // plain `TStmt::Assign` so the `op` compound form rides the shared emit.
             LValue::Field { base, field, span } => {
-                return in_own_frame(|| LowerStmtPlan::ready({
-                    if let Expr::Index {
-                        base: collection,
-                        index,
-                        kind,
-                        span: index_span,
-                    } = base.as_ref()
-                    {
-                        let is_map = matches!(kind, IndexKind::Map);
-                        let index_proven = matches!(kind, IndexKind::FixedListProof);
-                        if is_map
-                            || index_proven
-                            || matches!(kind, IndexKind::List)
+                return in_own_frame(|| {
+                    LowerStmtPlan::ready({
+                        if let Expr::Index {
+                            base: collection,
+                            index,
+                            kind,
+                            span: index_span,
+                        } = base.as_ref()
                         {
-                            let collection_t = lower_expr(collection, cx, env);
-                            let elem_ty = match &collection_t.ty {
-                                Type::List(elem) | Type::FixedList { elem, .. } => {
-                                    Some((**elem).clone())
+                            let is_map = matches!(kind, IndexKind::Map);
+                            let index_proven = matches!(kind, IndexKind::FixedListProof);
+                            if is_map || index_proven || matches!(kind, IndexKind::List) {
+                                let collection_t = lower_expr(collection, cx, env);
+                                let elem_ty = match &collection_t.ty {
+                                    Type::List(elem) | Type::FixedList { elem, .. } => {
+                                        Some((**elem).clone())
+                                    }
+                                    Type::Map { value, .. } => Some((**value).clone()),
+                                    // D-MEM-VIEWRET1 / #1163: `ViewMut<T>[i].field`
+                                    // must write through the slice element, not clone
+                                    // via `jet_index_vec` and mutate a temporary.
+                                    Type::Apply { name, args }
+                                        if matches!(
+                                            name.as_str(),
+                                            "View" | "ViewMut" | "ComputeViewMut"
+                                        ) && args.len() == 1 =>
+                                    {
+                                        Some(args[0].clone())
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(elem_ty) = elem_ty {
+                                    return in_own_frame(|| {
+                                        let field_ty = struct_field_type(cx, &elem_ty, field)
+                                            .unwrap_or(Type::Int);
+                                        let clone_value = if let Expr::Ident(vname, _) = value {
+                                            env.is_borrowed(vname)
+                                                && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                                        } else {
+                                            false
+                                        };
+                                        let line = crate::Diagnostics::span_line_col(
+                                            &cx.src,
+                                            index_span.start,
+                                        )
+                                        .0;
+                                        ready_return!(TStmt::IndexFieldAssign(Box::new(
+                                            TIndexFieldAssign {
+                                                base: collection_t,
+                                                index: lower_expr(index, cx, env),
+                                                is_map,
+                                                index_proven,
+                                                field: field.to_string(),
+                                                field_ty,
+                                                op: *op,
+                                                value: lower_expr(value, cx, env),
+                                                clone_value,
+                                                line,
+                                            }
+                                        )));
+                                    });
                                 }
-                                Type::Map { value, .. } => Some((**value).clone()),
-                                // D-MEM-VIEWRET1 / #1163: `ViewMut<T>[i].field`
-                                // must write through the slice element, not clone
-                                // via `jet_index_vec` and mutate a temporary.
-                                Type::Apply { name, args }
-                                    if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-                                        && args.len() == 1 =>
-                                {
-                                    Some(args[0].clone())
+                            }
+                        }
+                        let base_t = lower_expr(base, cx, env);
+                        let swizzle_write = match &base_t.ty {
+                            Type::Named(type_name)
+                                if crate::Sema::is_swizzleable_math_type(type_name)
+                                    && !cx.struct_fields.contains_key(type_name) =>
+                            {
+                                match crate::Sema::parse_swizzle_member(field, type_name) {
+                                    crate::Sema::SwizzleParse::Ok(lanes) => {
+                                        let lanes_u8: Vec<u8> =
+                                            lanes.iter().map(|&i| i as u8).collect();
+                                        Some((type_name.clone(), lanes_u8))
+                                    }
+                                    _ => None,
                                 }
-                                _ => None,
-                            };
-                            if let Some(elem_ty) = elem_ty {
-                                return in_own_frame(|| {
-                                    let field_ty =
-                                        struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
-                                    let clone_value = if let Expr::Ident(vname, _) = value {
-                                        env.is_borrowed(vname)
-                                            && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-                                    } else {
-                                        false
-                                    };
-                                    let line = crate::Diagnostics::span_line_col(
-                                        &cx.src,
-                                        index_span.start,
-                                    )
-                                    .0;
-                                    ready_return!(TStmt::IndexFieldAssign(Box::new(TIndexFieldAssign {
-                                        base: collection_t,
-                                        index: lower_expr(index, cx, env),
-                                        is_map,
-                                        index_proven,
-                                        field: field.to_string(),
-                                        field_ty,
-                                        op: *op,
-                                        value: lower_expr(value, cx, env),
-                                        clone_value,
-                                        line,
-                                    })));
+                            }
+                            _ => None,
+                        };
+                        if let Some((type_name, lanes_u8)) = swizzle_write {
+                            return in_own_frame(|| {
+                                let clone_value = if let Expr::Ident(vname, _) = value {
+                                    env.is_borrowed(vname)
+                                        && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                                } else {
+                                    false
+                                };
+                                ready_return!(TStmt::MathSwizzleAssign {
+                                    base: base_t,
+                                    type_name,
+                                    lanes: lanes_u8,
+                                    value: lower_expr(value, cx, env),
+                                    clone_value,
                                 });
-                            }
+                            });
                         }
-                    }
-                    let base_t = lower_expr(base, cx, env);
-                    let swizzle_write = match &base_t.ty {
-                        Type::Named(type_name)
-                            if crate::Sema::is_swizzleable_math_type(type_name)
-                                && !cx.struct_fields.contains_key(type_name) =>
+                        // D-MEM1 S6: `pool[id].field = v` — the general fallback below
+                        // resolves `place` by re-emitting the FIELD-READ expression (fine
+                        // for an owning local/`self`, but a `Pool` index-read is a value
+                        // clone via `jet_pool_get` — writing `.field` on that would edit a
+                        // throwaway copy and silently drop the change). Build a genuine
+                        // mutable place through `jet_pool_get_mut` instead.
+                        if let Expr::Index {
+                            base: pool_expr,
+                            index: id_expr,
+                            kind: IndexKind::Pool,
+                            span: idx_span,
+                        } = base.as_ref()
                         {
-                            match crate::Sema::parse_swizzle_member(field, type_name) {
-                                crate::Sema::SwizzleParse::Ok(lanes) => {
-                                    let lanes_u8: Vec<u8> = lanes.iter().map(|&i| i as u8).collect();
-                                    Some((type_name.clone(), lanes_u8))
-                                }
-                                _ => None,
-                            }
+                            return in_own_frame(|| {
+                                let line =
+                                    crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
+                                let src_line = cx
+                                    .src
+                                    .lines()
+                                    .nth(line.saturating_sub(1))
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let pool_t = lower_expr(pool_expr, cx, env);
+                                let id_t = lower_expr(id_expr, cx, env);
+                                let elem_ty = match &pool_t.ty {
+                                    Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                                    _ => Type::Int,
+                                };
+                                let field_ty =
+                                    struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
+                                let place = TPlace::Expr(Box::new(TExpr {
+                                    ty: field_ty,
+                                    kind: TExprKind::PoolSlot {
+                                        pool: Box::new(pool_t),
+                                        id: Box::new(id_t),
+                                        mutable: true,
+                                        field: Some(field.to_string()),
+                                        line,
+                                        src_line,
+                                    },
+                                }));
+                                let clone_value = if let Expr::Ident(vname, _) = value {
+                                    env.is_borrowed(vname)
+                                        && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                                } else {
+                                    false
+                                };
+                                ready_return!(TStmt::Assign {
+                                    place,
+                                    op: *op,
+                                    value: lower_expr(value, cx, env),
+                                    clone_value,
+                                    line: crate::Diagnostics::span_line_col(&cx.src, op_span.start)
+                                        .0 as u32,
+                                });
+                            });
                         }
-                        _ => None,
-                    };
-                    if let Some((type_name, lanes_u8)) = swizzle_write {
-                        return in_own_frame(|| {
-                            let clone_value = if let Expr::Ident(vname, _) = value {
-                                env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-                            } else {
-                                false
-                            };
-                            ready_return!(TStmt::MathSwizzleAssign {
-                                base: base_t,
-                                type_name,
-                                lanes: lanes_u8,
-                                value: lower_expr(value, cx, env),
-                                clone_value,
-                            });
-                        });
-                    }
-                    // D-MEM1 S6: `pool[id].field = v` — the general fallback below
-                    // resolves `place` by re-emitting the FIELD-READ expression (fine
-                    // for an owning local/`self`, but a `Pool` index-read is a value
-                    // clone via `jet_pool_get` — writing `.field` on that would edit a
-                    // throwaway copy and silently drop the change). Build a genuine
-                    // mutable place through `jet_pool_get_mut` instead.
-                    if let Expr::Index {
-                        base: pool_expr,
-                        index: id_expr,
-                        kind: IndexKind::Pool,
-                        span: idx_span,
-                    } = base.as_ref()
-                    {
-                        return in_own_frame(|| {
-                            let line = crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
-                            let src_line = cx
-                                .src
-                                .lines()
-                                .nth(line.saturating_sub(1))
-                                .unwrap_or_default()
-                                .to_string();
-                            let pool_t = lower_expr(pool_expr, cx, env);
-                            let id_t = lower_expr(id_expr, cx, env);
-                            let elem_ty = match &pool_t.ty {
-                                Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
-                                _ => Type::Int,
-                            };
-                            let field_ty = struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
-                            let place = TPlace::Expr(Box::new(TExpr {
-                                ty: field_ty,
-                                kind: TExprKind::PoolSlot {
-                                    pool: Box::new(pool_t),
-                                    id: Box::new(id_t),
-                                    mutable: true,
-                                    field: Some(field.to_string()),
-                                    line,
-                                    src_line,
-                                },
-                            }));
-                            let clone_value = if let Expr::Ident(vname, _) = value {
-                                env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-                            } else {
-                                false
-                            };
-                            ready_return!(TStmt::Assign {
-                                place,
-                                op: *op,
-                                value: lower_expr(value, cx, env),
-                                clone_value,
-                                line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
-                            });
-                        });
-                    }
-                    let field_expr = Expr::Field(base.clone(), field.clone(), *span);
-                    let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
-                    // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
-                    // ident on the RHS would move out of a shared reference (E0507, I2).
-                    let clone_value = if let Expr::Ident(vname, _) = value {
-                        env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
-                    } else {
-                        false
-                    };
-                    TStmt::Assign {
-                        place,
-                        op: *op,
-                        value: lower_expr(value, cx, env),
-                        clone_value,
-                        line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0 as u32,
-                    }
-                }));
+                        let field_expr = Expr::Field(base.clone(), field.clone(), *span);
+                        let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
+                        // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
+                        // ident on the RHS would move out of a shared reference (E0507, I2).
+                        let clone_value = if let Expr::Ident(vname, _) = value {
+                            env.is_borrowed(vname)
+                                && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                        } else {
+                            false
+                        };
+                        TStmt::Assign {
+                            place,
+                            op: *op,
+                            value: lower_expr(value, cx, env),
+                            clone_value,
+                            line: crate::Diagnostics::span_line_col(&cx.src, op_span.start).0
+                                as u32,
+                        }
+                    })
+                });
             }
         },
         Stmt::Return(Some(Expr::Ident(name, _)), _) if env.gc_return && env.is_gc(name) => {
@@ -2992,14 +3020,16 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             }))
         }
         Stmt::Return(Some(e), _) => {
-            return in_own_frame(|| LowerStmtPlan::ready({
-                let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
-                let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(e), cx, env);
-                if let Some(want) = &env.ret_ty {
-                    value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
-                }
-                TStmt::Return(Some(value))
-            }));
+            return in_own_frame(|| {
+                LowerStmtPlan::ready({
+                    let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
+                    let mut value = lower_owned_expr(normalized.as_ref().unwrap_or(e), cx, env);
+                    if let Some(want) = &env.ret_ty {
+                        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+                    }
+                    TStmt::Return(Some(value))
+                })
+            });
         }
         Stmt::Return(None, _) => {
             if matches!(
@@ -3007,48 +3037,54 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 Some(Type::Result { ok, .. })
                     if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
             ) {
-                return in_own_frame(|| LowerStmtPlan::ready({
-                    let unit = TExpr {
-                        ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
-                        kind: TExprKind::Unit,
-                    };
-                    TStmt::Return(Some(TExpr {
-                        ty: env.ret_ty.clone().expect("fallible void return"),
-                        kind: TExprKind::Ok(Box::new(unit)),
-                    }))
-                }));
+                return in_own_frame(|| {
+                    LowerStmtPlan::ready({
+                        let unit = TExpr {
+                            ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                            kind: TExprKind::Unit,
+                        };
+                        TStmt::Return(Some(TExpr {
+                            ty: env.ret_ty.clone().expect("fallible void return"),
+                            kind: TExprKind::Ok(Box::new(unit)),
+                        }))
+                    })
+                });
             }
             TStmt::Return(None)
         }
         // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the shared Stream Prelude owns
         // the producer task and makes this send a cancellation wait point.
         Stmt::Yield(e, _) => {
-            return in_own_frame(|| LowerStmtPlan::ready({
-                let v = lower_expr(e, cx, env);
-                TStmt::ExprStmt(TExpr {
-                    ty: unit_type(),
-                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::YieldSend {
-                        value: Box::new(v),
-                    })),
+            return in_own_frame(|| {
+                LowerStmtPlan::ready({
+                    let v = lower_expr(e, cx, env);
+                    TStmt::ExprStmt(TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::HostCall(Box::new(
+                            crate::Codegen::TIR::THostCall::YieldSend { value: Box::new(v) },
+                        )),
+                    })
                 })
-            }));
+            });
         }
         // D-SHAPE-RESOURCE2=A: lower the sema-checked consuming close into the
         // existing TIR cleanup node; the engines keep the same LIFO behavior.
         Stmt::DeferClose { close, span } => {
-            return in_own_frame(|| LowerStmtPlan::ready({
-                let Expr::Call(close_call) = close else {
-                    unreachable!("parser creates a close call for deferred cleanup")
-                };
-                let Expr::Ident(resource, _) = &close_call.args[0].expr else {
-                    unreachable!("parser restricts deferred close to one resource binding")
-                };
-                TStmt::DeferClose {
-                    close: lower_expr(close, cx, env),
-                    resource: env.rust_name_of(resource),
-                    id: span.start,
-                }
-            }));
+            return in_own_frame(|| {
+                LowerStmtPlan::ready({
+                    let Expr::Call(close_call) = close else {
+                        unreachable!("parser creates a close call for deferred cleanup")
+                    };
+                    let Expr::Ident(resource, _) = &close_call.args[0].expr else {
+                        unreachable!("parser restricts deferred close to one resource binding")
+                    };
+                    TStmt::DeferClose {
+                        close: lower_expr(close, cx, env),
+                        resource: env.rust_name_of(resource),
+                        id: span.start,
+                    }
+                })
+            });
         }
         Stmt::Expr(Expr::MethodCall {
             receiver, method, ..
@@ -3063,13 +3099,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             return in_own_frame(|| {
                 let branch = clone_env(env);
                 let label = label_name(label);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, branch)],
-                    move |mut lowered| TStmt::Loop {
+                return deferred_stmt(vec![LowerBody::scoped(body, branch)], move |mut lowered| {
+                    TStmt::Loop {
                         label,
                         body: lowered.pop().expect("loop body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         Stmt::While {
@@ -3079,14 +3114,13 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let cond = lower_expr(cond, cx, env);
                 let branch = clone_env(env);
                 let label = label_name(label);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, branch)],
-                    move |mut lowered| TStmt::While {
+                return deferred_stmt(vec![LowerBody::scoped(body, branch)], move |mut lowered| {
+                    TStmt::While {
                         label,
                         cond,
                         body: lowered.pop().expect("while body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` three-part counted loop.
@@ -3102,26 +3136,18 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // The emitted outer Rust block owns the init binding and every loop-body
                 // binding. Lower all of them in one child env so none survives the loop.
                 let init_val = lower_expr(&init.init, cx, env);
-                let init_ty = init
-                    .ty
-                    .clone()
-                    .unwrap_or_else(|| init_val.ty.clone());
+                let init_ty = init.ty.clone().unwrap_or_else(|| init_val.ty.clone());
                 let mut_fn = interrupt_lambda(&init.init)
                     .is_some_and(|lam| lam.meta.escapes && lam.meta.needs_fn_mut);
-                let send_fn = env.is_send_fn(&init.name)
-                    && matches!(&init_ty, Type::Fn { .. })
-                    && !mut_fn;
+                let send_fn =
+                    env.is_send_fn(&init.name) && matches!(&init_ty, Type::Fn { .. }) && !mut_fn;
                 let init_val = if send_fn {
                     force_interrupt_callback_value(init_val, cx)
                 } else {
                     init_val
                 };
                 let mut scoped = clone_env(env);
-                scoped.bind(
-                    &init.name,
-                    TLocal::user(&init.name),
-                    Some(init_ty.clone()),
-                );
+                scoped.bind(&init.name, TLocal::user(&init.name), Some(init_ty.clone()));
                 let init_stmt = Box::new(TStmt::Let {
                     name: init.name.clone(),
                     kw: "let mut",
@@ -3175,7 +3201,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
             label,
             ..
         } => match kind {
-            ForKind::Range { start, end, step, exclusive } => {
+            ForKind::Range {
+                start,
+                end,
+                step,
+                exclusive,
+            } => {
                 return in_own_frame(|| {
                     let start = lower_expr(start, cx, env);
                     let end = lower_expr(end, cx, env);
@@ -3252,7 +3283,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             ("value".to_string(), Box::new((**value).clone())),
                         ])),
                         // D-ONCE-WORD1 / D-CONC-STREAM1: a generator's `Stream<T>`.
-                        Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1 => {
+                        Type::Apply { name, args }
+                            if name == Syntax::TYPE_STREAM && args.len() == 1 =>
+                        {
                             Some(args[0].clone())
                         }
                         // D-ITERTOOLS1=A: lazy `Iter<T>` view — element is T.
@@ -3269,7 +3302,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // D-DYNARRAY1: `loop x in window` — a `View<T>`'s element type.
                         Type::Apply { name, args }
                             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-                                && args.len() == 1 => {
+                                && args.len() == 1 =>
+                        {
                             Some(args[0].clone())
                         }
                         _ => None,
@@ -3312,8 +3346,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // `EncodingReader` already took its item type from the
                         // reader above; `Iterable` is resolved below, from the hook.
                         Some(
-                            TForInMethod::EncodingReader { .. }
-                            | TForInMethod::Iterable { .. },
+                            TForInMethod::EncodingReader { .. } | TForInMethod::Iterable { .. },
                         )
                         | Some(TForInMethod::ChannelReceiver)
                         | None => {}
@@ -3348,10 +3381,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         || (method_kind.is_none()
                             && !elem_is_cloneable
                             && !elem_is_view_mut
-                            && matches!(
-                                &lowered_coll.ty,
-                                Type::List(_) | Type::FixedList { .. }
-                            ));
+                            && matches!(&lowered_coll.ty, Type::List(_) | Type::FixedList { .. }));
                     if method_kind.is_none() {
                         if let Type::Named(n) = &lowered_coll.ty {
                             if let Some(hook) = cx.iterable_hooks.get(n) {
@@ -3377,8 +3407,10 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 branch.bind(v2, TLocal::user(v2), Some((**inner).clone()));
                             }
                             Type::Apply { name, args }
-                                if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-                                    && args.len() == 1 =>
+                                if matches!(
+                                    name.as_str(),
+                                    "View" | "ViewMut" | "ComputeViewMut"
+                                ) && args.len() == 1 =>
                             {
                                 branch.bind(var, TLocal::user(var), Some(Type::Int));
                                 branch.bind(v2, TLocal::user(v2), Some(args[0].clone()));
@@ -3449,10 +3481,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Switched { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::DebugOnly(lowered.pop().expect("debug body was deferred")),
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::DebugOnly(lowered.pop().expect("debug body was deferred"))
+                });
             });
         }
         // Lexical-scope rule: whenever `emit_tir_stmt` opens a Rust `{ ... }`, lower
@@ -3479,10 +3510,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     None => &[],
                 };
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::inline(chosen, scoped)],
-                    |mut lowered| TStmt::Inline(lowered.pop().expect("comptime-if body was deferred")),
-                );
+                return deferred_stmt(vec![LowerBody::inline(chosen, scoped)], |mut lowered| {
+                    TStmt::Inline(lowered.pop().expect("comptime-if body was deferred"))
+                });
             });
         }
         // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
@@ -3490,7 +3520,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
         // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
-        Stmt::Unsafe { audit, body, span, .. } => {
+        Stmt::Unsafe {
+            audit, body, span, ..
+        } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
                 let gate = TUnsafeGate {
@@ -3500,13 +3532,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     enabled: env.sentries_enabled,
                     fenced: env.sentries_fenced,
                 };
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    move |mut lowered| TStmt::Unsafe {
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+                    TStmt::Unsafe {
                         gate,
                         body: lowered.pop().expect("unsafe body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // D-CTEFFECT1: preserve the policy gate for canonical comptime evaluation.
@@ -3514,10 +3545,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Impure { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Impure(lowered.pop().expect("impure body was deferred")),
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::Impure(lowered.pop().expect("impure body was deferred"))
+                });
             });
         }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
@@ -3562,10 +3592,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             shared.clone(),
                         ));
                         let jit_lambda = lower_spawn_lambda_for_jit_with_shared_block(
-                            &synthetic,
-                            cx,
-                            &outer_env,
-                            shared,
+                            &synthetic, cx, &outer_env, shared,
                         );
                         cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                         TStmt::Reactive {
@@ -3580,12 +3607,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Shield { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Shield {
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::Shield {
                         body: lowered.pop().expect("shield body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // c109 Phase 19: an explicit `region r { … }` (D-REGION1) emits a plain
@@ -3593,13 +3619,14 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Region { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Region(lowered.pop().expect("region body was deferred")),
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::Region(lowered.pop().expect("region body was deferred"))
+                });
             });
         }
-        Stmt::Policy { declarations, body, .. } => {
+        Stmt::Policy {
+            declarations, body, ..
+        } => {
             return in_own_frame(|| {
                 let mut scoped = clone_env(env);
                 let sentry_mode = declarations
@@ -3609,35 +3636,33 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 if sentry_mode == Some(false) {
                     scoped.sentries_enabled = false;
                 }
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    move |mut lowered| {
-                        let body = lowered.pop().expect("policy body was deferred");
-                        match sentry_mode {
-                            Some(enabled) => TStmt::SentryPolicy { enabled, body },
-                            None => TStmt::Region(body),
-                        }
-                    },
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+                    let body = lowered.pop().expect("policy body was deferred");
+                    match sentry_mode {
+                        Some(enabled) => TStmt::SentryPolicy { enabled, body },
+                        None => TStmt::Region(body),
+                    }
+                });
             });
         }
         // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
         // internal collector. Helpers borrow this same value.
-        Stmt::TaskGroup { name, limit, body, .. } => {
+        Stmt::TaskGroup {
+            name, limit, body, ..
+        } => {
             return in_own_frame(|| {
                 let mut scoped = clone_env(env);
                 let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
                 let group = TLocal::user(name);
                 scoped.bind(name, group.clone(), Some(group_ty));
                 let limit = limit.as_ref().map(|value| lower_expr(value, cx, env));
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    move |mut lowered| TStmt::TaskGroup {
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+                    TStmt::TaskGroup {
                         group,
                         limit,
                         body: lowered.pop().expect("task-group body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a public
@@ -3655,14 +3680,13 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     Some(Type::Named(Syntax::LAYOUT_TYPE.to_string())),
                 );
                 let label = name.clone();
-                return deferred_stmt(
-                    vec![LowerBody::inline(body, scoped)],
-                    move |mut lowered| TStmt::Layout {
+                return deferred_stmt(vec![LowerBody::inline(body, scoped)], move |mut lowered| {
+                    TStmt::Layout {
                         handle,
                         label,
                         body: lowered.pop().expect("layout body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // c109 Phase 26: a bare `#Abilities(IO) { … }` effect-restriction region
@@ -3734,35 +3758,31 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     });
                     used
                 });
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    move |mut lowered| {
-                        let mut lowered = lowered.pop().expect("caps body was deferred");
-                        if binding_used {
-                            lowered.insert(
-                                0,
-                                TStmt::Let {
-                                    name: binding.clone(),
-                                    kw: "let",
-                                    let_ty: TLetTy::plain(authority_ty),
-                                    init,
-                                    gc_promotion: None,
-                                    gc_transferred: false,
-                                },
-                            );
-                        }
-                        TStmt::Region(lowered)
-                    },
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+                    let mut lowered = lowered.pop().expect("caps body was deferred");
+                    if binding_used {
+                        lowered.insert(
+                            0,
+                            TStmt::Let {
+                                name: binding.clone(),
+                                kw: "let",
+                                let_ty: TLetTy::plain(authority_ty),
+                                init,
+                                gc_promotion: None,
+                                gc_transferred: false,
+                            },
+                        );
+                    }
+                    TStmt::Region(lowered)
+                });
             });
         }
         Stmt::Caps { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Region(lowered.pop().expect("caps body was deferred")),
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::Region(lowered.pop().expect("caps body was deferred"))
+                });
             });
         }
         // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
@@ -3775,25 +3795,23 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     .map(|(name, v, _)| (name.clone(), lower_expr(v, cx, env)))
                     .collect();
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    move |mut lowered| TStmt::ContextBlock {
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+                    TStmt::ContextBlock {
                         guards,
                         body: lowered.pop().expect("context body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // D-TERM1: `live { … }` emits an enter/guard/leave Rust lexical block.
         Stmt::Live { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Live {
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::Live {
                         body: lowered.pop().expect("live body was deferred"),
-                    },
-                );
+                    }
+                });
             });
         }
         // D-DOTSCOPE1 / D-META-DSL1: a `#Test` scope member
@@ -3804,7 +3822,11 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         // the others open their own scope in
         // `emit_tir_stmt`.
         Stmt::ScopeMember {
-            name, args, body, dsl, ..
+            name,
+            args,
+            body,
+            dsl,
+            ..
         } => {
             return in_own_frame(|| {
                 if *dsl {
@@ -3812,7 +3834,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         let scoped = clone_env(env);
                         return deferred_stmt(
                             vec![LowerBody::scoped(body, scoped)],
-                            |mut lowered| TStmt::Region(lowered.pop().expect("scope body was deferred")),
+                            |mut lowered| {
+                                TStmt::Region(lowered.pop().expect("scope body was deferred"))
+                            },
                         );
                     });
                 }
@@ -3855,10 +3879,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::AssumeDet { body, .. } => {
             return in_own_frame(|| {
                 let scoped = clone_env(env);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    |mut lowered| TStmt::Region(lowered.pop().expect("determinism body was deferred")),
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                    TStmt::Region(lowered.pop().expect("determinism body was deferred"))
+                });
             });
         }
         // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact { … }` block. A named
@@ -3880,12 +3903,13 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // The wrapper still needs a lexical block for its hoisted local.
                 if *implicit && cx.in_stm_transact.get() {
                     let scoped = clone_env(env);
-                    return deferred_stmt(
-                        vec![LowerBody::scoped(body, scoped)],
-                        |mut lowered| TStmt::Region(
-                            lowered.pop().expect("joined shared access body was deferred"),
-                        ),
-                    );
+                    return deferred_stmt(vec![LowerBody::scoped(body, scoped)], |mut lowered| {
+                        TStmt::Region(
+                            lowered
+                                .pop()
+                                .expect("joined shared access body was deferred"),
+                        )
+                    });
                 }
                 let mut scoped = clone_env(env);
                 let handle = name.as_ref().map(|name| {
@@ -3899,11 +3923,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 });
                 let synthesized_handle = TLocal::generated("txn");
                 let txn_undo_needed = Rc::new(Cell::new(false));
-                scoped.txn_handle = Some(
-                    handle
-                        .clone()
-                        .unwrap_or_else(|| synthesized_handle.clone()),
-                );
+                scoped.txn_handle =
+                    Some(handle.clone().unwrap_or_else(|| synthesized_handle.clone()));
                 scoped.txn_undo_needed = Some(txn_undo_needed.clone());
                 // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
                 // assigned anywhere in the block (recursing into nested control flow, but
@@ -3919,9 +3940,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     .map(|r| {
                         // D-TXN-ROLLBACK layer 2: if the root type implements Rollback,
                         // use snapshot_custom instead of the clone-based snapshot path.
-                        let rollback_ty = env.ty_of(r).filter(|ty| {
-                            matches!(ty, Type::Named(n) if cx.rollback_types.contains(n))
-                        });
+                        let rollback_ty = env.ty_of(r).filter(
+                            |ty| matches!(ty, Type::Named(n) if cx.rollback_types.contains(n)),
+                        );
                         (env.local_of(r), rollback_ty)
                     })
                     .collect();
@@ -3933,24 +3954,21 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // `#Transact` attaches to that inner block's own transaction, not this one.
                 let prev_in = cx.in_stm_transact.replace(true);
                 let prev_touched = cx.stm_touched.replace(false);
-                return deferred_stmt(
-                    vec![LowerBody::scoped(body, scoped)],
-                    move |mut lowered| {
-                        let stm = cx.stm_touched.get().then(TLocal::stm);
-                        cx.in_stm_transact.set(prev_in);
-                        cx.stm_touched.set(prev_touched);
-                        let handle = handle.or_else(|| {
-                            (txn_undo_needed.get() || !snapshots.is_empty())
-                                .then_some(synthesized_handle)
-                        });
-                        TStmt::Transact {
-                            handle,
-                            snapshots,
-                            stm,
-                            body: lowered.pop().expect("transaction body was deferred"),
-                        }
-                    },
-                );
+                return deferred_stmt(vec![LowerBody::scoped(body, scoped)], move |mut lowered| {
+                    let stm = cx.stm_touched.get().then(TLocal::stm);
+                    cx.in_stm_transact.set(prev_in);
+                    cx.stm_touched.set(prev_touched);
+                    let handle = handle.or_else(|| {
+                        (txn_undo_needed.get() || !snapshots.is_empty())
+                            .then_some(synthesized_handle)
+                    });
+                    TStmt::Transact {
+                        handle,
+                        snapshots,
+                        stm,
+                        body: lowered.pop().expect("transaction body was deferred"),
+                    }
+                });
             });
         }
         // Forward-safety default: a Stmt variant not in the subset never reaches

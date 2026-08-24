@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct CheckedQuery {
@@ -14,7 +15,7 @@ pub struct CheckedQuery {
     dependencies: Arc<Vec<PathBuf>>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CompilerQueryStats {
     pub hits: u64,
     pub recomputes: u64,
@@ -26,6 +27,109 @@ pub struct CompilerQueryStats {
     pub item_recomputes: u64,
     pub live_items: usize,
     pub live_item_bytes: usize,
+    pub recomputed_items: Vec<String>,
+}
+
+/// One measured front-end re-verdict. The named items are the semantic
+/// definitions actually rechecked after the caller's edit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReverdictReceipt {
+    pub source_path: String,
+    pub source_bytes: usize,
+    pub edit_bytes: usize,
+    pub program_items: usize,
+    pub reverified_items: Vec<String>,
+    pub elapsed_us: u128,
+    pub query_recomputes: u64,
+    pub item_hits: u64,
+    pub item_recomputes: u64,
+}
+
+impl ReverdictReceipt {
+    pub fn blast_radius(&self) -> usize {
+        self.reverified_items.len()
+    }
+
+    /// Stable receipt envelope. Timing remains evidence in the content, while
+    /// the id binds the exact measured claim for later readers.
+    pub fn to_json(&self) -> String {
+        use jet_foundation::PerformanceBudget::CanonicalJson;
+
+        let items = CanonicalJson::Array(
+            self.reverified_items
+                .iter()
+                .cloned()
+                .map(CanonicalJson::String)
+                .collect(),
+        );
+        let content = CanonicalJson::object([
+            (
+                "claim".into(),
+                CanonicalJson::String("D-DEVR-CONE1=A".into()),
+            ),
+            (
+                "edit_bytes".into(),
+                CanonicalJson::Integer(self.edit_bytes.to_string()),
+            ),
+            (
+                "elapsed_us".into(),
+                CanonicalJson::Integer(self.elapsed_us.to_string()),
+            ),
+            (
+                "evidence".into(),
+                CanonicalJson::String("observed".into()),
+            ),
+            (
+                "item_hits".into(),
+                CanonicalJson::Integer(self.item_hits.to_string()),
+            ),
+            (
+                "item_recomputes".into(),
+                CanonicalJson::Integer(self.item_recomputes.to_string()),
+            ),
+            (
+                "program_items".into(),
+                CanonicalJson::Integer(self.program_items.to_string()),
+            ),
+            (
+                "reverified_items".into(),
+                items.clone(),
+            ),
+            (
+                "blast_radius".into(),
+                CanonicalJson::object([
+                    ("count".into(), CanonicalJson::Integer(self.blast_radius().to_string())),
+                    ("items".into(), items),
+                ])
+                .expect("fixed receipt fields"),
+            ),
+            (
+                "source_bytes".into(),
+                CanonicalJson::Integer(self.source_bytes.to_string()),
+            ),
+            (
+                "source_path".into(),
+                CanonicalJson::String(self.source_path.clone()),
+            ),
+            (
+                "query_recomputes".into(),
+                CanonicalJson::Integer(self.query_recomputes.to_string()),
+            ),
+        ])
+        .expect("fixed receipt fields");
+        let receipt_id = content.sha256();
+        let receipt = CanonicalJson::object([
+            ("content".into(), content),
+            ("receipt_id".into(), CanonicalJson::String(receipt_id)),
+            (
+                "schema".into(),
+                CanonicalJson::String("jet.reverdict-receipt".into()),
+            ),
+            ("version".into(), CanonicalJson::Integer("1".into())),
+        ])
+        .expect("fixed receipt envelope");
+        String::from_utf8(receipt.bytes()).expect("canonical JSON is UTF-8")
+    }
 }
 
 #[derive(Default)]
@@ -113,6 +217,47 @@ impl CompilerQueries {
         checked
     }
 
+    /// Check one edit and return the measured semantic cone as a receipt.
+    /// `check_text` remains the compatibility-free low-level operation used by
+    /// existing callers; this wrapper is the explicit measurement seam.
+    pub fn check_text_with_receipt(
+        &mut self,
+        path: &str,
+        text: &str,
+        is_lsp: bool,
+    ) -> (CheckedQuery, ReverdictReceipt) {
+        let root = canonical_path(Path::new(path));
+        // Measure the edit before `check_text` takes `&mut self`; borrowing the
+        // overlay text across that call would conflict, and cloning it here
+        // would copy the whole previous source for one length comparison.
+        let edit_bytes = edit_bytes(self.overlays.get(&root).map(String::as_str), text);
+        let before = self.stats();
+        for cache in self.sema.values_mut() {
+            cache.clear_measurement();
+        }
+        let started = Instant::now();
+        let checked = self.check_text(path, text, is_lsp);
+        let elapsed_us = started.elapsed().as_micros();
+        let after = self.stats();
+        let mut reverified_items = after.recomputed_items.clone();
+        reverified_items.sort();
+        reverified_items.dedup();
+        let receipt = ReverdictReceipt {
+            source_path: root.to_string_lossy().into_owned(),
+            source_bytes: text.len(),
+            edit_bytes,
+            program_items: after.live_items,
+            reverified_items,
+            elapsed_us,
+            query_recomputes: after.recomputes.saturating_sub(before.recomputes),
+            item_hits: after.item_hits.saturating_sub(before.item_hits),
+            item_recomputes: after
+                .item_recomputes
+                .saturating_sub(before.item_recomputes),
+        };
+        (checked, receipt)
+    }
+
     pub fn check_disk(&mut self, path: &str, is_lsp: bool) -> CheckedQuery {
         let root = canonical_path(Path::new(path));
         match std::fs::read_to_string(path) {
@@ -170,6 +315,7 @@ impl CompilerQueries {
                 total.recomputes += stats.recomputes;
                 total.live_items += stats.live_items;
                 total.live_item_bytes += stats.live_item_bytes;
+                total.recomputed_items.extend(stats.recomputed_items);
                 total
             },
         );
@@ -184,6 +330,7 @@ impl CompilerQueries {
             item_recomputes: item.recomputes,
             live_items: item.live_items,
             live_item_bytes: item.live_item_bytes,
+            recomputed_items: item.recomputed_items,
         }
     }
 
@@ -327,6 +474,31 @@ fn canonical_path(path: &Path) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     }
+}
+
+fn edit_bytes(old: Option<&str>, new: &str) -> usize {
+    let Some(old) = old else {
+        return new.len();
+    };
+    if old == new {
+        return 0;
+    }
+    let prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let old_tail = old.len() - prefix;
+    let new_tail = new.len() - prefix;
+    let suffix = old[..prefix + old_tail]
+        .bytes()
+        .rev()
+        .zip(new[..prefix + new_tail].bytes().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
+        .min(old_tail)
+        .min(new_tail);
+    old_tail - suffix + new_tail - suffix
 }
 
 #[cfg(test)]
@@ -865,5 +1037,82 @@ fn run() {{}}
             after.live_item_bytes >= before.live_item_bytes + (two.len() - one.len()),
             "retained-byte total must cover the added key, function, and diagnostic payload"
         );
+    }
+
+    fn cone_source(functions: usize) -> String {
+        let mut source = (0..functions)
+            .map(|index| format!("fn helper_{index}() Int -> {{ return {index} }}\n"))
+            .collect::<String>();
+        source.push_str("fn target() Int -> { return 1 }\nfn run() Int -> { return target() }\n");
+        source
+    }
+
+    #[test]
+    fn reverdict_receipt_reports_the_edited_function_and_is_canonical() {
+        use jet_foundation::PerformanceBudget::CanonicalJson;
+
+        let before = cone_source(8);
+        let after = before.replace(
+            "fn target() Int -> { return 1 }",
+            "fn target() Int -> { return 2 }",
+        );
+        let mut service = CompilerQueries::new();
+        let (cold, _) = service.check_text_with_receipt("cone.jet", &before, true);
+        assert!(cold.diagnostics.is_empty(), "{:#?}", cold.diagnostics);
+        let (checked, receipt) = service.check_text_with_receipt("cone.jet", &after, true);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+        assert_eq!(receipt.program_items, 10);
+        assert_eq!(receipt.item_recomputes, 1);
+        assert_eq!(receipt.blast_radius(), 1);
+        assert!(receipt.reverified_items[0].contains("fn:target"));
+        assert_eq!(receipt.edit_bytes, 2);
+
+        let json = receipt.to_json();
+        let CanonicalJson::Object(envelope) = CanonicalJson::parse_canonical(json.as_bytes()).unwrap() else {
+            panic!("re-verdict receipt envelope")
+        };
+        assert_eq!(
+            envelope["schema"],
+            CanonicalJson::String("jet.reverdict-receipt".into())
+        );
+        assert!(matches!(envelope["receipt_id"], CanonicalJson::String(_)));
+        let CanonicalJson::Object(content) = &envelope["content"] else {
+            panic!("re-verdict receipt content")
+        };
+        let CanonicalJson::Object(blast_radius) = &content["blast_radius"] else {
+            panic!("re-verdict blast radius")
+        };
+        assert_eq!(blast_radius["count"], CanonicalJson::Integer("1".into()));
+        assert_eq!(content["claim"], CanonicalJson::String("D-DEVR-CONE1=A".into()));
+    }
+
+    #[test]
+    fn cone_benchmark_keeps_one_function_edit_flat_as_program_grows() {
+        // `item_recomputes` is the deterministic work unit; the receipt also
+        // records wall time without making this machine-sensitive assertion.
+        let mut measurements = Vec::new();
+        for functions in [16, 128] {
+            let before = cone_source(functions);
+            let after = before.replace(
+                "fn target() Int -> { return 1 }",
+                "fn target() Int -> { return 2 }",
+            );
+            let mut service = CompilerQueries::new();
+            let (cold, _) = service.check_text_with_receipt("cone-bench.jet", &before, true);
+            assert!(cold.diagnostics.is_empty(), "{:#?}", cold.diagnostics);
+            let (checked, receipt) =
+                service.check_text_with_receipt("cone-bench.jet", &after, true);
+            assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+            measurements.push(receipt);
+        }
+
+        let [small, large] = measurements.as_slice() else {
+            panic!("cone benchmark measurements")
+        };
+        assert!(large.program_items > small.program_items);
+        assert_eq!(small.item_recomputes, 1);
+        assert_eq!(large.item_recomputes, 1);
+        assert_eq!(small.blast_radius(), large.blast_radius());
+        assert_eq!(small.reverified_items, large.reverified_items);
     }
 }

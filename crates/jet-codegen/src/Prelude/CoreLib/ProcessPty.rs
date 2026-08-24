@@ -150,10 +150,7 @@ mod unix {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn apply_limits(limits: ResourceLimits) -> io::Result<()> {
         let set = |resource, current, maximum| {
-            let limit = RLimit {
-                current,
-                maximum,
-            };
+            let limit = RLimit { current, maximum };
             // SAFETY: `limit` is a live kernel-shaped value for this call.
             if unsafe { setrlimit(resource, &limit) } != 0 {
                 return Err(io::Error::last_os_error());
@@ -167,11 +164,7 @@ mod unix {
             // Keep the hard ceiling one second above the soft ceiling. Equal
             // ceilings let Linux jump straight to SIGKILL, which loses the
             // typed SIGXCPU classification in the parent.
-            set(
-                RLIMIT_CPU,
-                seconds as u64,
-                seconds.saturating_add(1) as u64,
-            )?;
+            set(RLIMIT_CPU, seconds as u64, seconds.saturating_add(1) as u64)?;
         }
         if let Some(bytes) = limits.memory_bytes {
             let bytes = bytes.max(0) as u64;
@@ -311,10 +304,7 @@ mod unix {
         Ok(())
     }
 
-    pub(super) fn attach_command(
-        command: &mut Command,
-        limits: ResourceLimits,
-    ) -> io::Result<()> {
+    pub(super) fn attach_command(command: &mut Command, limits: ResourceLimits) -> io::Result<()> {
         use std::os::unix::process::CommandExt;
         // SAFETY: `pre_exec` is the standard Rust boundary for the small set of
         // async-signal-safe session and resource calls required between fork

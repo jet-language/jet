@@ -4,22 +4,29 @@
 //! This module only turns the checked `CLISchema` projection into Prelude
 //! handles and turns the resulting scalar values into `CtValue`s.
 
-use crate::AST::{CtReport, CtValue, Func, Item, Param, StructDef, Type};
+use crate::Comptime;
 use crate::Comptime::Builtins::exact_int_value;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtReport, CtValue, Func, Item, Param, StructDef, Type};
 use jet_foundation::CLISchema::{
-    CLIDefault, CLICommandSchema, CLIInputSchema, CLIInputShape, CLIValueKind,
+    CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
 use jet_foundation::Numeric::CtBigInt;
-use crate::Comptime;
-use crate::Diagnostics::{Diagnostic, Span};
 
 use super::cli_boundary::jet_args_source_program_name;
 use super::unsupported;
 
 pub(super) enum Dispatch {
     Run(CtValue),
-    Direct { function: String, args: Vec<CtValue> },
-    Invoke { function: String, receiver: Option<CtValue>, args: Vec<CtValue> },
+    Direct {
+        function: String,
+        args: Vec<CtValue>,
+    },
+    Invoke {
+        function: String,
+        receiver: Option<CtValue>,
+        args: Vec<CtValue>,
+    },
     Help(String),
     Version(String),
     Error(String),
@@ -214,7 +221,11 @@ fn build_command_spec(
     Ok((root, commands))
 }
 
-fn parsed_option(parsed: &mut CtValue, name: &str, span: Span) -> Result<Option<String>, Diagnostic> {
+fn parsed_option(
+    parsed: &mut CtValue,
+    name: &str,
+    span: Span,
+) -> Result<Option<String>, Diagnostic> {
     match args_call(
         "ParsedArgsOption",
         parsed,
@@ -268,7 +279,9 @@ fn parse_args(
     let parsed = args_call(
         "ArgsSpecParse",
         spec,
-        vec![CtValue::List(argv.iter().cloned().map(CtValue::Str).collect())],
+        vec![CtValue::List(
+            argv.iter().cloned().map(CtValue::Str).collect(),
+        )],
         span,
     )?;
     match parsed {
@@ -318,11 +331,7 @@ fn type_default(ty: &Type) -> CtValue {
     }
 }
 
-fn default_value(
-    ty: &Type,
-    default: &CLIDefault,
-    flag: &str,
-) -> Result<CtValue, String> {
+fn default_value(ty: &Type, default: &CLIDefault, flag: &str) -> Result<CtValue, String> {
     match default {
         CLIDefault::Value(value) => Ok(value.clone()),
         CLIDefault::TypeDefault => Ok(type_default(ty)),
@@ -340,7 +349,11 @@ fn missing_value(input: &CLIInputSchema, ty: &Type, help: &str) -> Result<CtValu
     }
     Err(format!(
         "missing required {} --{}\n\n{}",
-        if input.positional.is_some() { "argument" } else { "flag" },
+        if input.positional.is_some() {
+            "argument"
+        } else {
+            "flag"
+        },
         input.flag,
         help
     ))
@@ -355,7 +368,11 @@ fn decode_struct(
     span: Span,
 ) -> Result<CtValue, String> {
     let mut fields = Vec::new();
-    for field in structure.fields.iter().filter(|field| field.computed.is_none()) {
+    for field in structure
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_none())
+    {
         let input = inputs
             .iter()
             .find(|input| input.field == field.name)
@@ -387,7 +404,10 @@ fn decode_input(
         }
         CLIInputShape::Value { optional: true, .. } => {
             let Type::Option(inner) = ty else {
-                return Err(format!("CLI option `{}` has a non-Option field", input.flag));
+                return Err(format!(
+                    "CLI option `{}` has a non-Option field",
+                    input.flag
+                ));
             };
             match parsed_option(parsed, &input.flag, span).map_err(|d| d.what)? {
                 Some(value) => Ok(CtValue::Present(Box::new(scalar_from_text(
@@ -398,7 +418,9 @@ fn decode_input(
                 None => Ok(CtValue::absent((**inner).clone())),
             }
         }
-        CLIInputShape::Value { optional: false, .. } => {
+        CLIInputShape::Value {
+            optional: false, ..
+        } => {
             let raw = parsed_option(parsed, &input.flag, span).map_err(|d| d.what)?;
             match raw {
                 Some(value) => scalar_from_text(ty, &value, &input.flag),
@@ -478,8 +500,8 @@ pub(super) fn prepare(
     };
     let mut parsed = parsed;
     if schema.standard {
-        let color_mode = parsed_option(&mut parsed, "color", span)?
-            .unwrap_or_else(|| "auto".to_string());
+        let color_mode =
+            parsed_option(&mut parsed, "color", span)?.unwrap_or_else(|| "auto".to_string());
         super::term_semantics::jet_term_set_color_mode(&color_mode);
     }
     if parsed_flag(&mut parsed, "help", span)? {
@@ -504,9 +526,7 @@ pub(super) fn prepare(
 
     if schema.commands.is_empty() {
         if type_name == "run"
-            && jet_foundation::CLISchema::is_direct_run_entry(
-                &bundle.modules[bundle.entry].items,
-            )
+            && jet_foundation::CLISchema::is_direct_run_entry(&bundle.modules[bundle.entry].items)
         {
             let function = find_func(items, "run")
                 .ok_or_else(|| unsupported("typed CLI direct entry", span))?;
@@ -538,16 +558,16 @@ pub(super) fn prepare(
             &help,
             span,
         )
-            .map(Dispatch::Run)
-            .map_err(|error| {
-                crate::Sema::Diagnostics::render_registered(
-                    "E2201",
-                    error,
-                    "typed CLI decoding failed".to_string(),
-                    "fix the command arguments".to_string(),
-                    None,
-                )
-            });
+        .map(Dispatch::Run)
+        .map_err(|error| {
+            crate::Sema::Diagnostics::render_registered(
+                "E2201",
+                error,
+                "typed CLI decoding failed".to_string(),
+                "fix the command arguments".to_string(),
+                None,
+            )
+        });
     }
 
     let Some(command) = parsed_subcommand(&mut parsed, span)? else {
@@ -564,8 +584,8 @@ pub(super) fn prepare(
         .map(|(_, spec)| spec.clone())
         .unwrap_or_else(|| spec.clone());
     let help = spec_help(&mut help_spec, span)?;
-    let structure = find_struct(items, type_name)
-        .ok_or_else(|| unsupported("typed CLI entry struct", span))?;
+    let structure =
+        find_struct(items, type_name).ok_or_else(|| unsupported("typed CLI entry struct", span))?;
     let function_owner = nominal_name(&structure.name);
     let target = jet_foundation::CLISchema::command_target(
         structure,
@@ -595,23 +615,28 @@ pub(super) fn prepare(
                     "fix the command arguments".to_string(),
                     None,
                 )
-            }
-            )?,
+            })?,
         )
     } else {
         None
     };
     let command_params = target.payload_params(&structure.name);
-    let args = decode_params(&command_params, &command_schema.inputs, &mut parsed, &help, span)
-        .map_err(|error| {
-            crate::Sema::Diagnostics::render_registered(
-                "E2201",
-                error,
-                "typed CLI decoding failed".to_string(),
-                "fix the command arguments".to_string(),
-                None,
-            )
-        })?;
+    let args = decode_params(
+        &command_params,
+        &command_schema.inputs,
+        &mut parsed,
+        &help,
+        span,
+    )
+    .map_err(|error| {
+        crate::Sema::Diagnostics::render_registered(
+            "E2201",
+            error,
+            "typed CLI decoding failed".to_string(),
+            "fix the command arguments".to_string(),
+            None,
+        )
+    })?;
     // Inherent methods bind their receiver through the evaluator's `self`
     // scope. A bound free function has an ordinary first parameter, so pass
     // the same decoded program value through its argument tuple instead.

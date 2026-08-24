@@ -171,7 +171,16 @@ pub(crate) fn is_reactive_effect_method_name(method: &str, nargs: usize) -> bool
 pub(crate) fn is_event_handle_type(name: Option<&str>) -> bool {
     matches!(
         name,
-        Some("Event" | "AsyncEvent" | "Hook" | "DecisionHook" | "Subscription" | "EventScope" | "EventTrace" | "DispatchReport")
+        Some(
+            "Event"
+                | "AsyncEvent"
+                | "Hook"
+                | "DecisionHook"
+                | "Subscription"
+                | "EventScope"
+                | "EventTrace"
+                | "DispatchReport"
+        )
     )
 }
 
@@ -185,7 +194,16 @@ pub(crate) fn is_event_method_name(method: &str, nargs: usize) -> bool {
             | ("unsubscribe" | "is_active" | "cancel" | "active_count", 0)
             | ("trace" | "listener_count" | "queued_count", 0)
             | ("summary" | "delivered" | "queued" | "dropped", 0)
-            | ("close" | "running_count" | "blocked_count" | "accepted" | "delivered_handlers" | "state" | "failures", 0)
+            | (
+                "close"
+                    | "running_count"
+                    | "blocked_count"
+                    | "accepted"
+                    | "delivered_handlers"
+                    | "state"
+                    | "failures",
+                0
+            )
     )
 }
 
@@ -222,7 +240,10 @@ pub(crate) fn is_process_handle_method_name(
         ),
         Some("ProcessChild") => matches!(
             (method, nargs),
-            ("id" | "wait" | "exited" | "kill" | "terminate" | "interrupt", 0)
+            (
+                "id" | "wait" | "exited" | "kill" | "terminate" | "interrupt",
+                0
+            )
         ),
         Some("TerminalSession") => matches!((method, nargs), ("resize", 1)),
         // D-PROCESS1=A: `.write(text)` on `child.stdin`.
@@ -287,13 +308,31 @@ pub(crate) fn is_app_method_name(method: &str, nargs: usize) -> bool {
         (method, nargs),
         ("route" | "page" | "layout" | "action" | "form" | "data", 2)
             | ("mount", 2 | 3 | 4)
-            | ("routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter", 1)
             | (
-                "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
-                    | "hydration_release" | "facts_json",
+                "routes"
+                    | "security"
+                    | "assets"
+                    | "split"
+                    | "code_split"
+                    | "cache"
+                    | "a11y"
+                    | "adapter",
+                1
+            )
+            | (
+                "csr"
+                    | "ssr"
+                    | "ssg"
+                    | "stream"
+                    | "streaming"
+                    | "island"
+                    | "hydration_dev"
+                    | "hydration_release"
+                    | "facts_json",
                 0
             )
-            | ("serve", 0 | 1) | ("serve_on", 1)
+            | ("serve", 0 | 1)
+            | ("serve_on", 1)
     )
 }
 
@@ -335,21 +374,71 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
     match recv_type {
         Some("HTTPRequest") => matches!(
             method,
-            "method" | "path" | "param" | "body_len" | "under_limit" | "header" | "body"
-                | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
-                | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout"
-                | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
-                | "trailers" | "json"
+            "method"
+                | "path"
+                | "param"
+                | "body_len"
+                | "under_limit"
+                | "header"
+                | "body"
+                | "timeout"
+                | "connect_timeout"
+                | "read_timeout"
+                | "total_timeout"
+                | "dns_timeout"
+                | "tls_timeout"
+                | "write_timeout"
+                | "first_byte_timeout"
+                | "redirects"
+                | "proxy"
+                | "cookie"
+                | "form"
+                | "multipart_text"
+                | "send"
+                | "trailers"
+                | "json"
         ),
-        Some("HTTPResponse") => matches!(method, "status" | "json" | "body" | "header" | "cookies" | "trailers" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
-        Some("HTTPClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries" | "send"),
+        Some("HTTPResponse") => matches!(
+            method,
+            "status"
+                | "json"
+                | "body"
+                | "header"
+                | "cookies"
+                | "trailers"
+                | "protocol"
+                | "remote_address"
+                | "redirect_history"
+                | "timings"
+                | "reused_connection"
+                | "raw_content_encoding"
+        ),
+        Some("HTTPClient") => matches!(
+            method,
+            "cookies"
+                | "redirects"
+                | "protocols"
+                | "timeouts"
+                | "raw_encoding"
+                | "proxy"
+                | "tls"
+                | "allow_http_downgrade"
+                | "retries"
+                | "send"
+        ),
         Some("HTTPHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
         Some("HTTPBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
-        Some("HTTPMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),
+        Some("HTTPMux") => matches!(
+            method,
+            "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"
+        ),
         Some("HTTPHandler") => method == "handle",
         Some("HTTPServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
         Some("WsConn") => matches!(method, "send_text" | "send_bytes" | "recv" | "close"),
-        Some("WsMessage") => matches!(method, "is_text" | "is_binary" | "is_close" | "text" | "bytes"),
+        Some("WsMessage") => matches!(
+            method,
+            "is_text" | "is_binary" | "is_close" | "text" | "bytes"
+        ),
         Some("Browser") => matches!(
             method,
             "abilities"
@@ -398,7 +487,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 method,
                 "wait" | "wait_gone" | "click" | "hover" | "fill" | "press" | "set_files"
             )
-        },
+        }
         Some("BrowserIntercept") => method == "remove",
         Some("BrowserEvent") => matches!(
             method,
@@ -415,13 +504,22 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("BrowserAbilities") => matches!(method, "bidi" | "cdp" | "profile"),
         Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),
         Some("BrowserReceipt") => {
-            matches!(method, "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")
+            matches!(
+                method,
+                "entry_count" | "redacted" | "summary" | "isolated" | "cleaned"
+            )
         }
         Some("BrowserPrivacy") => {
-            matches!(method, "isolated_profiles" | "redact_receipts" | "shared_profiles")
+            matches!(
+                method,
+                "isolated_profiles" | "redact_receipts" | "shared_profiles"
+            )
         }
         Some("BrowserLocked") => {
-            matches!(method, "engine" | "version" | "binary" | "protocol" | "verify")
+            matches!(
+                method,
+                "engine" | "version" | "binary" | "protocol" | "verify"
+            )
         }
         _ => false,
     }

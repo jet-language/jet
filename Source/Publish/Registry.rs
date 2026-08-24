@@ -2,13 +2,13 @@
 // Private / mirror registry configuration
 // ──────────────────────────────────────────────
 
+use super::Tier::{community_gate_error, RegistryTier};
+use super::Tuf::verify_registry_package;
 use crate::Diagnostics::Diagnostic;
 use crate::Publish::Index::{self, IndexEntry};
 use crate::Publish::Sign;
 use crate::SHA256;
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
-use super::Tuf::verify_registry_package;
-use super::Tier::{RegistryTier, community_gate_error};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
@@ -196,8 +196,10 @@ pub fn registry_root_key_path(registry_name: &str) -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    base.join("registry-roots")
-        .join(format!("{}.pub", SHA256::sha256_hex(registry_name.as_bytes())))
+    base.join("registry-roots").join(format!(
+        "{}.pub",
+        SHA256::sha256_hex(registry_name.as_bytes())
+    ))
 }
 
 fn configured_registry_root_key_path(registry_name: &str) -> Option<PathBuf> {
@@ -212,8 +214,10 @@ pub fn registry_checkpoint_path(registry_name: &str) -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    base.join("registry-checkpoints")
-        .join(format!("{}.state", SHA256::sha256_hex(registry_name.as_bytes())))
+    base.join("registry-checkpoints").join(format!(
+        "{}.state",
+        SHA256::sha256_hex(registry_name.as_bytes())
+    ))
 }
 
 /// Establish or verify the host-pinned TUF root key used by sparse metadata.
@@ -229,8 +233,12 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
     let configured = std::env::var_os("JET_REGISTRY_ROOT_KEY")
         .filter(|value| !value.is_empty())
         .is_some();
-    let path = configured_registry_root_key_path(registry_name)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry root key path is empty"))?;
+    let path = configured_registry_root_key_path(registry_name).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "registry root key path is empty",
+        )
+    })?;
     if let Ok(metadata) = std::fs::symlink_metadata(&path) {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(io::Error::new(
@@ -248,12 +256,18 @@ pub fn ensure_registry_root_key(registry_name: &str, public_key: &str) -> io::Re
         return Ok(path);
     }
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "registry root key has no parent")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "registry root key has no parent",
+        )
     })?;
     if configured {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("configured registry root key is unavailable at {}", path.display()),
+            format!(
+                "configured registry root key is unavailable at {}",
+                path.display()
+            ),
         ));
     }
     std::fs::create_dir_all(parent)?;
@@ -358,12 +372,19 @@ fn acquire_registry_root_key_lock(path: &Path) -> io::Result<RegistryRootKeyLock
 }
 
 pub fn read_registry_root_key(registry_name: &str) -> io::Result<String> {
-    let path = configured_registry_root_key_path(registry_name)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry root key path is empty"))?;
+    let path = configured_registry_root_key_path(registry_name).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "registry root key path is empty",
+        )
+    })?;
     let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!("registry root key is not installed at {}: {error}", path.display()),
+            format!(
+                "registry root key is not installed at {}: {error}",
+                path.display()
+            ),
         )
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -403,9 +424,9 @@ fn registry_cache_component(name: &str) -> String {
     let safe = !name.is_empty()
         && name != "."
         && name != ".."
-        && name.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')
-        });
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
     if safe {
         name.to_string()
     } else {
@@ -492,7 +513,10 @@ fn install_registry_clone(
                 match cleanup {
                     Ok(()) => Ok(dir.to_path_buf()),
                     Err(cleanup_error) => Err(attach_checkout_cleanup_failure(
-                        e1235(&registry.url, "couldn't remove the losing partial registry clone"),
+                        e1235(
+                            &registry.url,
+                            "couldn't remove the losing partial registry clone",
+                        ),
                         partial,
                         &cleanup_error,
                     )),
@@ -704,10 +728,7 @@ fn attach_checkout_cleanup_failure(
     path: &Path,
     error: &io::Error,
 ) -> Diagnostic {
-    let detail = format!(
-        "cleanup failed: {}",
-        checkout_cleanup_problem(path, error)
-    );
+    let detail = format!("cleanup failed: {}", checkout_cleanup_problem(path, error));
     if let Some(existing) = primary.detail.as_mut() {
         if !existing.is_empty() && !existing.ends_with('\n') {
             existing.push('\n');
@@ -794,12 +815,7 @@ pub fn prepare_publish_checkout(registry: &RegistryConfig) -> Result<PublishChec
     let output = match output {
         Ok(output) => output,
         Err(error) => {
-            return Err(clone_failure(
-                registry,
-                &path,
-                true,
-                error.to_string(),
-            ));
+            return Err(clone_failure(registry, &path, true, error.to_string()));
         }
     };
     if !output.status.success() {
@@ -845,8 +861,8 @@ fn push_index_inner(
     let _ = run(&["config", "user.email", "jet-publish@localhost"]);
     let _ = run(&["config", "user.name", "jet registry publish"]);
 
-    let cached_clean = run(&["diff", "--cached", "--quiet"])
-        .map_err(|e| e1235(&registry.url, &e.to_string()))?;
+    let cached_clean =
+        run(&["diff", "--cached", "--quiet"]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !cached_clean.status.success() {
         return Err(e1235(
             &registry.url,
@@ -876,7 +892,10 @@ fn push_index_inner(
             .map_err(|_| e1235(&registry.url, "publication path escapes its checkout"))?;
         add.arg(relative);
     }
-    let add = add.current_dir(repo).output().map_err(|e| e1235(&registry.url, &e.to_string()))?;
+    let add = add
+        .current_dir(repo)
+        .output()
+        .map_err(|e| e1235(&registry.url, &e.to_string()))?;
     if !add.status.success() {
         return Err(e1235(&registry.url, "git add failed"));
     }
@@ -888,7 +907,10 @@ fn push_index_inner(
     let allowed = stage_paths
         .iter()
         .filter_map(|path| path.strip_prefix(repo).ok())
-        .map(|path| path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
+        .map(|path| {
+            path.to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/")
+        })
         .collect::<Vec<_>>();
     for staged_path in String::from_utf8_lossy(&staged.stdout).lines() {
         let permitted = allowed.iter().any(|path| {
@@ -915,7 +937,10 @@ fn push_index_inner(
         .map_err(|e| e1235(&registry.url, &e.to_string()))?;
     let branch = String::from_utf8_lossy(&branch.stdout).trim().to_string();
     if branch.is_empty() || branch == "HEAD" || branch == "." || branch == ".." {
-        return Err(e1235(&registry.url, "publication checkout has no named branch"));
+        return Err(e1235(
+            &registry.url,
+            "publication checkout has no named branch",
+        ));
     }
     let push = run(&["push", "origin", &format!("HEAD:refs/heads/{branch}")])
         .map_err(|e| e1235(&registry.url, &e.to_string()))?;
@@ -924,15 +949,16 @@ fn push_index_inner(
         // only a byte-identical winner. Otherwise rebuild from a fresh remote
         // checkout; rebasing append-only index files can merge two conflicting
         // same-version lines and would violate immutable identity.
-        let fetch = run(&["fetch", "origin"])
-            .map_err(|e| e1235(&registry.url, &e.to_string()))?;
+        let fetch = run(&["fetch", "origin"]).map_err(|e| e1235(&registry.url, &e.to_string()))?;
         if !fetch.status.success() {
-            return Err(e1235(&registry.url, "git fetch failed after a concurrent push"));
+            return Err(e1235(
+                &registry.url,
+                "git fetch failed after a concurrent push",
+            ));
         }
         let remote = format!("origin/{branch}");
         if let Some(entry) = expected {
-            if remote_contains_entry(repo, &remote, entry)
-                && verify_remote_winner(registry, entry)?
+            if remote_contains_entry(repo, &remote, entry) && verify_remote_winner(registry, entry)?
             {
                 return Ok(());
             }
@@ -1054,7 +1080,9 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
         Err(_) => return false,
     };
     let relative = match path.strip_prefix(repo) {
-        Ok(path) => path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"),
+        Ok(path) => path
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/"),
         Err(_) => return false,
     };
     let spec = format!("{remote}:{relative}");
@@ -1075,7 +1103,9 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
     }
     let artifact = match artifact_path(repo, &expected.name, &expected.version) {
         Ok(path) => match path.strip_prefix(repo) {
-            Ok(path) => path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"),
+            Ok(path) => path
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/"),
             Err(_) => return false,
         },
         Err(_) => return false,
@@ -1088,16 +1118,21 @@ fn remote_contains_entry(repo: &Path, remote: &str, expected: &IndexEntry) -> bo
     {
         return false;
     }
-    let package_metadata = match crate::Publish::registry_package_metadata_path(repo, &expected.name) {
-        Ok(path) => path,
-        Err(_) => return false,
-    };
+    let package_metadata =
+        match crate::Publish::registry_package_metadata_path(repo, &expected.name) {
+            Ok(path) => path,
+            Err(_) => return false,
+        };
     let log = repo.join("transparency").join("log");
     let checkpoint = repo.join("transparency").join("checkpoint");
     [package_metadata, log, checkpoint].iter().all(|path| {
         path.strip_prefix(repo)
             .ok()
-            .map(|relative| relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
+            .map(|relative| {
+                relative
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/")
+            })
             .is_some_and(|relative| {
                 git_command()
                     .args(["cat-file", "-e", &format!("{remote}:{relative}")])
@@ -1194,9 +1229,12 @@ pub fn publish_artifact(
             "registry artifact path is not a directory",
         ));
     }
-    let parent = destination
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry artifact has no parent"))?;
+    let parent = destination.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "registry artifact has no parent",
+        )
+    })?;
     ensure_real_directory(repo, "registry checkout")?;
     ensure_real_directory_if_present(&repo.join("artifacts"), "registry artifact root")?;
     ensure_real_directory_if_present(
@@ -1205,11 +1243,7 @@ pub fn publish_artifact(
     )?;
     std::fs::create_dir_all(parent)?;
     ensure_real_directory(parent, "registry artifact parent")?;
-    let staging = parent.join(format!(
-        ".{}.jet-artifact-{}",
-        version,
-        unique_suffix()
-    ));
+    let staging = parent.join(format!(".{}.jet-artifact-{}", version, unique_suffix()));
     if std::fs::symlink_metadata(&staging).is_ok() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
@@ -1368,7 +1402,11 @@ fn stage_oci_sbom(
     let root = oci_referrer_root(repo, subject)?;
     let lock = load_publish_lock(source)?;
     let sbom = super::SBOM::registry_spdx(lock.as_ref(), name, version, subject);
-    write_oci_file(&root.join(OCI_PENDING_SBOM), sbom.as_bytes(), "pending OCI SBOM")
+    write_oci_file(
+        &root.join(OCI_PENDING_SBOM),
+        sbom.as_bytes(),
+        "pending OCI SBOM",
+    )
 }
 
 fn finalize_oci_referrers_for_package(repo: &Path, name: &str, version: &str) -> io::Result<()> {
@@ -1531,11 +1569,18 @@ fn write_oci_file(path: &Path, bytes: &[u8], label: &str) -> io::Result<()> {
         ));
     }
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, format!("{label} has no parent"))
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{label} has no parent"),
+        )
     })?;
     std::fs::create_dir_all(parent)?;
     ensure_real_directory(parent, "OCI referrer parent")?;
-    let partial = parent.join(format!(".partial-{}-{}", std::process::id(), unique_suffix()));
+    let partial = parent.join(format!(
+        ".partial-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -1582,8 +1627,8 @@ pub(super) fn referrer_index_digest(repo: &Path, entry: &IndexEntry) -> io::Resu
             format!("OCI referrer index is unavailable: {error}"),
         )
     })?;
-    let bytes = read_oci_file(&root.join(OCI_REFERRER_INDEX), MAX_OCI_REFERRER_BYTES)
-        .map_err(|error| {
+    let bytes =
+        read_oci_file(&root.join(OCI_REFERRER_INDEX), MAX_OCI_REFERRER_BYTES).map_err(|error| {
             io::Error::new(
                 error.kind(),
                 format!("OCI referrer index is unavailable: {error}"),
@@ -1592,10 +1637,7 @@ pub(super) fn referrer_index_digest(repo: &Path, entry: &IndexEntry) -> io::Resu
     Ok(format!("sha256-{}", SHA256::sha256_hex(&bytes)))
 }
 
-fn render_oci_index(
-    subject: &str,
-    descriptors: &[(&str, String, usize)],
-) -> String {
+fn render_oci_index(subject: &str, descriptors: &[(&str, String, usize)]) -> String {
     let manifests = descriptors
         .iter()
         .map(|(artifact_type, digest, size)| {
@@ -1611,7 +1653,8 @@ fn render_oci_index(
         .join(",");
     format!(
         "{{\"schemaVersion\":2,\"subject\":{{\"digest\":\"{}\"}},\"manifests\":[{}]}}\n",
-        json_escape(subject), manifests
+        json_escape(subject),
+        manifests
     )
 }
 
@@ -1693,7 +1736,10 @@ pub(super) fn verify_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Resul
         let child = child?;
         let name = child.file_name().to_string_lossy().into_owned();
         let metadata = std::fs::symlink_metadata(child.path())?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() || !expected_blobs.contains(&name) {
+        if metadata.file_type().is_symlink()
+            || !metadata.is_file()
+            || !expected_blobs.contains(&name)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "OCI referrer blob store contains an unreferenced or unsafe blob",
@@ -1713,19 +1759,22 @@ pub(super) fn verify_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Resul
     Ok(())
 }
 
-fn parse_oci_index(
-    bytes: &[u8],
-    subject: &str,
-) -> io::Result<Vec<(String, String, u64)>> {
-    let text = std::str::from_utf8(bytes)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "OCI referrer index is not UTF-8"))?;
+fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, String, u64)>> {
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "OCI referrer index is not UTF-8",
+        )
+    })?;
     let value = parse_json(text).map_err(|_| invalid_oci("OCI referrer index is malformed"))?;
     let object = value
         .as_object()
         .map_err(|_| invalid_oci("OCI referrer index is not an object"))?;
     require_oci_keys(object, &["schemaVersion", "subject", "manifests"], "index")?;
     if !matches!(object.get("schemaVersion"), Some(JSONValue::Number(2))) {
-        return Err(invalid_oci("OCI referrer index has an unsupported schema version"));
+        return Err(invalid_oci(
+            "OCI referrer index has an unsupported schema version",
+        ));
     }
     let subject_object = object
         .get("subject")
@@ -1739,7 +1788,9 @@ fn parse_oci_index(
         .as_str()
         .map_err(|_| invalid_oci("OCI referrer subject digest is not a string"))?;
     if recorded_subject != subject {
-        return Err(invalid_oci("OCI referrer subject does not match the index entry"));
+        return Err(invalid_oci(
+            "OCI referrer subject does not match the index entry",
+        ));
     }
     let manifests = object
         .get("manifests")
@@ -1747,7 +1798,9 @@ fn parse_oci_index(
         .as_array()
         .map_err(|_| invalid_oci("OCI referrer manifests is not an array"))?;
     if manifests.len() != 4 {
-        return Err(invalid_oci("OCI referrer index must contain SBOM, signature, provenance, and reproducibility"));
+        return Err(invalid_oci(
+            "OCI referrer index must contain SBOM, signature, provenance, and reproducibility",
+        ));
     }
     let mut seen = BTreeSet::new();
     let mut descriptors = Vec::with_capacity(manifests.len());
@@ -1755,7 +1808,11 @@ fn parse_oci_index(
         let manifest = manifest
             .as_object()
             .map_err(|_| invalid_oci("OCI referrer descriptor is not an object"))?;
-        require_oci_keys(manifest, &["artifactType", "digest", "mediaType", "size"], "descriptor")?;
+        require_oci_keys(
+            manifest,
+            &["artifactType", "digest", "mediaType", "size"],
+            "descriptor",
+        )?;
         let artifact_type = manifest
             .get("artifactType")
             .ok_or_else(|| invalid_oci("OCI referrer descriptor has no artifact type"))?
@@ -1774,7 +1831,9 @@ fn parse_oci_index(
             )
             || !seen.insert(artifact_type.clone())
         {
-            return Err(invalid_oci("OCI referrer descriptor has an unknown or repeated artifact type"));
+            return Err(invalid_oci(
+                "OCI referrer descriptor has an unknown or repeated artifact type",
+            ));
         }
         let digest = manifest
             .get("digest")
@@ -1785,7 +1844,11 @@ fn parse_oci_index(
         validate_oci_digest(&digest)?;
         let size = match manifest.get("size") {
             Some(JSONValue::Number(value)) if *value >= 0 => *value as u64,
-            _ => return Err(invalid_oci("OCI referrer descriptor size is not a non-negative integer")),
+            _ => {
+                return Err(invalid_oci(
+                    "OCI referrer descriptor size is not a non-negative integer",
+                ))
+            }
         };
         descriptors.push((artifact_type, digest, size));
     }
@@ -1798,7 +1861,9 @@ fn require_oci_keys(
     label: &str,
 ) -> io::Result<()> {
     if object.len() != keys.len() || object.keys().any(|key| !keys.contains(&key.as_str())) {
-        return Err(invalid_oci(&format!("OCI {label} has unknown or missing fields")));
+        return Err(invalid_oci(&format!(
+            "OCI {label} has unknown or missing fields"
+        )));
     }
     Ok(())
 }
@@ -1820,7 +1885,10 @@ fn unique_suffix() -> String {
 pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
     let path = artifact_path(repo, &entry.name, &entry.version)?;
     let package_dir = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "registry artifact has no parent")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "registry artifact has no parent",
+        )
     })?;
     ensure_real_directory_if_present(repo, "registry checkout")?;
     ensure_real_directory_if_present(&repo.join("artifacts"), "registry artifact root")?;
@@ -1829,7 +1897,10 @@ pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
         if error.kind() == io::ErrorKind::NotFound {
             io::Error::new(
                 io::ErrorKind::NotFound,
-                format!("registry has no source artifact for {} {}", entry.name, entry.version),
+                format!(
+                    "registry has no source artifact for {} {}",
+                    entry.name, entry.version
+                ),
             )
         } else {
             error
@@ -1838,15 +1909,19 @@ pub fn verify_artifact(repo: &Path, entry: &IndexEntry) -> io::Result<PathBuf> {
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("registry has no source artifact for {} {}", entry.name, entry.version),
+            format!(
+                "registry has no source artifact for {} {}",
+                entry.name, entry.version
+            ),
         ));
     }
-    if !entry.content_hash.is_empty()
-        && registry_artifact_hash(&path)? != entry.content_hash
-    {
+    if !entry.content_hash.is_empty() && registry_artifact_hash(&path)? != entry.content_hash {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("registry source artifact for {} {} failed its content hash", entry.name, entry.version),
+            format!(
+                "registry source artifact for {} {} failed its content hash",
+                entry.name, entry.version
+            ),
         ));
     }
     verify_oci_referrers(repo, entry)?;
@@ -1902,13 +1977,19 @@ fn collect_registry_identity_files(
         if metadata.file_type().is_symlink() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("registry source contains an unsupported node `{}`", path.display()),
+                format!(
+                    "registry source contains an unsupported node `{}`",
+                    path.display()
+                ),
             ));
         }
         if !metadata.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("registry source contains an unsupported node `{}`", path.display()),
+                format!(
+                    "registry source contains an unsupported node `{}`",
+                    path.display()
+                ),
             ));
         }
         let relative = path
@@ -1987,7 +2068,9 @@ impl RegistryPackageMetadata {
     }
 
     pub(crate) fn contains_dependency(&self, name: &str) -> bool {
-        self.dependencies.iter().any(|dependency| dependency.name == name)
+        self.dependencies
+            .iter()
+            .any(|dependency| dependency.name == name)
     }
 
     pub(crate) fn canonical(&self) -> &str {
@@ -2079,12 +2162,7 @@ fn parse_registry_package_metadata(
             )));
         };
         for (dependency_name, descriptor) in values {
-            merge_registry_dependency(
-                &mut dependencies,
-                dependency_name,
-                descriptor,
-                role,
-            )?;
+            merge_registry_dependency(&mut dependencies, dependency_name, descriptor, role)?;
         }
     }
 
@@ -2124,12 +2202,7 @@ fn parse_registry_package_metadata(
             ));
         };
         for (dependency_name, descriptor) in constraints {
-            merge_registry_dependency(
-                &mut dependencies,
-                dependency_name,
-                descriptor,
-                "normal",
-            )?;
+            merge_registry_dependency(&mut dependencies, dependency_name, descriptor, "normal")?;
         }
     }
 
@@ -2325,10 +2398,7 @@ fn activate_registry_feature(
     Ok(())
 }
 
-fn required_metadata_string(
-    object: &BTreeMap<String, JSONValue>,
-    key: &str,
-) -> io::Result<String> {
+fn required_metadata_string(object: &BTreeMap<String, JSONValue>, key: &str) -> io::Result<String> {
     match object.get(key) {
         Some(JSONValue::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
         _ => Err(invalid_registry_metadata(&format!(
@@ -2420,7 +2490,10 @@ fn copy_artifact_tree(source: &Path, destination: &Path) -> io::Result<()> {
         if metadata.file_type().is_symlink() || !metadata.is_dir() && !metadata.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("registry source contains an unsupported node `{}`", from.display()),
+                format!(
+                    "registry source contains an unsupported node `{}`",
+                    from.display()
+                ),
             ));
         }
         if metadata.is_dir() {

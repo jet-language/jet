@@ -1,9 +1,10 @@
-use crate::AST::{BinOp, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, OrFallback, Pattern, StrPart, Type};
-use crate::Codegen::Cx;
+use super::refusal;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_json_type_name;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
+use crate::Codegen::mangle_generated;
+use crate::Codegen::Cx;
 use crate::Codegen::TIR::arg_conv_in_subset;
 use crate::Codegen::TIR::enum_is_covered;
 use crate::Codegen::TIR::fold_typed_fact_enum_equality;
@@ -16,10 +17,11 @@ use crate::Codegen::TIR::is_prelude_struct_name;
 use crate::Codegen::TIR::method_call_in_subset;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_lit_constructible;
-use crate::Codegen::mangle_generated;
 use crate::Syntax;
+use crate::AST::{
+    BinOp, EnumLitArg, Expr, IndexKind, Lambda, LambdaBody, OrFallback, Pattern, StrPart, Type,
+};
 use std::collections::HashSet;
-use super::refusal;
 
 /// I2 self-report: a refusal records the expression it was about before the
 /// `false` propagates out, so the `ice!` in `emit_func` can name the construct
@@ -97,8 +99,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // D-FACT-ENUM-TIR: generated fact reads are typed comptime enum values.
         // The shared TIR fold turns the closed comparison into a Bool before
         // either value reaches an engine or the Rust/Web emitter.
-        Expr::Binary(op, l, r, _)
-            if fold_typed_fact_enum_equality(*op, l, r).is_some() => true,
+        Expr::Binary(op, l, r, _) if fold_typed_fact_enum_equality(*op, l, r).is_some() => true,
         Expr::Binary(_, l, r, _) => expr_in_subset(l, cx, locals) && expr_in_subset(r, cx, locals),
         // D-CHAINCMP1: `0 <= sev < 10` — in-subset iff every operand is.
         Expr::CompareChain { operands, .. } => {
@@ -116,9 +117,11 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 return c.args.len() <= 1
                     && matches!(c.resolved_ret.as_ref(), Some(Type::Tuple(_)))
                     && c.args.iter().all(|arg| {
-                    matches!(arg.label.as_ref().map(|(label, _)| label.as_str()), None | Some("capacity"))
-                        && expr_in_subset(&arg.expr, cx, locals)
-                });
+                        matches!(
+                            arg.label.as_ref().map(|(label, _)| label.as_str()),
+                            None | Some("capacity")
+                        ) && expr_in_subset(&arg.expr, cx, locals)
+                    });
             }
             // D-CALLPOLICY1=E: `apply` replaces a callable's policy metadata;
             // policy expressions are compile-time typed values and have no
@@ -126,12 +129,12 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             if c.name == "apply"
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
-                && c.args.last().is_some_and(|arg| arg.flags.callable_policy.is_some())
+                && c.args
+                    .last()
+                    .is_some_and(|arg| arg.flags.callable_policy.is_some())
             {
                 return c.args.last().is_some_and(|arg| {
-                    arg.label.is_none()
-                        && !arg.spread
-                        && expr_in_subset(&arg.expr, cx, locals)
+                    arg.label.is_none() && !arg.spread && expr_in_subset(&arg.expr, cx, locals)
                 });
             }
             // D-CONC-FREEZE1=A: `freeze` lowers to the existing owned-value
@@ -150,10 +153,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // lowered PLAINLY (`emit_call_args(.., None, ..)`). Cover it: the name is a
             // local (not a const) and every arg is in-subset + unlabeled.
             if locals.contains(&c.name) && !cx.consts.contains_key(&c.name) {
-                return c
-                    .args
-                    .iter()
-                    .all(|a| expr_in_subset(&a.expr, cx, locals));
+                return c.args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // `print` is the one builtin the subset covers (one or more args —
             // D-VERDICT-1321-1 lowers a multi-arg print to one joined Print).
@@ -178,9 +178,8 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
-            let is_close = c.name == Syntax::RESOURCE_CLOSE
-                && !locals.contains(&c.name)
-                && c.args.len() == 1;
+            let is_close =
+                c.name == Syntax::RESOURCE_CLOSE && !locals.contains(&c.name) && c.args.len() == 1;
             // c109 Phase 26: the rich-runtime-report builtins `assert(cond[, msg])`,
             // `assert_eq(left, right)`, and `panic(msg)` (S36). Each is a bare
             // `Expr::Call` whose name is the builtin (not in `cx.sigs`, not shadowed by a
@@ -248,9 +247,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                         ..
                     ))
                 ) && c.args.len() == 1
-                    && c.args
-                        .iter()
-                        .all(|a| expr_in_subset(&a.expr, cx, locals));
+                    && c.args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
@@ -376,7 +373,9 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             else_value,
             ..
         } => {
-            let Some(bindings) = crate::Codegen::TIR::if_cond_in_subset(cond, cx, locals) else { return false };
+            let Some(bindings) = crate::Codegen::TIR::if_cond_in_subset(cond, cx, locals) else {
+                return false;
+            };
             let mut then_locals = locals.clone();
             then_locals.extend(bindings);
             if !then_body
@@ -407,7 +406,10 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         } => {
             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.any_core_import_module(alias) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
+                    && matches!(
+                        type_name.as_str(),
+                        "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig"
+                    )
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.any_core_import_module(alias) == Some("core.encoding.cbor")
@@ -424,7 +426,14 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             });
             let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.any_core_import_module(alias) == Some("core.encoding.xml")
-                    && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
+                    && matches!(
+                        type_name.as_str(),
+                        "XMLLimits"
+                            | "XMLParseOptions"
+                            | "XMLRenderOptions"
+                            | "XMLCanonical"
+                            | "XMLError"
+                    )
                     && type_args.is_empty()
             });
             // c109 Phase 30: a TRAIT-OBJECT coercion (S48 — `Circle {…}` in a `[Shape]`
@@ -530,12 +539,9 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             if member == "clone" {
                 return false;
             }
-            if crate::Codegen::TIR::grouped_enum_unit_variant(
-                cx,
-                receiver,
-                member,
-                |name| locals.contains(name),
-            )
+            if crate::Codegen::TIR::grouped_enum_unit_variant(cx, receiver, member, |name| {
+                locals.contains(name)
+            })
             .is_some()
             {
                 return true;
@@ -565,7 +571,10 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     return true;
                 }
                 if enum_name == "DataEvent"
-                    && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
+                    && matches!(
+                        member.as_str(),
+                        "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
+                    )
                 {
                     return true;
                 }
@@ -597,8 +606,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 // only Rust head the TIR may emit for a foreign enum.
                 if !locals.contains(enum_name)
                     && cx.variant_owner.get(member).is_some_and(|owner| {
-                        owner.rsplit("::").next() == Some(enum_name)
-                            && enum_is_covered(owner, cx)
+                        owner.rsplit("::").next() == Some(enum_name) && enum_is_covered(owner, cx)
                     })
                 {
                     return true;
@@ -670,12 +678,14 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 .core_qualified_rust_type_name(type_name)
                 .unwrap_or(type_name.as_str());
             if (resolved_type == "SMTPSecurity" && matches!(variant.as_str(), "StartTls" | "TLS"))
-                || (resolved_type == "RecipientPolicy" && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
+                || (resolved_type == "RecipientPolicy"
+                    && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
             {
                 return args.is_empty();
             }
             if (resolved_type == "SMTPAuth" && matches!(variant.as_str(), "None" | "Password"))
-                || (resolved_type == "TLSTrust" && matches!(variant.as_str(), "System" | "SystemPlusCa"))
+                || (resolved_type == "TLSTrust"
+                    && matches!(variant.as_str(), "System" | "SystemPlusCa"))
             {
                 return args.iter().all(|arg| match arg {
                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
@@ -783,13 +793,16 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 return matches!(variant.as_str(), "Read" | "Write" | "ReadWrite");
             }
             if resolved_type == "XMLCanonicalMode" {
-                return args.is_empty() && matches!(variant.as_str(), "Inclusive11" | "Exclusive10");
+                return args.is_empty()
+                    && matches!(variant.as_str(), "Inclusive11" | "Exclusive10");
             }
             if resolved_type == "XMLEncoding" {
-                return args.is_empty() && matches!(variant.as_str(), "UTF8" | "UTF8BOM" | "UTF16LE" | "UTF16BE");
+                return args.is_empty()
+                    && matches!(variant.as_str(), "UTF8" | "UTF8BOM" | "UTF16LE" | "UTF16BE");
             }
             if resolved_type == "XMLLexicalPolicy" {
-                return args.is_empty() && matches!(variant.as_str(), "PreserveValid" | "Deterministic");
+                return args.is_empty()
+                    && matches!(variant.as_str(), "PreserveValid" | "Deterministic");
             }
             if !enum_is_covered(resolved_type, cx)
                 && !(crate::Codegen::core_rust_type_name(resolved_type).is_some()
@@ -798,9 +811,11 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 return false;
             }
             // Defensive: the variant must belong to this enum (sema guaranteed it).
-            if !cx.enum_variants.get(resolved_type).is_some_and(|variants| {
-                variants.iter().any(|(candidate, _)| candidate == variant)
-            }) {
+            if !cx
+                .enum_variants
+                .get(resolved_type)
+                .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
+            {
                 return false;
             }
             args.iter().all(|a| match a {
@@ -849,14 +864,15 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists only — the AST
         // path's `jet_slice_vec` is list-specific). Base/start/end must be in-subset.
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             expr_in_subset(base, cx, locals)
                 && range.as_deref().map_or_else(
-                    || {
-                        expr_in_subset(start, cx, locals)
-                            && expr_in_subset(end, cx, locals)
-                    },
+                    || expr_in_subset(start, cx, locals) && expr_in_subset(end, cx, locals),
                     |range| expr_in_subset(range, cx, locals),
                 )
         }
@@ -886,7 +902,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // D-REDUCE-VALUE1: a validated ReduceOp. Only appears inside `v.reduce(.Op)`; the
         // method lowering consumes it (it never emits on its own), so it is in-subset.
         Expr::ReduceMarker(_, _) => true,
-        // c109 Phase 23: a `#Todo` typed hole. Covered when sema filled the expected
+        // c109 Phase 23: a `#Todo` typed goal. Covered when sema filled the expected
         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
         // the AST path so the TIR never guesses the `(unknown)` fallback.
         Expr::Todo { expected_type, .. } => expected_type.is_some(),
@@ -944,9 +960,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         }
         Expr::CallValue { callee, args, .. } => {
             expr_in_subset(callee, cx, locals)
-                && args
-                    .iter()
-                    .all(|a| expr_in_subset(&a.expr, cx, locals))
+                && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
         }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58). The
         // address expr must be in-subset. The cast itself is safe Rust (no `unsafe`); it
@@ -1013,11 +1027,11 @@ pub(crate) fn orfallback_rhs_in_subset(
     match fallback {
         OrFallback::Value(e) => expr_in_subset(e, cx, &fallback_locals),
         OrFallback::Block { body, value, .. } => {
-            body.iter().all(|stmt| {
-                stmt_in_subset(stmt, cx, &mut fallback_locals)
-            }) && value
-                .as_ref()
-                .is_none_or(|value| expr_in_subset(value, cx, &fallback_locals))
+            body.iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut fallback_locals))
+                && value
+                    .as_ref()
+                    .is_none_or(|value| expr_in_subset(value, cx, &fallback_locals))
         }
         OrFallback::Return(None, _) => true,
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, &fallback_locals),

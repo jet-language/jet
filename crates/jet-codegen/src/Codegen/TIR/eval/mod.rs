@@ -1,7 +1,7 @@
 //! Canonical TIR evaluator — reference semantics (D-ONECORE1=A / #777).
 
-mod builtins;
 mod browser;
+mod builtins;
 mod cli;
 mod closure_ops;
 mod compute_calls;
@@ -17,9 +17,7 @@ mod stream;
 mod webapp;
 
 mod jet_mem {
-    pub(super) use jet_foundation::MemSentry::{
-        jet_memory_ledger_record, MemoryLedgerWitness,
-    };
+    pub(super) use jet_foundation::MemSentry::{jet_memory_ledger_record, MemoryLedgerWitness};
 }
 
 #[allow(dead_code)]
@@ -32,8 +30,7 @@ mod gc_runtime {
 #[allow(dead_code)]
 mod contract_semantics {
     use jet_foundation::Outcome::{
-        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr,
-        JetRuntimeDiagnostic,
+        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr, JetRuntimeDiagnostic,
     };
     include!("../../../Prelude/Core/Contracts.rs");
 }
@@ -48,14 +45,10 @@ mod measurement_semantics {
     include!("../../../Prelude/Core/Measurement.rs");
 }
 
-
 mod disjoint_semantics {
     include!("../../../Prelude/Core/Disjoint.rs");
 
-    pub(super) fn split(
-        len: usize,
-        mid: i64,
-    ) -> Result<((usize, usize), (usize, usize)), String> {
+    pub(super) fn split(len: usize, mid: i64) -> Result<((usize, usize), (usize, usize)), String> {
         jet_disjoint_split_bounds(len, mid)
     }
 
@@ -70,8 +63,7 @@ mod disjoint_semantics {
 #[allow(dead_code)]
 mod division_semantics {
     use super::contract_semantics::{
-        JET_ARITHMETIC_DIVIDE_OVERFLOW, JET_ARITHMETIC_DIVIDE_ZERO,
-        JET_ARITHMETIC_DIVISION_ERROR,
+        JET_ARITHMETIC_DIVIDE_OVERFLOW, JET_ARITHMETIC_DIVIDE_ZERO, JET_ARITHMETIC_DIVISION_ERROR,
     };
 
     // Division.rs also carries AOT-only stop adapters. The evaluator uses its
@@ -120,16 +112,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::AST::{BinMatchPart, Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
-use crate::Codegen::mangle;
+use super::build_cx_items;
 use super::Cx;
+use crate::Codegen::mangle;
 use crate::Codegen::TIR::{
     self, JitProgram, LowerEnv, TExpr, TExprKind, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal,
     TStmt,
 };
-use super::build_cx_items;
 use crate::Comptime::{self, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{BinMatchPart, Expr, Func, Item, ProgramBundle, Stmt, Type, UnitFamilyDef};
 use jet_foundation::MatchScan::BinBind;
 use jet_foundation::Reflection::ReflectionField;
 
@@ -225,14 +217,14 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
 /// raised by the joining parent remains a control diagnostic and is not
 /// converted here.
 fn task_failure_value(error: &Diagnostic) -> CtValue {
-    let failure = crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone());
+    let failure =
+        crate::task_group::jet_task_failure_from_code(error.code.as_str(), error.what.clone());
     let (variant, args) = match failure {
         crate::task_group::JetTaskFailure::Cancelled => ("Cancelled", Vec::new()),
         crate::task_group::JetTaskFailure::DeadlineBlown => ("DeadlineBlown", Vec::new()),
-        crate::task_group::JetTaskFailure::Panicked(reason) => (
-            "Panicked",
-            vec![(None, CtValue::Str(reason))],
-        ),
+        crate::task_group::JetTaskFailure::Panicked(reason) => {
+            ("Panicked", vec![(None, CtValue::Str(reason))])
+        }
     };
     CtValue::Enum {
         type_name: crate::Syntax::TYPE_TASK_FAILURE.to_string(),
@@ -290,10 +282,7 @@ pub(super) fn progress_no_color() -> bool {
     std::env::var_os("NO_COLOR").is_some()
 }
 
-pub(super) fn progress_emit(
-    sink: Option<&Arc<Mutex<DevSink>>>,
-    text: &str,
-) {
+pub(super) fn progress_emit(sink: Option<&Arc<Mutex<DevSink>>>, text: &str) {
     // Framing stays a terminal question — a pipe gets no carriage returns — but
     // where the frame GOES is the stream-ownership question.
     let tty = term_semantics::jet_term_stdout_is_terminal();
@@ -397,10 +386,7 @@ pub(super) fn checked_view_window(
         .map_err(|message| view_bounds_diagnostic(message, span))
 }
 
-pub(super) fn view_bounds_diagnostic(
-    message: String,
-    span: Span,
-) -> Diagnostic {
+pub(super) fn view_bounds_diagnostic(message: String, span: Span) -> Diagnostic {
     // Same E0953 voice as the JIT trap / comptime panic path so every tier
     // reports one code for an out-of-bounds view (I9).
     crate::Sema::Diagnostics::render_registered(
@@ -420,7 +406,9 @@ fn enter_source_nesting(depth: &mut usize, span: Span) -> Result<(), Diagnostic>
     }
     let exceeded = *depth;
     *depth -= 1;
-    Err(crate::Sema::Diagnostics::source_nesting_exceeded(exceeded, span))
+    Err(crate::Sema::Diagnostics::source_nesting_exceeded(
+        exceeded, span,
+    ))
 }
 
 pub(super) fn range_contains(
@@ -484,10 +472,7 @@ pub(super) fn uninit_fixed_read(value: &CtValue, index: usize) -> Option<CtValue
     let CtValue::List(values) = &fields.iter().find(|(name, _)| name == "values")?.1 else {
         return None;
     };
-    let CtValue::List(initialized) = &fields
-        .iter()
-        .find(|(name, _)| name == "initialized")?
-        .1
+    let CtValue::List(initialized) = &fields.iter().find(|(name, _)| name == "initialized")?.1
     else {
         return None;
     };
@@ -509,10 +494,7 @@ pub(super) fn uninit_fixed_materialize(value: &CtValue) -> Option<CtValue> {
     let CtValue::List(values) = &fields.iter().find(|(name, _)| name == "values")?.1 else {
         return None;
     };
-    let CtValue::List(initialized) = &fields
-        .iter()
-        .find(|(name, _)| name == "initialized")?
-        .1
+    let CtValue::List(initialized) = &fields.iter().find(|(name, _)| name == "initialized")?.1
     else {
         return None;
     };
@@ -524,11 +506,7 @@ pub(super) fn uninit_fixed_materialize(value: &CtValue) -> Option<CtValue> {
     Some(CtValue::List(values.clone()))
 }
 
-pub(super) fn uninit_fixed_write(
-    value: &mut CtValue,
-    index: usize,
-    replacement: CtValue,
-) -> bool {
+pub(super) fn uninit_fixed_write(value: &mut CtValue, index: usize, replacement: CtValue) -> bool {
     let CtValue::Struct { type_name, fields } = value else {
         return false;
     };
@@ -538,10 +516,7 @@ pub(super) fn uninit_fixed_write(
     let Some(values_index) = fields.iter().position(|(name, _)| name == "values") else {
         return false;
     };
-    let Some(initialized_index) = fields
-        .iter()
-        .position(|(name, _)| name == "initialized")
-    else {
+    let Some(initialized_index) = fields.iter().position(|(name, _)| name == "initialized") else {
         return false;
     };
     let CtValue::List(initialized) = &mut fields[initialized_index].1 else {
@@ -740,7 +715,8 @@ pub(super) fn project_list_place<'a>(
                 .iter()
                 .find(|(name, _)| {
                     name == field
-                        || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
+                        || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                            == Some(field.as_str())
                         || name == &crate::Codegen::mangle(field)
                 })
                 .map(|(_, value)| value)
@@ -769,11 +745,18 @@ pub(super) fn replace_list_place(
     let step = &path[0];
     let rest = &path[1..];
     match (step, root) {
-        (ViewMutPathStep::Field(field), CtValue::Struct { type_name, mut fields }) => {
+        (
+            ViewMutPathStep::Field(field),
+            CtValue::Struct {
+                type_name,
+                mut fields,
+            },
+        ) => {
             let mangled = crate::Codegen::mangle(field);
             let slot = fields.iter_mut().find(|(name, _)| {
                 name == field
-                    || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) == Some(field.as_str())
+                    || name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                        == Some(field.as_str())
                     || name == &mangled
             });
             let Some((_, value)) = slot else {
@@ -798,12 +781,15 @@ pub(super) fn view_mut_window_args(fields: &[(String, CtValue)]) -> Option<&[CtV
     if !crate::Comptime::ComputeLite::tensor_window_is_live(fields) {
         return None;
     }
-    fields.iter().find_map(|(name, value)| {
-        (name == "window").then(|| match value {
-            CtValue::List(args) => Some(args.as_slice()),
-            _ => None,
+    fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "window").then(|| match value {
+                CtValue::List(args) => Some(args.as_slice()),
+                _ => None,
+            })
         })
-    }).flatten()
+        .flatten()
 }
 
 /// D-TASKBORROW1=A: the runtime slot a loaned window addresses. A loaned handle
@@ -902,9 +888,7 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<(), Diagnostic> {
         if let Some(slot) = view_mut_loan(fields) {
             let slot = self.place_loan_slot(slot, span)?;
-            *slot
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner()) = replacement;
+            *slot.lock().unwrap_or_else(|poison| poison.into_inner()) = replacement;
             return Ok(());
         }
         let (base, path, _, _) =
@@ -976,7 +960,8 @@ impl<'a> EvalCtx<'a> {
             view_mut_bounds(fields).ok_or_else(|| unsupported("view-mut fields", span))?;
         let owner = self.view_mut_owner_value(fields, scope, span)?;
         if let Some(window) = view_mut_window_args(fields) {
-            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+            if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
+            {
                 return crate::Comptime::ComputeLite::tensor_view_list(&owner, window, span);
             }
         }
@@ -984,12 +969,7 @@ impl<'a> EvalCtx<'a> {
         let (start, end_exclusive) = if end < start {
             if end.checked_add(1) != Some(start) {
                 return Err(view_bounds_diagnostic(
-                    range_semantics::jet_view_bounds_error(
-                        start,
-                        end,
-                        false,
-                        items.len() as i64,
-                    ),
+                    range_semantics::jet_view_bounds_error(start, end, false, items.len() as i64),
                     span,
                 ));
             }
@@ -1014,10 +994,7 @@ impl<'a> EvalCtx<'a> {
     }
 }
 
-fn rebase_view_mut_owners(
-    value: &mut CtValue,
-    owners: &HashMap<String, String>,
-) {
+fn rebase_view_mut_owners(value: &mut CtValue, owners: &HashMap<String, String>) {
     match value {
         CtValue::Struct { type_name, fields } if type_name == "__JetViewMut" => {
             if let Some((_, CtValue::Str(base))) =
@@ -1384,7 +1361,9 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
                 .cancel
                 .as_ref()
                 .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-                || self.deadline.is_some_and(|deadline| wall_now_ms() >= deadline)
+                || self
+                    .deadline
+                    .is_some_and(|deadline| wall_now_ms() >= deadline)
             {
                 return Err(());
             }
@@ -1409,7 +1388,9 @@ impl shared_protocol::JetConditionWaiter for EvalConditionWaiter {
         self.cancel
             .as_ref()
             .is_some_and(|cancel| cancel.load(Ordering::Acquire))
-            || self.deadline.is_some_and(|deadline| wall_now_ms() >= deadline)
+            || self
+                .deadline
+                .is_some_and(|deadline| wall_now_ms() >= deadline)
     }
 }
 
@@ -1460,12 +1441,9 @@ fn select_eval_tasks(
         |task| match task.completion.try_recv() {
             Ok(completion) => Some(completion.result.map_err(EvalTaskSelectError::Child)),
             Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                Some(Err(EvalTaskSelectError::Child(unsupported(
-                    "task completion",
-                    span,
-                ))))
-            }
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(EvalTaskSelectError::Child(
+                unsupported("task completion", span),
+            ))),
         },
         |task| task.control.cancel(),
         |task| {
@@ -1650,9 +1628,9 @@ impl<'a> EvalCtx<'a> {
                     Some(self.span()),
                 ))
             }
-            crate::scheduler::JetSchedulerWait::Deadline(_) => Err(
-                self.deadline_stop(crate::task_group::jet_task_deadline(wait_kind)),
-            ),
+            crate::scheduler::JetSchedulerWait::Deadline(_) => {
+                Err(self.deadline_stop(crate::task_group::jet_task_deadline(wait_kind)))
+            }
             crate::scheduler::JetSchedulerWait::Panicked(message) => {
                 Err(task_child_panic(message, self.span()))
             }
@@ -1663,9 +1641,7 @@ impl<'a> EvalCtx<'a> {
         self.task_wait_while_paused()?;
         let deadline = crate::task_group::jet_task_deadline_if_expired(
             self.context_deadline
-                .map(|deadline| {
-                    deadline.saturating_sub(crate::scheduler::jet_std_time_now())
-                }),
+                .map(|deadline| deadline.saturating_sub(crate::scheduler::jet_std_time_now())),
             wait_kind,
         );
         let cancelled = self
@@ -1713,8 +1689,8 @@ impl<'a> EvalCtx<'a> {
         value: &CtValue,
         paused: bool,
     ) -> Result<(), Diagnostic> {
-        let index = Self::task_index(value)
-            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        let index =
+            Self::task_index(value).ok_or_else(|| unsupported("task receiver", self.span()))?;
         if let Some(Some(task)) = self
             .runtime
             .lock()
@@ -1734,8 +1710,8 @@ impl<'a> EvalCtx<'a> {
     /// The evaluator twin of `JetTask::detach`: drop the join handle so the
     /// task runs unattached and its result is never observed.
     pub(super) fn detach_task_value(&mut self, value: &CtValue) -> Result<(), Diagnostic> {
-        let index = Self::task_index(value)
-            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        let index =
+            Self::task_index(value).ok_or_else(|| unsupported("task receiver", self.span()))?;
         if let Some(slot) = self
             .runtime
             .lock()
@@ -1925,7 +1901,7 @@ impl<'a> EvalCtx<'a> {
                         Err(error) => Err(error),
                     }
                 }
-            },
+            }
         };
         crate::scheduler::jet_scheduler_set_task_control(None);
         crate::scheduler::jet_observe_task_finish(job.observe_id);
@@ -1993,9 +1969,10 @@ impl<'a> EvalCtx<'a> {
             ),
             None => None,
         };
-        let _deadline = group_runtime
-            .as_ref()
-            .and_then(|_| self.context_deadline.map(crate::scheduler::jet_ctx_push_deadline));
+        let _deadline = group_runtime.as_ref().and_then(|_| {
+            self.context_deadline
+                .map(crate::scheduler::jet_ctx_push_deadline)
+        });
         let permit = match group_runtime.as_ref() {
             Some(group) => {
                 let waiter = crate::scheduler::ParkSlot::new();
@@ -2044,11 +2021,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     /// Storage behind one open loan.
-    fn place_loan_slot(
-        &self,
-        slot: usize,
-        span: Span,
-    ) -> Result<Arc<Mutex<CtValue>>, Diagnostic> {
+    fn place_loan_slot(&self, slot: usize, span: Span) -> Result<Arc<Mutex<CtValue>>, Diagnostic> {
         self.runtime
             .lock()
             .expect("evaluator runtime poisoned")
@@ -2089,16 +2062,12 @@ impl<'a> EvalCtx<'a> {
     ) -> Option<Result<(), Diagnostic>> {
         Some(match place_mut_target(handle)? {
             PlaceMutTarget::Loan(slot) => self.place_loan_slot(slot, span).map(|slot| {
-                *slot
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner()) = replacement;
+                *slot.lock().unwrap_or_else(|poison| poison.into_inner()) = replacement;
             }),
             PlaceMutTarget::Owner(base, path) => match scope.get(&base).cloned() {
-                Some(root) => {
-                    replace_list_place(root, &path, replacement, span).map(|updated| {
-                        scope.insert(base, updated);
-                    })
-                }
+                Some(root) => replace_list_place(root, &path, replacement, span).map(|updated| {
+                    scope.insert(base, updated);
+                }),
                 None => Err(unsupported("place window owner", span)),
             },
         })
@@ -2266,10 +2235,12 @@ impl<'a> EvalCtx<'a> {
         if type_name != expected {
             return None;
         }
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+                _ => None,
+            })
     }
 
     fn new_taskgroup(
@@ -2297,10 +2268,7 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
-    fn select_builder_value(
-        receivers: Vec<usize>,
-        afters: Vec<(i64, CtValue)>,
-    ) -> CtValue {
+    fn select_builder_value(receivers: Vec<usize>, afters: Vec<(i64, CtValue)>) -> CtValue {
         CtValue::Struct {
             type_name: TIR_SELECT_BUILDER.to_string(),
             fields: vec![
@@ -2332,9 +2300,7 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
-    fn select_builder_parts(
-        value: &CtValue,
-    ) -> Option<(Vec<usize>, Vec<(i64, CtValue)>)> {
+    fn select_builder_parts(value: &CtValue) -> Option<(Vec<usize>, Vec<(i64, CtValue)>)> {
         let CtValue::Struct { type_name, fields } = value else {
             return None;
         };
@@ -2364,9 +2330,11 @@ impl<'a> EvalCtx<'a> {
                         if type_name != TIR_SELECT_AFTER {
                             return None;
                         }
-                        let duration_ns = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-                            ("duration_ns", CtValue::Int(duration_ns)) => Some(*duration_ns),
-                            _ => None,
+                        let duration_ns = fields.iter().find_map(|(name, value)| {
+                            match (name.as_str(), value) {
+                                ("duration_ns", CtValue::Int(duration_ns)) => Some(*duration_ns),
+                                _ => None,
+                            }
                         })?;
                         let payload = fields
                             .iter()
@@ -2453,11 +2421,7 @@ impl<'a> EvalCtx<'a> {
         receiver
     }
 
-    pub(super) fn send_eval_channel(
-        &self,
-        index: usize,
-        value: CtValue,
-    ) -> Result<(), Diagnostic> {
+    pub(super) fn send_eval_channel(&self, index: usize, value: CtValue) -> Result<(), Diagnostic> {
         self.task_wait_cancel_check()?;
         let sender = self
             .runtime
@@ -2476,10 +2440,7 @@ impl<'a> EvalCtx<'a> {
         Ok(())
     }
 
-    pub(super) fn receive_eval_channel(
-        &self,
-        index: usize,
-    ) -> Result<CtValue, Diagnostic> {
+    pub(super) fn receive_eval_channel(&self, index: usize) -> Result<CtValue, Diagnostic> {
         self.task_wait_cancel_check()?;
         let channel = self
             .runtime
@@ -2601,10 +2562,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     /// D-CONC-CHAN1: interpreter twin of the tagged Prelude select door.
-    pub(super) fn eval_select_wait_tagged(
-        &self,
-        builder: CtValue,
-    ) -> Result<CtValue, Diagnostic> {
+    pub(super) fn eval_select_wait_tagged(&self, builder: CtValue) -> Result<CtValue, Diagnostic> {
         self.eval_select_wait_tagged_mode(builder, false)
     }
 
@@ -2672,9 +2630,10 @@ impl<'a> EvalCtx<'a> {
             Some(crate::scheduler::JetSelectOutcome::Recv { arm, value }) => {
                 (arm as i64, CtValue::Present(Box::new(value)))
             }
-            Some(crate::scheduler::JetSelectOutcome::After { arm }) => {
-                (receiver_ids.len() as i64 + arm as i64, CtValue::absent(Type::Named("Unit".to_string())))
-            }
+            Some(crate::scheduler::JetSelectOutcome::After { arm }) => (
+                receiver_ids.len() as i64 + arm as i64,
+                CtValue::absent(Type::Named("Unit".to_string())),
+            ),
             Some(crate::scheduler::JetSelectOutcome::Closed) | None if nonblocking => {
                 (-1, CtValue::absent(Type::Named("Unit".to_string())))
             }
@@ -2685,15 +2644,18 @@ impl<'a> EvalCtx<'a> {
         };
         Ok(CtValue::Struct {
             type_name: "tuple".to_string(),
-            fields: vec![("arm".to_string(), CtValue::Int(arm)), ("value".to_string(), value)],
+            fields: vec![
+                ("arm".to_string(), CtValue::Int(arm)),
+                ("value".to_string(), value),
+            ],
         })
     }
 
     /// D-VERDICT-1323-1: request cancellation for one task without consuming
     /// it, the evaluator twin of `JetTask::cancel`.
     pub(super) fn cancel_task_value(&mut self, value: &CtValue) -> Result<(), Diagnostic> {
-        let index = Self::task_index(value)
-            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        let index =
+            Self::task_index(value).ok_or_else(|| unsupported("task receiver", self.span()))?;
         if let Some(Some(task)) = self
             .runtime
             .lock()
@@ -2707,8 +2669,8 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn take_task_entry(&mut self, value: &CtValue) -> Result<(usize, EvalTask), Diagnostic> {
-        let index = Self::task_index(value)
-            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        let index =
+            Self::task_index(value).ok_or_else(|| unsupported("task receiver", self.span()))?;
         let task = self
             .runtime
             .lock()
@@ -2898,6 +2860,12 @@ impl<'a> EvalCtx<'a> {
             1,
             message,
             "",
+        );
+        let _ = crate::development_receipt::jet_production_failure_receipt_write(
+            code,
+            &self.source_file,
+            line,
+            &self.current_fn,
         );
         if let Some(sink) = self.sink.as_ref() {
             let mut sink = sink.lock().expect("evaluator sink poisoned");
@@ -3177,7 +3145,9 @@ impl<'a> EvalCtx<'a> {
             }
         });
         for (i, (name, _, _)) in func.params.iter().enumerate() {
-            let jet = name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name.as_str());
+            let jet = name
+                .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(name.as_str());
             let value = args.get(i).cloned().unwrap_or(CtValue::Unit);
             scope.insert(jet.to_string(), value.clone());
             if jet != name {
@@ -3185,13 +3155,13 @@ impl<'a> EvalCtx<'a> {
             }
         }
         let result = match self.exec_stmts(&func.body, scope) {
-                Ok(Flow::Return(v)) => Ok(v),
-                Ok(Flow::Normal) => Ok(CtValue::Unit),
-                Ok(other) => Err(unsupported(
-                        &format!("control flow {other:?} escaping function"),
-                        self.span(),
-                    )),
-                Err(error) => Err(error),
+            Ok(Flow::Return(v)) => Ok(v),
+            Ok(Flow::Normal) => Ok(CtValue::Unit),
+            Ok(other) => Err(unsupported(
+                &format!("control flow {other:?} escaping function"),
+                self.span(),
+            )),
+            Err(error) => Err(error),
         };
         // Run scope.guard cleanups LIFO, matching Drop order in AOT/JIT.
         let guards: Vec<_> = self.scope_guards.drain(guard_mark..).rev().collect();
@@ -3240,9 +3210,7 @@ impl<'a> EvalCtx<'a> {
         self.current_span = previous_span;
         self.current_fn = previous_fn;
         let final_result = match (result, cleanup_result) {
-            (Err(error), _) | (Ok(_), Err(error)) => {
-                Err(error)
-            }
+            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
             (Ok(value), Ok(())) => Ok(value),
         };
         if let Some(bound) = func.memo_bound {
@@ -3308,10 +3276,12 @@ impl<'a> EvalCtx<'a> {
         if type_name != "__JetTirCallable" {
             return None;
         }
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+                _ => None,
+            })
     }
 
     pub(super) fn register_interrupt_callback(
@@ -3320,16 +3290,18 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         interrupt_runtime::jet_interrupt_arm().map_err(|message| {
-            unsupported(&interrupt_runtime::jet_interrupt_core_error(&message), self.span())
+            unsupported(
+                &interrupt_runtime::jet_interrupt_core_error(&message),
+                self.span(),
+            )
         })?;
         let value = self.eval_expr(callback, scope)?;
-        let index = Self::callable_index(&value)
-            .ok_or_else(|| {
-                unsupported(
-                    interrupt_runtime::jet_interrupt_invalid_callback_value_error(),
-                    self.span(),
-                )
-            })?;
+        let index = Self::callable_index(&value).ok_or_else(|| {
+            unsupported(
+                interrupt_runtime::jet_interrupt_invalid_callback_value_error(),
+                self.span(),
+            )
+        })?;
         self.runtime
             .lock()
             .expect("evaluator runtime poisoned")
@@ -3349,10 +3321,7 @@ impl<'a> EvalCtx<'a> {
         let index = Self::callable_index(&value)
             .ok_or_else(|| unsupported("invalid atexit callback value", self.span()))?;
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
-        jet_foundation::Outcome::jet_runtime_register_atexit(
-            &mut runtime.atexit_handlers,
-            index,
-        );
+        jet_foundation::Outcome::jet_runtime_register_atexit(&mut runtime.atexit_handlers, index);
         Ok(CtValue::Unit)
     }
 
@@ -3394,10 +3363,7 @@ impl<'a> EvalCtx<'a> {
                 Ok(_) => {}
                 Err(error) if error.code == "SOFT_EXIT" => {
                     let panic_stop = self.sink.as_ref().is_some_and(|sink| {
-                        sink.lock()
-                            .expect("evaluator sink poisoned")
-                            .exit_code
-                            == Some(70)
+                        sink.lock().expect("evaluator sink poisoned").exit_code == Some(70)
                     });
                     if panic_stop {
                         deferred_panic.get_or_insert(error);
@@ -3439,10 +3405,12 @@ impl<'a> EvalCtx<'a> {
         if type_name != "__JetTirStream" {
             return None;
         }
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+                _ => None,
+            })
     }
 
     pub(super) fn call_callable(
@@ -3455,12 +3423,10 @@ impl<'a> EvalCtx<'a> {
         let target = {
             let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
             match runtime.callables.get(index) {
-                Some(EvalCallable::Lambda { lambda, captured }) => {
-                    EvalCallableSnapshot::Lambda {
-                        lambda: *lambda,
-                        captured: captured.clone(),
-                    }
-                }
+                Some(EvalCallable::Lambda { lambda, captured }) => EvalCallableSnapshot::Lambda {
+                    lambda: *lambda,
+                    captured: captured.clone(),
+                },
                 Some(EvalCallable::Named(name)) => EvalCallableSnapshot::Named(*name),
                 Some(EvalCallable::Policy {
                     wrapper,
@@ -3471,14 +3437,21 @@ impl<'a> EvalCtx<'a> {
                     policy_args: policy_args.clone(),
                     callee: callee.clone(),
                 },
-                Some(EvalCallable::ComputeHandle { handle, kind, result_ty }) => {
-                    EvalCallableSnapshot::ComputeHandle {
-                        handle: handle.clone(),
-                        kind: *kind,
-                        result_ty: result_ty.clone(),
-                    }
+                Some(EvalCallable::ComputeHandle {
+                    handle,
+                    kind,
+                    result_ty,
+                }) => EvalCallableSnapshot::ComputeHandle {
+                    handle: handle.clone(),
+                    kind: *kind,
+                    result_ty: result_ty.clone(),
                 },
-                None => return Err(unsupported("calling an unknown function value", self.span())),
+                None => {
+                    return Err(unsupported(
+                        "calling an unknown function value",
+                        self.span(),
+                    ))
+                }
             }
         };
         match target {
@@ -3503,11 +3476,9 @@ impl<'a> EvalCtx<'a> {
                 result
             }
             EvalCallableSnapshot::Named(name) => {
-                let func = self
-                    .funcs
-                    .get(name)
-                    .copied()
-                    .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
+                let func = self.funcs.get(name).copied().ok_or_else(|| {
+                    unsupported(&format!("callable function `{name}`"), self.span())
+                })?;
                 let mut child = HashMap::new();
                 self.run_func(func, args, &mut child)
             }
@@ -3516,22 +3487,20 @@ impl<'a> EvalCtx<'a> {
                 policy_args,
                 callee,
             } => {
-                let func = self
-                    .funcs
-                    .get(wrapper)
-                    .copied()
-                    .ok_or_else(|| {
-                        unsupported(&format!("callable policy wrapper `{wrapper}`"), self.span())
-                    })?;
+                let func = self.funcs.get(wrapper).copied().ok_or_else(|| {
+                    unsupported(&format!("callable policy wrapper `{wrapper}`"), self.span())
+                })?;
                 let mut wrapper_args = policy_args;
                 wrapper_args.push(callee);
                 wrapper_args.extend(args);
                 let mut child = HashMap::new();
                 self.run_func(func, wrapper_args, &mut child)
             }
-            EvalCallableSnapshot::ComputeHandle { handle, kind, result_ty } => {
-                self.eval_compute_handle(&handle, kind, args, &result_ty)
-            }
+            EvalCallableSnapshot::ComputeHandle {
+                handle,
+                kind,
+                result_ty,
+            } => self.eval_compute_handle(&handle, kind, args, &result_ty),
         }
     }
 
@@ -3680,7 +3649,11 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
     for (name, function) in funcs {
         cx.fn_param_names.insert(
             name.clone(),
-            function.params.iter().map(|parameter| parameter.name.clone()).collect(),
+            function
+                .params
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect(),
         );
         cx.fn_type_params.insert(
             name.clone(),
@@ -3728,7 +3701,8 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                     })
                     .collect(),
                 ret: function.return_type.clone().map(Box::new),
-                effect_bound: None, return_view_provenance: None,
+                effect_bound: None,
+                return_view_provenance: None,
                 param_contract: (!function.params.is_empty()).then(|| {
                     function
                         .params
@@ -3737,13 +3711,21 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                         .collect()
                 }),
                 call_metadata: Some(crate::AST::FunctionCallMetadata {
-                    names: function.params.iter().map(|parameter| parameter.name.clone()).collect(),
+                    names: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.name.clone())
+                        .collect(),
                     defaults: function
                         .params
                         .iter()
                         .map(|parameter| parameter.default.as_deref().cloned())
                         .collect(),
-                    variadic: function.params.iter().map(|parameter| parameter.variadic).collect(),
+                    variadic: function
+                        .params
+                        .iter()
+                        .map(|parameter| parameter.variadic)
+                        .collect(),
                     conventions: function
                         .params
                         .iter()
@@ -3839,7 +3821,8 @@ fn seed_fragment_structs(
             .iter()
             .find(|param| param.name == crate::Syntax::KW_SELF)
         {
-            cx.method_self_convs.insert(key.clone(), self_param.convention);
+            cx.method_self_convs
+                .insert(key.clone(), self_param.convention);
         }
         cx.method_sigs.insert(
             key.clone(),
@@ -3924,10 +3907,7 @@ pub fn lower_expr_for_eval(
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_expr(expr, &cx, &mut env))
     })) {
-        Ok(tir) => Ok((
-            tir,
-            std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()),
-        )),
+        Ok(tir) => Ok((tir, std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()))),
         Err(_) => Err(unsupported("this expression", Span::new(0, 0))),
     }
 }
@@ -3971,17 +3951,15 @@ pub fn lower_stmts_for_eval(
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_stmts(stmts, &cx, &mut env))
     })) {
-        Ok(tir) => Ok((
-            tir,
-            std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()),
-        )),
+        Ok(tir) => Ok((tir, std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut()))),
         Err(_) => Err(unsupported("this statement", Span::new(0, 0))),
     }
 }
 
 pub fn lower_interp_program(bundle: &ProgramBundle) -> Option<JitProgram> {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TIR::lower_jit_program(bundle)))
-    {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        TIR::lower_jit_program(bundle)
+    })) {
         Ok(program) => program,
         Err(_) => None,
     }
@@ -4000,11 +3978,7 @@ fn serve_entry_value(ctx: &mut EvalCtx<'_>, value: CtValue) -> Result<CtValue, D
     }
 }
 
-fn struct_metadata_keys(
-    bundle: &ProgramBundle,
-    owner_idx: usize,
-    type_name: &str,
-) -> Vec<String> {
+fn struct_metadata_keys(bundle: &ProgramBundle, owner_idx: usize, type_name: &str) -> Vec<String> {
     let keys = if owner_idx == bundle.entry {
         vec![type_name.to_string()]
     } else {
@@ -4071,9 +4045,7 @@ fn collect_struct_field_types(
 /// AOT lowering and the JIT read, because three private copies of a Core
 /// record's shape is exactly how `ProcessResult.output` came to be a `String`
 /// in sema and an `Int` in the emitter.
-fn insert_core_struct_field_types(
-    fields: &mut HashMap<String, Vec<(String, crate::AST::Type)>>,
-) {
+fn insert_core_struct_field_types(fields: &mut HashMap<String, Vec<(String, crate::AST::Type)>>) {
     const CORE_ROWS: &[(&str, &[&str])] = &[
         (
             crate::Syntax::TYPE_MEMO_STATS,
@@ -4161,7 +4133,9 @@ fn program_struct_field_types(
                     .zip(types)
                     .map(|(name, ty)| {
                         (
-                            name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name).to_string(),
+                            name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+                                .unwrap_or(name)
+                                .to_string(),
                             ty.clone(),
                         )
                     })
@@ -4202,8 +4176,7 @@ fn validate_kernel_proofs(program: &JitProgram) -> Result<(), Diagnostic> {
         return Err(crate::Sema::Diagnostics::render_registered(
             "E0956",
             format!("kernel proof for `{}` is incomplete", func.name),
-            "the interpreter consumes sema's complete kernel proof before execution"
-                .to_string(),
+            "the interpreter consumes sema's complete kernel proof before execution".to_string(),
             "report this as a compiler bug".to_string(),
             Some(func.source_span),
         ));
@@ -4273,9 +4246,9 @@ fn run_program_with_structs_at_stage_and_cli(
     cli_bundle: Option<&ProgramBundle>,
     package_hardened: bool,
 ) -> Result<CtValue, Diagnostic> {
-    let cli_dispatch = if let Some(bundle) = cli_bundle.filter(|_| {
-        program.entry == crate::Codegen::mangle_generated("cli_main")
-    }) {
+    let cli_dispatch = if let Some(bundle) =
+        cli_bundle.filter(|_| program.entry == crate::Codegen::mangle_generated("cli_main"))
+    {
         // A typed-CLI entry parses the *program's* argv. When no embedder
         // installed one (`jet dev`, an embedder holding a checked bundle, a
         // test harness), the program simply received no arguments — it did
@@ -4293,7 +4266,8 @@ fn run_program_with_structs_at_stage_and_cli(
             | cli::Dispatch::Direct { .. }
             | cli::Dispatch::Invoke { .. }) => Some(dispatch),
             cli::Dispatch::Version(version) => {
-                sink.stdout.push_str(&cli_boundary::jet_cli_banner(&version));
+                sink.stdout
+                    .push_str(&cli_boundary::jet_cli_banner(&version));
                 return Ok(CtValue::Unit);
             }
             cli::Dispatch::Help(help) => {
@@ -4342,28 +4316,29 @@ fn run_program_with_structs_at_stage_and_cli(
             .name("jet-tir-eval".to_string())
             .stack_size(64 * 1024 * 1024)
             .spawn_scoped(scope, move || {
-                let outcome = jet_foundation::PackageEdition::with_package_edition(&edition, || {
-                    crate::Comptime::with_ambient(
-                        ambient_core,
-                        ambient_handle,
-                        ambient_extern,
-                        || {
-                            run_program_with_structs_on_stack(
-                                program,
-                                base_dir,
-                                sink,
-                                globals,
-                                core_imports,
-                                gates,
-                                struct_fields,
-                                struct_field_types,
-                                stage,
-                                cli_dispatch,
-                                package_hardened,
-                            )
-                        },
-                    )
-                });
+                let outcome =
+                    jet_foundation::PackageEdition::with_package_edition(&edition, || {
+                        crate::Comptime::with_ambient(
+                            ambient_core,
+                            ambient_handle,
+                            ambient_extern,
+                            || {
+                                run_program_with_structs_on_stack(
+                                    program,
+                                    base_dir,
+                                    sink,
+                                    globals,
+                                    core_imports,
+                                    gates,
+                                    struct_fields,
+                                    struct_field_types,
+                                    stage,
+                                    cli_dispatch,
+                                    package_hardened,
+                                )
+                            },
+                        )
+                    });
                 (outcome, jet_foundation::Outcome::jet_journey_take_hops())
             })
             .expect("evaluator worker");
@@ -4445,7 +4420,9 @@ fn run_program_with_structs_on_stack(
         gates,
         // Whole-program runtime/deopt carries RunTime explicitly.  Comptime
         // purity still uses eval_expr/eval_block with build-time defaults.
-        impure_depth: if matches!(stage, Comptime::PurityStage::RunTime) && gates.allows(jet_foundation::Policy::PolicyKey::Impure) {
+        impure_depth: if matches!(stage, Comptime::PurityStage::RunTime)
+            && gates.allows(jet_foundation::Policy::PolicyKey::Impure)
+        {
             1
         } else {
             0
@@ -4496,9 +4473,7 @@ fn run_program_with_structs_on_stack(
     let entry_args = match cli_dispatch {
         Some(cli::Dispatch::Run(args)) => vec![args],
         Some(cli::Dispatch::Direct { args, .. }) => args,
-        Some(cli::Dispatch::Invoke {
-            receiver, args, ..
-        }) => {
+        Some(cli::Dispatch::Invoke { receiver, args, .. }) => {
             if let Some(receiver) = receiver {
                 scope.insert("self".to_string(), receiver);
             }
@@ -4521,9 +4496,7 @@ fn run_program_with_structs_on_stack(
         (Err(error), _) | (Ok(_), Err(error)) => Err(error),
         (Ok(value), Ok(())) => Ok(value),
     };
-    *sink = std::mem::take(
-        &mut *shared_sink.lock().expect("evaluator sink poisoned"),
-    );
+    *sink = std::mem::take(&mut *shared_sink.lock().expect("evaluator sink poisoned"));
     result
 }
 
@@ -4628,9 +4601,7 @@ fn run_named_func_on_program_edition(
         task_cancel: task_control
             .as_ref()
             .map(|control| control.cancelled.clone()),
-        task_paused: task_control
-            .as_ref()
-            .map(|control| control.paused.clone()),
+        task_paused: task_control.as_ref().map(|control| control.paused.clone()),
         context_deadline: None,
         shield_depth: 0,
         yield_consumer: None,
@@ -4643,9 +4614,7 @@ fn run_named_func_on_program_edition(
     };
     let mut scope = HashMap::new();
     let result = ctx.with_task_dispatcher(|ctx| ctx.run_func(func, args, &mut scope));
-    *sink = std::mem::take(
-        &mut *shared_sink.lock().expect("evaluator sink poisoned"),
-    );
+    *sink = std::mem::take(&mut *shared_sink.lock().expect("evaluator sink poisoned"));
     result
 }
 
@@ -4738,9 +4707,7 @@ fn run_bundle_at_stage(
                 if let Some(v) = value {
                     globals.entry(c.name.clone()).or_insert_with(|| v.clone());
                     // ConstRef sometimes carries the Rust-mangled spelling.
-                    globals
-                        .entry(mangle(&c.name))
-                        .or_insert(v);
+                    globals.entry(mangle(&c.name)).or_insert(v);
                 }
             }
         }
@@ -4761,7 +4728,11 @@ fn run_bundle_at_stage(
                 }
             } else if let Some(core_module) = imp.core_module_path() {
                 let alias = imp.import_alias();
-                if bundle.name_ledger.effective_alias(module_idx, &alias).is_some() {
+                if bundle
+                    .name_ledger
+                    .effective_alias(module_idx, &alias)
+                    .is_some()
+                {
                     core_imports.entry(alias).or_insert(core_module);
                 }
             }
@@ -5083,16 +5054,13 @@ fn eval_block_hook(
 #[cfg(test)]
 mod tests {
     use super::{
-        mpsc, select_eval_tasks, unsupported, Arc, CtValue, EvalTask,
-        EvalTaskCompletion, OnceLock, Span,
+        mpsc, select_eval_tasks, unsupported, Arc, CtValue, EvalTask, EvalTaskCompletion, OnceLock,
+        Span,
     };
-    use crate::task_group::JetTaskSelectMode;
     use crate::scheduler::JetTaskControl;
+    use crate::task_group::JetTaskSelectMode;
 
-    fn ready_task(
-        order: u64,
-        result: Result<CtValue, crate::Diagnostics::Diagnostic>,
-    ) -> EvalTask {
+    fn ready_task(order: u64, result: Result<CtValue, crate::Diagnostics::Diagnostic>) -> EvalTask {
         let (sender, completion) = mpsc::sync_channel(1);
         let completion_order = Arc::new(OnceLock::new());
         completion_order.set(order).unwrap();

@@ -5,13 +5,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::Builtins::as_bool;
-use crate::Comptime::{
-    apply_core_call, apply_data_line_call, CtReport, CtValue, DataPipeline,
-};
+use crate::Comptime::{apply_core_call, apply_data_line_call, CtReport, CtValue, DataPipeline};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtFloat, Type};
 use jet_foundation::PackageEdition;
 
 use super::{unsupported, EvalCtx};
@@ -78,10 +76,18 @@ impl<'a> EvalCtx<'a> {
             "csv" | "json" => {
                 let text = match self.eval_expr(&args[0], scope)? {
                     CtValue::Str(s) => s,
-                    _ => return Err(unsupported(&format!("`data.{method}()`: expected string"), span)),
+                    _ => {
+                        return Err(unsupported(
+                            &format!("`data.{method}()`: expected string"),
+                            span,
+                        ))
+                    }
                 };
                 let elem = list_elem(call_ty).cloned().ok_or_else(|| {
-                    unsupported(&format!("`data.{method}<T>()` needs a list result type"), span)
+                    unsupported(
+                        &format!("`data.{method}<T>()` needs a list result type"),
+                        span,
+                    )
                 })?;
                 let target = Type::List(Box::new(elem));
                 let decoded = if method == "csv" {
@@ -103,7 +109,11 @@ impl<'a> EvalCtx<'a> {
                             || type_name == "LazyFrame"
                             || type_name == "Series" =>
                     {
-                        let key = if type_name == "Series" { "values" } else { "rows" };
+                        let key = if type_name == "Series" {
+                            "values"
+                        } else {
+                            "rows"
+                        };
                         fields
                             .iter()
                             .find(|(n, _)| n == key)
@@ -114,7 +124,10 @@ impl<'a> EvalCtx<'a> {
                             .unwrap_or(0)
                     }
                     _ => {
-                        return Err(unsupported("`data.count()` needs a list/table/series", span));
+                        return Err(unsupported(
+                            "`data.count()` needs a list/table/series",
+                            span,
+                        ));
                     }
                 };
                 Ok(CtValue::Int(n))
@@ -310,21 +323,19 @@ impl<'a> EvalCtx<'a> {
                             ));
                         }
                     };
-                    let entry = groups
-                        .entry(key)
-                        .or_insert((0, 0.0, left_s, right_s));
+                    let entry = groups.entry(key).or_insert((0, 0.0, left_s, right_s));
                     entry.0 += 1;
                     entry.1 += amount;
                 }
-                let cell_ty = if checked { "DataPivotCell" } else { "DataGroup" };
+                let cell_ty = if checked {
+                    "DataPivotCell"
+                } else {
+                    "DataGroup"
+                };
                 let out: Vec<CtValue> = groups
                     .into_iter()
                     .map(|(_, (count, sum, row, column))| {
-                        let mean = if count == 0 {
-                            0.0
-                        } else {
-                            sum / count as f64
-                        };
+                        let mean = if count == 0 { 0.0 } else { sum / count as f64 };
                         // Always expose row_key/column_key — AOT DataPivotCell and
                         // the parity harness read those fields (not only `key`).
                         ct_struct(
@@ -369,10 +380,13 @@ impl<'a> EvalCtx<'a> {
                 let series = self.eval_expr(&args[0], scope)?;
                 match series {
                     CtValue::Struct { type_name, fields }
-                        if type_name == "Series" || type_name == "DataSeries" => fields
+                        if type_name == "Series" || type_name == "DataSeries" =>
+                    {
+                        fields
                             .into_iter()
                             .find_map(|(name, value)| (name == "values").then_some(value))
-                            .ok_or_else(|| unsupported("`data.values()` needs a Series", span)),
+                            .ok_or_else(|| unsupported("`data.values()` needs a Series", span))
+                    }
                     _ => Err(unsupported("`data.values()` needs a Series", span)),
                 }
             }

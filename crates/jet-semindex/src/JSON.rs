@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use jet_foundation::AST::{AccessConvention, ParamZone, Type};
 use jet_foundation::AST::ProgramBundle;
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::render_status_json;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::Package::{
     dep_display, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
@@ -687,7 +688,7 @@ impl SemIndex {
         let expand = expand
             .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
             .unwrap_or_default();
-        format!(
+        let payload = format!(
             "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
@@ -701,6 +702,12 @@ impl SemIndex {
             effects.join(","),
             members.join(","),
             expand,
+        );
+        render_status_json(
+            "ok",
+            true,
+            "inspect.semindex",
+            &format!(",\"semindex\":{payload}"),
         )
     }
 }
@@ -764,7 +771,7 @@ impl TypeDossier {
         let members: Vec<String> = self.members.iter().map(json_member).collect();
         let refs: Vec<String> = self.references.iter().map(json_ref).collect();
         let bypasses: Vec<String> = self.bypass_facts.iter().map(json_bypass).collect();
-        format!(
+        let payload = format!(
             "{{\"schema_version\":{},\"target\":{},\"definition\":{},\"members\":[{}],\"references\":[{}],\"bypass_facts\":[{}]}}",
             self.schema_version,
             json_str(&self.target),
@@ -772,6 +779,12 @@ impl TypeDossier {
             members.join(","),
             refs.join(","),
             bypasses.join(",")
+        );
+        render_status_json(
+            "ok",
+            true,
+            "inspect.dossier",
+            &format!(",\"dossier\":{payload}"),
         )
     }
 

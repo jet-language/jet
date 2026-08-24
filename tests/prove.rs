@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -157,6 +158,46 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
         .unwrap();
     assert_eq!(rejected.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&rejected.stderr).contains("Error [E3622]"));
+}
+
+#[test]
+fn run_record_receipt_answers_debug_cause_queries() {
+    let root = workspace("recorded_debug_queries");
+    fs::write(
+        root.join("main.jet"),
+        "fn run() {\n    total := 0\n    total += 6\n    print(\"{total}\")\n}\n",
+    )
+    .unwrap();
+    let recorded = Command::new(jet())
+        .current_dir(&root)
+        .args(["run", "main.jet", "--record=causal"])
+        .output()
+        .unwrap();
+    assert_eq!(recorded.status.code(), Some(0), "{}", String::from_utf8_lossy(&recorded.stderr));
+    assert!(String::from_utf8_lossy(&recorded.stdout).contains("6"));
+    let artifact = root.join(".jet/replays/causal.jetproof-replay");
+    assert!(artifact.is_file());
+    assert!(String::from_utf8_lossy(&fs::read(artifact).unwrap()).contains("recorded_run"));
+
+    let mut debug = Command::new(jet())
+        .current_dir(&root)
+        .args(["debug", "main.jet", "--replay=causal"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    debug
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"s\ns\nwhy total == 0\nwhen total\nc\n")
+        .unwrap();
+    let output = debug.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("because act"), "{stdout}");
+    assert!(stdout.contains("last change:"), "{stdout}");
 }
 
 #[test]

@@ -979,7 +979,7 @@ module.exports = grammar({
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),
 
     // A direct value-fact rule riding an expression: `#Input value`, or
-    // a bare rule value such as the typed hole `#Todo` (D-TOOL2).
+    // a bare rule value such as the typed goal `#Todo` (D-TOOL2).
     marked_expr: ($) => prec.right(seq($.attribute, optional($._expr))),
 
     copy_expr: ($) => prec.right(6, seq("~", $._expr)),

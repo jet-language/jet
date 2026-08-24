@@ -279,9 +279,15 @@ pub(crate) fn authorize_registry_candidate_with_source_exception(
             && exception.version == version
             && exception.expires_at > policy.now
     });
-    let source_exception = source_exception.is_some_and(|exception| exception.expires_at > policy.now);
+    let source_exception =
+        source_exception.is_some_and(|exception| exception.expires_at > policy.now);
     if policy.now < mature_at && !feed_exception && !source_exception {
-        return Err(e2609(package, &version.to_string(), mature_at, release.source_class));
+        return Err(e2609(
+            package,
+            &version.to_string(),
+            mature_at,
+            release.source_class,
+        ));
     }
     if let Some(advisory) = policy
         .feed
@@ -956,7 +962,8 @@ pub fn e2611(input: &str, fix: &str) -> Diagnostic {
     Diagnostic::error(
         "E2611",
         format!("jet inspect audit needs {input}"),
-        "an audit without its lock or advisory database could report a false clean result.".to_string(),
+        "an audit without its lock or advisory database could report a false clean result."
+            .to_string(),
         fix.to_string(),
         None,
     )

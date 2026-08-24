@@ -1,4 +1,4 @@
-use crate::AST::{Func, Stmt, Type};
+use super::refusal;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -8,8 +8,8 @@ use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::stmt_in_subset;
 use crate::Codegen::TIR::struct_is_generic;
 use crate::Syntax;
+use crate::AST::{Func, Stmt, Type};
 use std::collections::HashSet;
-use super::refusal;
 
 /// Conservative structural test: `true` only if `f` is a top-level plain
 /// function whose entire body is inside the Phase-1 subset. The rule is
@@ -75,7 +75,9 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     // that is neither a local/param binding nor a builtin is a program-level
     // reference (const or fn-value), which the subset excludes.
     let mut locals: HashSet<String> = f.params.iter().map(|p| p.name.clone()).collect();
-    f.body.iter().all(|statement| stmt_in_subset(statement, cx, &mut locals))
+    f.body
+        .iter()
+        .all(|statement| stmt_in_subset(statement, cx, &mut locals))
 }
 
 /// c109: is a `#Test` block body fully inside the TIR subset? A test body is a bare
@@ -135,9 +137,7 @@ fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
     // every `self.field` read then emit exactly as `emit_method` produces them).
     let generic_owner = struct_is_generic(type_name, cx);
     let owner_ty = Type::Named(type_name.to_string());
-    if !generic_owner
-        && !is_covered_struct_ty(&owner_ty, cx)
-        && !is_covered_enum_ty(&owner_ty, cx)
+    if !generic_owner && !is_covered_struct_ty(&owner_ty, cx) && !is_covered_enum_ty(&owner_ty, cx)
     {
         refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
         return false;
@@ -198,8 +198,10 @@ pub(crate) fn tir_covers_trait_method(
     trait_name: &str,
 ) -> bool {
     refusal::begin();
-    let serde_generic_owner = matches!(trait_name, crate::Generics::ENCODE | crate::Generics::DECODE)
-        && struct_is_generic(type_name, cx);
+    let serde_generic_owner = matches!(
+        trait_name,
+        crate::Generics::ENCODE | crate::Generics::DECODE
+    ) && struct_is_generic(type_name, cx);
     // c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).

@@ -79,8 +79,7 @@ pub(crate) fn compute_hover(
     }) {
         if let Some(target) = &reference.target {
             if let Some(symbol) = db.symbols.symbols().iter().find(|symbol| {
-                symbol.module_path == target.module_path
-                    && symbol.span == Some(target.def_span)
+                symbol.module_path == target.module_path && symbol.span == Some(target.def_span)
             }) {
                 return Some(semantic_hover(symbol, path));
             }
@@ -281,38 +280,78 @@ pub(crate) fn compute_references(
     include_declaration: bool,
 ) -> Vec<(String, Span)> {
     let anchor_identity = |anchor: &jet_semindex::DefinitionAnchor| {
-        anchor.semantic_identity.clone().or_else(|| db.defs.iter().find(|definition| {
-            definition.module_path == anchor.module_path
-                && definition.def_span.start == anchor.def_span.start
-                && definition.def_span.end == anchor.def_span.end
-        }).map(|definition| definition.identity.clone()))
+        anchor.semantic_identity.clone().or_else(|| {
+            db.defs
+                .iter()
+                .find(|definition| {
+                    definition.module_path == anchor.module_path
+                        && definition.def_span.start == anchor.def_span.start
+                        && definition.def_span.end == anchor.def_span.end
+                })
+                .map(|definition| definition.identity.clone())
+        })
     };
-    let identity = db.index.instances().iter().flat_map(|instance| &instance.applications)
-        .find(|application| application.module_path == path
-            && application.span.start <= offset && offset <= application.span.end)
+    let identity = db
+        .index
+        .instances()
+        .iter()
+        .flat_map(|instance| &instance.applications)
+        .find(|application| {
+            application.module_path == path
+                && application.span.start <= offset
+                && offset <= application.span.end
+        })
         .map(|application| application.semantic_identity.clone())
-        .or_else(|| db.defs.iter().find(|definition| definition.module_path == path
-            && definition.def_span.start <= offset && offset <= definition.def_span.end)
-            .map(|definition| definition.identity.clone()))
-        .or_else(|| db.refs.iter().find(|reference| reference.module_path == path
-            && reference.span.start <= offset && offset <= reference.span.end)
-            .and_then(|reference| reference.target.as_ref())
-            .and_then(anchor_identity));
-    let Some(identity) = identity else { return Vec::new() };
+        .or_else(|| {
+            db.defs
+                .iter()
+                .find(|definition| {
+                    definition.module_path == path
+                        && definition.def_span.start <= offset
+                        && offset <= definition.def_span.end
+                })
+                .map(|definition| definition.identity.clone())
+        })
+        .or_else(|| {
+            db.refs
+                .iter()
+                .find(|reference| {
+                    reference.module_path == path
+                        && reference.span.start <= offset
+                        && offset <= reference.span.end
+                })
+                .and_then(|reference| reference.target.as_ref())
+                .and_then(anchor_identity)
+        });
+    let Some(identity) = identity else {
+        return Vec::new();
+    };
     let mut result: Vec<(String, Span)> = db
         .refs
         .iter()
-        .filter(|reference| reference.target.as_ref()
-            .and_then(anchor_identity)
-            .is_some_and(|candidate| candidate == identity))
+        .filter(|reference| {
+            reference
+                .target
+                .as_ref()
+                .and_then(anchor_identity)
+                .is_some_and(|candidate| candidate == identity)
+        })
         .map(|r| (r.module_path.clone(), r.span))
         .collect();
     if include_declaration {
-        for def in db.defs.iter().filter(|definition| definition.identity == identity) {
+        for def in db
+            .defs
+            .iter()
+            .filter(|definition| definition.identity == identity)
+        {
             result.push((def.module_path.clone(), def.def_span));
         }
     }
-    result.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)).then(a.1.end.cmp(&b.1.end)));
+    result.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.start.cmp(&b.1.start))
+            .then(a.1.end.cmp(&b.1.end))
+    });
     result.dedup();
     result
 }
@@ -323,7 +362,8 @@ mod generic_instance_tests {
 
     #[test]
     fn references_join_applicative_generic_module_aliases() {
-        let root = std::env::temp_dir().join(format!("jet_lsp_genmod_identity_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("jet_lsp_genmod_identity_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
@@ -331,21 +371,40 @@ mod generic_instance_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
-        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "{diagnostics:#?}"
+        );
         let db = jet_semindex::build_symbol_db(&bundle, &facts);
         let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
         assert!(lex_diagnostics.is_empty());
-        let references = compute_references(&db, &tokens, &shown, source.find("a.get").unwrap(), true);
-        let spellings: Vec<_> = references.iter().map(|(_, span)| &source[span.start..span.end]).collect();
-        assert!(spellings.iter().any(|spelling| *spelling == "a"), "{spellings:?}");
-        assert!(spellings.iter().any(|spelling| *spelling == "b"), "{spellings:?}");
+        let references =
+            compute_references(&db, &tokens, &shown, source.find("a.get").unwrap(), true);
+        let spellings: Vec<_> = references
+            .iter()
+            .map(|(_, span)| &source[span.start..span.end])
+            .collect();
+        assert!(
+            spellings.iter().any(|spelling| *spelling == "a"),
+            "{spellings:?}"
+        );
+        assert!(
+            spellings.iter().any(|spelling| *spelling == "b"),
+            "{spellings:?}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn references_never_join_same_alias_spelling_across_distinct_instances() {
-        let root = std::env::temp_dir().join(format!("jet_lsp_genmod_hostile_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("jet_lsp_genmod_hostile_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
@@ -360,15 +419,34 @@ mod generic_instance_tests {
         let shown_left = "left.jet".to_string();
         let shown_right = "right.jet".to_string();
         let mut bundle = crate::Loader::load_entry(&shown_main).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
-        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "{diagnostics:#?}"
+        );
         let db = jet_semindex::build_symbol_db(&bundle, &facts);
         let (tokens, lex_diagnostics) = crate::Lexer::lex(left_source);
         assert!(lex_diagnostics.is_empty());
         let offset = left_source.find("same ::").unwrap();
         let references = compute_references(&db, &tokens, &shown_left, offset, true);
-        assert!(references.iter().any(|(path, span)| path == &shown_left && &left_source[span.start..span.end] == "same"), "refs={references:?} defs={:#?} instances={:#?}", db.defs, db.index.instances());
-        assert!(!references.iter().any(|(path, _)| path == &shown_right), "distinct value(4) instance joined by alias spelling: {references:?}");
+        assert!(
+            references
+                .iter()
+                .any(|(path, span)| path == &shown_left
+                    && &left_source[span.start..span.end] == "same"),
+            "refs={references:?} defs={:#?} instances={:#?}",
+            db.defs,
+            db.index.instances()
+        );
+        assert!(
+            !references.iter().any(|(path, _)| path == &shown_right),
+            "distinct value(4) instance joined by alias spelling: {references:?}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }
@@ -404,7 +482,9 @@ pub(crate) fn compute_rename(
         return Err(format!("`{}` is not a valid identifier", new_name));
     }
     if crate::Syntax::classify_identifier(new_name) == crate::Syntax::IdentifierClass::Reserved {
-        return Err(format!("`{new_name}` is reserved for Jet and cannot be used as a name"));
+        return Err(format!(
+            "`{new_name}` is reserved for Jet and cannot be used as a name"
+        ));
     }
     if is_keyword(new_name) {
         return Err(format!(
@@ -425,15 +505,24 @@ pub(crate) fn compute_rename(
     if is_keyword(name) {
         return Err(format!("`{}` is a keyword and cannot be renamed", name));
     }
-    let indexed_case = db.defs.iter().find(|d| d.name == name).map(|def| {
-        match &def.kind {
-            SymKind::Struct { .. } | SymKind::Enum { .. } | SymKind::Trait | SymKind::Tag | SymKind::Type { .. }
+    let indexed_case = db
+        .defs
+        .iter()
+        .find(|d| d.name == name)
+        .map(|def| match &def.kind {
+            SymKind::Struct { .. }
+            | SymKind::Enum { .. }
+            | SymKind::Trait
+            | SymKind::Tag
+            | SymKind::Type { .. }
             | SymKind::EnumVariant { .. } => ("type-like name", Syntax::NameCase::Pascal),
-            SymKind::Module | SymKind::Function { .. } | SymKind::Const | SymKind::Field { .. }
-            | SymKind::Local { .. } | SymKind::Param { .. } =>
-                ("value-like name", Syntax::NameCase::Snake),
-        }
-    });
+            SymKind::Module
+            | SymKind::Function { .. }
+            | SymKind::Const
+            | SymKind::Field { .. }
+            | SymKind::Local { .. }
+            | SymKind::Param { .. } => ("value-like name", Syntax::NameCase::Snake),
+        });
     // Some declaration families are expanded before SemIndex sees the checked
     // bundle (protocols, derives, state/unit sugar). Their already-validated
     // source spelling still determines the strict two-tier category exactly.
@@ -600,7 +689,8 @@ fn import_actions(
         let [statement] = modules.as_slice() else {
             continue;
         };
-        if src.lines().any(|line| line.trim() == statement.trim()) || !seen.insert(statement.clone())
+        if src.lines().any(|line| line.trim() == statement.trim())
+            || !seen.insert(statement.clone())
         {
             continue;
         }
@@ -724,9 +814,11 @@ fn inline_actions(
     path: &str,
     requested: Span,
 ) -> Vec<RefactorAction> {
-    let Some(reference) = db.refs.iter().find(|reference| {
-        reference.module_path == path && spans_touch(reference.span, requested)
-    }) else {
+    let Some(reference) = db
+        .refs
+        .iter()
+        .find(|reference| reference.module_path == path && spans_touch(reference.span, requested))
+    else {
         return Vec::new();
     };
     let Some(target) = reference.target.as_ref() else {
@@ -735,13 +827,7 @@ fn inline_actions(
     let Some(binding) = definition_for_anchor(db, target) else {
         return Vec::new();
     };
-    if !matches!(
-        binding.kind,
-        SymKind::Local {
-            mutable: false,
-            ..
-        }
-    ) {
+    if !matches!(binding.kind, SymKind::Local { mutable: false, .. }) {
         return Vec::new();
     }
     let uses: Vec<_> = db
@@ -816,10 +902,7 @@ fn initializer_refs_are_stable(db: &SymbolDB, path: &str, span: Span) -> bool {
                 .as_ref()
                 .and_then(|target| definition_for_anchor(db, target))
                 .is_some_and(|definition| {
-                    !matches!(
-                        &definition.kind,
-                        SymKind::Local { mutable: true, .. }
-                    )
+                    !matches!(&definition.kind, SymKind::Local { mutable: true, .. })
                 })
         })
 }
@@ -835,13 +918,11 @@ fn source_symbol_is_exported(
         return false;
     };
     let start = line_start(source, span.start);
-    source
-        .get(start..span.start)
-        .is_some_and(|prefix| {
-            prefix
-                .split_whitespace()
-                .any(|word| word == "pub" || word.starts_with("pub("))
-        })
+    source.get(start..span.start).is_some_and(|prefix| {
+        prefix
+            .split_whitespace()
+            .any(|word| word == "pub" || word.starts_with("pub("))
+    })
 }
 
 fn exact_expr<'a>(
@@ -858,12 +939,7 @@ fn exact_expr<'a>(
 }
 
 /// Exact expr node, or a single outer `(…)` group around one.
-fn extractable_expr(
-    db: &SymbolDB,
-    src: &str,
-    path: &str,
-    selected: Span,
-) -> Option<Span> {
+fn extractable_expr(db: &SymbolDB, src: &str, path: &str, selected: Span) -> Option<Span> {
     if exact_expr(db, path, selected).is_some() {
         return Some(selected);
     }
@@ -874,10 +950,7 @@ fn extractable_expr(
     if core.len() < 2 || !core.starts_with('(') || !core.ends_with(')') {
         return None;
     }
-    let inner = Span::new(
-        selected.start + start_ws + 1,
-        selected.end - end_ws - 1,
-    );
+    let inner = Span::new(selected.start + start_ws + 1, selected.end - end_ws - 1);
     let inner = trim_span(src, inner)?;
     exact_expr(db, path, inner).map(|_| selected)
 }
@@ -983,10 +1056,7 @@ fn is_trivial_extract(tokens: &[Token], span: Span) -> bool {
             span.start <= token.span.start
                 && token.span.end <= span.end
                 && token.span.start < token.span.end
-                && !matches!(
-                    token.kind,
-                    TokKind::Eof | TokKind::LParen | TokKind::RParen
-                )
+                && !matches!(token.kind, TokKind::Eof | TokKind::LParen | TokKind::RParen)
         })
         .collect();
     matches!(
@@ -1075,12 +1145,9 @@ fn expr_comparison_operands_are_scalar(
                 && token.span.start < token.span.end
         })
         .collect();
-    let has_bool_op = enclosed.iter().any(|token| {
-        matches!(
-            token.kind,
-            TokKind::AndAnd | TokKind::OrOr | TokKind::Bang
-        )
-    });
+    let has_bool_op = enclosed
+        .iter()
+        .any(|token| matches!(token.kind, TokKind::AndAnd | TokKind::OrOr | TokKind::Bang));
     let mut leaf: Option<String> = None;
     for token in &enclosed {
         match &token.kind {
@@ -1173,7 +1240,11 @@ fn infer_total_pure_return_type(
             && !matches!(token.kind, TokKind::Eof)
     }) {
         match &token.kind {
-            TokKind::AndAnd | TokKind::OrOr | TokKind::Bang | TokKind::KwTrue | TokKind::KwFalse => {
+            TokKind::AndAnd
+            | TokKind::OrOr
+            | TokKind::Bang
+            | TokKind::KwTrue
+            | TokKind::KwFalse => {
                 saw_bool_op = true;
             }
             TokKind::EqEq | TokKind::NotEq => saw_comparison = true,
@@ -1231,10 +1302,8 @@ mod refactor_safety_tests {
 
     #[test]
     fn code_actions_reject_non_scalar_return_at_type_gate() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-lsp-string-result-gate-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-lsp-string-result-gate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
@@ -1264,8 +1333,7 @@ mod refactor_safety_tests {
             None
         );
         assert!(
-            extract_function_action(&db, &tokens, source, &shown, selected, "\"result\"")
-                .is_none()
+            extract_function_action(&db, &tokens, source, &shown, selected, "\"result\"").is_none()
         );
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1368,9 +1436,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
 
         TokKind::KwCopy => Some((st::OWNERSHIP, sm::COPY)),
 
-        TokKind::KwSwitch
-        | TokKind::KwMutate
-        | TokKind::KwMove => None,
+        TokKind::KwSwitch | TokKind::KwMutate | TokKind::KwMove => None,
 
         TokKind::Ident(name) => {
             if name == Syntax::KW_NEXT && is_contextual_next(tokens, idx) {
@@ -1417,7 +1483,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::LambdaArrow
         | TokKind::Question
         | TokKind::DotDot => Some((st::OPERATOR, 0)),
-        | TokKind::DotDotLt => Some((st::OPERATOR, 0)),
+        TokKind::DotDotLt => Some((st::OPERATOR, 0)),
 
         TokKind::Amp if token_text(src, tok) == crate::Syntax::SIGIL_WRITE => {
             Some((st::OWNERSHIP, sm::WRITE_BORROW))
@@ -1468,9 +1534,7 @@ fn marker_kind_after(tokens: &[Token], idx: usize) -> Option<MarkerKind> {
 fn marker_kind_for(prefix: &Token, tokens: &[Token], name_idx: usize) -> Option<MarkerKind> {
     let name = marker_name(tokens, name_idx)?;
     match prefix.kind {
-        TokKind::Hash if crate::Syntax::is_applied_rule(name) => {
-            Some(MarkerKind::Rule)
-        }
+        TokKind::Hash if crate::Syntax::is_applied_rule(name) => Some(MarkerKind::Rule),
         _ => None,
     }
 }

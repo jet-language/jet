@@ -18,6 +18,7 @@ pub use jet_driver::{
     bundle_uses_unsafe,
     boot_tir_eval,
     program_allocator,
+    development_receipt,
     AdaBind,
     CBind,
     CppBind,
@@ -106,6 +107,8 @@ pub use jet_repl::{SemanticSymbols, Term};
 pub mod BuildCache;
 pub mod RunCache;
 pub mod RuntimeCache;
+pub mod ReceiptStore;
+pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
 pub mod BudgetProviders;
 mod NativeLinker;
 pub mod BudgetStore;

@@ -238,7 +238,10 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
             .filter(|line| !line.trim().is_empty())
             .map(|line| {
                 IndexEntry::parse_line(line).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "malformed registry index record")
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "malformed registry index record",
+                    )
                 })
             })
         {
@@ -250,7 +253,10 @@ pub fn write_index_entry(repo: &Path, entry: &IndexEntry) -> io::Result<()> {
                 }
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
-                    format!("registry version {} {} is immutable", entry.name, entry.version),
+                    format!(
+                        "registry version {} {} is immutable",
+                        entry.name, entry.version
+                    ),
                 ));
             }
             existing_entries.push(existing);
@@ -333,7 +339,11 @@ fn validate_index_component(value: &str, label: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn with_index_lock<T>(repo: &Path, name: &str, action: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+fn with_index_lock<T>(
+    repo: &Path,
+    name: &str,
+    action: impl FnOnce() -> io::Result<T>,
+) -> io::Result<T> {
     let lock_dir = repo.join("index");
     std::fs::create_dir_all(&lock_dir)?;
     let metadata = std::fs::symlink_metadata(&lock_dir)?;
@@ -390,12 +400,14 @@ fn with_index_lock<T>(repo: &Path, name: &str, action: impl FnOnce() -> io::Resu
 }
 
 fn atomic_replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "registry index has no parent"))?;
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "registry index has no parent")
+    })?;
     let partial = parent.join(format!(
         ".{}.partial-{}-{}",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or("index"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("index"),
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -614,9 +626,7 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         assert_eq!(
-            mark_yanked(&repo, "textkit", "1.0.0")
-                .unwrap_err()
-                .kind(),
+            mark_yanked(&repo, "textkit", "1.0.0").unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
         std::fs::remove_dir_all(&repo).ok();

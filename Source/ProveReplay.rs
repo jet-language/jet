@@ -1,6 +1,6 @@
 //! D-JREPLAY1=A / D-PROVE-REPLAY1=A: `.jetproof-replay` capture and `--replay`.
 //!
-//! Safe capture records Time only. Sensitive roots require `--capture-sensitive`
+//! Safe capture records Time plus optional causal act snapshots. Sensitive roots require `--capture-sensitive`
 //! (consent path). Artifacts use the ratified binary envelope (magic `JREPLAY\0`,
 //! canonical JSON header, framed records, `JEND` footer).
 
@@ -16,6 +16,7 @@ use jet_foundation::JSON::{parse_json, JSONValue};
 
 const MAGIC: &[u8; 8] = b"JREPLAY\0";
 const KIND_TIME_WALL: u16 = 0x0001;
+const KIND_RUN_ACT: u16 = 0x1001;
 const MAX_REPLAY_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXACT_JSON_INTEGER: u64 = (1 << 53) - 1;
 
@@ -62,6 +63,7 @@ pub(crate) struct ReplayAuthority {
     pub expected_status: i32,
     time_values: Vec<i64>,
     next_time: usize,
+    pub recorded_run: jet::Debug::RecordedRun,
 }
 
 impl ReplayAuthority {
@@ -229,7 +231,22 @@ pub(crate) fn finish_named_capture(
     exit_code: i32,
     json_mode: bool,
 ) -> Result<(), i32> {
-    finalize_safe_capture(&capture.identity, &capture.authority, exit_code, json_mode)
+    finalize_safe_capture(&capture.identity, &capture.authority, exit_code, json_mode, None)
+}
+
+pub(crate) fn finish_named_capture_with_run(
+    capture: &NamedCapture,
+    exit_code: i32,
+    json_mode: bool,
+    run: &jet::Debug::RecordedRun,
+) -> Result<(), i32> {
+    finalize_safe_capture(
+        &capture.identity,
+        &capture.authority,
+        exit_code,
+        json_mode,
+        Some(run),
+    )
 }
 
 /// Open a named artifact for `jet debug`, install the shared Time adapter, and
@@ -449,6 +466,7 @@ pub(crate) fn finalize_safe_capture(
     authority: &CaptureAuthority,
     exit_code: i32,
     json_mode: bool,
+    recorded_run: Option<&jet::Debug::RecordedRun>,
 ) -> Result<(), i32> {
     if let Err(message) = validate_identity_for_capture(identity) {
         emit_diag(
@@ -466,7 +484,13 @@ pub(crate) fn finalize_safe_capture(
         "exit"
     };
     let status = i64::from(exit_code);
-    let bytes = match build_safe_time_artifact(identity, authority.unix_ns, outcome, status) {
+    let bytes = match build_safe_time_artifact_with_run(
+        identity,
+        authority.unix_ns,
+        outcome,
+        status,
+        recorded_run,
+    ) {
         Ok(bytes) => bytes,
         Err(message) => {
             emit_diag(
@@ -566,6 +590,7 @@ pub(crate) fn prepare_replay(
     identity_matches(&header, identity)
         .map_err(|field| ("E3621", format!("identity field `{field}` differs from the current target")))?;
     let time_values = extract_time_ms(&bytes).map_err(|why| ("E3628", why))?;
+    let recorded_run = extract_recorded_run(&bytes).map_err(|why| ("E3622", why))?;
     let time_ms = time_values
         .first()
         .copied()
@@ -585,6 +610,7 @@ pub(crate) fn prepare_replay(
         expected_status,
         time_values,
         next_time: 0,
+        recorded_run,
     })
 }
 
@@ -854,14 +880,15 @@ fn ensure_read_parent(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn build_safe_time_artifact(
+fn build_safe_time_artifact_with_run(
     identity: &ReplayIdentity,
     unix_ns: u64,
     outcome: &str,
     status: i64,
+    recorded_run: Option<&jet::Debug::RecordedRun>,
 ) -> Result<Vec<u8>, String> {
     let salt = privacy_salt()?;
-    let payload = canonical_json(&[
+    let time_payload = canonical_json(&[
         ("call_id", Json::Int(0)),
         (
             "site_id",
@@ -876,21 +903,80 @@ fn build_safe_time_artifact(
             ]),
         ),
     ]);
-    let frame = encode_frame(1, KIND_TIME_WALL, 0, payload.as_bytes());
+    let mut frames = vec![encode_frame(1, KIND_TIME_WALL, 0, time_payload.as_bytes())];
+    let mut payload_bytes = time_payload.len() as u64;
+    if let Some(recorded_run) = recorded_run {
+        for (index, act) in recorded_run.acts.iter().enumerate() {
+            if index >= 100_000 - 1 {
+                return Err("recorded run exceeds the 100000-frame limit".into());
+            }
+            let payload = recorded_act_payload(act)?;
+            payload_bytes = payload_bytes
+                .checked_add(payload.len() as u64)
+                .ok_or_else(|| "recorded run payload length overflowed".to_string())?;
+            if payload_bytes > 256 * 1024 * 1024 {
+                return Err("recorded run exceeds the 256 MiB payload limit".into());
+            }
+            frames.push(encode_frame(
+                1,
+                KIND_RUN_ACT,
+                u64::try_from(index + 1)
+                    .map_err(|_| "recorded run sequence overflowed".to_string())?,
+                payload.as_bytes(),
+            ));
+        }
+    }
+    let has_recorded_run = recorded_run.is_some_and(|run| !run.acts.is_empty());
 
     let zero_id = "000000000000000000000000";
-    let header_zero = header_json(identity, zero_id, &salt, outcome, status);
+    let header_zero = header_json(identity, zero_id, &salt, outcome, status, has_recorded_run);
     let mut body_zero = Vec::new();
     write_prefix(&mut body_zero, header_zero.as_bytes());
-    body_zero.extend_from_slice(&frame);
+    for frame in &frames {
+        body_zero.extend_from_slice(frame);
+    }
     let artifact_id = content_id(&body_zero);
 
-    let header = header_json(identity, &artifact_id, &salt, outcome, status);
+    let header = header_json(
+        identity,
+        &artifact_id,
+        &salt,
+        outcome,
+        status,
+        has_recorded_run,
+    );
     let mut out = Vec::new();
     write_prefix(&mut out, header.as_bytes());
-    out.extend_from_slice(&frame);
-    write_footer(&mut out, 1, payload.len() as u64);
+    for frame in &frames {
+        out.extend_from_slice(frame);
+    }
+    write_footer(
+        &mut out,
+        u64::try_from(frames.len())
+            .map_err(|_| "recorded run frame count overflowed".to_string())?,
+        payload_bytes,
+    );
     Ok(out)
+}
+
+fn recorded_act_payload(act: &jet::Debug::RecordedAct) -> Result<String, String> {
+    let line = i64::try_from(act.line).map_err(|_| "recorded act line is too large".to_string())?;
+    let locals = act
+        .locals
+        .iter()
+        .map(|local| {
+            Json::Obj(vec![
+                ("name".into(), Json::Str(local.name.clone())),
+                ("type".into(), Json::Str(local.type_name.clone())),
+                ("value".into(), Json::Str(local.value.clone())),
+            ])
+        })
+        .collect();
+    Ok(canonical_json(&[
+        ("function", Json::Str(act.function.clone())),
+        ("line", Json::Int(line)),
+        ("locals", Json::Arr(locals)),
+    ]))
 }
 
 fn header_json(
@@ -899,6 +985,7 @@ fn header_json(
     salt: &str,
     outcome: &str,
     status: i64,
+    has_recorded_run: bool,
 ) -> String {
     canonical_json(&[
         ("artifact_id", Json::Str(artifact_id.into())),
@@ -912,7 +999,17 @@ fn header_json(
                 ),
             ]),
         ),
-        ("extensions", Json::Obj(vec![])),
+        (
+            "extensions",
+            if has_recorded_run {
+                Json::Obj(vec![(
+                    "recorded_run".into(),
+                    Json::Obj(vec![("version".into(), Json::Int(1))]),
+                )])
+            } else {
+                Json::Obj(vec![])
+            },
+        ),
         (
             "identity",
             Json::Obj(vec![
@@ -1086,6 +1183,7 @@ fn parse_and_verify(
     let mut frame_count = 0u64;
     let mut payload_bytes = 0u64;
     let mut expected_sequence = 0u64;
+    let mut time_frame_count = 0u64;
     while off < jend {
         let frame_header_end = off
             .checked_add(15)
@@ -1117,7 +1215,11 @@ fn parse_and_verify(
         if plen > 1024 * 1024 {
             return Err(("E3622", "replay frame payload exceeds the 1 MiB limit".into()));
         }
-        if flags != 1 || kind != KIND_TIME_WALL || sequence != expected_sequence {
+        if flags != 1
+            || !matches!(kind, KIND_TIME_WALL | KIND_RUN_ACT)
+            || sequence != expected_sequence
+            || (frame_count == 0 && kind != KIND_TIME_WALL)
+        {
             return Err(("E3622", "replay frame ordering or kind is invalid".into()));
         }
         let payload_end = off
@@ -1138,13 +1240,18 @@ fn parse_and_verify(
         }
         let payload = std::str::from_utf8(&bytes[payload_end - plen..payload_end])
             .map_err(|_| ("E3622", "replay frame payload is not UTF-8".into()))?;
-        validate_time_payload(payload).map_err(|why| ("E3622", why))?;
+        if kind == KIND_TIME_WALL {
+            time_frame_count += 1;
+            validate_time_payload(payload).map_err(|why| ("E3622", why))?;
+        } else {
+            validate_recorded_act_payload(payload).map_err(|why| ("E3622", why))?;
+        }
         off = frame_end;
     }
-    if frame_count == 0 {
+    if time_frame_count == 0 {
         return Err(("E3628", "replay artifact contains no Time authority".into()));
     }
-    if frame_count > 1 {
+    if time_frame_count > 1 {
         return Err((
             "E3622",
             "safe replay must contain exactly one consumed Time frame".into(),
@@ -1223,7 +1330,7 @@ fn extract_time_ms(bytes: &[u8]) -> Result<Vec<i64>, String> {
             return Err("Time frame header is truncated".into());
         }
         let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
-        if kind != KIND_TIME_WALL {
+        if !matches!(kind, KIND_TIME_WALL | KIND_RUN_ACT) {
             return Err(format!("frame kind {kind:#06x} is not Time"));
         }
         let plen = u32::from_le_bytes([
@@ -1241,15 +1348,167 @@ fn extract_time_ms(bytes: &[u8]) -> Result<Vec<i64>, String> {
         if frame_end > jend {
             return Err("Time frame is truncated".into());
         }
-        let payload = std::str::from_utf8(&bytes[frame_header_end..payload_end])
-            .map_err(|_| "Time payload is not UTF-8".to_string())?;
-        values.push(time_ms_from_payload(payload)?);
+        if kind == KIND_TIME_WALL {
+            let payload = std::str::from_utf8(&bytes[frame_header_end..payload_end])
+                .map_err(|_| "Time payload is not UTF-8".to_string())?;
+            values.push(time_ms_from_payload(payload)?);
+        }
         off = frame_end;
     }
     if values.is_empty() {
         return Err("replay artifact contains no Time frames".into());
     }
     Ok(values)
+}
+
+fn extract_recorded_run(bytes: &[u8]) -> Result<jet::Debug::RecordedRun, String> {
+    if bytes.len() < 16 {
+        return Err("artifact too short for recorded run".into());
+    }
+    let hlen = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
+    let header_end = 16usize
+        .checked_add(hlen)
+        .ok_or_else(|| "replay header length overflow".to_string())?;
+    let jend = bytes
+        .len()
+        .checked_sub(52)
+        .ok_or_else(|| "missing JEND while reading recorded run".to_string())?;
+    if header_end > jend || &bytes[jend..jend + 4] != b"JEND" {
+        return Err("recorded run payload is truncated".into());
+    }
+    let mut run = jet::Debug::RecordedRun::default();
+    let mut off = header_end;
+    while off < jend {
+        let frame_header_end = off
+            .checked_add(15)
+            .ok_or_else(|| "recorded act frame header length overflow".to_string())?;
+        if frame_header_end > jend {
+            return Err("recorded act frame header is truncated".into());
+        }
+        let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
+        let sequence = u64::from_le_bytes(
+            bytes[off + 3..off + 11]
+                .try_into()
+                .map_err(|_| "recorded act sequence is invalid".to_string())?,
+        );
+        let plen = u32::from_le_bytes([
+            bytes[off + 11],
+            bytes[off + 12],
+            bytes[off + 13],
+            bytes[off + 14],
+        ]) as usize;
+        let payload_end = frame_header_end
+            .checked_add(plen)
+            .ok_or_else(|| "recorded act payload length overflow".to_string())?;
+        let frame_end = payload_end
+            .checked_add(32)
+            .ok_or_else(|| "recorded act frame length overflow".to_string())?;
+        if frame_end > jend {
+            return Err("recorded act frame is truncated".into());
+        }
+        if kind == KIND_RUN_ACT {
+            let payload = std::str::from_utf8(&bytes[frame_header_end..payload_end])
+                .map_err(|_| "recorded act payload is not UTF-8".to_string())?;
+            run.acts.push(parse_recorded_act_payload(payload, sequence)?);
+        }
+        off = frame_end;
+    }
+    Ok(run)
+}
+
+fn validate_recorded_act_payload(payload: &str) -> Result<(), String> {
+    parse_recorded_act_payload(payload, 1).map(|_| ())
+}
+
+fn parse_recorded_act_payload(
+    payload: &str,
+    sequence: u64,
+) -> Result<jet::Debug::RecordedAct, String> {
+    let value = parse_json(payload).map_err(|_| "recorded act payload is not valid JSON".to_string())?;
+    if canonical_json_value(&value)? != payload {
+        return Err("recorded act payload is not canonical JSON".into());
+    }
+    let JSONValue::Object(root) = value else {
+        return Err("recorded act payload must be an object".into());
+    };
+    require_object_keys(
+        &root,
+        "recorded act payload",
+        &["function", "line", "locals"],
+        &["function", "line", "locals"],
+    )?;
+    let JSONValue::String(function) = root
+        .get("function")
+        .ok_or_else(|| "recorded act function is missing".to_string())?
+    else {
+        return Err("recorded act function must be a string".into());
+    };
+    if function.is_empty() {
+        return Err("recorded act function is empty".into());
+    }
+    let JSONValue::Number(line) = root
+        .get("line")
+        .ok_or_else(|| "recorded act line is missing".to_string())?
+    else {
+        return Err("recorded act line must be an integer".into());
+    };
+    let line = usize::try_from(*line).map_err(|_| "recorded act line is invalid".to_string())?;
+    if line == 0 {
+        return Err("recorded act line must be at least 1".into());
+    }
+    let JSONValue::Array(locals) = root
+        .get("locals")
+        .ok_or_else(|| "recorded act locals are missing".to_string())?
+    else {
+        return Err("recorded act locals must be an array".into());
+    };
+    if locals.len() > 100_000 {
+        return Err("recorded act has too many locals".into());
+    }
+    let mut snapshots = Vec::with_capacity(locals.len());
+    for local in locals {
+        let JSONValue::Object(local) = local else {
+            return Err("recorded act local must be an object".into());
+        };
+        require_object_keys(
+            local,
+            "recorded act local",
+            &["name", "type", "value"],
+            &["name", "type", "value"],
+        )?;
+        let JSONValue::String(name) = local
+            .get("name")
+            .ok_or_else(|| "recorded act local name is missing".to_string())?
+        else {
+            return Err("recorded act local name must be a string".into());
+        };
+        let JSONValue::String(type_name) = local
+            .get("type")
+            .ok_or_else(|| "recorded act local type is missing".to_string())?
+        else {
+            return Err("recorded act local type must be a string".into());
+        };
+        let JSONValue::String(value) = local
+            .get("value")
+            .ok_or_else(|| "recorded act local value is missing".to_string())?
+        else {
+            return Err("recorded act local value must be a string".into());
+        };
+        if name.is_empty() || type_name.is_empty() {
+            return Err("recorded act local name and type must be non-empty".into());
+        }
+        snapshots.push(jet::Debug::ValueSnapshot {
+            name: name.clone(),
+            type_name: type_name.clone(),
+            value: value.clone(),
+        });
+    }
+    Ok(jet::Debug::RecordedAct {
+        sequence,
+        function: function.clone(),
+        line,
+        locals: snapshots,
+    })
 }
 
 
@@ -1897,12 +2156,41 @@ mod tests {
 
     #[test]
     fn safe_time_artifact_round_trips_and_preserves_authority() {
-        let bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         assert_eq!(header.get("schema").map(String::as_str), Some("jet.replay"));
         assert_eq!(header.get("run_outcome").map(String::as_str), Some("exit"));
         assert_eq!(header.get("run_status").map(String::as_str), Some("0"));
         assert_eq!(extract_time_ms(&bytes).unwrap()[0], 1_234);
+    }
+
+    #[test]
+    fn recorded_acts_stay_inside_the_replay_receipt() {
+        let run = jet::Debug::RecordedRun {
+            acts: vec![jet::Debug::RecordedAct {
+                sequence: 1,
+                function: "run".into(),
+                line: 4,
+                locals: vec![jet::Debug::ValueSnapshot {
+                    name: "total".into(),
+                    type_name: "Int".into(),
+                    value: "0".into(),
+                }],
+            }],
+        };
+        let bytes = build_safe_time_artifact_with_run(
+            &identity(),
+            1_234_567_890,
+            "exit",
+            0,
+            Some(&run),
+        )
+        .unwrap();
+        let header = parse_and_verify(&bytes).unwrap();
+        assert!(header.get("schema").is_some());
+        assert!(String::from_utf8_lossy(&bytes).contains("recorded_run"));
+        assert_eq!(extract_recorded_run(&bytes).unwrap(), run);
+        assert_eq!(extract_time_ms(&bytes).unwrap(), vec![1_234]);
     }
 
     #[test]
@@ -1925,7 +2213,7 @@ mod tests {
 
     #[test]
     fn safe_time_artifact_detects_payload_tampering() {
-        let mut bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let mut bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         let hlen = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
         let payload = 16 + hlen + 15;
         bytes[payload] ^= 1;
@@ -1942,7 +2230,7 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         fs::write(&path, bytes).unwrap();
         let mut different = identity();
         different.source_digest = "different-source".into();
@@ -1953,7 +2241,7 @@ mod tests {
 
     #[test]
     fn replay_rejects_identity_changes_beyond_source_digest() {
-        let bytes = build_safe_time_artifact(&identity(), 1_234_567_890, "exit", 0).unwrap();
+        let bytes = build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, None).unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         let mut different = identity();
         different.core_abi = "2".into();
@@ -1964,7 +2252,7 @@ mod tests {
     #[test]
     fn replay_rejects_time_site_identity_changes() {
         let original = identity();
-        let bytes = build_safe_time_artifact(&original, 1_234_567_890, "exit", 0).unwrap();
+        let bytes = build_safe_time_artifact_with_run(&original, 1_234_567_890, "exit", 0, None).unwrap();
         let header = parse_and_verify(&bytes).unwrap();
         let mut different = original.clone();
         different.time_site_id = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into();

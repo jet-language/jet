@@ -6,6 +6,7 @@
 mod Build;
 mod JSON;
 mod Symbols;
+mod SemanticOps;
 mod Types;
 
 pub use JSON::{package_facts_json, workspace_overlay_policy_json};
@@ -26,6 +27,10 @@ pub use Types::{
 pub use Symbols::{
     build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SemanticVisibilityAnchor,
+};
+pub use SemanticOps::{
+    review_semantic_ops, review_semantic_ops_with_receipts, semantic_ops_for_file, ReviewOpKind,
+    ReviewSemanticOp, SemanticOp, SemanticOpFile, SemanticOpTarget,
 };
 pub use jet_pkg_model::Package::PackageFacts;
 

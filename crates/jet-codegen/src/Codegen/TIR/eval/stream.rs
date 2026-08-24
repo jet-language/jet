@@ -9,11 +9,11 @@
 //! Cranelift host uses. No reader semantics live in this file.
 
 use super::unsupported;
-use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::THandleOp;
 use crate::Comptime::Builtins::exact_int_value;
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{CtFloat, Type};
 use jet_foundation::MatchScan::{
     bin_match_consumed, bin_match_scan, str_match_consumed, str_match_scan, BinBind,
 };
@@ -107,9 +107,9 @@ pub(super) fn eval(
                     *recv = cursor_ct(&c);
                     CtValue::Present(Box::new(value))
                 }
-                None => CtValue::failed(Box::new(CtValue::Str(
-                    kernel::jet_cursor_pattern_miss(&c),
-                ))),
+                None => {
+                    CtValue::failed(Box::new(CtValue::Str(kernel::jet_cursor_pattern_miss(&c))))
+                }
             })
         }
         THandleOp::ReaderTakePattern { parts, canonical } => {
@@ -123,9 +123,9 @@ pub(super) fn eval(
                     *recv = reader_ct(&r);
                     CtValue::Present(Box::new(value))
                 }
-                None => CtValue::failed(Box::new(CtValue::Str(
-                    kernel::jet_reader_pattern_miss(&r),
-                ))),
+                None => {
+                    CtValue::failed(Box::new(CtValue::Str(kernel::jet_reader_pattern_miss(&r))))
+                }
             })
         }
         _ => Err(unsupported("handle `stream`", span)),

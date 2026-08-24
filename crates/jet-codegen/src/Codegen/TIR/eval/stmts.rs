@@ -1,12 +1,4 @@
 //! Exhaustive TStmt evaluation (#777).
-use std::collections::{HashMap, HashSet};
-use std::sync::{mpsc, Arc};
-use crate::AST::Type;
-use crate::Codegen::{mangle, mangle_generated};
-use crate::Codegen::TIR::{TForInMethod, TIfCond, TPlace, TStmt};
-use crate::Comptime::Builtins::{as_bool, as_int};
-use crate::Comptime::{CtReport, CtValue};
-use crate::Diagnostics::{Diagnostic, Span};
 use super::{
     encode_view_mut_path, parse_view_mut_path, progress_elapsed, progress_emit,
     progress_iter_parts, progress_no_color, progress_now, progress_source_has_exact_total,
@@ -14,6 +6,14 @@ use super::{
     Flow, ViewMutPathStep,
 };
 use crate::Codegen::TIR::{TExpr, TExprKind, THandleOp};
+use crate::Codegen::TIR::{TForInMethod, TIfCond, TPlace, TStmt};
+use crate::Codegen::{mangle, mangle_generated};
+use crate::Comptime::Builtins::{as_bool, as_int};
+use crate::Comptime::{CtReport, CtValue};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::Type;
+use std::collections::{HashMap, HashSet};
+use std::sync::{mpsc, Arc};
 
 mod progress_semantics {
     include!("../../../Prelude/Core/Progress.rs");
@@ -52,7 +52,16 @@ fn place_region(base: &str, path: &[ViewMutPathStep], start: i64, end: i64) -> C
 
 fn progress_wrapper_parts(
     value: &CtValue,
-) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
+) -> Option<(
+    Vec<CtValue>,
+    String,
+    String,
+    f64,
+    Vec<usize>,
+    usize,
+    usize,
+    bool,
+)> {
     let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
@@ -145,11 +154,7 @@ fn progress_wrapper_parts(
 }
 
 fn parse_place_region(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>, i64, i64)> {
-    let CtValue::Struct {
-        type_name,
-        fields,
-    } = value
-    else {
+    let CtValue::Struct { type_name, fields } = value else {
         return None;
     };
     if type_name != "__JetViewMut" {
@@ -375,12 +380,8 @@ impl<'a> EvalCtx<'a> {
         for value in &owner_sources {
             collect_preserved_tensor_owners(value, scope, &mut preserve_values, self.span());
         }
-        let resource_result = drop_scope_tensor_resources(
-            scope,
-            scope_names,
-            &preserve_values,
-            self.span(),
-        );
+        let resource_result =
+            drop_scope_tensor_resources(scope, scope_names, &preserve_values, self.span());
         match (deferred_result, resource_result) {
             (Err(error), _) => Err(error),
             (Ok(()), Err(error)) => Err(error),
@@ -412,8 +413,8 @@ impl<'a> EvalCtx<'a> {
                     .iter()
                     .any(|held| std::sync::Arc::ptr_eq(held, &permit))
                     && !permits
-                    .iter()
-                    .any(|held| std::sync::Arc::ptr_eq(held, &permit))
+                        .iter()
+                        .any(|held| std::sync::Arc::ptr_eq(held, &permit))
                 {
                     permits.push(permit);
                 }
@@ -447,9 +448,10 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<Flow, Diagnostic> {
         self.enter_source_nesting()?;
         let result = match self.exec_stmt_inner(stmt, scope) {
-            Err(_) if self.pending_flow.is_some() => {
-                Ok(self.pending_flow.take().expect("checked pending loop control"))
-            }
+            Err(_) if self.pending_flow.is_some() => Ok(self
+                .pending_flow
+                .take()
+                .expect("checked pending loop control")),
             result => result,
         };
         self.leave_source_nesting();
@@ -478,10 +480,7 @@ impl<'a> EvalCtx<'a> {
                 Ok(Flow::Normal)
             }
             TStmt::ContractScope {
-                pre,
-                body,
-                post,
-                ..
+                pre, body, post, ..
             } => {
                 self.check_contracts(pre, scope)?;
                 let flow = self.exec_stmts(body, scope)?;
@@ -518,15 +517,16 @@ impl<'a> EvalCtx<'a> {
                 // `pinned :: mem.pin(&node)`) is an alias in AOT and Cranelift,
                 // so bind an alias handle here instead of a copy — otherwise
                 // edits through the window vanish on this tier alone (I9).
-                if let TExprKind::Borrow { place, mutable: true } = &init.kind {
+                if let TExprKind::Borrow {
+                    place,
+                    mutable: true,
+                } = &init.kind
+                {
                     if let Some((base, path)) = owner_list_place(place, self.span())? {
                         // `x :: &x` would shadow its own owner and make the
                         // handle point at itself, so fall back to the value.
                         if &base != name && scope.contains_key(&base) {
-                            scope.insert(
-                                name.clone(),
-                                super::place_mut_handle(&base, &path),
-                            );
+                            scope.insert(name.clone(), super::place_mut_handle(&base, &path));
                             return Ok(Flow::Normal);
                         }
                     }
@@ -642,9 +642,10 @@ impl<'a> EvalCtx<'a> {
                                 if Self::allocator_view_parts(&view).is_some() {
                                     let mut assigned = rhs;
                                     if let Some(binop) = op {
-                                        let current = self
-                                            .materialize_allocator_view(&view)?
-                                            .ok_or_else(|| unsupported("allocator view", self.span()))?;
+                                        let current =
+                                            self.materialize_allocator_view(&view)?.ok_or_else(
+                                                || unsupported("allocator view", self.span()),
+                                            )?;
                                         assigned = self.eval_runtime_binop(
                                             *binop,
                                             current,
@@ -657,25 +658,27 @@ impl<'a> EvalCtx<'a> {
                                 }
                             }
                         }
-                        if let Some(CtValue::Struct {
-                            type_name,
-                            fields,
-                        }) = scope.get(&key).cloned()
+                        if let Some(CtValue::Struct { type_name, fields }) =
+                            scope.get(&key).cloned()
                         {
                             if type_name == "__JetViewMut" {
                                 let owner =
                                     self.view_mut_owner_value(&fields, scope, self.span())?;
-                                if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
-                                    let window = view_mut_window_args(&fields)
-                                        .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
+                                if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
+                                {
+                                    let window =
+                                        view_mut_window_args(&fields).ok_or_else(|| {
+                                            unsupported("Tensor view window", self.span())
+                                        })?;
                                     let mut replacement = rhs;
                                     if let Some(binop) = op {
-                                        let current = crate::Comptime::ComputeLite::tensor_view_get_value(
-                                            &owner,
-                                            window,
-                                            0,
-                                            self.span(),
-                                        )?;
+                                        let current =
+                                            crate::Comptime::ComputeLite::tensor_view_get_value(
+                                                &owner,
+                                                window,
+                                                0,
+                                                self.span(),
+                                            )?;
                                         replacement = self.eval_runtime_binop(
                                             *binop,
                                             current,
@@ -683,13 +686,14 @@ impl<'a> EvalCtx<'a> {
                                             self.span(),
                                         )?;
                                     }
-                                    let updated = crate::Comptime::ComputeLite::tensor_view_set_value(
-                                        &owner,
-                                        window,
-                                        0,
-                                        &replacement,
-                                        self.span(),
-                                    )?;
+                                    let updated =
+                                        crate::Comptime::ComputeLite::tensor_view_set_value(
+                                            &owner,
+                                            window,
+                                            0,
+                                            &replacement,
+                                            self.span(),
+                                        )?;
                                     self.store_view_mut_owner_value(
                                         &fields,
                                         scope,
@@ -716,10 +720,7 @@ impl<'a> EvalCtx<'a> {
                                         )?;
                                         let i = start as usize;
                                         if i >= items.len() {
-                                            return Err(unsupported(
-                                                "view-mut OOB",
-                                                self.span(),
-                                            ));
+                                            return Err(unsupported("view-mut OOB", self.span()));
                                         }
                                         let mut rhs = rhs;
                                         if let Some(binop) = op {
@@ -751,7 +752,10 @@ impl<'a> EvalCtx<'a> {
                         Ok(Flow::Normal)
                     }
                     TPlace::Expr(place_expr)
-                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::PoolSlot { .. }) =>
+                        if matches!(
+                            place_expr.kind,
+                            crate::Codegen::TIR::TExprKind::PoolSlot { .. }
+                        ) =>
                     {
                         if let Some(binop) = op {
                             let current = self.eval_expr(place_expr, scope)?;
@@ -901,8 +905,11 @@ impl<'a> EvalCtx<'a> {
                     match self.exec_stmts(body, scope)? {
                         Flow::Normal | Flow::Continue => {}
                         Flow::Break => break,
-                        Flow::BreakLabel(ref name) if label.as_deref() == Some(name.as_str()) => break,
-                        Flow::ContinueLabel(ref name) if label.as_deref() == Some(name.as_str()) => {}
+                        Flow::BreakLabel(ref name) if label.as_deref() == Some(name.as_str()) => {
+                            break
+                        }
+                        Flow::ContinueLabel(ref name)
+                            if label.as_deref() == Some(name.as_str()) => {}
                         other => return Ok(other),
                     }
                 }
@@ -929,8 +936,11 @@ impl<'a> EvalCtx<'a> {
                     match self.exec_stmts(body, scope)? {
                         Flow::Normal | Flow::Continue => {}
                         Flow::Break => break,
-                        Flow::BreakLabel(ref name) if label.as_deref() == Some(name.as_str()) => break,
-                        Flow::ContinueLabel(ref name) if label.as_deref() == Some(name.as_str()) => {}
+                        Flow::BreakLabel(ref name) if label.as_deref() == Some(name.as_str()) => {
+                            break
+                        }
+                        Flow::ContinueLabel(ref name)
+                            if label.as_deref() == Some(name.as_str()) => {}
                         other => return Ok(other),
                     }
                     if let Some(step) = step {
@@ -961,7 +971,10 @@ impl<'a> EvalCtx<'a> {
                         return Err(unsupported("Range loop source type", self.span()));
                     }
                     let field = |name: &str| {
-                        fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+                        fields
+                            .iter()
+                            .find(|(field, _)| field == name)
+                            .map(|(_, value)| value)
                     };
                     let start = field("start")
                         .ok_or_else(|| unsupported("Range.start", self.span()))
@@ -988,7 +1001,11 @@ impl<'a> EvalCtx<'a> {
                 // D-RANGE-EXCL1=C: exclusive `..<` stops before end; inclusive `..` includes it.
                 let in_range = |cur: i64| {
                     if exclusive_v {
-                        if step_v > 0 { cur < end_v } else { cur > end_v }
+                        if step_v > 0 {
+                            cur < end_v
+                        } else {
+                            cur > end_v
+                        }
                     } else if step_v > 0 {
                         cur <= end_v
                     } else {
@@ -1002,8 +1019,11 @@ impl<'a> EvalCtx<'a> {
                     match self.exec_stmts(body, scope)? {
                         Flow::Normal | Flow::Continue => {}
                         Flow::Break => break,
-                        Flow::BreakLabel(ref name) if label.as_deref() == Some(name.as_str()) => break,
-                        Flow::ContinueLabel(ref name) if label.as_deref() == Some(name.as_str()) => {}
+                        Flow::BreakLabel(ref name) if label.as_deref() == Some(name.as_str()) => {
+                            break
+                        }
+                        Flow::ContinueLabel(ref name)
+                            if label.as_deref() == Some(name.as_str()) => {}
                         other => return Ok(other),
                     }
                     i += step_v;
@@ -1037,7 +1057,10 @@ impl<'a> EvalCtx<'a> {
                             let key = strip_user(local);
                             scope.insert(
                                 key,
-                                fields.get(i).map(|(_, v)| v.clone()).unwrap_or(CtValue::Unit),
+                                fields
+                                    .get(i)
+                                    .map(|(_, v)| v.clone())
+                                    .unwrap_or(CtValue::Unit),
                             );
                         }
                         Ok(Flow::Normal)
@@ -1068,7 +1091,10 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("list destructure non-list", self.span()));
                 };
                 for (i, local) in elems.iter().enumerate() {
-                    scope.insert(strip_user(local), items.get(i).cloned().unwrap_or(CtValue::Unit));
+                    scope.insert(
+                        strip_user(local),
+                        items.get(i).cloned().unwrap_or(CtValue::Unit),
+                    );
                 }
                 Ok(Flow::Normal)
             }
@@ -1138,9 +1164,7 @@ impl<'a> EvalCtx<'a> {
                     {
                         let evaluated = self.eval_expr(&args[0], scope)?;
                         let (coll, iter_known_total) = match progress_iter_parts(&evaluated) {
-                            Some((items, known_total)) => {
-                                (CtValue::List(items), Some(known_total))
-                            }
+                            Some((items, known_total)) => (CtValue::List(items), Some(known_total)),
                             None => (evaluated, None),
                         };
                         let description = match args.get(1) {
@@ -1161,12 +1185,15 @@ impl<'a> EvalCtx<'a> {
                             CtValue::List(items) => items.len(),
                             _ => return Err(unsupported("progress source", self.span())),
                         };
-                        let known_total = iter_known_total.unwrap_or_else(|| match args.first().map(|arg| &arg.ty) {
-                            Some(Type::Apply { name, .. })
-                                if name == crate::Syntax::TYPE_ITER => args
-                                    .first()
-                                    .is_some_and(progress_source_has_exact_total),
-                            _ => true,
+                        let known_total = iter_known_total.unwrap_or_else(|| {
+                            match args.first().map(|arg| &arg.ty) {
+                                Some(Type::Apply { name, .. })
+                                    if name == crate::Syntax::TYPE_ITER =>
+                                {
+                                    args.first().is_some_and(progress_source_has_exact_total)
+                                }
+                                _ => true,
+                            }
                         });
                         progress = Some((
                             description,
@@ -1188,8 +1215,16 @@ impl<'a> EvalCtx<'a> {
                     coll = CtValue::List(items);
                 }
                 if progress.is_none() {
-                    if let Some((items, description, format, started_at, pulls, tail, total, known_total)) =
-                        progress_wrapper_parts(&coll)
+                    if let Some((
+                        items,
+                        description,
+                        format,
+                        started_at,
+                        pulls,
+                        tail,
+                        total,
+                        known_total,
+                    )) = progress_wrapper_parts(&coll)
                     {
                         progress = Some((
                             description,
@@ -1208,48 +1243,48 @@ impl<'a> EvalCtx<'a> {
                         coll_type,
                         iter_type,
                     }) = method_kind
-                {
-                    let iter_func = self
-                        .funcs
-                        .get(&format!("{coll_type}::iter"))
-                        .copied()
-                        .ok_or_else(|| unsupported("Iterable.iter", self.span()))?;
-                    let next_func = self
-                        .funcs
-                        .get(&format!("{iter_type}::next"))
-                        .copied()
-                        .ok_or_else(|| unsupported("Iterator.next", self.span()))?;
-                    let mut iter_scope = HashMap::new();
-                    iter_scope.insert("self".to_string(), coll);
-                    let mut iterator = self.run_func(iter_func, Vec::new(), &mut iter_scope)?;
-                    loop {
-                        self.burn()?;
-                        let mut next_scope = HashMap::new();
-                        next_scope.insert("self".to_string(), iterator);
-                        let next = self.run_func(next_func, Vec::new(), &mut next_scope)?;
-                        iterator = next_scope.remove("self").unwrap_or(CtValue::Unit);
-                        let CtValue::Present(item) = next else {
-                            if matches!(next, CtValue::Failed(CtReport::Clean(_))) {
-                                break;
+                    {
+                        let iter_func = self
+                            .funcs
+                            .get(&format!("{coll_type}::iter"))
+                            .copied()
+                            .ok_or_else(|| unsupported("Iterable.iter", self.span()))?;
+                        let next_func = self
+                            .funcs
+                            .get(&format!("{iter_type}::next"))
+                            .copied()
+                            .ok_or_else(|| unsupported("Iterator.next", self.span()))?;
+                        let mut iter_scope = HashMap::new();
+                        iter_scope.insert("self".to_string(), coll);
+                        let mut iterator = self.run_func(iter_func, Vec::new(), &mut iter_scope)?;
+                        loop {
+                            self.burn()?;
+                            let mut next_scope = HashMap::new();
+                            next_scope.insert("self".to_string(), iterator);
+                            let next = self.run_func(next_func, Vec::new(), &mut next_scope)?;
+                            iterator = next_scope.remove("self").unwrap_or(CtValue::Unit);
+                            let CtValue::Present(item) = next else {
+                                if matches!(next, CtValue::Failed(CtReport::Clean(_))) {
+                                    break;
+                                }
+                                return Err(unsupported("Iterator.next result", self.span()));
+                            };
+                            scope.insert(var.clone(), *item);
+                            match self.exec_stmts(body, scope)? {
+                                Flow::Normal | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::BreakLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) =>
+                                {
+                                    break
+                                }
+                                Flow::ContinueLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => {}
+                                other => return Ok(other),
                             }
-                            return Err(unsupported("Iterator.next result", self.span()));
-                        };
-                        scope.insert(var.clone(), *item);
-                        match self.exec_stmts(body, scope)? {
-                            Flow::Normal | Flow::Continue => {}
-                            Flow::Break => break,
-                            Flow::BreakLabel(ref name)
-                                if label.as_deref() == Some(name.as_str()) =>
-                            {
-                                break
-                            }
-                            Flow::ContinueLabel(ref name)
-                                if label.as_deref() == Some(name.as_str()) => {}
-                            other => return Ok(other),
                         }
+                        return Ok(Flow::Normal);
                     }
-                    return Ok(Flow::Normal);
-                }
                 }
                 if progress.is_none() {
                     if matches!(method_kind, Some(TForInMethod::ChannelReceiver)) {
@@ -1282,7 +1317,10 @@ impl<'a> EvalCtx<'a> {
                                 Flow::Normal | Flow::Continue => {}
                                 Flow::Break => break,
                                 Flow::BreakLabel(ref name)
-                                    if label.as_deref() == Some(name.as_str()) => break,
+                                    if label.as_deref() == Some(name.as_str()) =>
+                                {
+                                    break
+                                }
                                 Flow::ContinueLabel(ref name)
                                     if label.as_deref() == Some(name.as_str()) => {}
                                 other => return Ok(other),
@@ -1325,12 +1363,7 @@ impl<'a> EvalCtx<'a> {
                             "CSVReader" => THandleOp::CSVReaderNext,
                             "XMLReader" => THandleOp::XMLReaderNext,
                             "CBORReader" => THandleOp::CBORReaderNext,
-                            _ => {
-                                return Err(unsupported(
-                                    "unknown encoding reader",
-                                    self.span(),
-                                ))
-                            }
+                            _ => return Err(unsupported("unknown encoding reader", self.span())),
                         };
                         let stride = match step {
                             Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
@@ -1385,7 +1418,7 @@ impl<'a> EvalCtx<'a> {
                                 }
                                 Flow::ContinueLabel(ref name)
                                     if label.as_deref() == Some(name.as_str()) => {}
-                                other => return Ok(other)
+                                other => return Ok(other),
                             }
                             skipped = stride - 1;
                         }
@@ -1409,12 +1442,14 @@ impl<'a> EvalCtx<'a> {
                             .ok_or_else(|| unsupported("stream handle", self.span()))?
                     };
                     self.task_wait_check("stream pull")?;
-                    if producer.cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                    if producer
+                        .cancelled
+                        .load(std::sync::atomic::Ordering::Acquire)
+                    {
                         return Ok(Flow::Normal);
                     }
                     let (func, args) = {
-                        let runtime =
-                            self.runtime.lock().expect("evaluator runtime poisoned");
+                        let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
                         runtime
                             .streams
                             .get(stream_index)
@@ -1468,15 +1503,23 @@ impl<'a> EvalCtx<'a> {
                         while i < items.len() {
                             self.burn()?;
                             let next_i = i.saturating_add(stride as usize).min(items.len());
-                            if let Some((description, format, started_at, total, pulls, _, known_total)) = progress.as_ref() {
+                            if let Some((
+                                description,
+                                format,
+                                started_at,
+                                total,
+                                pulls,
+                                _,
+                                known_total,
+                            )) = progress.as_ref()
+                            {
                                 let requested = if progress_count == 0 {
                                     1
                                 } else {
                                     stride as usize
                                 };
-                                let end = progress_yielded
-                                    .saturating_add(requested)
-                                    .min(pulls.len());
+                                let end =
+                                    progress_yielded.saturating_add(requested).min(pulls.len());
                                 let raw_pulls: usize = pulls[progress_yielded..end].iter().sum();
                                 progress_yielded = end;
                                 let raw_pulls = if *known_total {
@@ -1488,15 +1531,15 @@ impl<'a> EvalCtx<'a> {
                                     for pulled in
                                         (progress_count + 1)..=(progress_count + raw_pulls)
                                     {
-                                    let text = progress_semantics::jet_progress_render(
-                                        description,
-                                        format,
-                                        pulled,
-                                        (*known_total).then_some(*total),
-                                        progress_elapsed(*started_at),
-                                        progress_no_color(),
-                                    );
-                                    progress_emit(self.sink.as_ref(), &text);
+                                        let text = progress_semantics::jet_progress_render(
+                                            description,
+                                            format,
+                                            pulled,
+                                            (*known_total).then_some(*total),
+                                            progress_elapsed(*started_at),
+                                            progress_no_color(),
+                                        );
+                                        progress_emit(self.sink.as_ref(), &text);
                                     }
                                 }
                                 progress_count = progress_count.saturating_add(raw_pulls);
@@ -1519,7 +1562,7 @@ impl<'a> EvalCtx<'a> {
                                     if label.as_deref() == Some(name.as_str()) =>
                                 {
                                     naturally_exhausted = false;
-                                    break
+                                    break;
                                 }
                                 Flow::ContinueLabel(ref name)
                                     if label.as_deref() == Some(name.as_str()) => {}
@@ -1528,24 +1571,36 @@ impl<'a> EvalCtx<'a> {
                             i = next_i;
                         }
                         if naturally_exhausted {
-                            if let Some((description, format, started_at, total, pulls, tail, known_total)) = progress.as_ref() {
-                                let remaining = pulls[progress_yielded..].iter().sum::<usize>() + *tail;
+                            if let Some((
+                                description,
+                                format,
+                                started_at,
+                                total,
+                                pulls,
+                                tail,
+                                known_total,
+                            )) = progress.as_ref()
+                            {
+                                let remaining =
+                                    pulls[progress_yielded..].iter().sum::<usize>() + *tail;
                                 let remaining = if *known_total {
                                     remaining.min(total.saturating_sub(progress_count))
                                 } else {
                                     remaining
                                 };
                                 if remaining != 0 {
-                                    for pulled in (progress_count + 1)..=(progress_count + remaining) {
-                                    let text = progress_semantics::jet_progress_render(
-                                        description,
-                                        format,
-                                        pulled,
-                                        (*known_total).then_some(*total),
-                                        progress_elapsed(*started_at),
-                                        progress_no_color(),
-                                    );
-                                    progress_emit(self.sink.as_ref(), &text);
+                                    for pulled in
+                                        (progress_count + 1)..=(progress_count + remaining)
+                                    {
+                                        let text = progress_semantics::jet_progress_render(
+                                            description,
+                                            format,
+                                            pulled,
+                                            (*known_total).then_some(*total),
+                                            progress_elapsed(*started_at),
+                                            progress_no_color(),
+                                        );
+                                        progress_emit(self.sink.as_ref(), &text);
                                     }
                                 }
                             }
@@ -1658,25 +1713,21 @@ impl<'a> EvalCtx<'a> {
                 // is never a `__JetViewMut`, so the probe answers the same and
                 // the write rule stays exactly where it belongs — on reads.
                 let base_value = match &base.kind {
-                    crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed => scope
-                        .get(&local.name)
-                        .cloned()
-                        .ok_or_else(|| {
+                    crate::Codegen::TIR::TExprKind::Local(local) if local.uninit_fixed => {
+                        scope.get(&local.name).cloned().ok_or_else(|| {
                             unsupported(&format!("unbound `{}`", local.name), self.span())
-                        })?,
+                        })?
+                    }
                     _ => self.eval_expr(base, scope)?,
                 };
                 let idx_v = self.eval_expr(index, scope)?;
                 let rhs = self.eval_expr(value, scope)?;
                 // Mutable place-window write-through (`&xs[a..b]` → `__JetViewMut`).
-                if let CtValue::Struct {
-                    type_name,
-                    fields,
-                } = &base_value
-                {
+                if let CtValue::Struct { type_name, fields } = &base_value {
                     if type_name == "__JetViewMut" {
                         let owner = self.view_mut_owner_value(fields, scope, self.span())?;
-                        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor") {
+                        if matches!(&owner, CtValue::Struct { type_name, .. } if type_name == "Tensor" || type_name == "JetTensor")
+                        {
                             let window = view_mut_window_args(fields)
                                 .ok_or_else(|| unsupported("Tensor view window", self.span()))?;
                             let idx = as_int(&idx_v, self.span())?;
@@ -1687,12 +1738,7 @@ impl<'a> EvalCtx<'a> {
                                 &rhs,
                                 self.span(),
                             )?;
-                            self.store_view_mut_owner_value(
-                                fields,
-                                scope,
-                                updated,
-                                self.span(),
-                            )?;
+                            self.store_view_mut_owner_value(fields, scope, updated, self.span())?;
                             return Ok(Flow::Normal);
                         }
                         let mut start = None;
@@ -1701,8 +1747,8 @@ impl<'a> EvalCtx<'a> {
                                 start = Some(*n);
                             }
                         }
-                        let start = start
-                            .ok_or_else(|| unsupported("view-mut fields", self.span()))?;
+                        let start =
+                            start.ok_or_else(|| unsupported("view-mut fields", self.span()))?;
                         let idx = as_int(&idx_v, self.span())?;
                         if idx < 0 {
                             return Err(unsupported("negative view index", self.span()));
@@ -1768,11 +1814,7 @@ impl<'a> EvalCtx<'a> {
                     rhs = self.clone_structural_value(rhs, &assign.value.ty)?;
                 }
                 let base_value = self.eval_expr(&assign.base, scope)?;
-                if let CtValue::Struct {
-                    type_name,
-                    fields,
-                } = &base_value
-                {
+                if let CtValue::Struct { type_name, fields } = &base_value {
                     if type_name == "__JetViewMut" {
                         let owner = self.view_mut_owner_value(fields, scope, self.span())?;
                         let (start, _) = view_mut_bounds(fields)
@@ -1812,13 +1854,14 @@ impl<'a> EvalCtx<'a> {
                         } else {
                             *slot = rhs;
                         }
-                        return self.store_view_mut_owner_value(
-                            fields,
-                            scope,
-                            CtValue::List(items),
-                            self.span(),
-                        )
-                        .map(|()| Flow::Normal);
+                        return self
+                            .store_view_mut_owner_value(
+                                fields,
+                                scope,
+                                CtValue::List(items),
+                                self.span(),
+                            )
+                            .map(|()| Flow::Normal);
                     }
                 }
                 let CtValue::List(mut items) = base_value else {
@@ -1894,10 +1937,9 @@ impl<'a> EvalCtx<'a> {
                 } else {
                     strip_user(root)
                 };
-                let root_value = scope
-                    .get(&root_key)
-                    .cloned()
-                    .ok_or_else(|| unsupported(&format!("unbound GC root `{root}`"), self.span()))?;
+                let root_value = scope.get(&root_key).cloned().ok_or_else(|| {
+                    unsupported(&format!("unbound GC root `{root}`"), self.span())
+                })?;
                 let current = self.gc_read_root(&root_value)?;
                 let value_key = mangle_generated("value");
                 let prior_value = scope.insert(value_key.clone(), current);
@@ -1968,8 +2010,8 @@ impl<'a> EvalCtx<'a> {
                 // IndexAssign / field writes reach the owner (AOT emits real slices).
                 // Read-only windows still materialize.
                 let owner_path = if let Some(owner_expr) = owner {
-                        let (base_name, path) = owner_list_place(owner_expr, self.span())?
-                            .ok_or_else(|| unsupported("split views owner", self.span()))?;
+                    let (base_name, path) = owner_list_place(owner_expr, self.span())?
+                        .ok_or_else(|| unsupported("split views owner", self.span()))?;
                     let items = {
                         let probe = place_region(&base_name, &path, 0, 0);
                         let CtValue::Struct { fields, .. } = &probe else {
@@ -2008,11 +2050,7 @@ impl<'a> EvalCtx<'a> {
                 let (base_name, path, _src_abs_start, src_abs_end) =
                     parse_place_region(&source_region)
                         .ok_or_else(|| unsupported("split views source region", self.span()))?;
-                let path = if owner.is_some() {
-                    owner_path
-                } else {
-                    path
-                };
+                let path = if owner.is_some() { owner_path } else { path };
                 let relative_start = *start - *source_start;
                 let width = *end - *start + 1;
                 if relative_start < 0 || width <= 0 {
@@ -2215,7 +2253,8 @@ impl<'a> EvalCtx<'a> {
                                             .unwrap_or_else(|error| error.into_inner()) = updated;
                                     }
                                     Ok(())
-                                })();
+                                })(
+                                );
                                 result
                             })?;
                         }
@@ -2295,9 +2334,9 @@ impl<'a> EvalCtx<'a> {
                     left,
                     right,
                 } => {
-                    let left = results.remove(&(left as *const TIfCond as usize)).ok_or_else(|| {
-                        unsupported("if condition result stack", self.span())
-                    })?;
+                    let left = results
+                        .remove(&(left as *const TIfCond as usize))
+                        .ok_or_else(|| unsupported("if condition result stack", self.span()))?;
                     if left {
                         work.push(CondWork::AfterRight { parent, right });
                         work.push(CondWork::Eval(right));
@@ -2306,9 +2345,9 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 CondWork::AfterRight { parent, right } => {
-                    let right = results.remove(&(right as *const TIfCond as usize)).ok_or_else(|| {
-                        unsupported("if condition result stack", self.span())
-                    })?;
+                    let right = results
+                        .remove(&(right as *const TIfCond as usize))
+                        .ok_or_else(|| unsupported("if condition result stack", self.span()))?;
                     results.insert(parent as *const TIfCond as usize, right);
                 }
             }
@@ -2342,8 +2381,7 @@ impl<'a> EvalCtx<'a> {
 fn collect_tensor_resources(value: &CtValue, out: &mut Vec<CtValue>) {
     match value {
         CtValue::Struct { type_name, fields }
-            if type_name == "Tensor" || type_name == "JetTensor"
-                || type_name == "__JetViewMut" =>
+            if type_name == "Tensor" || type_name == "JetTensor" || type_name == "__JetViewMut" =>
         {
             out.push(value.clone());
             if type_name == "__JetViewMut" {
@@ -2447,10 +2485,9 @@ fn drop_tensor_resources(
         CtValue::Struct {
             type_name,
             fields: _,
+        } if type_name == "Tensor" || type_name == "JetTensor" => {
+            crate::Comptime::ComputeLite::tensor_drop_value(value, span)
         }
-            if type_name == "Tensor" || type_name == "JetTensor" => {
-                crate::Comptime::ComputeLite::tensor_drop_value(value, span)
-            }
         CtValue::Struct { type_name, .. } if type_name == "__JetViewMut" => {
             crate::Comptime::ComputeLite::tensor_window_drop_value(value, span)
         }
@@ -2493,9 +2530,7 @@ fn drop_scope_tensor_resources(
 ) -> Result<(), Diagnostic> {
     let names = scope
         .iter()
-        .filter(|(name, value)| {
-            !scope_names.contains(*name) && contains_tensor_resource(value)
-        })
+        .filter(|(name, value)| !scope_names.contains(*name) && contains_tensor_resource(value))
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
     for name in names {
@@ -2522,15 +2557,15 @@ fn returned_shared_guards(flow: &Flow) -> Vec<usize> {
     };
     fn collect(value: &CtValue, out: &mut Vec<usize>) {
         match value {
-            CtValue::Struct { type_name, fields }
-                if type_name == "__JetTirSharedGuard" =>
-            {
-                if let Some(index) = fields.iter().find_map(|(name, value)| {
-                    match (name.as_str(), value) {
-                        ("lease", CtValue::Int(index)) => usize::try_from(*index).ok(),
-                        _ => None,
-                    }
-                }) {
+            CtValue::Struct { type_name, fields } if type_name == "__JetTirSharedGuard" => {
+                if let Some(index) =
+                    fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("lease", CtValue::Int(index)) => usize::try_from(*index).ok(),
+                            _ => None,
+                        })
+                {
                     if !out.contains(&index) {
                         out.push(index);
                     }
@@ -2568,7 +2603,9 @@ fn returned_shared_guards(flow: &Flow) -> Vec<usize> {
 }
 
 fn strip_user(name: &str) -> String {
-    name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX).unwrap_or(name).to_string()
+    name.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
+        .unwrap_or(name)
+        .to_string()
 }
 
 /// Bind a match-arm pattern against `value`. Returns `true` when the arm matches
@@ -2580,7 +2617,9 @@ pub(super) fn bind_match_pattern(
 ) -> Result<bool, Diagnostic> {
     use crate::AST::{Pattern, StructPatField};
     match pattern {
-        Pattern::Variant { variant, bindings, .. } => {
+        Pattern::Variant {
+            variant, bindings, ..
+        } => {
             let (got, args) = match value {
                 CtValue::Enum { variant, args, .. } => (variant.as_str(), args.as_slice()),
                 CtValue::Present(inner) if variant == "Ok" => {
@@ -2594,7 +2633,9 @@ pub(super) fn bind_match_pattern(
                 {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
-                CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit if variant == "None" || variant == "Absent" => {
+                CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
+                    if variant == "None" || variant == "Absent" =>
+                {
                     return Ok(bindings.is_empty());
                 }
                 _ => return Ok(false),
@@ -2630,7 +2671,10 @@ pub(super) fn bind_match_pattern(
             }
             _ => Ok(false),
         },
-        Pattern::Absent(_) => Ok(matches!(value, CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit)),
+        Pattern::Absent(_) => Ok(matches!(
+            value,
+            CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
+        )),
         Pattern::Range { lo, hi, .. } => match value {
             CtValue::Int(n) => Ok(*n >= *lo && *n <= *hi),
             CtValue::Char(c) => {
@@ -2651,10 +2695,7 @@ pub(super) fn bind_match_pattern(
             Ok(false)
         }
         Pattern::Struct { fields, .. } => {
-            let CtValue::Struct {
-                fields: values, ..
-            } = value
-            else {
+            let CtValue::Struct { fields: values, .. } = value else {
                 return Ok(false);
             };
             for field in fields {

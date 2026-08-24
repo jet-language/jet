@@ -1,4 +1,8 @@
 use super::*;
+use jet_codegen::development_receipt::{
+    is_content_address, jet_development_receipt_render, JetDevelopmentReceipt,
+    JetDevelopmentReceiptInput,
+};
 use std::io::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -256,9 +260,23 @@ mod registration_tests {
             .join(&ingested.entry.receipt);
         let bytes = fs::read(&receipt).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
-        assert!(text.starts_with("jet-hangar-receipt-v1\n"));
+        assert!(text.starts_with("jet-development-receipt-v1\n"));
+        assert!(text.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\t"));
+        assert!(text.contains("closure\t\t7368613235362d"));
         assert!(text.contains("action\t706c616e6e6564\t"));
         assert!(text.contains("activation-proof\t\t\n"));
+        assert!(text.contains("witness\t\t"));
+        assert!(text.contains("outcome\t\t706173736564\t"));
+        let source_digest = format!("sha256-{}", SHA256::sha256_hex("source-v1".as_bytes()));
+        let source_input = format!(
+            "input\t{}\t{}",
+            super::hex("source-fingerprint"),
+            super::hex(&source_digest)
+        );
+        assert!(
+            text.contains(&source_input),
+            "missing content-addressed input"
+        );
 
         let partial = receipt.with_file_name(".crashed-receipt.partial");
         fs::write(&partial, b"partial receipt").unwrap();
@@ -1360,54 +1378,69 @@ fn recover_receipt_staging(roots: &Roots) -> std::io::Result<usize> {
 }
 
 fn render_receipt(entry: &StoreEntry) -> String {
-    let mut out = String::from("jet-hangar-receipt-v1\n");
-    receipt_line(&mut out, "input", "reference", &entry.reference);
-    receipt_line(
-        &mut out,
-        "input",
-        "source-fingerprint",
-        &entry.cache_identity.source_fingerprint,
-    );
-    receipt_line(
-        &mut out,
-        "input",
-        "recipe-fingerprint",
-        &entry.cache_identity.recipe_fingerprint,
-    );
-    receipt_line(
-        &mut out,
-        "input",
-        "policy-fingerprint",
-        &entry.cache_identity.policy_fingerprint,
-    );
-    receipt_line(
-        &mut out,
-        "input",
-        "platform",
-        &entry.cache_identity.platform,
-    );
+    let mut inputs = vec![
+        receipt_input("package-name", &entry.name),
+        receipt_input("package-version", &entry.version),
+        receipt_input("reference", &entry.reference),
+        receipt_input(
+            "source-fingerprint",
+            &entry.cache_identity.source_fingerprint,
+        ),
+        receipt_input(
+            "recipe-fingerprint",
+            &entry.cache_identity.recipe_fingerprint,
+        ),
+        receipt_input(
+            "policy-fingerprint",
+            &entry.cache_identity.policy_fingerprint,
+        ),
+        receipt_input("platform", &entry.cache_identity.platform),
+        receipt_input("platform-artifact-kind", &entry.platform_artifact_kind),
+        receipt_input("producer-record", &entry.producer_record),
+    ];
     let references = entry.references.iter().collect::<BTreeSet<_>>();
     for reference in references {
-        receipt_line(&mut out, "input", "closure", reference);
+        inputs.push(receipt_input("closure", reference));
     }
-    receipt_line(&mut out, "action", "planned", &entry_action_key(entry));
+    let action = entry_action_key(entry);
     let mut outputs = entry.named_outputs.clone();
     outputs.insert("out".to_string(), entry.envelope.output_hash.clone());
-    for (name, digest) in outputs {
-        receipt_line(&mut out, "output", &name, &digest);
-    }
-    receipt_line(&mut out, "activation-proof", "", "");
-    receipt_line(&mut out, "parent-generation", "", "");
-    out
+    let outputs = outputs
+        .into_iter()
+        .map(|(name, digest)| receipt_input(&name, &digest))
+        .collect();
+    let receipt = JetDevelopmentReceipt {
+        act: "package-realization".into(),
+        locked_closure: action.clone(),
+        inputs,
+        planned_action: action,
+        outputs,
+        activation_proof: String::new(),
+        parent_generation: String::new(),
+        witness: receipt_witness(),
+        outcome: "passed".into(),
+        failure_path: None,
+    };
+    jet_development_receipt_render(&receipt)
 }
 
-fn receipt_line(out: &mut String, kind: &str, name: &str, value: &str) {
-    out.push_str(kind);
-    out.push('\t');
-    out.push_str(&hex(name));
-    out.push('\t');
-    out.push_str(&hex(value));
-    out.push('\n');
+fn receipt_input(name: &str, value: &str) -> JetDevelopmentReceiptInput {
+    let digest = if is_content_address(value) {
+        value.to_owned()
+    } else {
+        format!("sha256-{}", SHA256::sha256_hex(value.as_bytes()))
+    };
+    JetDevelopmentReceiptInput {
+        name: name.to_owned(),
+        digest,
+    }
+}
+
+fn receipt_witness() -> String {
+    std::env::var("JET_RECEIPT_WITNESS")
+        .ok()
+        .filter(|witness| !witness.is_empty())
+        .unwrap_or_else(|| "jetpack".into())
 }
 
 fn descriptor_for_entry(

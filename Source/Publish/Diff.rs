@@ -1,6 +1,6 @@
-use crate::Diagnostics::Diagnostic;
 use super::SemVer::BumpKind;
 use super::API::ApiItem;
+use crate::Diagnostics::Diagnostic;
 
 // ──────────────────────────────────────────────
 // API diff → E2601
@@ -70,8 +70,14 @@ mod tests {
 
     #[test]
     fn duplicate_legacy_names_match_as_signature_multisets() {
-        let old = vec![function("report", "fn report()"), function("report", "fn report(x: Int)")];
-        let new = vec![function("report", "fn report(x: Int)"), function("report", "fn report()")];
+        let old = vec![
+            function("report", "fn report()"),
+            function("report", "fn report(x: Int)"),
+        ];
+        let new = vec![
+            function("report", "fn report(x: Int)"),
+            function("report", "fn report()"),
+        ];
         assert!(diff_public_api(&old, &new).is_empty());
     }
 }

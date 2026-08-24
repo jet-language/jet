@@ -232,8 +232,18 @@
   function reviewBuildFile(file) {
     const source = reviewCurrentSourceFor(file);
     const nodes = reviewCurrentNodesFor(file);
-    const hunks = reviewParseDiff(file.diff, file.path, file.status).map((hunk) => reviewMapHunk(hunk, source, nodes));
-    return Object.assign({}, file, { hunks, source_text: source });
+    const semanticOps = Array.isArray(file.semantic_ops) ? file.semantic_ops : [];
+    const hunks = reviewParseDiff(file.diff, file.path, file.status)
+      .map((hunk) => reviewMapHunk(hunk, source, nodes))
+      .map((hunk) => Object.assign({}, hunk, { semantic_ops: semanticOps }));
+    return Object.assign({}, file, { hunks, semantic_ops: semanticOps, source_text: source });
+  }
+
+  function reviewSemanticOpLabel(ops) {
+    return (Array.isArray(ops) ? ops : []).map((op) => {
+      if (op && op.kind === "rename") return "rename " + (op.from || "?") + " → " + (op.to || "?");
+      return op && op.kind ? op.kind : "semantic operation";
+    }).join(" · ");
   }
 
   function reviewNodeTitle(nodeId) {
@@ -260,7 +270,8 @@
       doc && doc.project_revision,
       doc && doc.revision,
       latestProject && latestProject.project_revision,
-      file && file.revision
+      file && file.revision,
+      file && reviewSemanticOpLabel(file.semantic_ops)
     ].filter(Boolean);
     return Array.from(new Set(facts)).join(" · ");
   }
@@ -270,10 +281,12 @@
       path: file.path,
       status: file.status,
       dirty: !!file.dirty,
+      semanticOps: (file.semantic_ops || []).map((op) => ({ kind: op.kind, from: op.from || null, to: op.to || null })),
       hunks: (file.hunks || []).map((hunk) => ({
         id: hunk.id,
         kind: hunk.kind,
         status: hunk.status,
+        semanticOps: (hunk.semantic_ops || []).map((op) => ({ kind: op.kind, from: op.from || null, to: op.to || null })),
         nodeIds: hunk.nodeIds || [],
         added: (hunk.rows || []).filter((row) => row.prefix === "+").map((row) => row.text),
         deleted: (hunk.rows || []).filter((row) => row.prefix === "-").map((row) => row.text)
@@ -290,6 +303,7 @@
       overlayHunkId: reviewState.overlayHunkId,
       selectedNodeIds: selected ? selected.hunk.nodeIds || [] : [],
       files,
+      semanticOps: selected ? (selected.file.semantic_ops || []).map((op) => ({ kind: op.kind, from: op.from || null, to: op.to || null })) : [],
       protocol: reviewState.sourceControl && reviewState.sourceControl.protocol || null
     };
   }

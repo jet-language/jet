@@ -125,9 +125,8 @@ fn publish_bytes(
     permissions: Option<fs::Permissions>,
     label: &str,
 ) -> Result<(), String> {
-    let tmp = temp_path(dest, label).ok_or_else(|| {
-        format!("could not derive a temporary path for {}", dest.display())
-    })?;
+    let tmp = temp_path(dest, label)
+        .ok_or_else(|| format!("could not derive a temporary path for {}", dest.display()))?;
     let result = (|| {
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -181,7 +180,10 @@ pub fn store_cached(key: &str, bin: &Path) -> Result<(), String> {
     let dir = cache_entry_dir(key)
         .ok_or_else(|| "refusing to store a cache entry with an invalid key".to_string())?;
     if !regular_file(bin) {
-        return Err(format!("refusing non-regular build artifact {}", bin.display()));
+        return Err(format!(
+            "refusing non-regular build artifact {}",
+            bin.display()
+        ));
     }
     safe_cache_dir(&dir)?;
     fs::create_dir_all(&dir)
@@ -237,10 +239,8 @@ mod tests {
 
     #[test]
     fn cache_integrity_rejects_changed_bytes() {
-        let path = std::env::temp_dir().join(format!(
-            "jet-build-cache-integrity-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("jet-build-cache-integrity-{}", std::process::id()));
         fs::write(&path, b"valid").unwrap();
         let digest = sha256_hex(b"valid");
         assert_eq!(
@@ -257,8 +257,7 @@ mod tests {
         let digest = sha256_hex(b"valid");
         assert!(parse_digest_record(format!("{digest} \n").as_bytes()).is_none());
         assert!(
-            parse_digest_record(format!("{}\n", digest.to_ascii_uppercase()).as_bytes())
-                .is_none()
+            parse_digest_record(format!("{}\n", digest.to_ascii_uppercase()).as_bytes()).is_none()
         );
     }
 }

@@ -105,14 +105,20 @@ pub fn export_surface(bundle: &ProgramBundle) -> Vec<ExportFunction> {
         .items
         .iter()
         .filter_map(|item| {
-            let Item::Func(function) = item else { return None };
+            let Item::Func(function) = item else {
+                return None;
+            };
             if !function.is_pub || !bundle.name_ledger.public(bundle.entry, &function.name) {
                 return None;
             }
             Some(ExportFunction {
                 name: function.name.clone(),
                 scalar: export_shape(function)?,
-                params: function.params.iter().map(|parameter| parameter.convention).collect(),
+                params: function
+                    .params
+                    .iter()
+                    .map(|parameter| parameter.convention)
+                    .collect(),
             })
         })
         .collect()

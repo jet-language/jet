@@ -695,3 +695,17 @@ pub fn assert_scene_probe_measurement(report: &CanonicalJson, expected_metric: &
     let CanonicalJson::Array(samples) = &measurement["samples"] else { panic!("samples") };
     assert_eq!(samples.len(), 600, "SceneProbe must produce exactly 600 measured samples");
 }
+
+/// One index on a `CanonicalJson::Object` yields a `CanonicalJson`, which is
+/// not itself indexable, so a nested lookup has to step through the enum.
+pub fn canonical_field<'a>(
+    value: &'a jet_foundation::PerformanceBudget::CanonicalJson,
+    key: &str,
+) -> &'a jet_foundation::PerformanceBudget::CanonicalJson {
+    match value {
+        jet_foundation::PerformanceBudget::CanonicalJson::Object(fields) => fields
+            .get(key)
+            .unwrap_or_else(|| panic!("canonical JSON has no field `{key}`")),
+        _ => panic!("canonical JSON parent of `{key}` is not an object"),
+    }
+}

@@ -42,11 +42,23 @@ pub struct Change {
 }
 
 pub fn validate_destinations(project: &Path, paths: &[PathBuf]) {
+    validate_destinations_with(project, paths, false);
+}
+
+pub fn validate_fix_destinations(project: &Path, paths: &[PathBuf]) {
+    validate_destinations_with(project, paths, true);
+}
+
+fn validate_destinations_with(project: &Path, paths: &[PathBuf], allow_any_path: bool) {
     let project = canonical_project(project);
     let mut names = BTreeSet::new();
     let mut identities = BTreeSet::new();
     for path in paths {
-        let canonical = validate_destination(&project, path, true)
+        let canonical = if allow_any_path {
+            validate_fix_destination(&project, path, true)
+        } else {
+            validate_destination(&project, path, true)
+        }
             .unwrap_or_else(|e| fail(&format!("unsafe codemod destination `{}`: {e}", path.display())));
         if !names.insert(canonical.clone()) {
             fail(&format!("duplicate codemod destination `{}`", path.display()))
@@ -60,11 +72,23 @@ pub fn validate_destinations(project: &Path, paths: &[PathBuf]) {
 }
 
 pub fn validate_replay_aliases(project: &Path, log: &Path, paths: &[PathBuf]) {
+    validate_replay_aliases_with(project, log, paths, false);
+}
+
+pub fn validate_fix_replay_aliases(project: &Path, log: &Path, paths: &[PathBuf]) {
+    validate_replay_aliases_with(project, log, paths, true);
+}
+
+fn validate_replay_aliases_with(project: &Path, log: &Path, paths: &[PathBuf], allow_any_path: bool) {
     let project = canonical_project(project);
     let mut identities = BTreeSet::new();
     identities.insert(path_identity(log).unwrap_or_else(|e| fail(&format!("could not inspect replay log: {e}"))));
     for path in paths {
-        let path = validate_destination(&project, path, true)
+        let path = if allow_any_path {
+            validate_fix_destination(&project, path, true)
+        } else {
+            validate_destination(&project, path, true)
+        }
             .unwrap_or_else(|e| fail(&format!("unsafe replay destination `{}`: {e}", path.display())));
         if !identities.insert(path_identity(&path).unwrap_or_else(|e| fail(&format!("could not inspect replay destination: {e}")))) {
             fail("replay log and destinations contain a file-ID alias")
@@ -110,8 +134,20 @@ fn path_identity(path: &Path) -> std::io::Result<(u64, u64)> {
 }
 
 pub fn read_destination(project: &Path, path: &Path) -> std::io::Result<Vec<u8>> {
+    read_destination_with(project, path, false)
+}
+
+pub fn read_fix_destination(project: &Path, path: &Path) -> std::io::Result<Vec<u8>> {
+    read_destination_with(project, path, true)
+}
+
+fn read_destination_with(project: &Path, path: &Path, allow_any_path: bool) -> std::io::Result<Vec<u8>> {
     let project = canonical_project_io(project)?;
-    let path = validate_destination(&project, path, true)?;
+    let path = if allow_any_path {
+        validate_fix_destination(&project, path, true)?
+    } else {
+        validate_destination(&project, path, true)?
+    };
     let relative = path.strip_prefix(&project).map_err(|_| {
         std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
     })?;
@@ -180,6 +216,47 @@ fn validate_destination(project: &Path, path: &Path, must_exist: bool) -> std::i
             std::io::ErrorKind::PermissionDenied,
             "destination must be a .jet source or paired tests/ui .stderr snapshot",
         ));
+    }
+    let mut current = project.to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let std::path::Component::Normal(name) = component else { unreachable!() };
+        current.push(name);
+        let metadata = fs::symlink_metadata(&current)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination parent contains a link or non-directory",
+            ));
+        }
+    }
+    if must_exist {
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination is not a regular non-link file",
+            ));
+        }
+        let canonical = fs::canonicalize(path)?;
+        if canonical != path {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "destination aliases a different canonical path",
+            ));
+        }
+        Ok(canonical)
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+fn validate_fix_destination(project: &Path, path: &Path, must_exist: bool) -> std::io::Result<PathBuf> {
+    let relative = path.strip_prefix(project).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "destination escapes project")
+    })?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.is_empty() || components.iter().any(|component| !matches!(component, std::path::Component::Normal(_))) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "non-normal destination path"));
     }
     let mut current = project.to_path_buf();
     for component in relative.parent().into_iter().flat_map(Path::components) {
@@ -648,19 +725,30 @@ fn prepare_recovery_handles(lock: &Lock, parsed: &Journal) -> Vec<UnixRecoveryHa
 
 pub fn commit(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8]) {
     #[cfg(unix)]
-    commit_unix(lock, changes, log_path, log);
+    commit_unix(lock, changes, log_path, log, false);
     #[cfg(not(unix))]
     fail("codemod commit is unavailable on this platform until native handle-relative transactions are implemented")
 }
 
+pub fn commit_fix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8]) {
+    #[cfg(unix)]
+    commit_unix(lock, changes, log_path, log, true);
+    #[cfg(not(unix))]
+    fail("fix commit is unavailable on this platform until native handle-relative transactions are implemented")
+}
+
 #[cfg(unix)]
-fn commit_unix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8]) {
+fn commit_unix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8], allow_any_path: bool) {
     if changes.is_empty() {
         fail("codemod has no file edits");
     }
     let project = lock.project.clone();
     let paths = changes.iter().map(|change| change.path.clone()).collect::<Vec<_>>();
-    validate_destinations(&project, &paths);
+    if allow_any_path {
+        validate_fix_destinations(&project, &paths);
+    } else {
+        validate_destinations(&project, &paths);
+    }
     let dir = lock.dir.clone();
     if log_path.parent() != Some(dir.as_path()) {
         fail("codemod replay log must be directly beneath .jet/codemods")
