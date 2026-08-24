@@ -19,7 +19,7 @@ use super::edit_actions::{
     apply_edit_function_signature, apply_edit_pattern_arm, apply_inline_edit, apply_insert_call,
     apply_insert_structural, apply_move_link, apply_noop, apply_promote_inline,
     apply_remove_multi_input_element, apply_remove_pattern_arm, apply_rename,
-    apply_reorder_statements, apply_toggle_switch_state, apply_update_comment_region,
+    apply_reorder_statements, apply_exec_convergence, apply_toggle_switch_state, apply_update_comment_region,
     apply_visible_conversion, canvas_action_candidate, extract_inline_candidate,
     inline_helper_candidate, write_checked_formatted, write_checked_source,
 };
@@ -1119,6 +1119,35 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
             apply_remove_multi_input_element(path, &src, node, element)
         }
         "replace_source" => {
+            if json_string_field(request, "source_edit").as_deref() == Some("exec_convergence") {
+                let graph_id = required_string(request, "graph_id")?;
+                let from_pin_name = required_string(request, "from_pin_name")?;
+                let strategy = required_string(request, "strategy")?;
+                let function = required_string(request, "function")?;
+                let from_span = SourceSpan {
+                    start: json_usize_field(request, "from_start")
+                        .ok_or_else(|| edit_error("bad_request", "missing `from_start`"))?,
+                    end: json_usize_field(request, "from_end")
+                        .ok_or_else(|| edit_error("bad_request", "missing `from_end`"))?,
+                };
+                let target_span = SourceSpan {
+                    start: json_usize_field(request, "target_start")
+                        .ok_or_else(|| edit_error("bad_request", "missing `target_start`"))?,
+                    end: json_usize_field(request, "target_end")
+                        .ok_or_else(|| edit_error("bad_request", "missing `target_end`"))?,
+                };
+                return apply_exec_convergence(
+                    path,
+                    &src,
+                    &graph_id,
+                    from_span,
+                    target_span,
+                    &from_pin_name,
+                    &strategy,
+                    &function,
+                    json_string_field(request, "helper_name").as_deref(),
+                );
+            }
             let source = required_string(request, "source")?;
             if json_string_field(request, "undo_restore").is_some() {
                 write_checked_source(path, &src, &source)
@@ -1128,7 +1157,16 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
         }
         "insert_branch" | "insert_switch" | "insert_loop" | "insert_fallible_rail" => {
             let graph_id = required_string(request, "graph_id")?;
-            apply_insert_structural(path, &src, &graph_id, op.as_str())
+            let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
+            let wire_target_pin = json_string_field(request, "wire_target_pin");
+            apply_insert_structural(
+                path,
+                &src,
+                &graph_id,
+                op.as_str(),
+                wire_origin_pin_id.as_deref(),
+                wire_target_pin.as_deref(),
+            )
         }
         "create_comment_region" => {
             let graph_id = required_string(request, "graph_id")?;
@@ -1379,6 +1417,7 @@ pub fn debug_session_json_for_file_with_sessions(
         &src,
         &projection.json,
         &execution.transcript,
+        execution.snapshot.as_ref(),
         execution.status,
         &execution.id,
         execution.tier,

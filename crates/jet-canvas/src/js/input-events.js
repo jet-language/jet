@@ -3,10 +3,50 @@
 
   function exactBodyHelperForExecTarget(graph, target) {
     const node = nodeForPin(graph, target);
-    const helperId = node && (node.exact_body_helper_id || node.execution_helper_id);
-    if (!helperId || !latestDoc) return null;
-    const helper = (latestDoc.graphs || []).find((candidate) => candidate.graph_id === helperId);
+    if (!node || !latestDoc || !latestDoc.source_text || !node.source_span) return null;
+    const targetSource = latestDoc.source_text.slice(node.source_span.start, node.source_span.end).trim();
+    if (!targetSource || targetSource.includes("\n")) return null;
+    const helper = (latestDoc.graphs || []).find((candidate) => {
+      if (!candidate || candidate.graph_id === graph.graph_id || !candidate.function) return false;
+      const span = candidate.function.source_span;
+      if (!span) return false;
+      const open = latestDoc.source_text.indexOf("{", Number(span.start));
+      if (open < 0 || open >= Number(span.end)) return false;
+      let depth = 0;
+      let quote = null;
+      let escaped = false;
+      for (let i = open; i < latestDoc.source_text.length; i++) {
+        const ch = latestDoc.source_text[i];
+        if (quote) {
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          quote = ch;
+        } else if (ch === "{") {
+          depth += 1;
+        } else if (ch === "}") {
+          depth -= 1;
+          if (depth === 0) {
+            return latestDoc.source_text.slice(open + 1, i).trim() === targetSource;
+          }
+        }
+      }
+      return false;
+    });
     return helper ? { name: helper.title, graph_id: helper.graph_id } : null;
+  }
+
+  function defaultExecConvergenceFunctionName(graph, target) {
+    const node = nodeForPin(graph, target);
+    const title = String(node && node.title || "shared")
+      .replace(/[^A-Za-z0-9_]+/g, "_")
+      .replace(/^([^A-Za-z_])/, "_$1")
+      .replace(/_+/g, "_")
+      .replace(/^$/, "shared");
+    return `shared_${title}`;
   }
 
   function closeExecConvergencePreview() {
@@ -23,9 +63,11 @@
     }
     const helper = preview.helper || null;
     const strategy = preview.strategy || "extract";
+    const functionName = preview.function_name || "shared_steps";
     const helperOption = helper
       ? `<label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="helper"${strategy === "helper" ? " checked" : ""}> Reuse exact-body helper</span><code>${escapeHtml(helper.name)}</code><small>The existing helper body matches this branch exactly.</small></label>`
       : `<div class="inline-row"><b>Reuse exact-body helper</b><span class="tag">No exact-body helper found. Keep the source unchanged while you choose another strategy.</span></div>`;
+    const applyLabel = strategy === "duplicate" ? "Apply duplication (warning)" : "Apply convergence";
     details.innerHTML = `
       <div class="details-hero">
         <div class="details-titleline"><span class="node-glyph">⇄</span><div class="details-title"><p class="title">Execution convergence preview</p><div class="kind">No source written</div></div></div>
@@ -35,9 +77,10 @@
       <div class="pin-list">
         <label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="extract"${strategy === "extract" ? " checked" : ""}> Extract shared body (recommended)</span><small>One canonical helper body can serve both labeled execution paths.</small></label>
         ${helperOption}
-        <label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="duplicate"${strategy === "duplicate" ? " checked" : ""}> Duplicate body</span><small><b>Warning:</b> copied source can drift. This choice is explicit and is not applied from this preview.</small></label>
+        <label class="inline-row"><span><input type="radio" name="exec-convergence-strategy" data-exec-convergence-strategy="duplicate"${strategy === "duplicate" ? " checked" : ""}> Duplicate body</span><small><b>Warning:</b> copied source can drift. This choice is explicit and applies only after confirmation.</small></label>
+        <label class="inline-row"><b>Helper name</b><input id="exec-convergence-function" data-exec-convergence-function value="${escapeHtml(functionName)}" spellcheck="false" autocomplete="off"><small>The name is part of the checked source transaction.</small></label>
       </div>
-      <div class="edit-grid"><button id="close-exec-convergence-preview">Close preview</button><span class="tag">Source and undo history are unchanged.</span></div>`;
+      <div class="edit-grid"><button id="apply-exec-convergence">${applyLabel}</button><button id="close-exec-convergence-preview">Close preview</button><span class="tag">Source and undo history are unchanged until Apply.</span></div>`;
     setDrawer("details");
     details.querySelectorAll("[data-exec-convergence-strategy]").forEach((input) => {
       input.addEventListener("change", () => {
@@ -46,18 +89,57 @@
         renderExecConvergencePreview();
       });
     });
+    const nameInput = document.getElementById("exec-convergence-function");
+    if (nameInput) {
+      nameInput.addEventListener("input", () => {
+        preview.function_name = nameInput.value;
+        window.__jetCanvasExecConvergencePreview = preview;
+      });
+      nameInput.focus();
+      nameInput.select();
+    }
+    const apply = document.getElementById("apply-exec-convergence");
+    if (apply) apply.addEventListener("click", () => {
+      const name = String((document.getElementById("exec-convergence-function") || {}).value || "").trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        showToast("Convergence helper name must be a Jet identifier", { isError: true });
+        return;
+      }
+      preview.function_name = name;
+      postTransaction({
+        schema_version: 1,
+        op: "replace_source",
+        source_edit: "exec_convergence",
+        revision: latestDoc.revision,
+        graph_id: preview.graph_id,
+        from_pin_name: preview.from_pin_name,
+        from_start: preview.from_source_span && preview.from_source_span.start,
+        from_end: preview.from_source_span && preview.from_source_span.end,
+        target_start: preview.target_source_span && preview.target_source_span.start,
+        target_end: preview.target_source_span && preview.target_source_span.end,
+        strategy: preview.strategy || "extract",
+        function: name,
+        helper_name: preview.helper && preview.helper.name || null
+      });
+    });
     const close = document.getElementById("close-exec-convergence-preview");
     if (close) close.addEventListener("click", closeExecConvergencePreview);
   }
 
   function openExecConvergencePreview(graph, fromPin, target) {
     const input = fromPin.direction === "input" ? fromPin : target;
+    const fromNode = nodeForPin(graph, fromPin);
+    const targetNode = nodeForPin(graph, input);
     const helper = exactBodyHelperForExecTarget(graph, input);
     window.__jetCanvasExecConvergencePreview = {
       graph_id: graph.graph_id,
       revision: latestDoc && latestDoc.revision,
       from_pin_id: fromPin.pin_id,
       to_pin_id: target.pin_id,
+      from_pin_name: fromPin.name,
+      from_source_span: fromNode && fromNode.source_span || fromPin.source_span || null,
+      target_source_span: targetNode && targetNode.source_span || input.source_span || null,
+      function_name: defaultExecConvergenceFunctionName(graph, input),
       incoming_wire_id: (graph.wires || []).find((wire) => wire.wire_kind === "control" && wire.to_pin === input.pin_id)?.wire_id || null,
       strategy: "extract",
       helper
@@ -80,12 +162,16 @@
       if (offset) nodeOffsets.set(id, Object.assign({}, offset));
       else nodeOffsets.delete(id);
     }
+    restoreMarqueeGesture(gesture);
   }
 
   function restoreMarqueeGesture(gesture) {
     selectedNodeIds = new Set(gesture.initialSelection || []);
     selectedNodeId = gesture.initialSelectedNodeId || null;
     selectionExplicitlyCleared = !!gesture.initialSelectionExplicitlyCleared;
+    if (Object.prototype.hasOwnProperty.call(gesture, "initialSelectedVariableName")) {
+      selectedVariableName = gesture.initialSelectedVariableName;
+    }
   }
 
   function rejectStaleCanvasGesture(gesture) {
@@ -189,6 +275,10 @@
     setPendingPin(null);
     const found = hitNodeAt(x, y);
     if (found) {
+      const initialSelection = new Set(selectedNodeIds);
+      const initialSelectedNodeId = selectedNodeId;
+      const initialSelectionExplicitlyCleared = selectionExplicitlyCleared;
+      const initialSelectedVariableName = selectedVariableName;
       const modifier = ev.ctrlKey || ev.metaKey ? "toggle" : ev.shiftKey ? "add" : null;
       const alreadySelected = selectedNodeIds.has(found.node.node_id);
       if (modifier) {
@@ -217,6 +307,10 @@
         wy: wy(y),
         starts,
         beforeOffsets,
+        initialSelection,
+        initialSelectedNodeId,
+        initialSelectionExplicitlyCleared,
+        initialSelectedVariableName,
         graphId: graph && graph.graph_id,
         revision: latestDoc && latestDoc.revision,
         sourceId: currentCanvasSourceId(),
@@ -247,6 +341,7 @@
         initialSelection: new Set(selectedNodeIds),
         initialSelectedNodeId: selectedNodeId,
         initialSelectionExplicitlyCleared: selectionExplicitlyCleared,
+        initialSelectedVariableName: selectedVariableName,
         graphId: graph && graph.graph_id,
         revision: latestDoc && latestDoc.revision,
         sourceId: currentCanvasSourceId(),
@@ -313,7 +408,7 @@
   });
 
   window.addEventListener("mouseup", function (ev) {
-    if (drag && (drag.mode === "node" || drag.mode === "marquee" || drag.mode === "pin") && rejectStaleCanvasGesture(drag)) {
+    if (drag && (drag.mode === "node" || drag.mode === "marquee") && rejectStaleCanvasGesture(drag)) {
       drag = null;
       if (latestDoc) drawGraph(latestDoc);
       return;
@@ -511,6 +606,23 @@
   window.addEventListener("keydown", function (ev) {
     const editingText = ev.target && ["INPUT", "TEXTAREA", "SELECT"].includes(ev.target.tagName);
     if (ev.key === " ") spaceDown = true;
+    if (keyboardCheatSheetIsOpen()) {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        closeKeyboardCheatSheet();
+      }
+      return;
+    }
+    if (!editingText && ev.key === "?") {
+      ev.preventDefault();
+      openKeyboardCheatSheet();
+      return;
+    }
+    if (ev.key === "Escape" && window.__jetCanvasExecConvergencePreview) {
+      closeExecConvergencePreview();
+      ev.preventDefault();
+      return;
+    }
     if (ev.key === "Escape") {
       const hadTransient = !!drag || !!pendingPin || contextMenu.classList.contains("is-open");
       if (drag && drag.mode === "node") restoreNodeGesture(drag);

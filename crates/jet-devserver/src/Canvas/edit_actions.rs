@@ -20,7 +20,7 @@ use super::source_model::{write_source_if_unchanged, SourceWriteError};
 use super::validation_json::{
     extract_params, find_comment_hint, find_hint_region, find_simple_helper, normalize_bounds,
     parse_simple_call, quoted_attr, replace_ident, validate_comment_alpha, validate_comment_color,
-    wire_span_from_json_chunk,
+    validate_ident, wire_span_from_json_chunk,
 };
 
 pub(super) fn apply_noop(path: &Path, _src: &str) -> Result<String, String> {
@@ -794,6 +794,8 @@ pub(super) fn apply_insert_structural(
     src: &str,
     graph_id: &str,
     op: &str,
+    wire_origin_pin_id: Option<&str>,
+    wire_target_pin: Option<&str>,
 ) -> Result<String, String> {
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let Some(anchor) = projection
@@ -803,20 +805,29 @@ pub(super) fn apply_insert_structural(
     else {
         return Err(edit_error("not_found", "Canvas graph no longer exists"));
     };
+    let (insert, indent) = structural_insert_target(
+        src,
+        graph_id,
+        &projection,
+        anchor,
+        wire_origin_pin_id,
+        wire_target_pin,
+    )?;
     let stmt = match op {
-        "insert_branch" => {
-            "    if true {\n        print(\"branch\")\n    } else {\n        print(\"else\")\n    }\n".to_string()
-        }
-        "insert_switch" => {
-            "    if 0 == {\n        0 -> { print(\"case\") }\n        else -> { print(\"else\") }\n    }\n"
-                .to_string()
-        }
-        "insert_loop" => "    loop {\n        break\n    }\n".to_string(),
+        "insert_branch" => format!(
+            "{indent}if true {{\n{indent}    print(\"branch\")\n{indent}}} else {{\n{indent}    print(\"else\")\n{indent}}}\n"
+        ),
+        "insert_switch" => format!(
+            "{indent}if 0 == {{\n{indent}    0 -> {{ print(\"case\") }}\n{indent}    else -> {{ print(\"else\") }}\n{indent}}}\n"
+        ),
+        "insert_loop" => format!("{indent}loop {{\n{indent}    break\n{indent}}}\n"),
         "insert_fallible_rail" => {
             if !anchor.fallible {
                 return Err(edit_error("unavailable", "needs a fallible function"));
             }
-            "    fallible_value :: Int.parse(\"1\")\n    unwrapped :: fallible_value ?? 0\n".to_string()
+            format!(
+                "{indent}fallible_value :: Int.parse(\"1\")\n{indent}unwrapped :: fallible_value ?? 0\n"
+            )
         }
         _ => return Err(edit_error("unsupported", "unknown Canvas structural operation")),
     };
@@ -824,14 +835,66 @@ pub(super) fn apply_insert_structural(
         src,
         &[edit(
             SourceSpan {
-                start: anchor.insert_offset,
-                end: anchor.insert_offset,
+                start: insert,
+                end: insert,
             },
             &stmt,
         )],
     )
     .map_err(|_| edit_error("overlap", "Canvas structural insert overlapped"))?;
     write_checked_formatted(path, src, &changed)
+}
+
+fn structural_insert_target(
+    src: &str,
+    graph_id: &str,
+    projection: &super::schema_api::Projection,
+    anchor: &super::schema_api::GraphEditAnchor,
+    wire_origin_pin_id: Option<&str>,
+    wire_target_pin: Option<&str>,
+) -> Result<(usize, String), String> {
+    let Some(pin_id) = wire_origin_pin_id else {
+        return Ok((anchor.insert_offset, "    ".to_string()));
+    };
+    if let Some(target) = wire_target_pin {
+        if target != "exec" {
+            return Err(edit_error(
+                "bad_request",
+                "Canvas structural nodes connect through the exec pin",
+            ));
+        }
+    }
+    let (node_id, direction) = pin_id
+        .rsplit_once(":input:")
+        .map(|(node, _)| (node, "input"))
+        .or_else(|| {
+            pin_id
+                .rsplit_once(":output:")
+                .map(|(node, _)| (node, "output"))
+        })
+        .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+    let node = projection
+        .node_refs
+        .iter()
+        .filter(|node| node.graph_id == graph_id)
+        .filter(|node| node.node_id == node_id || node.node_id.ends_with(&format!(":{node_id}")))
+        .max_by_key(|node| node.span.end.saturating_sub(node.span.start))
+        .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+    if node.node_id.ends_with(":entry") {
+        return Ok((anchor.insert_offset, "    ".to_string()));
+    }
+    let insert = if direction == "input" {
+        line_start(src, node.span.start)
+    } else {
+        line_after(src, node.span.end)
+    };
+    let indent = indentation_at(src, node.span.start);
+    let indent = if indent.is_empty() {
+        "    ".to_string()
+    } else {
+        indent
+    };
+    Ok((insert, indent))
 }
 
 pub(super) fn apply_create_comment_region(
@@ -1291,6 +1354,587 @@ pub(super) fn apply_reorder_statements(
     write_checked_formatted(path, src, &changed)
 }
 
+/// Build one source-backed execution convergence edit.
+///
+/// The browser owns the gesture and the preview choice. It does not own source
+/// construction: this function resolves both pins against the checked AST,
+/// creates the ordinary Jet helper/call text, and sends the result through the
+/// same formatter, sema check, and atomic writer as every other Canvas edit.
+pub(super) fn apply_exec_convergence(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    from_span: SourceSpan,
+    target_span: SourceSpan,
+    from_pin_name: &str,
+    strategy: &str,
+    function: &str,
+    helper_name: Option<&str>,
+) -> Result<String, String> {
+    validate_ident(function)?;
+    if !matches!(strategy, "extract" | "helper" | "duplicate") {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas convergence strategy must be extract, helper, or duplicate",
+        ));
+    }
+    if same_span(from_span, target_span) {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas convergence needs two different source pins",
+        ));
+    }
+
+    let func = checked_func_for_graph(path, src, graph_id)?;
+    let Some(target) = find_expression_statement(&func.body, target_span, src) else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas convergence target step no longer exists",
+        ));
+    };
+    let target_text = src
+        .get(target.expr.start..target.expr.end)
+        .ok_or_else(|| edit_error("bad_request", "Canvas convergence target span is stale"))?
+        .trim()
+        .to_string();
+    if target_text.is_empty() || target_text.contains('\n') {
+        return Err(edit_error(
+            "ambiguous",
+            "Canvas can converge one ordinary source statement at a time",
+        ));
+    }
+
+    let Some(insertion) = find_exec_insertion(src, &func.body, from_span, from_pin_name)? else {
+        return Err(edit_error(
+            "not_found",
+            "Canvas convergence source path no longer exists",
+        ));
+    };
+    if insertion.branch && target.expr.start >= insertion.owner.end {
+        return Err(edit_error(
+            "structured_join",
+            "This source already has a structured join after the branch; keep the downstream step single",
+        ));
+    }
+
+    let projection = project_file(path)
+        .map_err(|diags| diagnostics_error(path, src, &diags))?;
+    let params = extract_params(&projection.json, &target_text);
+    if params.iter().any(|(name, ty)| name.is_empty() || ty.is_empty()) {
+        return Err(edit_error(
+            "ambiguous",
+            "Canvas could not preserve a convergence capture type",
+        ));
+    }
+    let args = params
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let call_name = if strategy == "helper" {
+        helper_name.unwrap_or(function)
+    } else {
+        function
+    };
+    let call = format!("{call_name}({args})");
+    let incoming_source = if strategy == "duplicate" {
+        target_text.clone()
+    } else {
+        call.clone()
+    };
+
+    let bundle = checked_bundle(path, src)?;
+    let exact_helper = exact_body_helper_name(bundle, src, &target_text, &func.name);
+    let mut edits = Vec::new();
+    let insertion_text = format!("{}{}\n", insertion.indent, incoming_source);
+    edits.push(edit(
+        SourceSpan {
+            start: insertion.offset,
+            end: insertion.offset,
+        },
+        &insertion_text,
+    ));
+
+    match strategy {
+        "helper" => {
+            let Some(helper_name) = helper_name.filter(|name| !name.is_empty()) else {
+                return Err(edit_error(
+                    "bad_request",
+                    "Canvas exact-body helper choice has no helper name",
+                ));
+            };
+            validate_ident(helper_name)?;
+            if exact_helper.as_deref() != Some(helper_name) {
+                return Err(edit_error(
+                    "stale",
+                    "The selected helper body no longer matches the converged source",
+                ));
+            }
+        }
+        "extract" => {
+            if function_name_exists(bundle, function) {
+                return Err(edit_error(
+                    "bad_request",
+                    "Canvas helper name already exists; choose another name",
+                ));
+            }
+            let signature = params
+                .iter()
+                .map(|(name, ty)| format!("{name}: {ty}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let body = target_text
+                .lines()
+                .map(|line| format!("    {}\n", line.trim()))
+                .collect::<String>();
+            let helper = format!("fn {function}({signature}) {{\n{body}}}\n\n");
+            edits.push(edit(SourceSpan { start: 0, end: 0 }, &helper));
+        }
+        "duplicate" => {}
+        _ => unreachable!(),
+    }
+
+    if strategy != "duplicate" {
+        let suffix = src
+            .get(target.expr.end..target.full.end)
+            .ok_or_else(|| edit_error("bad_request", "Canvas convergence target line is stale"))?;
+        let replacement = format!(
+            "{}{}{}",
+            indentation_at(src, target.full.start),
+            call,
+            suffix
+        );
+        edits.push(edit(target.full, &replacement));
+    }
+
+    let changed = FixEngine::apply_edits(src, &edits)
+        .map_err(|_| edit_error("overlap", "Canvas convergence source edits overlapped"))?;
+    write_checked_formatted(path, src, &changed)
+}
+
+#[derive(Clone, Copy)]
+struct ExpressionStatementLocation {
+    expr: SourceSpan,
+    full: SourceSpan,
+}
+
+#[derive(Clone)]
+struct ExecInsertion {
+    offset: usize,
+    indent: String,
+    owner: SourceSpan,
+    branch: bool,
+}
+
+fn find_expression_statement(
+    stmts: &[Stmt],
+    target: SourceSpan,
+    src: &str,
+) -> Option<ExpressionStatementLocation> {
+    for stmt in stmts {
+        if let Stmt::Expr(expr) = stmt {
+            let expr_span: SourceSpan = expr.span().into();
+            if same_span(expr_span, target) {
+                return Some(ExpressionStatementLocation {
+                    expr: expr_span,
+                    full: stmt_text_span(src, stmt),
+                });
+            }
+        }
+        if let Some(found) = find_expression_statement_in_children(stmt, target, src) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn find_expression_statement_in_children(
+    stmt: &Stmt,
+    target: SourceSpan,
+    src: &str,
+) -> Option<ExpressionStatementLocation> {
+    match stmt {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => find_expression_statement(body, target, src),
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => arms
+            .iter()
+            .find_map(|arm| find_expression_statement(&arm.body, target, src))
+            .or_else(|| {
+                else_body
+                    .as_deref()
+                    .and_then(|body| find_expression_statement(body, target, src))
+            }),
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => find_expression_statement(then_body, target, src).or_else(|| {
+            else_body
+                .as_deref()
+                .and_then(|body| find_expression_statement(body, target, src))
+        }),
+        _ => None,
+    }
+}
+
+fn find_exec_insertion(
+    src: &str,
+    stmts: &[Stmt],
+    node_span: SourceSpan,
+    pin_name: &str,
+) -> Result<Option<ExecInsertion>, String> {
+    for stmt in stmts {
+        if exec_branch_node_matches(stmt, node_span) {
+            let body = matching_exec_branch(stmt, node_span, pin_name).ok_or_else(|| {
+                edit_error(
+                    "ambiguous",
+                    "Canvas convergence pin has no source-backed branch body",
+                )
+            })?;
+            let owner = branch_source_span(src, stmt);
+            return branch_exec_insertion(src, body, owner).map(Some);
+        }
+        let source = stmt_source_span(stmt);
+        let anchor: SourceSpan = stmt_canvas_anchor(stmt).into();
+        if same_span(source, node_span) || same_span(anchor, node_span) {
+            if execution_terminates(stmt) {
+                return Err(edit_error(
+                    "ambiguous",
+                    "Canvas cannot add a convergence step after an early exit",
+                ));
+            }
+            let full = stmt_text_span(src, stmt);
+            return Ok(Some(ExecInsertion {
+                offset: full.end,
+                indent: indentation_at(src, full.start),
+                owner: full,
+                branch: false,
+            }));
+        }
+        if let Some(found) = find_exec_insertion_in_children(src, stmt, node_span, pin_name)? {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
+}
+
+fn exec_branch_node_matches(stmt: &Stmt, node_span: SourceSpan) -> bool {
+    match stmt {
+        Stmt::Switch { arms, span, .. } | Stmt::ComptimeSwitch { arms, span, .. } => {
+            same_span((*span).into(), node_span)
+                || arms
+                    .iter()
+                    .any(|arm| same_span(arm.cond.span().into(), node_span))
+        }
+        _ => false,
+    }
+}
+
+fn branch_source_span(src: &str, stmt: &Stmt) -> SourceSpan {
+    let line = line_start(src, stmt.span().start);
+    let keyword = src[line..]
+        .find("if")
+        .map(|offset| line + offset)
+        .unwrap_or(stmt.span().start);
+    let Some(open_rel) = src[keyword..].find('{') else {
+        return stmt.span().into();
+    };
+    let open = keyword + open_rel;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, ch) in src[open..].char_indices() {
+        if let Some(quoted) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quoted {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            quote = Some(ch);
+        } else if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return SourceSpan {
+                    start: keyword,
+                    end: open + offset + ch.len_utf8(),
+                };
+            }
+        }
+    }
+    stmt.span().into()
+}
+
+fn find_exec_insertion_in_children(
+    src: &str,
+    stmt: &Stmt,
+    node_span: SourceSpan,
+    pin_name: &str,
+) -> Result<Option<ExecInsertion>, String> {
+    match stmt {
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::CountedLoop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::Caps { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => {
+            find_exec_insertion(src, body, node_span, pin_name)
+        }
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => {
+            for arm in arms {
+                if let Some(found) = find_exec_insertion(src, &arm.body, node_span, pin_name)? {
+                    return Ok(Some(found));
+                }
+            }
+            else_body
+                .as_deref()
+                .map(|body| find_exec_insertion(src, body, node_span, pin_name))
+                .transpose()
+                .map(|found| found.flatten())
+        }
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            if let Some(found) = find_exec_insertion(src, then_body, node_span, pin_name)? {
+                return Ok(Some(found));
+            }
+            else_body
+                .as_deref()
+                .map(|body| find_exec_insertion(src, body, node_span, pin_name))
+                .transpose()
+                .map(|found| found.flatten())
+        }
+        _ => Ok(None),
+    }
+}
+
+fn matching_exec_branch<'a>(
+    stmt: &'a Stmt,
+    node_span: SourceSpan,
+    pin_name: &str,
+) -> Option<&'a [Stmt]> {
+    let (arms, else_body, span) = match stmt {
+        Stmt::Switch {
+            arms,
+            else_body,
+            span,
+            ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms,
+            else_body,
+            span,
+            ..
+        } => (arms, else_body, *span),
+        _ => return None,
+    };
+    let node_matches = same_span(span.into(), node_span)
+        || arms
+            .iter()
+            .any(|arm| same_span(arm.cond.span().into(), node_span));
+    if !node_matches {
+        return None;
+    }
+    if pin_name == "else" {
+        return else_body.as_deref();
+    }
+    if pin_name == "then" {
+        return arms.first().map(|arm| arm.body.as_slice());
+    }
+    let index = pin_name.strip_prefix("arm")?.parse::<usize>().ok()?;
+    arms.get(index.checked_sub(1)?).map(|arm| arm.body.as_slice())
+}
+
+fn branch_exec_insertion(
+    src: &str,
+    body: &[Stmt],
+    owner: SourceSpan,
+) -> Result<ExecInsertion, String> {
+    let Some(last) = body.last() else {
+        return Err(edit_error(
+            "ambiguous",
+            "Canvas needs a non-empty source-backed branch body to converge",
+        ));
+    };
+    if execution_terminates(last) || matches!(
+        last,
+        Stmt::While { .. }
+            | Stmt::For { .. }
+            | Stmt::Loop { .. }
+            | Stmt::CountedLoop { .. }
+            | Stmt::Switch { .. }
+            | Stmt::ComptimeSwitch { .. }
+            | Stmt::ComptimeIf { .. }
+    ) {
+        return Err(edit_error(
+            "ambiguous",
+            "Canvas cannot prove a convergence path after this branch body",
+        ));
+    }
+    let full = stmt_text_span(src, last);
+    if line_start(src, last.span().start) != line_start(src, full.start)
+        || full.end > owner.end
+    {
+        return Err(edit_error(
+            "ambiguous",
+            "Canvas needs a multiline source-backed branch body to converge",
+        ));
+    }
+    Ok(ExecInsertion {
+        offset: full.end,
+        indent: indentation_at(src, full.start),
+        owner,
+        branch: true,
+    })
+}
+
+fn execution_terminates(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::Return(..)
+            | Stmt::Break(..)
+            | Stmt::BreakValue(..)
+            | Stmt::BreakLabel(..)
+            | Stmt::BreakLabelValue(..)
+            | Stmt::Continue(..)
+            | Stmt::ContinueLabel(..)
+    )
+}
+
+fn exact_body_helper_name(
+    bundle: &AST::ProgramBundle,
+    src: &str,
+    target: &str,
+    current: &str,
+) -> Option<String> {
+    fn in_items(
+        items: &[Item],
+        src: &str,
+        target: &str,
+        current: &str,
+    ) -> Option<String> {
+        for item in items {
+            match item {
+                Item::Func(func) if func.name != current && func.body.len() == 1 => {
+                    if let Stmt::Expr(expr) = &func.body[0] {
+                        if snippet(src, expr.span()) == target {
+                            return Some(func.name.clone());
+                        }
+                    }
+                }
+                Item::Struct(structure) => {
+                    if let Some(found) = structure.methods.iter().find_map(|method| {
+                        if method.name == current || method.body.len() != 1 {
+                            return None;
+                        }
+                        match &method.body[0] {
+                            Stmt::Expr(expr) if snippet(src, expr.span()) == target => {
+                                Some(method.name.clone())
+                            }
+                            _ => None,
+                        }
+                    }) {
+                        return Some(found);
+                    }
+                }
+                Item::Impl(implementation) => {
+                    if let Some(found) = implementation.methods.iter().find_map(|method| {
+                        if method.name == current || method.body.len() != 1 {
+                            return None;
+                        }
+                        match &method.body[0] {
+                            Stmt::Expr(expr) if snippet(src, expr.span()) == target => {
+                                Some(method.name.clone())
+                            }
+                            _ => None,
+                        }
+                    }) {
+                        return Some(found);
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        if let Some(found) = in_items(body, src, target, current) {
+                            return Some(found);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+    bundle.modules.iter().find_map(|module| {
+        in_items(&module.items, src, target, current)
+    })
+}
+
+fn function_name_exists(bundle: &AST::ProgramBundle, name: &str) -> bool {
+    fn in_items(items: &[Item], name: &str) -> bool {
+        items.iter().any(|item| match item {
+            Item::Func(func) => func.name == name,
+            Item::Struct(structure) => structure.methods.iter().any(|method| method.name == name),
+            Item::Impl(implementation) => implementation.methods.iter().any(|method| method.name == name),
+            Item::CodeModule(module) => module
+                .body
+                .as_deref()
+                .is_some_and(|body| in_items(body, name)),
+            _ => false,
+        })
+    }
+    bundle.modules.iter().any(|module| in_items(&module.items, name))
+}
+
 pub(super) fn apply_add_pattern_arm(
     path: &Path,
     src: &str,
@@ -1698,7 +2342,8 @@ fn find_pattern_target<'a>(
                     });
                 if classic {
                     if let Some(arm) = arms.first() {
-                        if same_span(arm.cond.span().into(), node_span)
+                        if (same_span(arm.cond.span().into(), node_span)
+                            || same_span((*span).into(), node_span))
                             && matches!(arm.cond, Expr::PatternTest { .. })
                         {
                             *out = Some(PatternTarget::Classic {

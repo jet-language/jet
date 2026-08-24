@@ -24,6 +24,7 @@ const MAX_DEBUG_TRACE_BYTES: usize = 32 * 1024;
 const MAX_DEBUG_LOCAL_VALUES: usize = 64;
 const MAX_DEBUG_VALUE_BYTES: usize = 4 * 1024;
 const MAX_DEBUG_CALL_STACK_BYTES: usize = 16 * 1024;
+const MAX_DEBUG_WIRE_PATH: usize = 64;
 
 /// The only debugger engines a Canvas session may claim. The wire names are
 /// deliberately explicit: a client must never mistake a native compiled run
@@ -97,6 +98,7 @@ pub(crate) struct DebugExecution {
     pub(crate) id: String,
     pub(crate) status: jet_debug::SessionStatus,
     pub(crate) transcript: String,
+    pub(crate) snapshot: Option<jet_debug::DebugSnapshot>,
     pub(crate) tier: DebugTier,
 }
 
@@ -266,6 +268,7 @@ impl DebugSessions {
             id,
             status: result.status,
             transcript: result.transcript,
+            snapshot: result.snapshot,
             tier: session_tier,
         })
     }
@@ -520,6 +523,7 @@ pub(super) fn debug_ok(
     src: &str,
     graph_json: &str,
     transcript: &str,
+    snapshot: Option<&jet_debug::DebugSnapshot>,
     status: jet_debug::SessionStatus,
     session_id: &str,
     tier: DebugTier,
@@ -529,7 +533,9 @@ pub(super) fn debug_ok(
     watches: &[String],
 ) -> String {
     let active_line = match status {
-        jet_debug::SessionStatus::Running => active_line_from_transcript(transcript),
+        jet_debug::SessionStatus::Running => snapshot
+            .map(|snapshot| snapshot.line)
+            .or_else(|| active_line_from_transcript(transcript)),
         jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => None,
     };
     let active_span = active_line
@@ -538,21 +544,34 @@ pub(super) fn debug_ok(
     let active_node = active_line
         .and_then(|_| record_id_for_span(graph_json, "node_id", active_span))
         .unwrap_or_default();
-    let active_wire = active_line
-        .and_then(|_| record_id_for_span(graph_json, "wire_id", active_span))
-        .unwrap_or_default();
+    let (wire_path, wire_path_truncated) = active_line
+        .map(|_| record_ids_for_span(graph_json, "wire_id", active_span))
+        .unwrap_or_else(|| (Vec::new(), false));
+    let active_wire = wire_path.first().cloned().unwrap_or_default();
     let active_graph = graph_id_from_node_id(&active_node).unwrap_or_default();
     let overlay = match status {
         jet_debug::SessionStatus::Running => "running",
         jet_debug::SessionStatus::Finished | jet_debug::SessionStatus::Failed => "finished",
     };
+    let runtime_state = match status {
+        jet_debug::SessionStatus::Running if snapshot.is_some() => "live",
+        jet_debug::SessionStatus::Running => "unavailable",
+        jet_debug::SessionStatus::Finished => "finished",
+        jet_debug::SessionStatus::Failed => "failed",
+    };
     let revision = source_revision(src);
-    let (locals, locals_truncated) = locals_json(transcript);
-    let (watch_values, watches_truncated) = watches_json(transcript, watches);
-    let (call_stack, call_stack_truncated) = call_stack_json(transcript);
+    let (locals, locals_truncated) = snapshot
+        .map(snapshot_locals_json)
+        .unwrap_or_else(|| locals_json(transcript));
+    let (watch_values, watches_truncated) = snapshot
+        .map(|snapshot| snapshot_watches_json(snapshot, watches))
+        .unwrap_or_else(|| watches_json(transcript, watches));
+    let (call_stack, call_stack_truncated) = snapshot
+        .map(|snapshot| snapshot_call_stack_json(snapshot, source_id))
+        .unwrap_or_else(|| call_stack_json(transcript));
     let (trace, trace_truncated) = trace_json(transcript);
     format!(
-        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":{},\"persistence\":\"local-source-span\",\"source_id\":{},\"revision\":{}}},\"overlay\":{{\"debug_overlay\":{},\"source_id\":{},\"revision\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}],\"limits\":{{\"locals_truncated\":{},\"watches_truncated\":{},\"call_stack_truncated\":{},\"trace_truncated\":{}}}}}}}",
+        "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{},\"ok\":true,\"source_id\":{},\"revision\":{},\"session\":{{\"id\":{},\"state\":{},\"tier\":{},\"persistence\":\"local-source-span\",\"source_id\":{},\"revision\":{}}},\"overlay\":{{\"debug_overlay\":{},\"runtime_state\":{},\"source_id\":{},\"revision\":{},\"active_line\":{},\"active_span\":{},\"active_graph_id\":{},\"active_node_id\":{},\"active_wire_id\":{},\"wire_path\":[{}],\"breakpoints\":[{}],\"locals\":[{}],\"watches\":[{}],\"call_stack\":[{}],\"trace\":[{}],\"limits\":{{\"locals_truncated\":{},\"watches_truncated\":{},\"call_stack_truncated\":{},\"trace_truncated\":{},\"wire_path_truncated\":{}}}}}}}",
         DEBUG_SCHEMA_VERSION,
         json_str(source_id),
         json_str(&revision),
@@ -562,6 +581,7 @@ pub(super) fn debug_ok(
         json_str(source_id),
         json_str(&revision),
         json_str(overlay),
+        json_str(runtime_state),
         json_str(source_id),
         json_str(&revision),
         active_line
@@ -571,6 +591,11 @@ pub(super) fn debug_ok(
         json_str(&active_graph),
         json_str(&active_node),
         json_str(&active_wire),
+        wire_path
+            .iter()
+            .map(|wire| json_str(wire))
+            .collect::<Vec<_>>()
+            .join(","),
         breakpoint_json(src, breakpoint_lines, stale_breakpoints),
         locals,
         watch_values,
@@ -579,7 +604,8 @@ pub(super) fn debug_ok(
         if locals_truncated { "true" } else { "false" },
         if watches_truncated { "true" } else { "false" },
         if call_stack_truncated { "true" } else { "false" },
-        if trace_truncated { "true" } else { "false" }
+        if trace_truncated { "true" } else { "false" },
+        if wire_path_truncated { "true" } else { "false" }
     )
 }
 
@@ -716,8 +742,15 @@ fn anchor_span(src: &str, anchor: &str) -> Option<SourceSpan> {
 }
 
 fn record_id_for_span(json: &str, id_key: &str, active: SourceSpan) -> Option<String> {
+    let (mut matches, _) = record_ids_for_span(json, id_key, active);
+    matches
+        .drain(..)
+        .min_by_key(|id| record_width_for_span(json, id_key, id).unwrap_or(usize::MAX))
+}
+
+fn record_ids_for_span(json: &str, id_key: &str, active: SourceSpan) -> (Vec<String>, bool) {
     let needle = format!("\"{id_key}\":");
-    let mut best: Option<(usize, String)> = None;
+    let mut matches = Vec::new();
     for chunk in json.split(&needle).skip(1) {
         let Some((id, _)) = parse_json_string(chunk.trim_start()) else {
             continue;
@@ -740,13 +773,35 @@ fn record_id_for_span(json: &str, id_key: &str, active: SourceSpan) -> Option<St
             continue;
         };
         if span_overlaps(SourceSpan { start, end }, active) {
-            let width = end.saturating_sub(start);
-            if best.as_ref().map(|(w, _)| width < *w).unwrap_or(true) {
-                best = Some((width, id));
+            if !matches.iter().any(|existing| existing == &id) {
+                matches.push(id);
+                if matches.len() >= MAX_DEBUG_WIRE_PATH {
+                    return (matches, true);
+                }
             }
         }
     }
-    best.map(|(_, id)| id)
+    (matches, false)
+}
+
+fn record_width_for_span(json: &str, id_key: &str, wanted: &str) -> Option<usize> {
+    let needle = format!("\"{id_key}\":");
+    for chunk in json.split(&needle).skip(1) {
+        let Some((id, _)) = parse_json_string(chunk.trim_start()) else {
+            continue;
+        };
+        if id != wanted {
+            continue;
+        }
+        let pos = chunk.find("\"source_span\"")?;
+        let rest = &chunk[pos + "\"source_span\"".len()..];
+        let colon = rest.find(':')?;
+        let value = rest[colon + 1..].trim_start();
+        let start = json_usize_field(value, "start")?;
+        let end = json_usize_field(value, "end")?;
+        return Some(end.saturating_sub(start));
+    }
+    None
 }
 
 pub(super) fn span_overlaps(a: SourceSpan, b: SourceSpan) -> bool {
@@ -848,6 +903,82 @@ fn parse_assignments(text: &str) -> (String, bool) {
         .collect::<Vec<_>>()
         .join(",");
     (values, truncated)
+}
+
+fn snapshot_locals_json(snapshot: &jet_debug::DebugSnapshot) -> (String, bool) {
+    let mut truncated = false;
+    let values = snapshot
+        .locals
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            if index >= MAX_DEBUG_LOCAL_VALUES {
+                truncated = true;
+                return None;
+            }
+            let (type_name, type_truncated) = bounded_text(&value.type_name, MAX_DEBUG_VALUE_BYTES);
+            let (rendered, value_truncated) = bounded_text(&value.value, MAX_DEBUG_VALUE_BYTES);
+            truncated |= type_truncated || value_truncated;
+            Some(format!(
+                "{{\"name\":{},\"type\":{},\"value\":{}}}",
+                json_str(&value.name),
+                json_str(&type_name),
+                json_str(&rendered)
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    (values, truncated)
+}
+
+fn snapshot_watches_json(
+    snapshot: &jet_debug::DebugSnapshot,
+    watches: &[String],
+) -> (String, bool) {
+    let mut truncated = false;
+    let values = watches
+        .iter()
+        .filter_map(|watch| {
+            let value = snapshot.locals.iter().find(|value| value.name == *watch)?;
+            let (type_name, type_truncated) = bounded_text(&value.type_name, MAX_DEBUG_VALUE_BYTES);
+            let (rendered, value_truncated) = bounded_text(&value.value, MAX_DEBUG_VALUE_BYTES);
+            truncated |= type_truncated || value_truncated;
+            Some(format!(
+                "{{\"name\":{},\"type\":{},\"value\":{},\"state\":\"ok\"}}",
+                json_str(watch),
+                json_str(&type_name),
+                json_str(&rendered)
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    (values, truncated)
+}
+
+fn snapshot_call_stack_json(
+    snapshot: &jet_debug::DebugSnapshot,
+    source_id: &str,
+) -> (String, bool) {
+    let mut entries = Vec::new();
+    let mut bytes = 0;
+    let mut truncated = false;
+    for (index, frame) in snapshot.call_stack.iter().rev().enumerate() {
+        if index >= MAX_DEBUG_CALL_STACK {
+            truncated = true;
+            break;
+        }
+        let entry = json_str(&format!(
+            "#{}  {}()  at {}:{}",
+            index, frame.function, source_id, frame.line
+        ));
+        if bytes + entry.len() > MAX_DEBUG_CALL_STACK_BYTES {
+            truncated = true;
+            break;
+        }
+        bytes += entry.len();
+        entries.push(entry);
+    }
+    (entries.join(","), truncated)
 }
 
 fn call_stack_json(transcript: &str) -> (String, bool) {
@@ -978,6 +1109,7 @@ mod tests {
             src,
             &graph,
             transcript,
+            None,
             jet_debug::SessionStatus::Running,
             "test-session",
             DebugTier::Interpreter,
@@ -1005,6 +1137,58 @@ mod tests {
     }
 
     #[test]
+    fn runtime_snapshot_projects_typed_values_and_wire_path() {
+        let src = "fn run() {\n    total := 1\n    print(total)\n}\n";
+        let active = line_span(src, 3);
+        let graph = format!(
+            "{{\"node_id\":\"node:print\",\"source_span\":{},\"wire_id\":\"wire:input\",\"source_span\":{}}},{{\"wire_id\":\"wire:output\",\"source_span\":{}}}",
+            span_json(active),
+            span_json(active),
+            span_json(active),
+        );
+        let snapshot = jet_debug::DebugSnapshot {
+            function: "run".to_string(),
+            line: 3,
+            locals: vec![jet_debug::ValueSnapshot {
+                name: "total".to_string(),
+                type_name: "Int".to_string(),
+                value: "1".to_string(),
+            }],
+            call_stack: vec![jet_debug::FrameSnapshot {
+                function: "run".to_string(),
+                line: 3,
+            }],
+        };
+        let out = debug_ok(
+            src,
+            &graph,
+            "program finished\n",
+            Some(&snapshot),
+            jet_debug::SessionStatus::Running,
+            "test-session",
+            DebugTier::Interpreter,
+            "main.jet",
+            &[],
+            &[],
+            &["total".to_string()],
+        );
+        for field in [
+            "\"runtime_state\":\"live\"",
+            "\"active_line\":3",
+            "\"type\":\"Int\"",
+            "\"value\":\"1\"",
+            "\"name\":\"total\"",
+            "\"run()\"",
+            "\"wire_path\":[\"wire:input\",\"wire:output\"]",
+        ] {
+            assert!(
+                out.contains(field),
+                "runtime snapshot missing {field}: {out}"
+            );
+        }
+    }
+
+    #[test]
     fn overlay_marks_bounded_debug_values() {
         let src = "fn run() {\n    print(\"ok\")\n}\n";
         let huge = "x".repeat(MAX_DEBUG_VALUE_BYTES + 128);
@@ -1012,6 +1196,7 @@ mod tests {
             src,
             "{}",
             &format!("locals: value = {huge}\nvalue = {huge}"),
+            None,
             jet_debug::SessionStatus::Finished,
             "test-session",
             DebugTier::Interpreter,

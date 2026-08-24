@@ -59,6 +59,31 @@ struct Frame {
     line: usize,
 }
 
+/// One value captured at a real paused source statement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValueSnapshot {
+    pub name: String,
+    pub type_name: String,
+    pub value: String,
+}
+
+/// One Jet frame captured at a real paused source statement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FrameSnapshot {
+    pub function: String,
+    pub line: usize,
+}
+
+/// Runtime-owned debugger state for the current paused interpreter frame.
+/// Canvas projects this instead of guessing from terminal text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DebugSnapshot {
+    pub function: String,
+    pub line: usize,
+    pub locals: Vec<ValueSnapshot>,
+    pub call_stack: Vec<FrameSnapshot>,
+}
+
 /// What the user asked the debugger to do next, set by a `(jet)` command and
 /// read by the hook to decide where to stop.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -147,6 +172,9 @@ struct Debugger {
     /// Set when Canvas input ends at a live stop. This is an internal unwind
     /// signal; the paused transcript is not a diagnostic.
     paused: bool,
+    /// Structured state captured at the last real stop. This is separate from
+    /// the human transcript so program output cannot fabricate liveness.
+    snapshot: Option<DebugSnapshot>,
 }
 
 impl Debugger {
@@ -163,6 +191,7 @@ impl Debugger {
             started: false,
             quit: false,
             paused: false,
+            snapshot: None,
         }
     }
 
@@ -424,6 +453,19 @@ impl DebugHook for Debugger {
             return Ok(());
         }
 
+        self.snapshot = Some(DebugSnapshot {
+            function: func.to_string(),
+            line,
+            locals: snapshot_values(scope),
+            call_stack: self
+                .stack
+                .iter()
+                .map(|frame| FrameSnapshot {
+                    function: frame.func.clone(),
+                    line: frame.line,
+                })
+                .collect(),
+        });
         self.show_stop(line, scope);
         self.prompt_loop(line, depth, scope);
         if self.paused {
@@ -465,10 +507,26 @@ fn render_locals(scope: &HashMap<String, CtValue>) -> String {
     format!("locals:  {}", body.join("   "))
 }
 
+fn snapshot_values(scope: &HashMap<String, CtValue>) -> Vec<ValueSnapshot> {
+    let mut names: Vec<&String> = scope.keys().collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| {
+            let value = &scope[name];
+            ValueSnapshot {
+                name: name.clone(),
+                type_name: value.jet_type().name(),
+                value: value.jet_show(),
+            }
+        })
+        .collect()
+}
+
 /// Load + check `file`, then run it under the debugger driving `io`. Returns
 /// the process exit code and the captured transcript (empty in interactive
 /// mode, where output already went to the terminal).
-fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool) {
+fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool, Option<DebugSnapshot>) {
     let scripted = io.is_scripted();
     let checked = jet_driver::run_compiler_work(|| {
         let mut bundle = crate::Loader::load_entry(file).map_err(|diags| (None, diags))?;
@@ -495,11 +553,11 @@ fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool) {
                     eprintln!("{}", line);
                 }
             }
-            return (ExitCodes::USER_ERROR, io.into_output(), false);
+            return (ExitCodes::USER_ERROR, io.into_output(), false, None);
         }
         Err((Some(src), errors)) => {
             emit_diags(&mut io, file, &src, &errors);
-            return (ExitCodes::USER_ERROR, io.into_output(), false);
+            return (ExitCodes::USER_ERROR, io.into_output(), false, None);
         }
     };
     let src = bundle.modules[bundle.entry].source.clone();
@@ -508,7 +566,7 @@ fn run_with_io(file: &str, mut io: IO) -> (i32, String, bool) {
     // points at the real build (D-DBG3 step 2, the native backend follow-on).
     if let Some(b) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
         emit_diags(&mut io, file, &src, &[b]);
-        return (ExitCodes::USER_ERROR, io.into_output(), false);
+        return (ExitCodes::USER_ERROR, io.into_output(), false, None);
     }
     run_checked(&bundle, file, io)
 }
@@ -523,7 +581,11 @@ fn emit_diags(io: &mut IO, file: &str, src: &str, diags: &[Diagnostic]) {
 
 /// Drive the interpreter with the debugger hook attached, then flush the
 /// program's own stdout/stderr around the debugger's `(jet)` session.
-fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i32, String, bool) {
+fn run_checked(
+    bundle: &crate::AST::ProgramBundle,
+    file: &str,
+    mut io: IO,
+) -> (i32, String, bool, Option<DebugSnapshot>) {
     let funcs = collect_funcs(bundle);
     let main = match funcs.get("run") {
         Some(f) => *f,
@@ -539,7 +601,7 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
             );
             let src = bundle.modules[bundle.entry].source.clone();
             emit_diags(&mut io, file, &src, &[diag]);
-            return (ExitCodes::USER_ERROR, io.into_output(), false);
+            return (ExitCodes::USER_ERROR, io.into_output(), false, None);
         }
     };
     let base_dir = &bundle.project_root;
@@ -568,13 +630,13 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
             dbg.io.push_line(sink.stderr.trim_end_matches('\n'));
         }
         if dbg.paused {
-            return (ExitCodes::OK, dbg.io.into_output(), true);
+            return (ExitCodes::OK, dbg.io.into_output(), true, dbg.snapshot);
         }
         match &result {
             Ok(()) => dbg.io.push_line("program finished"),
             Err(d) => dbg.io.push_line(&format!("[{}] {}", d.code, d.what)),
         }
-        (code, dbg.io.into_output(), false)
+        (code, dbg.io.into_output(), false, dbg.snapshot)
     } else {
         print!("{}", sink.stdout);
         eprint!("{}", sink.stderr);
@@ -582,7 +644,7 @@ fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i
             Ok(()) => println!("program finished"),
             Err(d) => eprintln!("[{}] {}", d.code, d.what),
         }
-        (code, String::new(), false)
+        (code, String::new(), false, dbg.snapshot)
     }
 }
 
@@ -604,7 +666,7 @@ fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::
 /// and steps the program with a live `(jet)` prompt on stdin/stdout. Returns
 /// the process exit code.
 pub fn run_debug(file: &str) -> i32 {
-    let (code, _captured, _paused) = run_with_io(file, IO::Interactive);
+    let (code, _captured, _paused, _snapshot) = run_with_io(file, IO::Interactive);
     code
 }
 
@@ -621,6 +683,7 @@ pub enum SessionStatus {
 pub struct SessionResult {
     pub status: SessionStatus,
     pub transcript: String,
+    pub snapshot: Option<DebugSnapshot>,
 }
 
 /// Scripted debug session with a machine-readable outcome.
@@ -633,13 +696,17 @@ pub fn run_session_result(file: &str, inputs: &[&str]) -> SessionResult {
             out: String::new(),
             pause_on_input_end: false,
         };
-        let (code, transcript, _paused) = run_with_io(file, io);
+        let (code, transcript, _paused, snapshot) = run_with_io(file, io);
         let status = if code == ExitCodes::OK {
             SessionStatus::Finished
         } else {
             SessionStatus::Failed
         };
-        SessionResult { status, transcript }
+        SessionResult {
+            status,
+            transcript,
+            snapshot,
+        }
     })
 }
 
@@ -656,7 +723,7 @@ pub fn run_session_result_paused(file: &str, inputs: &[&str]) -> SessionResult {
             out: String::new(),
             pause_on_input_end: true,
         };
-        let (code, transcript, paused) = run_with_io(file, io);
+        let (code, transcript, paused, snapshot) = run_with_io(file, io);
         let status = if paused {
             SessionStatus::Running
         } else if code == ExitCodes::OK {
@@ -664,7 +731,11 @@ pub fn run_session_result_paused(file: &str, inputs: &[&str]) -> SessionResult {
         } else {
             SessionStatus::Failed
         };
-        SessionResult { status, transcript }
+        SessionResult {
+            status,
+            transcript,
+            snapshot,
+        }
     })
 }
 
@@ -785,7 +856,12 @@ fn run_native_session_result_with_mode(
         } else {
             SessionStatus::Failed
         };
-        SessionResult { status, transcript }
+        let snapshot = Native::snapshot_from_transcript(&transcript);
+        SessionResult {
+            status,
+            transcript,
+            snapshot,
+        }
     })
 }
 

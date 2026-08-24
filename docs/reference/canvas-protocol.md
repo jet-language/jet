@@ -202,8 +202,13 @@ Loop execution outputs use `role:"loop_body"` and `role:"loop_done"` with
 names `body` and `done`. Early-return outputs use `role:"early_return"` and
 name `return`. These pins use the owning source node span, so rewire and
 preview actions retain source provenance. A second compatible execution drop
-is a client preview. It does not add a semantic wire or write source until a
-checked convergence transaction exists.
+opens a no-write convergence preview. The preview keeps the incoming and target
+pin identities plus their source spans, lets the user name an extracted helper,
+and applies only through `replace_source` with
+`source_edit:"exec_convergence"`. The server resolves the checked AST, formats
+the ordinary Jet helper/calls, sema-checks the complete candidate, and writes
+only that candidate. A structured join after a branch remains one downstream
+source step; it is not extracted.
 
 Shared Canvas comment hints persist as ordinary source comments:
 
@@ -271,10 +276,15 @@ Request fields:
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false}}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","runtime_state":"live","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","wire_path":[],"breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","type":"Int","value":"6"}],"watches":[],"call_stack":["#0  run()  at main.jet:12"],"trace":["breakpoint hit  main.jet:12  in run()"],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false,"wire_path_truncated":false}}}
 ```
 
-The first request creates a live source-level session. A later request sends
+The first request creates a live source-level session. runtime_state:"live"
+means the values, stack, active node, and wire path came from the current
+paused runtime snapshot. finished values are historical only; Canvas labels
+them as such and does not pulse the graph. A disconnected or stale session
+clears its cached overlay before showing the disconnected/stale state. A later
+request sends
 the returned `session_id` and one or more commands to continue the same
 source/revision session. The active line, node, wire, locals, watches, call
 stack, and trace are all projections of that one stop. A finished or stopped
@@ -346,10 +356,11 @@ Current transactions:
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
 | `replace_source` | `source` | Replaces the file with exact prior/future Jet source after formatting and front-end validation. Used by local undo/redo. |
-| `insert_branch` | `graph_id` | Inserts an ordinary checked `if true { ... } else { ... }` branch skeleton. |
-| `insert_switch` | `graph_id` | Inserts an ordinary checked `if 0 == { ... }` dispatch skeleton. |
-| `insert_loop` | `graph_id` | Inserts an ordinary `loop { break }` skeleton. |
-| `insert_fallible_rail` | `graph_id` | Inserts an ordinary fallible-result binding plus `?` propagation skeleton; front-end validation rejects non-fallible contexts. |
+| `replace_source` with `source_edit:"exec_convergence"` | `graph_id`, `from_pin_name`, `from_start`, `from_end`, `target_start`, `target_end`, `strategy` (`extract`/`helper`/`duplicate`), `function`, optional `helper_name` | Resolves one source-backed incoming convergence from the checked AST. `extract` creates the named helper; `helper` requires an exact existing helper body; `duplicate` copies the target statement with an explicit warning. Formatting, sema validation, stale-span refusal, and the atomic write happen before the ordinary edit response. |
+| `insert_branch` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary checked `if true { ... } else { ... }` branch skeleton. A saved exec input inserts before its owning source statement; a saved exec output inserts after it. A stale or unknown pin is refused without writing source. |
+| `insert_switch` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary checked `if 0 == { ... }` dispatch skeleton at the saved exec target, or at the graph body when no target is supplied. |
+| `insert_loop` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary `loop { break }` skeleton at the saved exec target, or at the graph body when no target is supplied. |
+| `insert_fallible_rail` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary fallible-result binding plus `?` propagation skeleton at the saved exec target, or at the graph body when no target is supplied; front-end validation rejects non-fallible contexts. |
 | `create_comment_region` | `graph_id`, `start`, `end`, `title`, `color`, `alpha`, `bounds` | Inserts an ordinary `// canvas:comment ...` source hint after the anchored source line. |
 | `edit_comment_region` | `region_id`, optional `title`, `color`, `alpha`, `bounds` | Rewrites one Canvas comment hint line. |
 | `move_comment_region` | `region_id`, `bounds` | Alias of `edit_comment_region` for geometry changes. |
@@ -370,7 +381,9 @@ Pin-drag insertion is still source truth: the transaction writes either an
 ordinary call statement (`wire_expr` becomes a call argument) or an ordinary call
 expression in the target input (`wire_inline_expr_id`). The returned graph then
 projects the real wire from source; Canvas does not persist semantic edges in a
-side graph asset.
+side graph asset. Convergence uses the same endpoint and records the resulting
+source in the normal undo stack; rejected or stale candidates leave the
+preview and source recoverable.
 
 Control wires are source-anchored. Each wire still has `source_span`; control
 wires also carry `from_source_span` and `to_source_span`, the source spans of
@@ -460,6 +473,9 @@ The `core_catalog` query is browse-only. Core entries in the actions palette are
 source-backed insert candidates when `available:true`: they carry module path,
 signature, `pure`, `insert_callee`, `insert_op:"insert_call"`, source document,
 ordinary source-edit authority, and `writes:"source_transaction_only"`. Rows with
+`callee` and `insert_callee` carry the checked source spelling, including an
+import alias; the client must use `insert_callee` and must not derive a fallback
+from the display title or ordinary `callee` field.
 `available:false` stay visible. Entries with `stageable:true` and
 `stage_reason_code` `needs_canvas_defaults` or `method_only` remain active and
 place a dashed local node; the first compatible wire runs the existing checked

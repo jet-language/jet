@@ -223,7 +223,8 @@
   function appendFieldControl(row, field, state, group) {
     const source = field.source !== undefined ? field.source : field.value;
     let control;
-    if (field.editable) {
+    const editable = field.editable && !!state && !!group;
+    if (editable) {
       if (field.kind === "enum" || field.kind === "reference") {
         control = document.createElement("select");
         for (const option of field.options || []) {
@@ -386,7 +387,8 @@
       const row = document.createElement("div");
       row.className = "pin-row";
       appendText(row, "b", "", item && item.name || "frame");
-      appendText(row, "span", "tag", item && item.value || String(item));
+      if (item && item.type) appendText(row, "code", "tag", item.type);
+      appendText(row, "span", "tag", item && item.value !== undefined ? item.value : String(item));
       fragment.appendChild(row);
     }
     return fragment;
@@ -676,20 +678,57 @@
     return "";
   }
 
-  function nestedTypePart(type, index, mapValue) {
+  function nestedTypeBody(type, open, close) {
     const text = String(type || "").trim().replace(/\?$/, "");
-    const match = text.match(/^\[(.*)\]$/);
-    if (!match) return "";
-    const body = match[1];
-    const colon = topLevelSourceColon(body, 0, body.length);
-    if (colon >= 0) return body.slice(mapValue ? colon + 1 : 0, mapValue ? body.length : colon).trim();
-    return index === undefined ? body.trim() : body.trim();
+    if (text[0] !== open || text[text.length - 1] !== close || matchingSourceDelimiter(text, 0, text.length) !== text.length - 1) return null;
+    return text.slice(1, -1).trim();
   }
 
-  function nestedValueType(source, expectedType) {
-    const expected = String(expectedType || "").trim();
+  function nestedTypePart(type, index, mapValue, memberName) {
+    const text = String(type || "").trim().replace(/\?$/, "");
+    const collectionBody = nestedTypeBody(text, "[", "]");
+    if (collectionBody !== null) {
+      const colon = topLevelSourceColon(collectionBody, 0, collectionBody.length);
+      const part = colon >= 0
+        ? collectionBody.slice(mapValue ? colon + 1 : 0, mapValue ? collectionBody.length : colon)
+        : collectionBody;
+      return part.trim().replace(/#\d+$/, "").trim();
+    }
+    const tupleBody = nestedTypeBody(text, "(", ")");
+    if (tupleBody === null) return "";
+    const entries = topLevelSourceRanges(tupleBody, 0, tupleBody.length);
+    const entry = memberName
+      ? entries.find((candidate) => {
+        const colon = topLevelSourceColon(tupleBody, candidate.start, candidate.end);
+        return colon >= 0 && tupleBody.slice(candidate.start, colon).trim() === memberName;
+      })
+      : entries[index];
+    if (!entry) return "";
+    const colon = topLevelSourceColon(tupleBody, entry.start, entry.end);
+    return (colon >= 0 ? tupleBody.slice(colon + 1, entry.end) : tupleBody.slice(entry.start, entry.end)).trim();
+  }
+
+  function normalizedNestedType(type) {
+    return String(type || "").trim().replace(/\?$/, "").replace(/^([A-Za-z][A-Za-z0-9_]*)#\d+$/, "$1");
+  }
+
+  function inferredNestedValueType(source, graph) {
+    const text = String(source || "").trim();
+    const variantsByType = latestDoc && latestDoc.facts && latestDoc.facts.enum_variants || {};
+    for (const [type, variants] of Object.entries(variantsByType)) {
+      if ((variants || []).some((variant) => String(variant && variant.source || "") === text)) return type;
+    }
+    if (typeof graphVariables === "function") {
+      const reference = graphVariables(graph).find((candidate) => candidate.name === text);
+      if (reference) return reference.type || "Value";
+    }
+    return "";
+  }
+
+  function nestedValueType(source, expectedType, graph) {
+    const expected = normalizedNestedType(expectedType);
     if (expected && expected !== "Value" && expected !== "unknown") return expected;
-    return nestedLiteralType(source) || "Value";
+    return inferredNestedValueType(source, graph) || nestedLiteralType(source) || "Value";
   }
 
   function parseNestedValueNode(source, start, end, expectedType, graph, path, label, depth) {
@@ -702,7 +741,7 @@
       path,
       label,
       depth,
-      type: nestedValueType(text, expectedType),
+      type: nestedValueType(text, expectedType, graph),
       children: []
     };
     if (!text) return node;
@@ -763,10 +802,12 @@
       if (colon >= 0) {
         const fieldName = source.slice(entry.start, colon).trim() || String(index + 1);
         const childPath = `${path}.${fieldName}`;
-        node.children.push(parseNestedValueNode(source, colon + 1, entry.end, "", graph, childPath, `${label}.${fieldName}`, depth + 1));
+        const childType = nestedTypePart(expectedType, index, false, fieldName);
+        node.children.push(parseNestedValueNode(source, colon + 1, entry.end, childType, graph, childPath, `${label}.${fieldName}`, depth + 1));
       } else {
         const childPath = `${path}.${index + 1}`;
-        node.children.push(parseNestedValueNode(source, entry.start, entry.end, "", graph, childPath, `${label}.${index + 1}`, depth + 1));
+        const childType = nestedTypePart(expectedType, index, false);
+        node.children.push(parseNestedValueNode(source, entry.start, entry.end, childType, graph, childPath, `${label}.${index + 1}`, depth + 1));
       }
     }
     return node;
@@ -790,7 +831,10 @@
   function validateNestedField(source, field) {
     const text = String(source || "").trim();
     if (!text) throw new Error(`${field.label}: value is required`);
-    const type = String(field.type || "").replace(/\?$/, "");
+    const type = normalizedNestedType(field.type);
+    if (type === "Value" || type === "unknown" || !type) {
+      throw new Error(`${field.label}: type is ambiguous; edit the complete expression`);
+    }
     if (field.kind === "enum" && field.options && !field.options.some((option) => !option.disabled && option.source === text)) {
       throw new Error(`${field.label}: choose a valid ${type} value`);
     }
@@ -854,7 +898,7 @@
     }) : null;
     const sourceSpan = expr && expr.source_span;
     return leaves.map((leaf) => {
-      const type = nestedValueType(leaf.source, leaf.type);
+      const type = nestedValueType(leaf.source, leaf.type, graph);
       const kind = detailEditorKind(type, leaf.source, graph);
       const field = {
         key: leaf.path,
@@ -1518,11 +1562,23 @@
     debug.appendChild(debugActions);
     const live = document.createElement("div");
     live.className = "pin-list";
-    const debugFragment = debugRows(debugOverlay && debugOverlay.locals);
-    if (debugOverlay && debugOverlay.watches) debugFragment.appendChild(debugRows(debugOverlay.watches));
-    if (debugOverlay && debugOverlay.call_stack) debugFragment.appendChild(debugRows(debugOverlay.call_stack.map((frame) => ({ value: frame }))));
-    if (debugFragment.childNodes.length) live.appendChild(debugFragment);
-    else appendText(live, "div", "tag", "no live values");
+    const debuggerIsLive = !!(debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.runtime_state === "live");
+    if (debuggerIsLive) {
+      const debugFragment = debugRows(debugOverlay.locals);
+      if (debugOverlay.watches) debugFragment.appendChild(debugRows(debugOverlay.watches));
+      if (debugOverlay.call_stack) debugFragment.appendChild(debugRows(debugOverlay.call_stack.map((frame) => ({ value: frame }))));
+      if (debugFragment.childNodes.length) live.appendChild(debugFragment);
+      else appendText(live, "div", "tag", "no live values");
+    } else {
+      const message = debugConnectionState === "disconnected"
+        ? "runtime disconnected; live values cleared"
+        : debugConnectionState === "stale"
+          ? "source changed; debugger anchors are stale"
+          : debugOverlay && debugOverlay.runtime_state === "finished"
+            ? "runtime finished; values are historical"
+            : "no live values";
+      appendText(live, "div", "tag", message);
+    }
     debug.appendChild(live);
 
     const comments = appendDetailsSection(details, "Comments", "diagnostic-detail");
@@ -1901,6 +1957,15 @@
     return (graph.wires || []).some((wire) => wire.wire_kind === "control" && wire.to_pin === input.pin_id);
   }
 
+  function isStructuredExecJoin(graph, fromPin, target) {
+    if (!graph || !fromPin || !target || fromPin.direction !== "output" || !isExecPin(fromPin) || !isExecPin(target)) return false;
+    const node = nodeForPin(graph, fromPin);
+    const targetNode = nodeForPin(graph, target);
+    if (!node || !targetNode || !node.source_span || !targetNode.source_span) return false;
+    if (!["branch", "dispatch"].includes(node.kind)) return false;
+    return Number(targetNode.source_span.start) >= Number(node.source_span.end);
+  }
+
   function inlineForPin(graph, pin) {
     if (!graph || !pin || !pin.source_span) return null;
     const owner = (graph.inline_exprs || []).find((e) => e.node_id === pin.node_id
@@ -1940,6 +2005,15 @@
     window.__jetCanvasLastConnectionPlan = plan;
     if (!plan.ok) {
       if (target) showToast("Wire refused: " + plan.label, { isError: true });
+      return true;
+    }
+    if (!drag?.rewire && isStructuredExecJoin(graph, fromPin, target)) {
+      window.__jetCanvasLastConnectionPlan = {
+        ok: true,
+        label: "Structured join already represented",
+        color: "#7dd3fc"
+      };
+      showToast("Structured join already represented; downstream source step stays single");
       return true;
     }
     if (!drag?.rewire

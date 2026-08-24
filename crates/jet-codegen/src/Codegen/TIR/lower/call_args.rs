@@ -333,8 +333,15 @@ pub(crate) fn lower_one_call_arg(
         }
         (_, v) => v,
     };
+    let web_noncopy_int = cx.web_wasm_noncopy_int
+        && match &value.ty {
+            Type::Int => true,
+            Type::InlineRange { base, .. } => matches!(base.as_ref(), Type::Int),
+            _ => false,
+        };
     let clone = !resource_move
-        && (a.flags.implicit_clone
+        && (web_noncopy_int
+        || a.flags.implicit_clone
         || matches!(
             (&a.expr, conv.as_ref()),
             (Expr::Ident(name, _), None | Some((AccessConvention::Move, _)))

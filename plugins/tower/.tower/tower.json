@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2154,
-    "rev": 43169,
+    "rev": 43176,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2099,7 +2099,7 @@
       "title": "M01 · Native isolation on three operating systems",
       "goal": "Untrusted build work runs inside real native Linux, macOS, and Windows isolation boundaries with the declared filesystem, process, network, device, and resource limits. Someone can know it works by running the hostile build cases on each supported OS and seeing escapes blocked, cleanup enforced, and unsupported capabilities reported before launch.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:01:28.009Z"
     },
     {
@@ -2515,7 +2515,7 @@
       "title": "M06 · Registry delivery and provider ecosystem",
       "goal": "Jet resolves and executes packages through a verified registry and lossless provider contract, with profiles, rollback, dev-shell projection, credentials, redaction, import, migration, and provider-specific conformance. Someone can consume packages online or offline and move a real project from supported ecosystems without losing dependency facts or policy state.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:03:18.337Z"
     },
     {
@@ -35132,7 +35132,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m01-native-isolation",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Outcome\n\nShip **Build sandbox: native Windows AppContainer isolation** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with crates/jetpack/src/RuntimePolicy.rs, crates/jetpack/src/Recipe.rs, crates/jetpack/src/CLI/trust_env_build.rs, crates/jetpack/src/CLI/services_secrets_config.rs, crates/jetpack/src/Trust.rs, tests/build_sandbox.rs, .github/workflows/ci.yml, docs/plans/epoch-4/world-class-package-manager.md, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Use the same native isolation substrate and hostile corpus as hermetic builds and agent execution. Claims must match enforcement on each platform.\n6. Every corpus escape attempt is blocked or the capability is reported unsupported before launch. Skips and advisory-only checks do not count as isolation.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 7 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -35213,10 +35213,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:38.943Z",
-      "updated": "2026-08-24T02:03:15.575Z",
+      "updated": "2026-08-24T02:52:08.503Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T02:52:08.503Z"
     },
     {
       "id": "c0k8mz9e",
@@ -62317,7 +62318,7 @@
       "track": "epoch",
       "epoch": "e7",
       "milestoneId": "e7-m03-process-sessions",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
       "blockedBy": [
@@ -62355,11 +62356,11 @@
         {
           "n": 2,
           "text": "Sessions, terminals, browser contexts, input, output, navigation, waits, and teardown behave consistently across supported platforms and callers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:07.974Z"
+          "evidence": "evidence: native-session-matrix runs native fixtures on Ubuntu/macOS/Windows (.github/workflows/ci.yml:114-150); assertions cover terminal bytes/input/resize/close (tests/process_sessions.rs:70-78), tier parity (:116-120), full-tree teardown (:269-285), and compatibility rows (:372-393); Windows ConPTY assertions run at .github/workflows/ci.yml:155-157 → tests/corelib_parts/platform.rs:919-934.",
+          "at": "2026-08-24T02:52:05.282Z"
         },
         {
           "n": 3,
@@ -62391,11 +62392,11 @@
         {
           "n": 6,
           "text": "Native fixtures cover the compatibility matrix across supported platforms; the closeout report maps each claimed session capability to a passing fixture or an explicit per-platform unsupported entry.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:36:01.815Z"
+          "evidence": "evidence: .github/workflows/ci.yml:114-150; fixture assertions tests/process_sessions.rs:70,268; matrix validation tests/process_sessions.rs:347-393; capability map docs/audits/process-session-compatibility-closeout-2026-08-23.md:13-22; unsupported entries tests/fixtures/process_sessions/compatibility.tsv:2-9; Windows ConPTY assertion .github/workflows/ci.yml:155-157 → tests/corelib_parts/platform.rs:917-924.",
+          "at": "2026-08-24T02:52:05.630Z"
         }
       ],
       "refs": [
@@ -62408,10 +62409,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T10:49:41.049Z",
-      "updated": "2026-08-23T16:22:14.816Z",
+      "updated": "2026-08-24T02:52:07.775Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T02:52:07.775Z"
     },
     {
       "id": "c0fv3bcg",
@@ -117973,7 +117975,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m06-registry-providers",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
@@ -118021,20 +118023,20 @@
         {
           "n": 4,
           "text": "Composed secrets: parts (for example host, user, password) plus one declared template yield an assembled value readable through the same Secret-effect path; rotating one part changes the composed value. Surface spelling is owner-gated: ballot before code.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:34:13.538Z"
+          "evidence": "Shared typed-map parser and metadata policy checks at [Eval.rs:1418](/home/nate/Projects/Github/jet/crates/jet-env-model/src/ModuleEval/Eval.rs:1418); syntax registry at [jetpack_config.rs:8](/home/nate/Projects/Github/jet/crates/jet-foundation/src/Syntax/jetpack_config.rs:8); focused test passed.",
+          "at": "2026-08-24T02:52:05.984Z"
         },
         {
           "n": 5,
           "text": "Per-secret metadata (required, description, per-profile default, generated value): ballot before code; implementation matches the ratified pick; required-but-missing fails activation with a registered diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T13:34:13.913Z"
+          "evidence": "Activation/E1263 at [services_secrets_config.rs:21](/home/nate/Projects/Github/jet/crates/jetpack/src/CLI/services_secrets_config.rs:21); sorted read-time plans and Prelude composition/audits at [Secrets.rs:52](/home/nate/Projects/Github/jet/crates/jetpack/src/Secrets.rs:52) and [SecretsCrypto.rs:147](/home/nate/Projects/Github/jet/crates/jet-pkg-model/src/Prelude/SecretsCrypto.rs:147). jet-env-model and jetpack lane checks: CHECK OK.",
+          "at": "2026-08-24T02:52:06.342Z"
         },
         {
           "n": 6,
@@ -118064,8 +118066,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T13:33:58.730Z",
-      "updated": "2026-08-23T23:52:47.866Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-24T02:52:07.046Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-24T02:52:07.046Z"
     },
     {
       "id": "c0v6buo8",
@@ -191832,6 +191835,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-24T02:52:08.503Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f0iuwx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T02:52:07.775Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03nuhak",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T02:52:07.047Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gq3vxb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T02:52:06.343Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gq3vxb",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T02:52:05.984Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gq3vxb",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T02:52:05.630Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03nuhak",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-24T02:52:05.282Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03nuhak",
+      "note": "#2"
+    },
+    {
       "at": "2026-08-24T02:03:15.575Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -195281,55 +195333,6 @@
       "action": "card.criteria-meet",
       "ref": "c0fu9ovs",
       "note": "#5"
-    },
-    {
-      "at": "2026-08-23T03:42:39.897Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fu9ovs",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T03:42:39.238Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fu9ovs",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T03:42:37.712Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07cg57p",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T03:42:36.884Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0z0a3nt",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-23T03:42:35.885Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0z0a3nt",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T03:42:34.790Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0z0a3nt",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T03:42:34.194Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qsstz7",
-      "note": "phase"
     }
   ],
   "nextNum": 368,

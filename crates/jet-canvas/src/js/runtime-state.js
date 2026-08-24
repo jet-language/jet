@@ -23,6 +23,7 @@
   const graphOverview = document.getElementById("graph-overview");
   const leftDrawer = document.getElementById("left-drawer");
   const rightDrawer = document.getElementById("right-drawer");
+  const componentTree = document.getElementById("canvas-component-tree");
   const dockGraphs = document.getElementById("dock-graphs");
   const dockDetails = document.getElementById("dock-details");
   const projectRail = document.getElementById("project-rail");
@@ -75,6 +76,7 @@
   const debugStop = document.getElementById("debug-stop");
   const debugStart = document.getElementById("debug-start");
   const debugSession = document.getElementById("debug-session");
+  const debugLiveness = document.getElementById("debug-liveness");
   const debugBreak = document.getElementById("debug-break");
   const debugWatch = document.getElementById("debug-watch");
   let hit = [];
@@ -92,6 +94,7 @@
   let debugOverlay = null;
   let debugSessionId = null;
   let debugSessionInfo = null;
+  let debugConnectionState = "idle";
   let debugRequestGeneration = 0;
   let debugState = { breakpoints: [], watches: [], staleBreakpoints: [] };
   let searchState = { results: [], spans: [], active: -1, diff: null, impact: null, renamePlan: null, stale: false };

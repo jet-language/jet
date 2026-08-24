@@ -27,6 +27,7 @@
     if (body.op === "edit_function_signature") return "signature";
     if (body.op === "create_function") return "create " + (body.name || "function");
     if (body.op === "replace_source" && body.source_edit === "paste_clone") return "paste";
+    if (body.op === "replace_source" && body.source_edit === "exec_convergence") return "converge execution";
     if (body.op === "replace_source") return body.source_edit ? "source edit" : "source restore";
     if (body.op === "insert_branch") return "insert branch";
     if (body.op === "insert_switch") return "insert dispatch";
@@ -296,6 +297,8 @@
     const y = Number.isFinite(graphPoint && graphPoint.y) ? graphPoint.y : viewportCenterGraphPoint().y;
     const descriptor = nodeDescriptorForAction(action);
     if (!descriptor || !descriptor.palette.insertable) return null;
+    if (descriptor.transaction === "insert_call"
+      && !(typeof action.insert_callee === "string" && action.insert_callee.trim())) return null;
     const node = {
       node_id: id,
       graph_id: graph.graph_id,
@@ -326,7 +329,7 @@
         receiver_type: action.receiver_type || "",
         type: action.type || "",
         callee: action.callee || "",
-        insert_callee: action.insert_callee || action.callee || "",
+        insert_callee: action.insert_callee || "",
         args: action.args || action.default_args || []
       }
     };
@@ -454,15 +457,22 @@
     if (node.staged && node.action) return JSON.parse(JSON.stringify(node.action));
     const descriptor = nodeDescriptor(node);
     if (!descriptor || !descriptor.palette || !descriptor.palette.insertable) return null;
+    const sourceAction = node.action || {};
+    const sourceCallee = descriptor.transaction === "insert_call" && node.title
+      ? node.title
+      : "";
+    if (descriptor.transaction === "insert_call"
+      && !(typeof sourceAction.insert_callee === "string" && sourceAction.insert_callee.trim())
+      && !sourceCallee.trim()) return null;
     const pins = (node.pins || []).map((pin) => Object.assign({}, pin));
     const output = pins.find((pin) => pin.direction === "output" && !isExecPin(pin));
-    return Object.assign({}, node.action || {}, {
+    return Object.assign({}, sourceAction, {
       title: node.title || "node",
       kind: node.kind || descriptor.kind,
       node_descriptor_id: descriptor.id,
       op: node.action && node.action.op || descriptor.transaction || "",
-      callee: node.action && node.action.callee || node.title || "",
-      insert_callee: node.action && node.action.insert_callee || node.title || "",
+      callee: sourceAction.callee || sourceCallee,
+      insert_callee: sourceAction.insert_callee || sourceCallee,
       ret: node.action && node.action.ret || output && output.type || "Void",
       pins
     });
@@ -800,7 +810,7 @@
     const descriptor = nodeDescriptorForAction(staged.action);
     if (descriptor && descriptor.transaction && descriptor.transaction !== "insert_call" && descriptor.transaction !== "edit_inline_expr") {
       pendingInsertPlacement = { graph_id: selectedGraphId, title: staged.title, x: nodeX(staged), y: nodeY(staged) };
-      const request = postTransaction({ schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId });
+      const request = postTransaction(transactionForStructuralInsert(staged.action, realPin));
       finishStagedMaterialization(staged.node_id, request);
       return true;
     }
@@ -1025,8 +1035,13 @@
   }
 
   function syncDebugActive() {
-    document.body.classList.toggle("is-debug-active", !!(debugSessionId && debugOverlay && debugOverlay.debug_overlay === "running"));
+    document.body.classList.toggle("is-debug-active", !!(debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.runtime_state === "live"));
     if (typeof syncDebugSessionPicker === "function") syncDebugSessionPicker();
+    window.__jetCanvasDebugState = {
+      state: debugConnectionState,
+      live: !!(debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.runtime_state === "live"),
+      revision: debugOverlay && debugOverlay.revision || null
+    };
   }
 
   function renderCommandAuthority(item) {

@@ -116,6 +116,21 @@ archetype colors.
 - Placing a Core/Project function creates a real function node (source-backed
   edit through the existing transaction path).
 
+## Component tree
+
+The left `My Canvas` rail is one source-backed tree over the current project:
+
+- `Files` selects a source file and keeps its file revision visible to Canvas.
+- `Functions` selects a projected function graph; `New` uses the existing
+  checked function transaction.
+- `Variables` lists the open function's parameters and local bindings with
+  their types; `Add` promotes a selected value expression through the
+  existing checked binding transaction.
+
+Tree navigation changes the selected projection only. It never creates a
+parallel graph or variable model; every item carries the current source ID and
+revision and is re-rendered after a source transaction.
+
 ## Typography
 
 UI sans stack (`Inter, "Segoe UI", Roboto, system-ui, sans-serif`) for node
@@ -175,7 +190,10 @@ Canvas assigns source-backed execution output roles. Loop outputs use
 `role:"loop_body"` and `role:"loop_done"`; early-return outputs use
 `role:"early_return"`. A second compatible execution drop opens a no-write
 convergence preview. Extract is selected first, an exact-body helper appears
-only when one exists, and duplication carries an explicit warning.
+only when one exists, and duplication carries an explicit warning. Apply keeps
+the pin source spans and strategy in the existing source transaction; the
+checked server constructs and formats the helper/calls, and a stale, ill-typed,
+or out-of-scope candidate leaves source and the recoverable preview unchanged.
 
 ## Node states (gated on D-CANVASSTATE1 — do not build until ratified)
 

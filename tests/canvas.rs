@@ -351,13 +351,21 @@ fn run() {
     print(before_save.run(5, "fallback"))
     before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
     before_publish.on(scope, n -> HookDecision.Continue)
-    print(before_publish.run(7))
+    show_publish(before_publish.run(7))
     jobs :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
     jobs.on(scope, (n) -> { print("job {n}") })
     report :: jobs.emit_async(2).join() ?? panic("report")
     print(jobs.queued_count())
     jobs.close()
     scope.cancel()
+}
+
+fn show_publish(outcome: HookOutcome<Int, String>) {
+    if outcome == {
+        .Continue(value) -> print("continue {value}")
+        .Cancel -> print("cancel")
+        .Fail(error) -> print("fail {error}")
+    }
 }
 "#;
 
@@ -1300,6 +1308,91 @@ fn canvas_exec_rewire_reorders_statements_and_guards_scope_and_dataflow() {
 }
 
 #[test]
+fn canvas_exec_convergence_is_checked_source_and_refuses_scope_drift() {
+    let path = write_fixture(
+        "convergence_checked",
+        r#"fn converge(flag: Bool) {
+    value :: 1
+    done :: value
+    if flag {
+        print(value)
+        finish(done)
+    } else {
+        print(value)
+    }
+}
+
+fn finish(value: Int) {
+    print(value)
+}
+
+fn run() {
+    converge(true)
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("convergence graph");
+    let graph_id = graph_id_for_title(&graph, "converge");
+    let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+    let (target_start, target_end) = source_span_near(&graph, "\"title\":\"finish\"");
+    let source = fs::read_to_string(&path).unwrap();
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}",
+        jet::Canvas::source_revision(&source),
+        graph_id,
+        from_start,
+        from_end,
+        target_start,
+        target_end
+    );
+    let result = jet::Canvas::apply_transaction_json(&path, &request).expect("checked convergence");
+    assert!(result.contains("\"changed\":true"), "{result}");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("fn shared_finish(done: Int)"), "{after}");
+    assert_eq!(after.matches("shared_finish(done)").count(), 2, "{after}");
+    assert_eq!(after, jet::format_source(&after).expect("formatted convergence"));
+
+    let refused = write_fixture(
+        "convergence_scope_refusal",
+        r#"fn converge(flag: Bool) {
+    value :: 1
+    if flag {
+        branch_value :: value
+        finish(branch_value)
+    } else {
+        print(value)
+    }
+}
+
+fn finish(value: Int) {
+    print(value)
+}
+
+fn run() {
+    converge(true)
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&refused).expect("refusal graph");
+    let graph_id = graph_id_for_title(&graph, "converge");
+    let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+    let (target_start, target_end) = source_span_near(&graph, "\"title\":\"finish\"");
+    let before = fs::read_to_string(&refused).unwrap();
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}",
+        jet::Canvas::source_revision(&before),
+        graph_id,
+        from_start,
+        from_end,
+        target_start,
+        target_end
+    );
+    let error = jet::Canvas::apply_transaction_json(&refused, &request).unwrap_err();
+    assert!(error.contains("E0107") || error.contains("diagnostic"), "{error}");
+    assert_eq!(fs::read_to_string(&refused).unwrap(), before);
+}
+
+#[test]
 fn canvas_projection_dedupes_variable_getters_with_fanout() {
     let path = write_fixture(
         "getter_fanout",
@@ -1676,6 +1769,8 @@ fn run() {
     let graph_id = graph_id_for_title(&graph, "choose");
     let (pat_start, pat_end) = source_span_near(&graph, "\"pattern_source\":\"== Val(_)\"");
     let before = fs::read_to_string(&path).unwrap();
+    let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if ==\"");
+    assert!(before[node_start..node_end].contains("else"));
     let remove_last = format!(
         "{{\"schema_version\":1,\"op\":\"remove_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"pattern_start\":{},\"pattern_end\":{}}}",
         jet::Canvas::source_revision(&before), graph_id, pat_start, pat_end
@@ -1971,6 +2066,85 @@ fn canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source()
 }
 
 #[test]
+fn canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target() {
+    let path = write_fixture(
+        "structural_pin_target",
+        r#"fn run() {
+    print("before")
+    print("target")
+    print("after")
+}
+"#,
+    );
+    let before = fs::read_to_string(&path).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("target graph");
+    let graph_id = graph_id_for_title(&graph, "run");
+    let target_node_id = field_before(&graph, "\"source\":\"\\\"target\\\"\"", "node_id");
+    let target_pin = format!("{target_node_id}:input:exec");
+    let insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}\",\"wire_target_pin\":\"exec\"}}",
+        jet::Canvas::source_revision(&before),
+        graph_id,
+        target_pin
+    );
+    jet::Canvas::apply_transaction_json(&path, &insert).expect("targeted branch insert");
+    let inserted = fs::read_to_string(&path).unwrap();
+    let branch = inserted.find("if true").expect("branch source");
+    assert!(branch > inserted.find("print(\"before\")").unwrap());
+    assert!(branch < inserted.find("print(\"target\")").unwrap());
+    assert!(inserted.contains("print(\"after\")"), "{inserted}");
+    assert_eq!(
+        jet::format_source(&inserted).expect("format targeted branch"),
+        inserted
+    );
+
+    let graph_after = jet::Canvas::graph_json_for_file(&path).expect("reproject targeted branch");
+    assert!(graph_after.contains("\"kind\":\"branch\""), "{graph_after}");
+    let stale_target = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:exec\",\"wire_target_pin\":\"exec\"}}",
+        jet::Canvas::source_revision(&inserted),
+        graph_id,
+        target_node_id
+    );
+    let err = jet::Canvas::apply_transaction_json(&path, &stale_target).unwrap_err();
+    assert!(
+        err.contains("Canvas insertion pin no longer exists"),
+        "{err}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), inserted);
+
+    let output_path = write_fixture(
+        "structural_output_target",
+        r#"fn run() {
+    print("before")
+    print("target")
+}
+"#,
+    );
+    let output_before = fs::read_to_string(&output_path).unwrap();
+    let output_graph = jet::Canvas::graph_json_for_file(&output_path).expect("output target graph");
+    let output_graph_id = graph_id_for_title(&output_graph, "run");
+    let output_node_id = field_before(&output_graph, "\"source\":\"\\\"before\\\"\"", "node_id");
+    let output_insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:output:then\",\"wire_target_pin\":\"exec\"}}",
+        jet::Canvas::source_revision(&output_before),
+        output_graph_id,
+        output_node_id
+    );
+    jet::Canvas::apply_transaction_json(&output_path, &output_insert)
+        .expect("output-targeted branch insert");
+    let output_inserted = fs::read_to_string(&output_path).unwrap();
+    assert!(
+        output_inserted.find("if true").unwrap()
+            > output_inserted.find("print(\"before\")").unwrap()
+    );
+    assert!(
+        output_inserted.find("if true").unwrap()
+            < output_inserted.find("print(\"target\")").unwrap()
+    );
+}
+
+#[test]
 fn canvas_fallible_rail_is_excluded_outside_fallible_function() {
     let path = write_fixture("fallible_rail_nonfallible", "fn compute() {\n    print(1)\n}\n");
     let before = fs::read_to_string(&path).unwrap();
@@ -2244,6 +2418,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"kind\":\"canvas.builtin\"",
         "\"title\":\"Print\"",
         "\"callee\":\"print\"",
+        "\"insert_callee\":\"print\"",
         "\"module_path\":\"builtin\"",
         "\"ret\":\"Void\"",
         "\"pins\":[{\"name\":\"value\",\"direction\":\"input\",\"type\":\"Any\"}]",
@@ -2447,7 +2622,7 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     )
     .unwrap();
     let path = dir.join("main.jet");
-    let src = "use \"./helper\"\nuse js.plotly as plot\n\nfn run() {\n    print(plot.println())\n    print(helper.square(2))\n}\n";
+    let src = "use \"./helper\" as h\nuse js.plotly as plot\n\nfn run() {\n    print(plot.println())\n    print(h.square(2))\n}\n";
     fs::write(&path, src).unwrap();
 
     let request = format!(
@@ -2456,7 +2631,8 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     );
     let actions = jet::Canvas::query_json_for_file(&path, &request).expect("actions query");
     assert!(
-        actions.contains("\"callee\":\"helper.square\""),
+        actions.contains("\"callee\":\"h.square\"")
+            && actions.contains("\"insert_callee\":\"h.square\""),
         "imported action must use the entry-facing callee: {actions}"
     );
     assert!(
@@ -2465,7 +2641,7 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     );
     let noisy = json_top_level_objects(json_array_field(&actions, "actions"))
         .into_iter()
-        .find(|action| action.contains("\"callee\":\"helper.noisy\""))
+        .find(|action| action.contains("\"callee\":\"h.noisy\""))
         .expect("effectful imported action");
     assert!(
         noisy.contains("\"node_descriptor_id\":\"function_exec\"")
@@ -2477,14 +2653,14 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
         !actions.contains("\"module_path\":\"js.plotly\"")
             && !actions.contains("\"name\":\"println\"")
             && !actions.contains("\"name\":\"hidden\"")
-            && !actions.contains("\"callee\":\"helper.hidden\""),
+            && !actions.contains("\"callee\":\"h.hidden\""),
         "foreign binding functions must not leak into the project palette: {actions}"
     );
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("actions graph");
     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
     let insert = format!(
-        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"helper.square\",\"args\":[\"1\"]}}",
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"h.square\",\"args\":[\"1\"]}}",
         jet::Canvas::source_revision(src),
         graph_id
     );
@@ -2492,7 +2668,7 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
         .expect("imported action insert");
     assert!(inserted.contains("\"changed\":true"), "{inserted}");
     let changed = fs::read_to_string(&path).unwrap();
-    assert!(changed.contains("helper.square(1)"), "{changed}");
+    assert!(changed.contains("h.square(1)"), "{changed}");
     assert_eq!(
         jet::Formatter::format_source(&changed).unwrap(),
         changed,
@@ -2532,7 +2708,7 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     );
     jet::Canvas::apply_transaction_json(&path, &edit).expect("edit imported call argument");
     let edited = fs::read_to_string(&path).unwrap();
-    assert!(edited.contains("helper.square(2)"), "{edited}");
+    assert!(edited.contains("h.square(2)"), "{edited}");
     assert_eq!(
         jet::Formatter::format_source(&edited).unwrap(),
         edited,
@@ -2583,7 +2759,10 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
 
 #[test]
 fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() {
-    let path = write_fixture("core_catalog", "fn run() {\n    print(\"core\")\n}\n");
+    let path = write_fixture(
+        "core_catalog",
+        "use core.math as m\n\nfn run() {\n    print(\"core\")\n}\n",
+    );
     let src = fs::read_to_string(&path).unwrap();
     let revision = jet::Canvas::source_revision(&src);
     let query = format!(
@@ -2611,6 +2790,7 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"signature\":\"client.request(method, url)\"",
         "\"name\":\"request\"",
         "\"pure\"",
+        "\"insert_callee\":\"m.abs\"",
     ] {
         assert!(catalog.contains(field), "catalog missing {field}: {catalog}");
     }
@@ -4484,6 +4664,9 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("debugSessionId"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
     assert!(js.contains("function nodeDescriptorForAction"), "{js}");
+    assert!(js.contains("function insertCalleeForAction"), "{js}");
+    assert!(js.contains("insert_callee: action.insert_callee"), "{js}");
+    assert!(!js.contains("window.prompt(\"Call function\""), "Canvas must not invent a callee for an incomplete action: {js}");
     assert!(js.contains("descriptor.palette.insertable"), "{js}");
     assert!(js.contains("descriptor.palette.rank"), "{js}");
     assert!(js.contains("descriptor.presentation.hover"), "{js}");
@@ -4525,6 +4708,9 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(!js.contains("Source truth"), "{js}");
     assert!(!js.contains("source-truth"), "{js}");
     assert!(js.contains("function renderExecConvergencePreview"), "{js}");
+    assert!(js.contains("source_edit: \"exec_convergence\""), "{js}");
+    assert!(js.contains("id=\"apply-exec-convergence\""), "{js}");
+    assert!(js.contains("data-exec-convergence-function"), "{js}");
     assert!(js.contains("strategy: \"extract\""), "{js}");
     assert!(js.contains("const accepted = result && result.changed === true"), "{js}");
 }
@@ -4675,7 +4861,8 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         "\"ok\":true",
         "\"persistence\":\"local-source-span\"",
         "\"state\":\"finished\"",
-        "\"debug_overlay\":\"finished\"",
+       "\"debug_overlay\":\"finished\"",
+        "\"runtime_state\":\"finished\"",
         "\"active_line\":null",
         "\"active_span\":{\"start\":0,\"end\":0}",
         "\"active_graph_id\":\"\"",
@@ -4684,7 +4871,8 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         "\"breakpoints\"",
         "\"locals\"",
         "\"watches\"",
-        "\"name\":\"total\"",
+       "\"name\":\"total\"",
+        "\"type\":\"Int\"",
         "\"value\":\"1\"",
         "\"call_stack\"",
         "\"trace\"",
@@ -4696,6 +4884,37 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         "trace must retain program output and the debugger completion marker: {out}"
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), src);
+}
+
+#[test]
+fn canvas_debug_session_projects_live_runtime_snapshot() {
+    let path = write_fixture("debug_live_overlay", CANVAS_DEBUG_FIXTURE);
+    let src = fs::read_to_string(&path).unwrap();
+    let revision = jet::Canvas::source_revision(&src);
+    let req = format!(
+        "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"s\",\"s\"],\"watches\":[\"total\"]}}",
+        revision
+    );
+    let sessions = jet::Canvas::DebugSessions::default();
+    let out = jet::Canvas::debug_session_json_for_file_with_sessions(&path, &req, &sessions)
+        .expect("debug session");
+    for field in [
+        "\"state\":\"running\"",
+        "\"debug_overlay\":\"running\"",
+        "\"runtime_state\":\"live\"",
+        "\"active_line\":",
+        "\"active_node_id\":\"",
+        "\"locals\":[",
+        "\"name\":\"total\"",
+        "\"type\":\"Int\"",
+        "\"value\":\"1\"",
+        "\"watches\":[",
+        "\"call_stack\":[",
+        "\"run()\"",
+        "\"wire_path\":[",
+    ] {
+        assert!(out.contains(field), "live debug overlay missing {field}: {out}");
+    }
 }
 
 #[test]
@@ -4988,6 +5207,48 @@ fn canvas_projects_event_dispatchers_without_masquerading_runtime_facts() {
 }
 
 #[test]
+fn canvas_does_not_project_unimported_event_named_calls() {
+    let path = write_fixture(
+        "unimported_event_named_call",
+        r#"struct Resource {
+    id: Int
+
+    fn new(&self) {}
+}
+
+fn run() {
+    event :: Resource{ id: 1 }
+    event.new()
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    assert!(graph.contains("\"event_dispatchers\":[]"), "{graph}");
+}
+
+#[test]
+fn canvas_projects_event_dispatchers_from_imported_source_module() {
+    let dir = temp_dir("imported_event_dispatcher");
+    let helper = dir.join("helper.jet");
+    let entry = dir.join("main.jet");
+    fs::write(
+        &helper,
+        "use core.event as event\n\npub fn make_scope() {\n    scope :: event.scope()\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entry,
+        "use \"./helper\" as h\n\nfn run() {\n    h.make_scope()\n}\n",
+    )
+    .unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&helper).expect("imported event graph");
+    assert!(graph.contains("\"kind\":\"event_scope_create\""), "{graph}");
+    assert!(graph.contains("scope :: event.scope()"), "{graph}");
+    let entry_graph = jet::Canvas::graph_json_for_file(&entry).expect("entry event graph");
+    assert!(entry_graph.contains("\"event_dispatchers\":[]"), "{entry_graph}");
+}
+
+#[test]
 fn canvas_event_dispatcher_edits_are_checked_and_stale_or_invalid_edits_keep_source() {
     let path = write_fixture("event_dispatcher_edits", CANVAS_EVENT_DISPATCHER_FIXTURE);
     let before = fs::read_to_string(&path).unwrap();
@@ -5021,6 +5282,7 @@ fn canvas_event_dispatcher_edits_are_checked_and_stale_or_invalid_edits_keep_sou
     assert!(valid_out.contains("\"changed\":true"), "{valid_out}");
     let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("event.new<String>()"), "{after}");
+    assert_eq!(jet::Formatter::format_source(&after).unwrap(), after);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("reprojected event graph");
     assert!(graph.contains("\"receiver_type\":\"Event<String>\""), "{graph}");
 }

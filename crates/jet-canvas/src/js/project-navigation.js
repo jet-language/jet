@@ -1,5 +1,76 @@
 
 // Project panels, graph navigation, variables, source-backed actions, and debugger state.
+  let keyboardHelpReturnFocus = null;
+
+  function keyboardCheatSheetIsOpen() {
+    const dialog = document.getElementById("keyboard-cheat-sheet");
+    return !!dialog && (dialog.open || dialog.hasAttribute("open"));
+  }
+
+  function closeKeyboardCheatSheet() {
+    const dialog = document.getElementById("keyboard-cheat-sheet");
+    if (!dialog) return false;
+    if (dialog.open && typeof dialog.close === "function") dialog.close();
+    else dialog.removeAttribute("open");
+    dialog.setAttribute("aria-hidden", "true");
+    window.__jetCanvasKeyboardCheatSheet = { open: false };
+    const returnFocus = keyboardHelpReturnFocus;
+    keyboardHelpReturnFocus = null;
+    if (returnFocus && document.contains(returnFocus) && typeof returnFocus.focus === "function") {
+      window.requestAnimationFrame(() => returnFocus.focus({ preventScroll: true }));
+    }
+    return true;
+  }
+
+  function openKeyboardCheatSheet() {
+    const dialog = document.getElementById("keyboard-cheat-sheet");
+    if (!dialog) return false;
+    if (keyboardCheatSheetIsOpen()) return true;
+    keyboardHelpReturnFocus = document.activeElement && document.activeElement !== document.body
+      ? document.activeElement
+      : document.getElementById("jet-canvas-view");
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    dialog.setAttribute("aria-hidden", "false");
+    window.__jetCanvasKeyboardCheatSheet = { open: true, shortcut: "?", focus: "keyboard-cheat-sheet-close" };
+    window.requestAnimationFrame(() => {
+      const close = document.getElementById("keyboard-cheat-sheet-close");
+      if (close) close.focus({ preventScroll: true });
+    });
+    return true;
+  }
+
+  function createCanvasFunction() {
+    if (!latestDoc) return false;
+    const name = window.prompt("Function name", "helper");
+    if (!name) return false;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      showToast("Function name must be a Jet identifier", { isError: true });
+      return false;
+    }
+    postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
+    return true;
+  }
+
+  function addCanvasVariable() {
+    const graph = currentGraphOrNull();
+    const expr = graph && selectedNodeId
+      ? (graph.inline_exprs || []).find((candidate) => candidate.node_id === selectedNodeId)
+      : null;
+    if (!expr) {
+      showToast("Select a value expression first; Add promotes it to a source-backed variable", { isError: true });
+      return false;
+    }
+    const name = window.prompt("Binding name", "value");
+    if (!name) return false;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      showToast("Binding name must be a Jet identifier", { isError: true });
+      return false;
+    }
+    postTransaction({ schema_version: 1, op: "promote_to_binding", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, name });
+    return true;
+  }
+
   function ensureCanvasChrome() {
     const stage = document.getElementById("stage");
     if (stage && !document.getElementById("canvas-state")) {
@@ -7,6 +78,10 @@
       state.id = "canvas-state";
       state.setAttribute("role", "status");
       state.setAttribute("aria-live", "polite");
+      state.setAttribute("aria-atomic", "true");
+      state.setAttribute("aria-labelledby", "canvas-state-title");
+      state.setAttribute("aria-describedby", "canvas-state-detail");
+      state.setAttribute("aria-hidden", "true");
       state.style.cssText = "position:absolute;z-index:28;left:50%;top:12px;transform:translateX(-50%);display:none;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;width:min(520px,calc(100% - 24px));padding:10px 12px;border:1px solid #365a7f;border-radius:7px;background:rgba(7,16,28,.96);box-shadow:0 18px 52px rgba(0,0,0,.48);color:#c9dcf2;pointer-events:none";
       state.innerHTML = "<div><b id=\"canvas-state-title\" style=\"display:block;color:#f8fbff\"></b><span id=\"canvas-state-detail\" style=\"display:block;margin-top:3px;color:#9fb9d8;line-height:1.35\"></span></div><div id=\"canvas-state-actions\" style=\"display:flex;gap:6px;flex-wrap:wrap;justify-content:end;pointer-events:auto\"></div>";
       stage.appendChild(state);
@@ -31,6 +106,42 @@
       open.textContent = "Tour";
       more.appendChild(open);
     }
+    const keyboardHelp = document.getElementById("keyboard-help");
+    if (keyboardHelp && keyboardHelp.dataset.bound !== "true") {
+      keyboardHelp.dataset.bound = "true";
+      keyboardHelp.addEventListener("click", openKeyboardCheatSheet);
+    }
+    const keyboardClose = document.getElementById("keyboard-cheat-sheet-close");
+    if (keyboardClose && keyboardClose.dataset.bound !== "true") {
+      keyboardClose.dataset.bound = "true";
+      keyboardClose.addEventListener("click", closeKeyboardCheatSheet);
+    }
+    const keyboardDialog = document.getElementById("keyboard-cheat-sheet");
+    if (keyboardDialog && keyboardDialog.dataset.bound !== "true") {
+      keyboardDialog.dataset.bound = "true";
+      keyboardDialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        closeKeyboardCheatSheet();
+      });
+    }
+    const newFunction = document.getElementById("canvas-new-function");
+    if (newFunction && newFunction.dataset.bound !== "true") {
+      newFunction.dataset.bound = "true";
+      newFunction.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        createCanvasFunction();
+      });
+    }
+    const addVariable = document.getElementById("canvas-add-variable");
+    if (addVariable && addVariable.dataset.bound !== "true") {
+      addVariable.dataset.bound = "true";
+      addVariable.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        addCanvasVariable();
+      });
+    }
   }
 
   function setSaveState(label, kind = "saved") {
@@ -48,21 +159,33 @@
     const detailEl = document.getElementById("canvas-state-detail");
     const actionsEl = document.getElementById("canvas-state-actions");
     if (!state || !titleEl || !detailEl || !actionsEl) return;
+    const stateActions = actions.length ? actions : [
+      { label: "Open source", run: openSourceRecovery },
+      { label: "Retry", primary: true, run: () => typeof loadGraph === "function" && loadGraph() }
+    ];
     state.dataset.state = kind || "info";
     titleEl.textContent = title || "Canvas";
     detailEl.textContent = detail || "";
     actionsEl.innerHTML = "";
-    for (const action of actions) {
+    state.setAttribute("aria-hidden", "false");
+    for (const action of stateActions) {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = action.label;
+      button.setAttribute("aria-label", action.label);
+      button.dataset.canvasStateAction = action.label;
       button.style.cssText = "min-height:27px;padding:0 8px";
       if (action.primary) button.classList.add("primary");
       button.addEventListener("click", () => action.run && action.run());
       actionsEl.appendChild(button);
     }
     state.style.display = "grid";
-    window.__jetCanvasCanvasState = { kind: kind || "info", title: title || "Canvas", detail: detail || "", actions: actions.map((action) => action.label) };
+    const snapshot = { kind: kind || "info", title: title || "Canvas", detail: detail || "", actions: stateActions.map((action) => action.label) };
+    const history = window.__jetCanvasCanvasStateHistory || [];
+    history.push(snapshot);
+    if (history.length > 32) history.shift();
+    window.__jetCanvasCanvasStateHistory = history;
+    window.__jetCanvasCanvasState = snapshot;
   }
 
   function clearCanvasState() {
@@ -70,6 +193,7 @@
     if (!state) return;
     state.style.display = "none";
     state.dataset.state = "";
+    state.setAttribute("aria-hidden", "true");
     window.__jetCanvasCanvasState = null;
   }
 
@@ -243,11 +367,16 @@
     const key = graphNavigationKey(doc);
     if (graphListKey === key) return;
     graphListKey = key;
+    graphList.setAttribute("role", "group");
     graphList.innerHTML = "";
     for (const graph of doc.graphs || []) {
       const button = document.createElement("button");
       button.className = "graph-item" + (graph.graph_id === selectedGraphId ? " is-active" : "");
       button.type = "button";
+      button.setAttribute("role", "treeitem");
+      button.setAttribute("aria-level", "2");
+      button.setAttribute("aria-selected", graph.graph_id === selectedGraphId ? "true" : "false");
+      button.setAttribute("data-canvas-tree-item", "function");
       button.setAttribute("data-sidebar-graph", graph.graph_id);
       button.innerHTML = "<span>" + escapeHtml(graph.title) + "</span><span class=\"count\">" + graph.nodes.length + "</span>";
       button.addEventListener("click", () => {
@@ -323,10 +452,11 @@
     variablesListKey = key;
     const vars = graphVariables(graph);
     if (variableCount) variableCount.textContent = String(vars.length);
+    variablesList.setAttribute("role", "group");
     variablesList.innerHTML = vars.map((v) => {
       const color = colorForType(v.type);
       const active = selectedVariableName === v.name ? " is-active" : "";
-      return `<button class="variable-item${active}" type="button" data-variable-name="${escapeAttr(v.name)}"><span class="variable-dot" style="color:${escapeAttr(color)}"></span><span class="variable-name">${escapeHtml(v.name)}</span>${typeChipHtml(v.type)}</button>`;
+      return `<button class="variable-item${active}" type="button" role="treeitem" aria-level="3" aria-selected="${selectedVariableName === v.name ? "true" : "false"}" data-canvas-tree-item="variable" data-variable-name="${escapeAttr(v.name)}"><span class="variable-dot" style="color:${escapeAttr(color)}"></span><span class="variable-name">${escapeHtml(v.name)}</span>${typeChipHtml(v.type)}</button>`;
     }).join("") || "<div class=\"tag\">no variables</div>";
     variablesList.querySelectorAll("[data-variable-name]").forEach((button) => {
       button.addEventListener("click", () => selectVariable(button.getAttribute("data-variable-name")));
@@ -815,8 +945,41 @@
     if (!cards.length) cards.push(projectMiniCard(project.entry || "source", "open", "", null, "project-card is-active"));
     clearDom(projectRail);
     renderFieldDescriptors(projectRail, cards, { fieldsClass: "project-list" });
+    projectRail.setAttribute("role", "group");
+    projectRail.querySelectorAll("[data-project-file]").forEach((button) => {
+      button.setAttribute("role", "treeitem");
+      button.setAttribute("aria-level", "1");
+      button.setAttribute("aria-selected", button.getAttribute("data-project-file") === (selectedSourceId || project.entry) ? "true" : "false");
+      button.setAttribute("data-canvas-tree-item", "file");
+    });
     syncProjectPanels(project);
     window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount, panels: window.__jetCanvasWorkspacePanels };
+  }
+
+  function syncComponentTree(doc, graph) {
+    if (!componentTree || !doc) return;
+    componentTree.dataset.sourceId = doc.source_id || "";
+    componentTree.dataset.revision = doc.revision || "";
+    componentTree.dataset.graphId = graph && graph.graph_id || "";
+    componentTree.setAttribute("aria-label", `My Canvas · ${graph && graph.title || "source"}`);
+    const items = Array.from(componentTree.querySelectorAll("[data-canvas-tree-item]"));
+    for (const item of items) {
+      item.setAttribute("data-canvas-source-id", doc.source_id || "");
+      item.setAttribute("data-canvas-revision", doc.revision || "");
+      item.setAttribute("data-canvas-source-backed", "true");
+    }
+    window.__jetCanvasComponentTree = {
+      rendered: true,
+      sourceId: doc.source_id || "",
+      revision: doc.revision || "",
+      graphId: graph && graph.graph_id || "",
+      graphTitle: graph && graph.title || "",
+      files: componentTree.querySelectorAll('[data-canvas-tree-item="file"]').length,
+      functions: componentTree.querySelectorAll('[data-canvas-tree-item="function"]').length,
+      variables: componentTree.querySelectorAll('[data-canvas-tree-item="variable"]').length,
+      itemCount: items.length,
+      sourceBacked: true
+    };
   }
 
   let projectLoadGeneration = 0;
@@ -832,6 +995,7 @@
       .then((project) => {
         if (loadToken !== projectLoadGeneration || currentCanvasSourceId() !== requestedSourceId) return latestProject;
         syncProjectRail(project);
+        if (latestDoc) syncComponentTree(latestDoc, currentGraphOrNull());
         return project;
       })
       .catch(() => {
@@ -1107,7 +1271,7 @@
       { title: "Add comment", detail: "around selection", group: "Comment", run: addCommentAroundSelection },
       { title: "Jump source", detail: "span", group: "source", run: () => { const s = node.source_span || { start: 0, end: 0 }; setSourceHash(s); setViewMode("code"); } },
       { title: "Find references", detail: "search index", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
-      { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
+      { title: nodeBreakpoint(node) ? "Remove breakpoint" : "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
     ];
     if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add pattern arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
     if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
@@ -1320,6 +1484,7 @@
     if (debugState.staleBreakpoints.length && (!previous || previous.revision !== doc.revision)) {
       showToast(debugState.staleBreakpoints.length + " breakpoint" + (debugState.staleBreakpoints.length === 1 ? " is" : "s are") + " stale; source was kept", { isError: true });
     }
+    syncDebugSessionPicker();
   }
 
   function saveDebugState() {
@@ -1346,6 +1511,10 @@
     loadDebugState(latestDoc);
     const anchor = spanAnchor(node.source_span);
     const current = debugState.breakpoints.some((b) => b.revision === latestDoc.revision && b.anchor === anchor);
+    if (!current && debugState.breakpoints.length >= 128) {
+      showToast("Breakpoint limit reached; source was kept", { isError: true });
+      return;
+    }
     debugState.breakpoints = debugState.breakpoints.filter((b) => !(b.revision === latestDoc.revision && b.anchor === anchor));
     if (!current) {
       debugState.breakpoints.push({ anchor, source_span: node.source_span, node_id: node.node_id, revision: latestDoc.revision });
@@ -1397,29 +1566,53 @@
       });
   }
 
-  function clearDebugClientState() {
+  function clearDebugClientState(state = "idle") {
     debugSessionId = null;
     debugSessionInfo = null;
     debugOverlay = null;
+    debugConnectionState = state;
     syncDebugSessionPicker();
     syncDebugActive();
   }
 
+  function syncDebugLiveness() {
+    if (!debugLiveness) return;
+    const labels = {
+      idle: "Runtime idle",
+      connecting: "Runtime connecting",
+      live: "Runtime live",
+      finished: "Runtime finished",
+      stale: "Source changed · anchors stale",
+      disconnected: "Runtime disconnected",
+      failed: "Runtime unavailable"
+    };
+    const staleCount = debugState && Array.isArray(debugState.staleBreakpoints) ? debugState.staleBreakpoints.length : 0;
+    const suffix = staleCount && debugConnectionState !== "live" && debugConnectionState !== "connecting"
+      ? " · " + staleCount + " stale anchor" + (staleCount === 1 ? "" : "s")
+      : "";
+    debugLiveness.textContent = (labels[debugConnectionState] || labels.idle) + suffix;
+    debugLiveness.dataset.state = debugConnectionState;
+  }
+
   function syncDebugSessionPicker() {
-    if (!debugSession) return;
-    debugSession.innerHTML = "";
-    const option = document.createElement("option");
-    option.value = debugSessionId || "none";
-    option.textContent = debugSessionInfo && debugSessionInfo.state === "running"
-      ? "Canvas · " + (debugSessionInfo.tier || "live session")
-      : "No live session";
-    debugSession.appendChild(option);
-    debugSession.disabled = !debugSessionId;
+    if (debugSession) {
+      debugSession.innerHTML = "";
+      const option = document.createElement("option");
+      option.value = debugSessionId || "none";
+      option.textContent = debugSessionInfo && debugSessionInfo.state === "running"
+        ? "Canvas · " + (debugSessionInfo.tier || "live session")
+        : "No live session";
+      debugSession.appendChild(option);
+      debugSession.disabled = !debugSessionId;
+    }
+    syncDebugLiveness();
   }
 
   function runDebug(commands) {
     if (!latestDoc) return;
     loadDebugState(latestDoc);
+    debugConnectionState = "connecting";
+    syncDebugSessionPicker();
     const requestGeneration = ++debugRequestGeneration;
     const requestedSession = debugSessionSnapshot();
     const requestedRevision = latestDoc.revision;
@@ -1452,8 +1645,9 @@
           ))
         )) {
           releaseDebugSession(requestedSession);
-          clearDebugClientState();
+          clearDebugClientState("stale");
           showToast("Debug result is stale; current source was kept", { isError: true });
+          drawGraph(latestDoc);
           return;
         }
         if (!result.ok) {
@@ -1461,14 +1655,20 @@
           const keepSession = requestedSession && ["bad_request", "schema", "unsupported", "limit"].includes(kind);
           if (!keepSession) {
             releaseDebugSession(requestedSession);
-            clearDebugClientState();
+            clearDebugClientState(kind === "conflict" ? "stale" : "failed");
           }
           showToast((result.json.message || "Debug rejected").split("\n")[0], { isError: true });
+          if (!keepSession) drawGraph(latestDoc);
           return;
         }
         debugSessionInfo = result.json.session || null;
         debugSessionId = debugSessionInfo && debugSessionInfo.state === "running" ? debugSessionInfo.id : null;
         debugOverlay = result.json.overlay || null;
+        debugConnectionState = debugOverlay && debugOverlay.runtime_state === "live"
+          ? "live"
+          : debugOverlay && debugOverlay.runtime_state === "finished"
+            ? "finished"
+            : "failed";
         syncDebugSessionPicker();
         syncDebugActive();
         if (debugOverlay && debugOverlay.active_graph_id) selectedGraphId = debugOverlay.active_graph_id;
@@ -1483,8 +1683,9 @@
       .catch(() => {
         if (requestGeneration !== debugRequestGeneration) return;
         releaseDebugSession(requestedSession);
-        clearDebugClientState();
+        clearDebugClientState("disconnected");
         showToast("Debug session disconnected; source was kept", { isError: true });
+        drawGraph(latestDoc);
       });
   }
 
@@ -1492,7 +1693,7 @@
     const doc = latestDoc;
     const session = debugSessionSnapshot();
     debugRequestGeneration++;
-    clearDebugClientState();
+    clearDebugClientState("idle");
     if (session && doc) releaseDebugSession(session, true);
     showToast("Debug overlay stopped");
     if (latestDoc) drawGraph(latestDoc);

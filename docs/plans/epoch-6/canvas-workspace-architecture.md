@@ -128,6 +128,9 @@ lock reasons, and diff.
   preview, Canvas preview.
 - Source Graph Pane: existing function graph, scoped by package/file, with
   cross-file references, rename impact, source jumps, and package boundaries.
+  The `My Canvas` component tree is the compact source-backed entry point for
+  files, function graphs, and the current function's typed variables; its
+  `New` and `Add` affordances use the existing checked source transactions.
 - Diagnostics Pane: grouped by workspace, package, file, target, and manifest.
   Only Jet diagnostics appear.
 - Trust/Provenance Pane: grants, lock reasons, envelopes, SBOM/audit facts,

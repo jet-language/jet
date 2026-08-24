@@ -22,6 +22,7 @@ use std::path::Path;
 
 use super::Inferior::{Inferior, ResumeResult};
 use super::LineMap::LineMap;
+use super::{DebugSnapshot, FrameSnapshot, ValueSnapshot};
 use crate::ExitCodes;
 use crate::Syntax;
 
@@ -438,10 +439,17 @@ impl Session {
             Ok(out) => {
                 // I2: only `__jet_`-mangled bindings are Jet locals; a
                 // compiler-internal temp (no prefix) is filtered, never shown.
-                let body: Vec<String> = Inferior::parse_locals(&out)
+                let body: Vec<String> = Inferior::parse_typed_locals(&out)
                     .iter()
-                    .filter_map(|(n, v)| {
-                        Inferior::rust_local_to_jet(n).map(|jn| format!("{} = {}", jn, v))
+                    .filter_map(|(ty, n, v)| {
+                        Inferior::rust_local_to_jet(n).map(|jn| {
+                            let ty = jet_type_name(ty);
+                            if ty.is_empty() {
+                                format!("{} = {}", jn, v)
+                            } else {
+                                format!("{} : {} = {}", jn, ty, v)
+                            }
+                        })
                     })
                     .collect();
                 if body.is_empty() {
@@ -644,4 +652,80 @@ commands:
     fn run_to_completion(&mut self) {
         let _ = self.inf.resume_and_locate("continue");
     }
+}
+
+fn jet_type_name(raw: &str) -> &str {
+    match raw.trim() {
+        "bool" => "Bool",
+        "f32" | "f64" => "Float",
+        "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => {
+            "Int"
+        }
+        "alloc::string::String" | "std::string::String" | "String" => "String",
+        other => other,
+    }
+}
+
+pub(crate) fn snapshot_from_transcript(transcript: &str) -> Option<DebugSnapshot> {
+    let line = transcript.lines().rev().find_map(|line| {
+        let before_pipe = line.split('|').next()?.trim();
+        let number = before_pipe.split_whitespace().last()?.parse().ok()?;
+        line.contains("<- here").then_some(number)
+    })?;
+    let locals = transcript
+        .lines()
+        .rev()
+        .find(|line| line.starts_with("locals:"))
+        .map(|line| {
+            line.trim_start_matches("locals:")
+                .trim()
+                .split("   ")
+                .filter_map(|part| {
+                    if part == "(none)" || part.is_empty() {
+                        return None;
+                    }
+                    let (name_and_type, value) = part.split_once(" = ")?;
+                    let (name, type_name) = name_and_type
+                        .split_once(" : ")
+                        .map(|(name, ty)| (name.trim(), ty.trim()))
+                        .unwrap_or((name_and_type.trim(), ""));
+                    Some(ValueSnapshot {
+                        name: name.to_string(),
+                        type_name: type_name.to_string(),
+                        value: value.trim().to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut frames = transcript
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix('#')?.split_once("  ")?.1;
+            let (function, location) = rest.split_once("()  at ")?;
+            let line = location.rsplit_once(':')?.1.parse().ok()?;
+            Some(FrameSnapshot {
+                function: function.to_string(),
+                line,
+            })
+        })
+        .collect::<Vec<_>>();
+    if frames.is_empty() {
+        frames.push(FrameSnapshot {
+            function: "run".to_string(),
+            line,
+        });
+    } else {
+        frames.reverse();
+    }
+    let function = frames
+        .last()
+        .map(|frame| frame.function.clone())
+        .unwrap_or_else(|| "run".to_string());
+    Some(DebugSnapshot {
+        function,
+        line,
+        locals,
+        call_stack: frames,
+    })
 }

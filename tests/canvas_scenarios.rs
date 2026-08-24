@@ -273,6 +273,34 @@ const DEMO: &str = r#"fn helper() Int -> {
     return 1
 }
 
+/// Squares an integer input for this Canvas example.
+fn square(n: Int) Int -> {
+    return n * n
+}
+
+/// Summarizes a checked value for Canvas hover guidance.
+fn summarize(limit: Int) Int -> {
+    total := square(limit)
+    if total > 10 {
+        return total
+    } else {
+        return total + 1
+    }
+}
+
+fn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {
+    print(limit)
+}
+
+fn run() {
+    print(summarize(4))
+}
+"#;
+
+const DEBUG_DEMO: &str = r#"fn helper() Int -> {
+    return 1
+}
+
 fn square(n: Int) Int -> {
     return n * n
 }
@@ -291,7 +319,9 @@ fn scratch(limit: Int, text: String, flag: Bool, ratio: Float) {
 }
 
 fn run() {
-    print(summarize(4))
+    value := summarize(4)
+    print(value)
+    print(value)
 }
 "#;
 
@@ -418,6 +448,11 @@ fn canvas_onboarding_tour() {
 }
 
 #[test]
+fn keyboard_cheat_sheet_accessibility_states() {
+    run_canvas_scenario("keyboard-cheat-sheet-accessibility-states");
+}
+
+#[test]
 fn open_and_render() {
     run_canvas_scenario("open-and-render");
 }
@@ -453,8 +488,18 @@ fn read_graph_overview() {
 }
 
 #[test]
+fn component_tree_and_palette() {
+    run_canvas_scenario("component-tree-and-palette");
+}
+
+#[test]
 fn palette_insert_core_fn() {
     run_canvas_scenario("palette-insert-core-fn");
+}
+
+#[test]
+fn palette_insert_imported_alias_function() {
+    run_canvas_scenario("palette-insert-imported-alias-function");
 }
 
 #[test]
@@ -508,6 +553,41 @@ fn exec_convergence_preview() {
 }
 
 #[test]
+fn exec_convergence_structured_join() {
+    run_canvas_scenario("exec-convergence-structured-join");
+}
+
+#[test]
+fn exec_convergence_apply() {
+    run_canvas_scenario("exec-convergence-apply");
+}
+
+#[test]
+fn exec_convergence_refuses_out_of_scope() {
+    run_canvas_scenario("exec-convergence-refuses-out-of-scope");
+}
+
+#[test]
+fn exec_convergence_explicit_strategies() {
+    run_canvas_scenario("exec-convergence-explicit-strategies");
+}
+
+#[test]
+fn exec_convergence_escape() {
+    run_canvas_scenario("exec-convergence-escape");
+}
+
+#[test]
+fn exec_convergence_stale() {
+    run_canvas_scenario("exec-convergence-stale");
+}
+
+#[test]
+fn branch_insertion_targets() {
+    run_canvas_scenario("branch-insertion-targets");
+}
+
+#[test]
 fn pattern_arm_add_edit_remove() {
     run_canvas_scenario("pattern-arm-add-edit-remove");
 }
@@ -520,6 +600,11 @@ fn pattern_arm_invalid_refused() {
 #[test]
 fn node_state_off_toggle() {
     run_canvas_scenario("node-state-off-toggle");
+}
+
+#[test]
+fn node_state_debug_only_toggle() {
+    run_canvas_scenario("node-state-debug-only-toggle");
 }
 
 #[test]
@@ -565,6 +650,11 @@ fn workspace_keyboard_view_state() {
 #[test]
 fn node_docs_pointer_hover() {
     run_canvas_scenario("node-docs-pointer-hover");
+}
+
+#[test]
+fn canvas_teaching_empty_states() {
+    run_canvas_scenario("canvas-teaching-empty-states");
 }
 
 #[test]
@@ -645,6 +735,16 @@ fn run_button_output_visible() {
 #[test]
 fn debug_live_session() {
     run_canvas_scenario("debug-live-session");
+}
+
+#[test]
+fn debug_runtime_values_staleness_liveness() {
+    run_canvas_scenario("debug-runtime-values-staleness-liveness");
+}
+
+#[test]
+fn debug_breakpoints_run_control_gestures() {
+    run_canvas_scenario("debug-breakpoints-run-control-gestures");
 }
 
 #[test]
@@ -919,7 +1019,12 @@ impl CanvasCase {
             .expect("copy Canvas onboarding example source");
             None
         } else {
-            fs::write(&entry, DEMO).expect("write Canvas scenario source");
+            let source = if name == "debug-breakpoints-run-control-gestures" {
+                DEBUG_DEMO
+            } else {
+                DEMO
+            };
+            fs::write(&entry, source).expect("write Canvas scenario source");
             None
         };
         let screenshots = dir.join("screenshots");

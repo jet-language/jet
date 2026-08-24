@@ -294,6 +294,18 @@
     return !!(descriptor && descriptor.palette.insertable);
   }
 
+  function actionCompatibleWithPin(action, pin) {
+    if (!pin || !actionInsertsNode(action)) return !pin && actionInsertsNode(action);
+    if (isExecPin(pin)) {
+      return pin.direction === "output" ? actionAcceptsExec(action) : actionProducesExec(action);
+    }
+    if (pin.direction === "output") {
+      return (action.pins || []).some((candidate) => candidate.direction === "input"
+        && compatibleActionType(candidate.type, pin.type || "Value"));
+    }
+    return compatibleActionType(pin.type || "Value", actionReturnType(action) || action.ret || "Value");
+  }
+
   function traitMethodActions(doc = latestDoc) {
     const interfaces = doc && doc.facts && doc.facts.blueprint && doc.facts.blueprint.interfaces;
     if (!Array.isArray(interfaces)) return [];
@@ -363,20 +375,7 @@
   }
 
   function functionsForPin(pin) {
-    if (!pin) return actionEntries.filter(actionInsertsNode);
-    const targetType = pin.type || null;
-    let entries = actionEntries.filter(actionInsertsNode).filter((entry) => {
-      if (!targetType) return true;
-      if (isExecPin(pin)) return pin.direction === "output"
-        ? actionAcceptsExec(entry)
-        : actionProducesExec(entry);
-      if (pin.direction === "output") {
-        return (entry.pins || []).some((p) => p.direction === "input" && compatibleActionType(p.type, targetType));
-      }
-      return compatibleActionType(pin.type, actionReturnType(entry) || entry.ret || "Value");
-    });
-    if (entries.length === 0) entries = actionEntries.filter(actionInsertsNode);
-    return entries;
+    return actionEntries.filter((entry) => actionCompatibleWithPin(entry, pin));
   }
 
   function actionAcceptsExec(entry) {
@@ -443,20 +442,22 @@
     if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
     if (action.kind === "canvas.command" || group.includes("command")) return "Commands";
     const descriptor = nodeDescriptorForAction(action);
-    if (descriptor && descriptor.palette.category) return descriptor.palette.category;
-    if (group.includes("flow") || group.includes("execution")) return "Execution";
+    const category = descriptor && descriptor.palette.category || "";
+    if (category.toLowerCase() === "execution" || category.toLowerCase() === "flow") return "Flow";
+    if (category) return category;
+    if (group.includes("flow") || group.includes("execution")) return "Flow";
     if (group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
     if (group.includes("interface") || group.includes("trait")) return "Interfaces";
     if (group.includes("event")) return "Events";
     if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
-    return "Execution";
+    return "Flow";
   }
 
   function paletteActionGlyph(action) {
     const descriptor = nodeDescriptorForAction(action);
     if (descriptor && descriptor.presentation.accent === "type") return action.type || action.ret || descriptor.presentation.glyph;
     if (descriptor) return descriptor.presentation.glyph;
-    if (paletteCategoryForAction(action) === "Execution") return "◇";
+    if (paletteCategoryForAction(action) === "Flow") return "◇";
     return "•";
   }
 
@@ -500,13 +501,13 @@
       const reason = disabled ? availability.reason : "";
       return `<button class="action-result${fav ? " is-favorite" : ""}${disabled ? " is-disabled" : ""}" data-menu-action="${escapeAttr(action.index)}" data-available="${disabled ? "false" : "true"}" data-unavailable-reason-code="${escapeAttr(availability.code)}" aria-disabled="${disabled ? "true" : "false"}" title="${escapeAttr(reason)}" style="--action-color:${escapeAttr(disabled ? "#6b7280" : color)}"><span class="action-glyph">${escapeHtml(paletteActionGlyph(action))}</span><span>${fav ? "★ " : ""}${escapeHtml(action.title)}<small style="color:${escapeAttr(disabled ? "#9ca3af" : color)}">${escapeHtml(disabled ? reason : paletteTypeSummary(action))}</small></span></button>`;
     };
-    const categories = ["Execution", "Variables", "Events", "Interfaces", "Project", "Core", "Commands"].map((category) => {
+    const categories = ["Flow", "Variables", "Project", "Core", "Events", "Interfaces", "Commands"].map((category) => {
       const limit = largePalette
-        ? ({ Execution: 16, Variables: 16, Events: 24, Interfaces: 16, Project: 12, Core: 24, Commands: 16 }[category] || 16)
+        ? ({ Flow: 16, Variables: 16, Events: 24, Interfaces: 16, Project: 12, Core: 24, Commands: 16 }[category] || 16)
         : category === "Core" ? 1000 : category === "Project" ? 32 : category === "Variables" ? 200 : 64;
       const rows = matches.filter((action) => paletteCategoryForAction(action) === category).slice(0, limit);
       if (!rows.length && query) return "";
-      let body = "<div class=\"action-empty\">No actions</div>";
+      let body = "<div class=\"action-empty\">No checked actions in this group.</div>";
       if (rows.length && category === "Core") {
         const modules = [];
         for (const action of rows) {
@@ -525,7 +526,8 @@
       return `<section class="action-category"><h3>${escapeHtml(category)}</h3>${body}</section>`;
     }).join("");
     const countTag = contextMenuState.pin ? `<span class="tag">${matches.length}/${contextMenuState.actions.length}</span>` : "";
-    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span>${countTag}</div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${categories || "<div class=\"action-empty\">No matching actions</div>"}</div>`;
+    const emptyState = `<div class="action-empty" data-action-empty="true"><b>${query ? "No matching checked actions" : "No compatible checked actions"}</b><span>Canvas only inserts checked, source-backed actions. Open Jet source to add or repair one.</span><button type="button" data-menu-empty-source>Open source</button><button type="button" data-menu-empty-close>Close</button></div>`;
+    contextMenu.innerHTML = `<div class="action-palette-head"><div class="menu-title">${escapeHtml(contextMenuState.title)}</div><div class="action-context">${port}<span>${escapeHtml(context)}</span>${countTag}</div><input id="action-palette-search" placeholder="Search actions" value="${escapeAttr(query)}"></div><div class="action-results">${matches.length ? categories : emptyState}</div>`;
     const input = document.getElementById("action-palette-search");
     if (input) {
       input.addEventListener("input", () => {
@@ -576,6 +578,13 @@
         }
       });
     });
+    const emptySource = contextMenu.querySelector("[data-menu-empty-source]");
+    if (emptySource) emptySource.addEventListener("click", () => {
+      closeContextMenu();
+      openSourceRecovery();
+    });
+    const emptyClose = contextMenu.querySelector("[data-menu-empty-close]");
+    if (emptyClose) emptyClose.addEventListener("click", closeContextMenu);
     if (palettePerfStart) {
       (window.__jetCanvasPalettePerf ||= []).push({ query, ms: performance.now() - palettePerfStart, actions: contextMenuState.actions.length, matches: matches.length });
     }
@@ -585,7 +594,7 @@
     if (contextMenuState && contextMenuState.renderFrame) cancelAnimationFrame(contextMenuState.renderFrame);
     contextMenuState = {
       title,
-      actions: (actions.length ? actions : [{ title: "No compatible actions", detail: "source-backed only", group: "empty", run: () => {} }]).map((action, index) => Object.assign({ index }, action)),
+      actions: actions.map((action, index) => Object.assign({ index }, action)),
       pin: opts.pin || null,
       context: opts.context || "",
       query: opts.query || "",
@@ -619,7 +628,8 @@
       ], { pin, context: "Input element" });
       return;
     }
-    const entries = functionsForPin(pin).concat(variableActionsForGraph(currentGraphOrNull()).filter(actionInsertsNode));
+    const entries = functionsForPin(pin).concat(variableActionsForGraph(currentGraphOrNull())
+      .filter((action) => actionCompatibleWithPin(action, pin)));
     const actions = entries.map((entry) => ({
       title: entry.title,
       detail: entry.detail,

@@ -148,21 +148,27 @@ The known unfinished graph work, now interaction-verified:
 
 - First-run: a `canvas tour` example project (I5: examples are the spec) that
   opens with a guided overlay — the Content-Examples pattern, source-backed.
-- Node/docs hovers everywhere (doc comments → tooltips; module docs in
-  palette rows), keyboard cheat-sheet overlay, empty-states that teach.
+- Checked function docs drive node hovers (doc comments → tooltips; module
+  docs remain in palette rows), keyboard cheat-sheet overlay, and empty
+  states that teach with a visible source or retry action.
 - `jet dev --canvas-demo` (or equivalent) one-command demo entry.
 - Exit: a new user (owner proxy) goes from `jet new` to a working two-function
   graph program without touching a text editor or any doc outside the tool.
 
-The Canvas onboarding tour slice uses
-`examples/features/tooling/canvas_blueprint_demo.jet` as its source-backed
-project and `tests/canvas_scenarios.rs::canvas_onboarding_tour` as its real
-browser proof. The tour teaches graph reading, source editing, checking,
+The Canvas onboarding tour and accessibility-state slices use
+`examples/features/tooling/canvas_blueprint_demo.jet` as their source-backed
+project and `tests/canvas_scenarios.rs::canvas_onboarding_tour`,
+`tests/canvas_scenarios.rs::keyboard_cheat_sheet_accessibility_states`, and
+`tests/canvas_scenarios.rs::canvas_teaching_empty_states` as
+their real browser proof. The tour teaches graph reading, source editing, checking,
 running, inspection, and undo. Its edit step selects the example's
 source-backed value in Inspector; Apply and Undo travel through the normal
 source transaction path. Its state is local editor state; Jet source remains
-the semantic truth. Loading, empty, invalid, offline, and permission states
-keep source recovery or retry actions visible.
+the semantic truth. The keyboard sheet exposes source-safe graph commands and
+restores focus after close. Loading, empty, invalid, offline, permission, and
+recovery states keep source recovery or retry actions visible and announced;
+an empty projection clears stale graph hit maps before showing its teaching
+message.
 
 ### M6 — Beyond parity (only after M1–M5)
 

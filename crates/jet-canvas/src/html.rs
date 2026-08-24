@@ -87,6 +87,16 @@ body:not(.is-debug-active) .debug-controls > :not(#debug-start) { display: none;
 .right { border-right: 0; border-left: 1px solid #23344a; box-shadow: inset 1px 0 0 rgba(255,255,255,.03); display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
 .panel { border-bottom: 1px solid #23344a; padding: clamp(9px, 1.2vw, 13px); }
 .panel h2 { margin: 0 0 10px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+.component-tree-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.component-tree-head h2 { margin: 0; }
+.component-tree-section { display: grid; gap: 7px; padding-top: 9px; border-top: 1px solid #22364d; }
+.component-tree-section + .component-tree-section { margin-top: 9px; }
+.component-tree-section details { gap: 7px; }
+.component-tree-section summary { min-height: 27px; }
+.component-tree-section summary > .component-tree-section-actions { display: inline-flex; align-items: center; justify-content: end; gap: 6px; }
+.component-tree-section-actions button { min-height: 22px; padding: 2px 7px; border-radius: 4px; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .04em; }
+.component-tree-section [role="treeitem"] { position: relative; }
+.component-tree-section [role="treeitem"]:focus-visible { outline: 2px solid #35c2ff; outline-offset: 1px; }
 .panel details { display: grid; gap: 8px; }
 .panel summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 30px; color: #eaf5ff; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
 .panel summary::-webkit-details-marker { display: none; }
@@ -331,6 +341,29 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
 .action-result.is-disabled:hover, .action-result.is-disabled:focus-visible { border-color: #3f4856; background: #151922; }
 .action-result small { color: #9aaecb; display: block; margin-top: 2px; overflow-wrap: anywhere; font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .action-empty { color: #8da4c2; padding: 9px; border: 1px dashed #31445d; border-radius: 4px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.action-empty[data-action-empty] { display: grid; gap: 8px; }
+.action-empty[data-action-empty] b { color: #e4efff; font: 600 12px system-ui, sans-serif; }
+.action-empty[data-action-empty] span { line-height: 1.45; }
+.action-empty[data-action-empty] button { justify-self: start; }
+#keyboard-cheat-sheet { width: min(760px, calc(100vw - 32px)); max-height: min(82vh, 760px); padding: 0; border: 1px solid #46698f; border-radius: 8px; background: #0b1118; color: #d7e4f7; box-shadow: 0 26px 90px rgba(0,0,0,.68); }
+#keyboard-cheat-sheet:not([open]) { display: none; }
+#keyboard-cheat-sheet[open] { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; }
+#keyboard-cheat-sheet::backdrop { background: rgba(2,7,13,.74); }
+.keyboard-cheat-sheet-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; padding: 16px 18px 12px; border-bottom: 1px solid #263b55; background: linear-gradient(135deg, #111d2b, #0b131e 70%); }
+.keyboard-cheat-sheet-head h2 { margin: 0 0 4px; color: #f8fbff; font-size: 18px; }
+.keyboard-cheat-sheet-head p, .keyboard-cheat-sheet-note { margin: 0; color: #94abc7; line-height: 1.45; }
+.keyboard-cheat-sheet-note { padding: 12px 18px 0; }
+.keyboard-shortcuts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px 18px 18px; overflow: auto; }
+.keyboard-shortcut-group { display: grid; align-content: start; gap: 5px; padding: 9px; border: 1px solid #263b55; border-radius: 6px; background: #0f1823; }
+.keyboard-shortcut-group h3 { margin: 0 0 3px; color: #65d4ff; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.keyboard-shortcut-row { display: grid; grid-template-columns: minmax(112px, auto) minmax(0, 1fr); gap: 10px; align-items: baseline; color: #c9dcf2; line-height: 1.35; }
+.keyboard-shortcut-row kbd { color: #f8fbff; border: 1px solid #46698f; border-bottom-width: 2px; border-radius: 4px; background: #172435; padding: 2px 5px; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; text-align: center; white-space: nowrap; }
+.keyboard-cheat-sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px 14px; border-top: 1px solid #263b55; color: #8fa7c6; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.keyboard-cheat-sheet-foot kbd { color: #eaf5ff; }
+@media (max-width: 640px) {
+  .keyboard-shortcuts { grid-template-columns: 1fr; }
+  .keyboard-shortcut-row { grid-template-columns: minmax(104px, auto) minmax(0, 1fr); }
+}
 #first-run-tour { position: fixed; inset: auto 18px 42px auto; z-index: 29; width: min(340px, calc(100vw - 36px)); display: none; gap: 10px; padding: 12px; border: 1px solid #365a7f; border-radius: 6px; background: rgba(7,16,28,.95); box-shadow: 0 22px 70px rgba(0,0,0,.5); color: #c9dcf2; pointer-events: none; }
 #first-run-tour.is-open { display: grid; }
 #first-run-tour b { color: #f8fbff; }
@@ -409,6 +442,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <button id="run-current" class="primary" title="Run current entry" aria-label="Run current entry">Run</button>
       <details id="debug-menu" class="toolbar-menu"><summary class="icon-button" title="Debug controls" aria-label="Debug controls"><svg viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M7 10h10"/><path d="M12 6v14"/><path d="M5 14h14"/><path d="M8 22h8"/><path d="M4 18l4-4"/><path d="M20 18l-4-4"/></svg></summary><div class="toolbar-popover debug-controls">
       <select id="debug-session" aria-label="Debug session"><option value="none">No live session</option></select>
+      <span id="debug-liveness" class="tag" role="status">Runtime idle</span>
       <button id="debug-start" type="button" aria-label="Start debug">Start debug</button>
       <button id="debug-break">Break</button>
       <button id="debug-watch">Watch</button>
@@ -432,6 +466,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
         <button id="bookmark-jump">Go</button>
         <button id="core-catalog">Core</button>
         <button id="favorite-action">Fav</button>
+        <button id="keyboard-help" type="button" aria-haspopup="dialog" aria-controls="keyboard-cheat-sheet">Keyboard</button>
       </div></details>
       <button id="toolbar-search" class="icon-button" title="Search" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
       <button id="developer-mode" class="icon-button" title="Developer details" aria-label="Developer details"><svg viewBox="0 0 24 24"><path d="M16 18l6-6-6-6"/><path d="M8 6l-6 6 6 6"/><path d="M14 4l-4 16"/></svg></button>
@@ -441,10 +476,29 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   </header>
   <main id="workbench">
     <aside id="left-drawer" class="side">
-      <section id="canvas-panel" class="panel"><h2>My Canvas</h2></section>
-      <section id="project-panel" class="panel"><details open><summary><span>Files</span><span id="project-mode" class="count">file</span></summary><div id="project-rail" class="project-list"></div></details></section>
-      <section id="graphs-panel" class="panel"><details open><summary><span>Functions</span><span id="graph-count" class="count">0</span></summary><div id="graph-list" class="graph-list"></div></details></section>
-      <section id="variables-panel" class="panel"><details open><summary><span>Variables</span><span id="variable-count" class="count">0</span></summary><div id="variables-list" class="variable-list"></div></details></section>
+      <section id="canvas-panel" class="panel">
+        <div id="canvas-component-tree" data-canvas-component-tree role="tree" aria-label="My Canvas">
+          <div class="component-tree-head"><h2>My Canvas</h2><span class="tag">source tree</span></div>
+          <section id="project-panel" class="component-tree-section">
+            <details open>
+              <summary><span>Files</span><span id="project-mode" class="count">file</span></summary>
+              <div id="project-rail" class="project-list"></div>
+            </details>
+          </section>
+          <section id="graphs-panel" class="component-tree-section">
+            <details open>
+              <summary><span>Functions</span><span class="component-tree-section-actions"><button id="canvas-new-function" type="button" title="Create a source-backed function">+ New</button><span id="graph-count" class="count">0</span></span></summary>
+              <div id="graph-list" class="graph-list"></div>
+            </details>
+          </section>
+          <section id="variables-panel" class="component-tree-section">
+            <details open>
+              <summary><span>Variables</span><span class="component-tree-section-actions"><button id="canvas-add-variable" type="button" title="Promote a selected value to a source-backed variable">+ Add</button><span id="variable-count" class="count">0</span></span></summary>
+              <div id="variables-list" class="variable-list"></div>
+            </details>
+          </section>
+        </div>
+      </section>
       <section id="status-panel" class="panel"><details><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div></details></section>
       <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
@@ -472,7 +526,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           <section id="review-pane" aria-live="polite"><div id="review-content"></div></section>
         </div>
       </section>
-      <canvas id="jet-canvas-view" width="1400" height="900"></canvas>
+      <canvas id="jet-canvas-view" width="1400" height="900" tabindex="0" aria-label="Jet source graph. Press question mark for keyboard shortcuts."></canvas>
       <pre id="source-view" aria-label="Jet source"></pre>
       <textarea id="source-editor" aria-label="Editable Jet source"></textarea>
       <canvas id="minimap" width="190" height="124"></canvas>
@@ -487,6 +541,58 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
 </div>
 <div id="context-menu" role="menu"></div>
+<dialog id="keyboard-cheat-sheet" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="keyboard-cheat-sheet-title" aria-describedby="keyboard-cheat-sheet-note">
+  <header class="keyboard-cheat-sheet-head">
+    <div>
+      <h2 id="keyboard-cheat-sheet-title">Canvas keyboard shortcuts</h2>
+      <p>Use these commands while graph focus is active. Text fields keep their normal editing keys.</p>
+    </div>
+    <button id="keyboard-cheat-sheet-close" type="button" aria-label="Close keyboard shortcuts">Close</button>
+  </header>
+  <p id="keyboard-cheat-sheet-note" class="keyboard-cheat-sheet-note">Jet source stays canonical. Layout, selection, and shortcut help are local Canvas state.</p>
+  <div class="keyboard-shortcuts">
+    <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-view">
+      <h3 id="keyboard-shortcuts-view">View and search</h3>
+      <div class="keyboard-shortcut-row"><kbd>?</kbd><span>Open keyboard shortcuts</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + `</kbd><span>Toggle graph and Code</span></div>
+      <div class="keyboard-shortcut-row"><kbd>/</kbd><span>Focus Canvas search</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + F</kbd><span>Find in Canvas</span></div>
+      <div class="keyboard-shortcut-row"><kbd>F</kbd><span>Fit graph</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Space + drag</kbd><span>Pan graph</span></div>
+    </section>
+    <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-actions">
+      <h3 id="keyboard-shortcuts-actions">Actions</h3>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + K or P</kbd><span>Open action palette</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + Enter</kbd><span>Prepare Run</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Z</kbd><span>Undo source edit</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Y</kbd><span>Redo source edit</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Shift + Z</kbd><span>Redo source edit</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Esc</kbd><span>Close transient UI or clear selection</span></div>
+    </section>
+    <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-layout">
+      <h3 id="keyboard-shortcuts-layout">Arrange and navigate</h3>
+      <div class="keyboard-shortcut-row"><kbd>Arrow keys</kbd><span>Nudge selected nodes</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Shift + Arrow</kbd><span>Nudge farther</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + A</kbd><span>Align top</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + Shift + A</kbd><span>Align left</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + D</kbd><span>Distribute horizontally</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + Shift + D</kbd><span>Distribute vertically</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + T</kbd><span>Tidy graph</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + B / G</kbd><span>Save / go to bookmark</span></div>
+    </section>
+    <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-source">
+      <h3 id="keyboard-shortcuts-source">Source authoring</h3>
+      <div class="keyboard-shortcut-row"><kbd>C</kbd><span>Add source-backed comment</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + C</kbd><span>Copy selection</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + V</kbd><span>Paste selection</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Shift + V</kbd><span>Paste as staged</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + D</kbd><span>Duplicate selection</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + C</kbd><span>Collapse selected source</span></div>
+      <div class="keyboard-shortcut-row"><kbd>Alt + Shift + C</kbd><span>Expand selected source</span></div>
+    </section>
+  </div>
+  <footer class="keyboard-cheat-sheet-foot"><span>Press <kbd>?</kbd> again after closing to reopen.</span></footer>
+</dialog>
 <div id="first-run-tour" role="dialog" aria-modal="false" aria-label="Canvas first run" aria-describedby="tour-detail">
   <b>Canvas edits Jet source.</b>
   <span>Use Code, Split, or Graph, then right-click or drag from a pin and release on empty space.</span>

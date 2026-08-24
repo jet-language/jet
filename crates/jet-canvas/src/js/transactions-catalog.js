@@ -69,9 +69,15 @@
   }
 
   function callExpressionForAction(item, pin) {
-    const callee = item.insert_callee || item.callee || item.title;
+    const callee = insertCalleeForAction(item);
+    if (!callee) return null;
     const args = wiredArgsForAction(item, pin);
     return callee + "(" + args.join(", ") + ")";
+  }
+
+  function insertCalleeForAction(item) {
+    const callee = item && item.insert_callee;
+    return typeof callee === "string" && callee.trim() ? callee : null;
   }
 
   function wireTargetForAction(item, pin) {
@@ -89,7 +95,7 @@
   function transactionForPaletteInsert(item, pin, graphPoint) {
     const descriptor = nodeDescriptorForAction(item);
     if (!descriptor || descriptor.transaction !== "insert_call") return null;
-    const baseCallee = item.insert_callee || item.callee || (item.op === "insert_print" ? "print" : null);
+    const baseCallee = insertCalleeForAction(item);
     if (!baseCallee) return null;
     const target = wireTargetForAction(item, pin);
     const graph = currentGraph(latestDoc);
@@ -117,6 +123,20 @@
     return body;
   }
 
+  function transactionForStructuralInsert(item, pin) {
+    const descriptor = nodeDescriptorForAction(item);
+    if (!descriptor || !descriptor.transaction || descriptor.transaction === "insert_call") return null;
+    const body = {
+      schema_version: 1,
+      op: descriptor.transaction,
+      revision: latestDoc.revision,
+      graph_id: selectedGraphId,
+      wire_target_pin: "exec"
+    };
+    if (pin && pin.pin_id) body.wire_origin_pin_id = pin.pin_id;
+    return body;
+  }
+
   function runPalette(item, pinContext) {
     if (!latestDoc || !selectedGraphId) return;
     const availability = actionAvailability(item);
@@ -124,12 +144,11 @@
     const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
     const graphPoint = contextMenuState && contextMenuState.graphPoint || null;
     const descriptor = nodeDescriptorForAction(item);
+    if (descriptor && descriptor.transaction === "insert_call" && !insertCalleeForAction(item)) {
+      showToast("Checked action has no source callee; source was not changed", { isError: true });
+      return;
+    }
     if ((item.stageable || !pin) && actionInsertsNode(item) && item.op !== "preview_canvas_action") {
-      if (item.op === "insert_call" && !item.insert_callee && !item.callee) {
-        const callee = window.prompt("Call function", "print");
-        if (!callee) return;
-        return createStagedNodeFromAction(Object.assign({}, item, { title: callee, callee, insert_callee: callee, args: ["\"canvas\""] }), graphPoint || viewportCenterGraphPoint());
-      }
       return createStagedNodeFromAction(item, graphPoint || viewportCenterGraphPoint());
     }
     if (item.kind === "canvas.core_catalog") {
@@ -140,18 +159,22 @@
       if (pin && pin.direction === "input") {
         const graph = currentGraph(latestDoc);
         const expr = inlineForPin(graph, pin);
-        if (expr && item.callee) return postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: callExpressionForAction(item, pin) });
+        if (expr && insertCalleeForAction(item)) {
+          const newExpr = callExpressionForAction(item, pin);
+          if (newExpr) return postTransaction({ schema_version: 1, op: "edit_inline_expr", revision: latestDoc.revision, inline_expr_id: expr.inline_expr_id, new_expr: newExpr });
+        }
       }
-      postTransaction({ schema_version: 1, op: "preview_canvas_action", revision: latestDoc.revision, graph_id: selectedGraphId, action_id: item.action_id, callee: item.callee, args: defaultArgsForAction(item, pin) });
+      const callee = insertCalleeForAction(item);
+      if (!callee) return showToast("Checked action has no source callee; source was not changed", { isError: true });
+      postTransaction({ schema_version: 1, op: "preview_canvas_action", revision: latestDoc.revision, graph_id: selectedGraphId, action_id: item.action_id, callee, args: defaultArgsForAction(item, pin) });
     } else if (item.op === "command_authority") {
       renderCommandAuthority(item);
     } else if (item.op === "insert_print") {
-      postTransaction(transactionForPaletteInsert(Object.assign({}, item, { callee: "print" }), pin, graphPoint));
+      postTransaction(transactionForPaletteInsert(Object.assign({}, item, { callee: "print", insert_callee: "print" }), pin, graphPoint));
     } else if (item.op === "insert_call") {
-      const callee = item.insert_callee || item.callee || window.prompt("Call function", "print");
-      if (callee) postTransaction(transactionForPaletteInsert(Object.assign({}, item.insert_callee || item.callee ? item : { args: ["\"canvas\""] }, { callee }), pin, graphPoint));
+      postTransaction(transactionForPaletteInsert(item, pin, graphPoint));
     } else if (descriptor && descriptor.transaction && descriptor.transaction !== "insert_call" && descriptor.transaction !== "edit_inline_expr") {
-      postTransaction({ schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId });
+      postTransaction(transactionForStructuralInsert(item, pin));
     } else if (item.op === "comment") {
       const graph = currentGraph(latestDoc);
       const node = graph && (graph.nodes.find((n) => n.node_id === selectedNodeId) || graph.nodes[0]);
@@ -179,13 +202,19 @@
     if (!latestDoc || !selectedGraphId) return Promise.resolve({ ok: false, changed: false, code: "no_graph" });
     const availability = actionAvailability(item, currentGraphOrNull());
     if (!availability.available) {
-      setCanvasState("error", "Library entry unavailable", `${availability.reason} Source was not changed.`);
+      setCanvasState("permission", "Library entry unavailable", `${availability.reason} Source was not changed.`, [
+        { label: "Open source", run: openSourceRecovery },
+        { label: "Close", primary: true, run: clearCanvasState }
+      ]);
       return Promise.resolve({ ok: false, changed: false, code: availability.code, message: availability.reason });
     }
     if (item.stageable) return runPalette(item);
     const body = transactionForPaletteInsert(item, null, viewportCenterGraphPoint());
     if (!body) {
-      setCanvasState("error", "Library entry needs a compatible source action", "The checked action was kept visible. Source was not changed.");
+      setCanvasState("error", "Library entry needs a compatible source action", "The checked action was kept visible. Source was not changed.", [
+        { label: "Open source", run: openSourceRecovery },
+        { label: "Close", primary: true, run: clearCanvasState }
+      ]);
       return Promise.resolve({ ok: false, changed: false, code: "missing_insert_descriptor" });
     }
     return postTransaction(body);
@@ -292,7 +321,7 @@
           if (result.json.revision !== latestDoc.revision) {
             releaseDebugSession(debugSessionSnapshot());
             debugRequestGeneration++;
-            clearDebugClientState();
+            clearDebugClientState("stale");
           }
           latestDoc = Object.assign({}, latestDoc, {
             revision: result.json.revision,
@@ -342,7 +371,7 @@
           if (result.json.revision !== latestDoc.revision) {
             releaseDebugSession(debugSessionSnapshot());
             debugRequestGeneration++;
-            clearDebugClientState();
+            clearDebugClientState("stale");
           }
           latestDoc = Object.assign({}, latestDoc, {
             revision: result.json.revision,
@@ -398,10 +427,8 @@
     const previousSourceId = selectedSourceId;
     const previousRevision = latestDoc && latestDoc.revision;
     const previousDebugSession = debugSessionSnapshot();
-    setCanvasState("loading", "Opening Canvas", "Reading Jet source and rebuilding the source-backed graph…", latestDoc ? [
+    setCanvasState("loading", "Opening Canvas", "Reading Jet source and rebuilding the source-backed graph…", [
       { label: "Show source", run: openSourceRecovery },
-      { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
-    ] : [
       { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
     ]);
     setSaveState("loading", "draft");
@@ -435,7 +462,7 @@
           selectedNodeIds = new Set();
           selectionExplicitlyCleared = false;
           debugRequestGeneration++;
-          clearDebugClientState();
+          clearDebugClientState("stale");
           searchState.results = [];
           searchState.spans = [];
           searchState.active = -1;
@@ -448,7 +475,7 @@
           if (typeof renderSearchResults === "function") renderSearchResults();
         } else if (revisionChanged) {
           debugRequestGeneration++;
-          clearDebugClientState();
+          clearDebugClientState("stale");
           searchState.stale = true;
           if (typeof renderSearchResults === "function") renderSearchResults();
         }
@@ -519,7 +546,7 @@
       .then((r) => r.json())
       .then((doc) => {
         if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
-        if (!doc || !doc.actions) return;
+        if (!doc || !Array.isArray(doc.actions)) throw new Error("checked action query returned no actions");
         const canvasActions = doc.actions.map((action) => withNodeDescriptor({
           title: action.title || action.callee,
           detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
@@ -530,7 +557,7 @@
           action_id: action.action_id,
           callee: action.callee,
           module_path: action.module_path || "",
-          insert_callee: action.insert_callee || action.callee,
+          insert_callee: action.insert_callee,
           rank: Number(action.rank || 0),
           rank_terms: action.rank_terms || [],
           source_span: action.source_span || null,
@@ -564,7 +591,19 @@
         if (latestDoc && latestDoc.revision === loadRevision && !document.getElementById("execute-command-authority") && !canvasActionsSkipRedraw) drawGraph(latestDoc);
         return actionEntries;
       })
-      .catch(() => actionEntries)
+      .catch((error) => {
+        if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
+        const offline = navigator.onLine === false;
+        setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Checked actions unavailable", offline
+          ? "Jet source and the current graph stay visible. Reconnect, then retry the checked action query."
+          : "Jet source and the current graph stay visible. Retry the checked action query or open Code.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => loadCanvasActions(options) }
+        ]);
+        setSaveState("source unchanged", "error");
+        showToast(error && error.message ? error.message : "Checked action query failed", { isError: true });
+        return actionEntries;
+      })
       .finally(() => {
         canvasActionsLoading = null;
         canvasActionsLoadingRevision = null;
@@ -590,6 +629,7 @@
     coreCatalogLoading = fetch(url, { cache: "no-store" })
       .then((r) => r.json())
       .then((doc) => {
+        if (!doc || !Array.isArray(doc.modules)) throw new Error("core library query returned no modules");
         const entries = [];
         for (const module of doc.modules || []) {
           for (const member of module.members || []) {
@@ -603,8 +643,8 @@
               op: "insert_call",
               action_id: "canvas.core_catalog:" + (module.path || "core") + ":" + member.name,
               module_path: module.path || "core",
-              callee,
-              insert_callee: callee,
+              callee: member.callee || callee,
+              insert_callee: member.insert_callee || null,
               rank: Number(member.rank || 0),
               rank_terms: member.rank_terms || [],
               signature: member.signature || "",
@@ -634,7 +674,18 @@
         }
         return actionEntries;
       })
-      .catch(() => actionEntries)
+      .catch((error) => {
+        const offline = navigator.onLine === false;
+        setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Core library unavailable", offline
+          ? "Jet source stays visible. Reconnect, then retry the library query."
+          : "Checked source stays visible. Retry the library query or open Code.", [
+          { label: "Open source", run: openSourceRecovery },
+          { label: "Retry", primary: true, run: () => loadCoreCatalogActions(query) }
+        ]);
+        setSaveState("source unchanged", "error");
+        showToast(error && error.message ? error.message : "Core library query failed", { isError: true });
+        return actionEntries;
+      })
       .finally(() => { if (!query) coreCatalogLoading = null; });
     return coreCatalogLoading;
   }

@@ -369,16 +369,23 @@ impl Inferior {
     /// (confirmed live) — this tracks brace depth and joins the continuation
     /// lines into one compact value rather than truncating at the first `{`.
     pub(crate) fn parse_locals(lldb_output: &str) -> Vec<(String, String)> {
+        Self::parse_typed_locals(lldb_output)
+            .into_iter()
+            .map(|(_, name, value)| (name, value))
+            .collect()
+    }
+
+    pub(crate) fn parse_typed_locals(lldb_output: &str) -> Vec<(String, String, String)> {
         let mut pairs = Vec::new();
         let mut lines = lldb_output.lines();
         while let Some(line) = lines.next() {
-            let after_ty = if line.starts_with('(') {
-                match line.find(')') {
-                    Some(close) => line[close + 1..].trim_start(),
-                    None => continue,
-                }
+            let (type_name, after_ty) = if let Some(rest) = line.strip_prefix('(') {
+                let Some(close) = rest.find(')') else {
+                    continue;
+                };
+                (&rest[..close], rest[close + 1..].trim_start())
             } else {
-                line.trim_start()
+                ("", line.trim_start())
             };
             let Some((name, first_value)) = after_ty.split_once(" = ") else {
                 continue;
@@ -390,7 +397,11 @@ impl Inferior {
             // confirmed live. A complete quoted literal IS the value; the
             // per-byte children dump is noise a Jet debugger never shows (I2).
             if let Some(quoted) = complete_quoted_literal(first_value) {
-                pairs.push((name.trim().to_string(), quoted.to_string()));
+                pairs.push((
+                    type_name.to_string(),
+                    name.trim().to_string(),
+                    quoted.to_string(),
+                ));
                 continue;
             }
             let mut value = first_value.to_string();
@@ -402,7 +413,7 @@ impl Inferior {
                 value.push(' ');
                 value.push_str(trimmed);
             }
-            pairs.push((name.trim().to_string(), value));
+            pairs.push((type_name.to_string(), name.trim().to_string(), value));
         }
         pairs
     }

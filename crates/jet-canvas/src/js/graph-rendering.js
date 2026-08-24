@@ -268,7 +268,22 @@
     return nodeStyle(node, graph).label || node.kind || "Node";
   }
 
+  function checkedFunctionDocs(node, graph) {
+    if (!node) return "";
+    const nodeTitle = String(node.title || "").replace(/^\./, "");
+    if (node.kind === "entry" && graph && graph.function && graph.function.docs) {
+      return String(graph.function.docs).trim();
+    }
+    const checkedGraph = (latestDoc && latestDoc.graphs || []).find((candidate) => {
+      const fn = candidate && candidate.function || {};
+      return candidate && (candidate.title === nodeTitle || fn.name === nodeTitle);
+    });
+    return String(checkedGraph && checkedGraph.function && checkedGraph.function.docs || "").trim();
+  }
+
   function nodeDescription(node, graph) {
+    const docs = checkedFunctionDocs(node, graph);
+    if (docs) return docs;
     const hover = nodeDescriptor(node) && nodeDescriptor(node).presentation.hover;
     if (hover) return hover;
     if (!node) return "";
@@ -567,7 +582,7 @@
       return;
     }
     const selected = selectedNodeIds.has(node.node_id);
-    const active = debugSessionId && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_node_id === node.node_id;
+    const active = debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.runtime_state === "live" && debugOverlay.active_node_id === node.node_id;
     const searchHit = (searchState.spans || []).some((span) => spansOverlap(node.source_span, span));
     const diagnostics = nodeDiagnostics(node);
     const breakpoint = nodeBreakpoint(node);
@@ -791,15 +806,69 @@
     if (debugOverlay && (
       debugOverlay.revision !== doc.revision
       || debugOverlay.source_id !== currentCanvasSourceId()
-      || (debugOverlay.debug_overlay === "running" && !debugSessionId)
+      || (debugOverlay.runtime_state === "live" && !debugSessionId)
     )) {
       debugRequestGeneration++;
       releaseDebugSession(previousDebugSession);
-      clearDebugClientState();
+      clearDebugClientState("stale");
     }
     loadDebugState(doc);
     const sourceGraph = currentGraph(doc);
-    if (!sourceGraph) return;
+    if (!sourceGraph) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      mini.clearRect(0, 0, minimap.width, minimap.height);
+      hit = [];
+      pinPoints = new Map();
+      nodeBounds = new Map();
+      pinHit = [];
+      pinEditorHit = [];
+      wireEndpointHit = [];
+      diagnosticHit = [];
+      connectedPinIds = new Set();
+      selectedGraphId = null;
+      selectedNodeId = null;
+      selectedNodeIds = new Set();
+      selectionExplicitlyCleared = false;
+      hoverPin = null;
+      hoverNode = null;
+      hoverDiagnostic = null;
+      window.__jetCanvasSelectedGraphId = null;
+      window.__jetCanvasNodeBounds = {};
+      window.__jetCanvasPinPoints = {};
+      window.__jetCanvasWireEndpoints = [];
+      window.__jetCanvasHitMap = { graph_id: null, nodes: [], pins: [], diagnostics: [] };
+      window.__jetCanvasStagedRegistry = [];
+      window.__jetCanvasNonblankPixels = 0;
+      if (graphSelect) graphSelect.innerHTML = "";
+      if (graphList) graphList.innerHTML = "";
+      if (graphStrip) graphStrip.innerHTML = "";
+      if (graphCount) graphCount.textContent = "0";
+      if (variablesList) variablesList.innerHTML = '<div class="tag">no variables</div>';
+      if (variableCount) variableCount.textContent = "0";
+      if (graphOverview) {
+        graphOverview.innerHTML = '<div class="details-empty"><b>No graph yet</b><span>Add a function such as <code>fn run()</code> in Code or Split view.</span></div>';
+      }
+      syncWireStatus(null);
+      window.__jetCanvasTest = Object.assign({}, window.__jetCanvasTest || {}, {
+        hitMap: window.__jetCanvasHitMap,
+        nodeBounds: window.__jetCanvasNodeBounds,
+        pinPoints: window.__jetCanvasPinPoints,
+        wireEndpoints: window.__jetCanvasWireEndpoints,
+        stagedRegistry: window.__jetCanvasStagedRegistry,
+        graphId: null,
+        selectedNodeId: null,
+        selectedNodeTitle: "",
+        sourceText: source,
+        doc: latestDoc,
+        nodeDescriptors: latestDoc.node_descriptors || [],
+        descriptorConsumption: [],
+        diagnosticsByNode: [],
+        nodeCount: 0,
+        hoveredNodeTitle: "",
+        hoveredNodeDescription: ""
+      });
+      return;
+    }
     if (window.__jetCanvasExecConvergencePreview && window.__jetCanvasExecConvergencePreview.revision !== doc.revision) {
       window.__jetCanvasExecConvergencePreview = null;
     }
@@ -821,6 +890,7 @@
     syncGraphList(doc);
     syncGraphStrip(doc);
     syncVariablesList(graph);
+    syncComponentTree(doc, graph);
     syncTraitsPanel(doc);
     syncLibraryPanel(doc);
     syncEventsPanel(doc);
@@ -859,7 +929,7 @@
       const to = pinPoints.get(wire.to_pin);
       if (!from || !to) continue;
       if (!visibleIds.has(from.pin.node_id) && !visibleIds.has(to.pin.node_id)) continue;
-      const activeWire = debugSessionId && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.active_wire_id === wire.wire_id;
+      const activeWire = debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.debug_overlay === "running" && debugOverlay.runtime_state === "live" && ((debugOverlay.wire_path || []).includes(wire.wire_id) || debugOverlay.active_wire_id === wire.wire_id);
       const selectedWire = selectedNodeIds.has(from.pin.node_id) || selectedNodeIds.has(to.pin.node_id);
       rememberWireEndpoint(wire, from, to);
       drawWire(wire, from, to, activeWire, selectedWire);
@@ -1015,6 +1085,8 @@
       debugSession: debugSessionInfo,
       debugSessionId,
       debugOverlay,
+      debugState: window.__jetCanvasDebugState || null,
+      debugLiveness: debugLiveness && debugLiveness.textContent || "",
       execConvergencePreview: window.__jetCanvasExecConvergencePreview || null,
       wirePreview: window.__jetCanvasWirePreview || null,
       lastConnectionPlan: window.__jetCanvasLastConnectionPlan || null,
@@ -1092,7 +1164,7 @@
           op: entry.op || "",
           action_id: entry.action_id || "",
           callee: entry.callee || "",
-          insert_callee: entry.insert_callee || entry.callee || "",
+          insert_callee: entry.insert_callee || "",
           args: entry.args || entry.default_args || [],
           available: availability.available,
           stageable: !!entry.stageable,
@@ -1115,7 +1187,8 @@
         if (!pin) return false;
         const point = pinPoints.get(pin.pin_id);
         const r = canvas.getBoundingClientRect();
-        const actions = functionsForPin(pin).map((entry) => ({
+        const actions = functionsForPin(pin).concat(variableActionsForGraph(g)
+          .filter((entry) => actionCompatibleWithPin(entry, pin))).map((entry) => ({
           title: entry.title,
           detail: entry.detail,
           group: paletteCategoryForAction(entry),

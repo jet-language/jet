@@ -62,7 +62,7 @@ pub(super) fn project_checked(
         );
     }
     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
-    let blueprint = canvas_blueprint_facts_json(src, bundle, &index, runtime_events);
+    let blueprint = canvas_blueprint_facts_json(path, src, bundle, &index, runtime_events);
     let enum_catalog = enum_catalog_json(bundle);
     let json = format!(
         "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"enum_variants\":{},\"blueprint\":{}}}}}",
@@ -341,6 +341,7 @@ fn function_is_fallible(f: &AST::Func) -> bool {
 }
 
 fn canvas_blueprint_facts_json(
+    path: &Path,
     src: &str,
     bundle: &AST::ProgramBundle,
     index: &SemIndex,
@@ -369,7 +370,7 @@ fn canvas_blueprint_facts_json(
         .workspace_overlay_policy()
         .map(jet_semindex::workspace_overlay_policy_json)
         .unwrap_or_else(|| "null".to_string());
-    let event_dispatchers = event_dispatcher_facts(src, index).join(",");
+    let event_dispatchers = event_dispatcher_facts(path, src, bundle, index).join(",");
     format!(
         "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
         runtime_events.unwrap_or("null"),
@@ -709,12 +710,28 @@ pub(super) fn trait_method_signature(src: &str, m: &AST::TraitMethodSig) -> Stri
     format!("fn {}({}){}{}{}", m.name, params, ret, provenance, effects)
 }
 
-fn event_dispatcher_facts(src: &str, index: &SemIndex) -> Vec<String> {
-    let aliases = event_module_aliases(src);
+fn event_dispatcher_facts(
+    path: &Path,
+    source: &str,
+    bundle: &AST::ProgramBundle,
+    index: &SemIndex,
+) -> Vec<String> {
+    let path_text = path.to_string_lossy();
+    let Some(module) = bundle
+        .modules
+        .iter()
+        .find(|module| module.display == path_text.as_ref())
+        .or_else(|| bundle.modules.iter().find(|module| module.source == source))
+    else {
+        return Vec::new();
+    };
+    let src = module.source.as_str();
     index
         .call_edges()
         .iter()
+        .filter(|call| call.module_path == module.display)
         .filter_map(|call| {
+            let aliases = event_module_aliases(src);
             let call_source_span = event_call_span(src, call.call_span).unwrap_or(call.call_span);
             let source = src
                 .get(call_source_span.start..call_source_span.end)
@@ -726,12 +743,12 @@ fn event_dispatcher_facts(src: &str, index: &SemIndex) -> Vec<String> {
                 source,
                 &aliases,
             );
-            let receiver = event_receiver(src, index, call.call_span);
+            let receiver = event_receiver(src, index, call.call_span, &module.display);
             let kind = constructor.or_else(|| {
                 let receiver_type = receiver.as_ref().map(|(_, ty, _)| ty.as_str())?;
                 event_method_kind(receiver_type, call.callee.as_str())
             })?;
-            let scope = event_scope_argument(index, call_source_span);
+            let scope = event_scope_argument(index, call_source_span, &module.display);
             let receiver_type = constructor_type(call.callee.as_str(), source)
                 .or_else(|| receiver.as_ref().map(|(_, ty, _)| ty.clone()));
             let receiver_name = receiver.as_ref().map(|(name, _, _)| name.as_str());
@@ -757,17 +774,21 @@ fn event_dispatcher_facts(src: &str, index: &SemIndex) -> Vec<String> {
 }
 
 fn event_module_aliases(src: &str) -> Vec<String> {
-    let mut aliases = vec!["event".to_string()];
+    let mut aliases = Vec::new();
     for line in src.lines() {
-        let line = line.trim();
-        let Some(rest) = line.strip_prefix("use core.event") else {
+        let line = line.split("//").next().unwrap_or("").trim();
+        let Some(rest) = line.strip_prefix("use core.") else {
             continue;
         };
-        if let Some(alias) = rest
-            .split_whitespace()
-            .position(|part| part == "as")
-            .and_then(|position| rest.split_whitespace().nth(position + 1))
-        {
+        let full = format!("core.{rest}");
+        let (module, alias) = full
+            .split_once(" as ")
+            .map(|(module, alias)| (module.trim(), alias.trim()))
+            .unwrap_or_else(|| {
+                let module = full.trim();
+                (module, module.rsplit('.').next().unwrap_or(""))
+            });
+        if module == "core.event" && !alias.is_empty() {
             aliases.push(alias.to_string());
         }
     }
@@ -859,10 +880,12 @@ fn event_receiver(
     src: &str,
     index: &SemIndex,
     call_span: SourceSpan,
+    module_path: &str,
 ) -> Option<(String, String, SourceSpan)> {
     let reference = index
         .references()
         .iter()
+        .filter(|reference| reference.module_path == module_path)
         .filter(|reference| reference.span.end <= call_span.start)
         .filter(|reference| {
             src.get(reference.span.end..call_span.start)
@@ -880,10 +903,15 @@ fn event_receiver(
     Some((reference.name.clone(), ty, reference.span))
 }
 
-fn event_scope_argument(index: &SemIndex, call_span: SourceSpan) -> Option<(String, SourceSpan)> {
+fn event_scope_argument(
+    index: &SemIndex,
+    call_span: SourceSpan,
+    module_path: &str,
+) -> Option<(String, SourceSpan)> {
     index
         .references()
         .iter()
+        .filter(|reference| reference.module_path == module_path)
         .filter(|reference| {
             reference.span.start >= call_span.start && reference.span.end <= call_span.end
         })
@@ -1497,7 +1525,7 @@ fn project_stmt(
                     &node_id,
                     "branch",
                     if is_pattern_test { "if ==" } else { "if" },
-                    arm.cond.span().into(),
+                    (*span).into(),
                     x,
                     y,
                     vec!["control"],

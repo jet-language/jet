@@ -862,7 +862,7 @@ pub(super) fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Resul
     let catalog = core_catalog_entries(query);
     let modules = catalog
         .iter()
-        .map(core_module_json)
+        .map(|module| core_module_json(src, module))
         .collect::<Vec<_>>()
         .join(",");
     Ok(query_ok(
@@ -1631,11 +1631,11 @@ fn function_signature_from_parts(
     format!("fn {name}({params}){ret}")
 }
 
-fn core_module_json(module: &CoreCatalogModule) -> String {
+fn core_module_json(src: &str, module: &CoreCatalogModule) -> String {
     let members = module
         .members
         .iter()
-        .map(|member| core_member_json(&module.path, member))
+        .map(|member| core_member_json(src, &module.path, member))
         .collect::<Vec<_>>()
         .join(",");
     format!(
@@ -1648,7 +1648,8 @@ fn core_module_json(module: &CoreCatalogModule) -> String {
     )
 }
 
-fn core_member_json(module_path: &str, member: &CoreCatalogMember) -> String {
+fn core_member_json(src: &str, module_path: &str, member: &CoreCatalogMember) -> String {
+    let callee = format!("{}.{}", core_source_callee(src, module_path), member.name);
     let params = core_member_params(module_path, &member.name, &member.signature);
     let default_args = params
         .iter()
@@ -1661,8 +1662,10 @@ fn core_member_json(module_path: &str, member: &CoreCatalogMember) -> String {
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     format!(
-        "{{\"name\":{},\"node_descriptor_id\":{}{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"name\":{},\"callee\":{},\"insert_callee\":{},\"node_descriptor_id\":{}{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&member.name),
+        json_str(&callee),
+        json_str(&callee),
         json_str(descriptor_id),
         rank_fields,
         json_str(&member.signature),
@@ -1807,11 +1810,12 @@ fn canvas_builtin_action_json(
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"module_path\":\"builtin\",\"insert_op\":\"insert_call\",\"pure\":false,\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.builtin\",\"title\":{},\"callee\":{},\"insert_callee\":{},\"module_path\":\"builtin\",\"insert_op\":\"insert_call\",\"pure\":false,\"engine\":\"checked-tir+jit\",\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"audit\":[\"package_id\",\"version\",\"hash\",\"authority\",\"touched_files\",\"diff\",\"diagnostics\"],\"source_span\":null,\"ret\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
         rank_fields,
         json_str(title),
+        json_str(callee),
         json_str(callee),
         json_str(&authority.grant),
         json_str(&authority.package_id),
