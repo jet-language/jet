@@ -73,6 +73,51 @@ fn profile_unknown_name_emits_e1219() {
 }
 
 #[test]
+fn default_run_and_dev_route_to_fast_production_lens() {
+    let scratch = common::Scratch::new("default_profile_routing");
+    fs::write(
+        scratch.join("main.jet"),
+        "fn run() { print(\"default-profile\") }\n",
+    )
+    .unwrap();
+
+    for args in [
+        vec!["run", "--trace-tiers", "main.jet"],
+        vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
+    ] {
+        let output = Command::new(jet())
+            .args(&args)
+            .current_dir(&scratch.path)
+            .env("JET_CACHE_DIR", scratch.join("build-cache"))
+            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let trace = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{} failed:\nstdout: {}\nstderr: {trace}",
+            args[0],
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
+        assert!(
+            trace
+                .lines()
+                .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+            "{} did not use the default fast production lens:\n{trace}",
+            args[0]
+        );
+        assert!(
+            !trace.contains("tier0 interp"),
+            "{} default route deoptimized:\n{trace}",
+            args[0]
+        );
+    }
+}
+
+#[test]
 fn profile_release_flag_is_accepted() {
     // `--release` is valid (blessed profile) and must not emit E1219.
     let p = std::env::temp_dir().join("jet_cli_release_test.jet");

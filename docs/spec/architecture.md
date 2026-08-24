@@ -445,13 +445,13 @@ D-LSP1 makes editor tooling a client of the front end, not a second checker.
 `crates/jet-queries` is a std-only demand cache for file inputs and derived
 queries. LSP and batch clients store source text as query inputs and memoize
 checked bundles and fix data through that cache. The staged loader prepares
-multiple open sources with a bounded pool of at most eight workers, then
-consumes the results in stable module order. A changed root is reloaded through
-the canonical parser; sema reuses span-exact checked function bodies while the
-global environment and that module's interface are unchanged. An interface
-change invalidates the changed module and its reverse import closure; a
-body-only change leaves unrelated modules warm. Disk import checks conservatively
-revalidate their module closure. Warm-session timings are reported as
+multiple open or already-discovered disk sources with a bounded pool of at most
+eight workers, then consumes the results in stable module order. A changed root
+is reloaded through the canonical parser; sema reuses span-exact checked function
+bodies while the global environment and that module's interface are unchanged.
+An interface change invalidates the changed module and its reverse import
+closure; a body-only change leaves unrelated modules warm. Disk import checks
+conservatively revalidate their module closure. Warm-session timings are reported as
 observations; deterministic query/item counters and retained-byte totals are the
 regression gates. The server records cancellation concurrently with request
 execution and replaces a cancelled in-flight result with JSON-RPC `-32800`.
@@ -473,8 +473,12 @@ fixed warmups and samples, elapsed variance, and phase totals. Clean,
 no-change, and representative-edit runs are distinct. Partial timing, changed
 inputs, incompatible identities, nondeterminism, pathological inputs, and
 unstable samples are unavailable/failure; they cannot be made green by changing
-the workload or hiding cold-cache work. A baseline is valid only for its pinned
-machine and toolchain.
+the workload or hiding cold-cache work. The checked-corpus dashboard drives the
+production default JIT and optimized AOT paths through clean and incremental
+rows, with one warmup and three samples per row. Its pinned baseline allows at
+most 15% latency or peak-RSS regression and 100% range/median variance; exact
+stdout/stderr hashes and phase totals remain part of each row. A baseline is
+valid only for its pinned machine and toolchain.
 
 The code-action engine uses the same semantic index. It ships unique workspace
 imports, binding and function extraction, and immutable-binding inline actions.

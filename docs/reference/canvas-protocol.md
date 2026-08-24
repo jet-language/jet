@@ -233,7 +233,11 @@ Entry and return anchors are not copyable. A mixed or source-incompatible
 selection uses staged fallback only when every selected node has an insertable
 descriptor; otherwise the UI explains the refusal before any source
 transaction. Undo and redo restore the exact checked source through the same
-revision-guarded transaction path.
+revision-guarded transaction path. A rejected or failed restore puts the
+popped history entry back before it reports the refusal, so the current source
+and the recoverable undo/redo history remain intact. The Canvas state panel
+shows the server reason for stale/conflicting restores and offers source
+recovery or reload.
 
 Collapsed graph views also persist as ordinary comments:
 
@@ -361,7 +365,7 @@ Current transactions:
 | `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
 | `replace_source` | `source` | Replaces the file with exact prior/future Jet source after formatting and front-end validation. Used by local undo/redo. |
-| `replace_source` with `source_edit:"exec_convergence"` | `graph_id`, `from_pin_name`, `from_start`, `from_end`, `target_start`, `target_end`, `strategy` (`extract`/`helper`/`duplicate`), `function`, optional `helper_name` | Resolves one source-backed incoming convergence from the checked AST. `extract` creates the named helper; `helper` requires an exact existing helper body; `duplicate` copies the target statement with an explicit warning. Formatting, sema validation, stale-span refusal, and the atomic write happen before the ordinary edit response. |
+| `replace_source` with `source_edit:"exec_convergence"` | `graph_id`, `from_pin_name`, `from_start`, `from_end`, `target_start`, `target_end`, `strategy` (`extract`/`helper`/`duplicate`), `function`, optional `helper_name` | Resolves one source-backed incoming convergence from the checked AST. The target span may cover one or more contiguous complete expression statements selected in the graph. `extract` creates the named helper; `helper` requires an exact existing helper body; `duplicate` copies the target span with an explicit warning. Formatting, sema validation, stale-span refusal, and the atomic write happen before the ordinary edit response. |
 | `insert_branch` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary checked `if true { ... } else { ... }` branch skeleton. A saved exec input inserts before its owning source statement; a saved exec output inserts after it. A stale or unknown pin is refused without writing source. |
 | `insert_switch` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary checked `if 0 == { ... }` dispatch skeleton at the saved exec target, or at the graph body when no target is supplied. |
 | `insert_loop` | `graph_id`, optional `wire_origin_pin_id`, `wire_target_pin` (`exec`) | Inserts an ordinary `loop { break }` skeleton at the saved exec target, or at the graph body when no target is supplied. |

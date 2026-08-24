@@ -3156,14 +3156,6 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
         Ok(resolver) => resolver,
         Err(error) => report_entry_authority_error(error),
     };
-    if let Err(error) = jet::Package::PackageFacts::default().resolve_run_entry_checked(&resolver) {
-        crate::cli_error!(
-            @fix "E2105",
-            error,
-            "keep one project entry, using `run.jet`, or point at a `.jet` file directly"
-        );
-        exit(ExitCodes::USER_ERROR);
-    }
     let package = match resolver.checked_package(Path::new(".")) {
         Ok(package) => Some(package),
         Err(error) if error.is_missing() => None,
@@ -3178,6 +3170,14 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
                 exit(ExitCodes::USER_ERROR);
             }
         }
+    }
+    if let Err(error) = jet::Package::PackageFacts::default().resolve_run_entry_checked(&resolver) {
+        crate::cli_error!(
+            @fix "E2105",
+            error,
+            "keep one project entry, using `run.jet`, or point at a `.jet` file directly"
+        );
+        exit(ExitCodes::USER_ERROR);
     }
     if let Some(entry) = checked_project_entry(&resolver, Path::new(jet::Syntax::DEFAULT_ENTRY_FILE)) {
         return entry;
@@ -3220,7 +3220,11 @@ fn checked_project_entry(
 }
 
 fn report_entry_authority_error(error: jet::Authority::AuthorityError) -> ! {
-    crate::cli_error!(@fix "E1334", error.to_string(), "restore the required regular no-follow authority file or directory");
+    let diagnostic = error.diagnostic();
+    eprint!(
+        "{}",
+        jet::render_diagnostics(jet::Syntax::PACKAGE_FILE, "", &[diagnostic])
+    );
     exit(ExitCodes::USER_ERROR)
 }
 

@@ -47,7 +47,9 @@
     const base = window.__JET_CANVAS_BASE__ || "/canvas";
     const source = latestDoc && latestDoc.source_id;
     const query = source ? "?source_id=" + encodeURIComponent(source) : "";
-    const currentSource = latestDoc && String(latestDoc.source_text || "");
+    const currentSource = latestDoc && typeof latestDoc.source_text === "string"
+      ? latestDoc.source_text
+      : null;
     const draft = latestDoc && readSourceDraft(latestDoc);
     const editorSource = sourceEditMode && sourceEditor ? sourceEditor.value : null;
     const pendingSource = draft !== null && draft !== currentSource
@@ -59,19 +61,24 @@
         if (!response.ok) throw new Error("source request failed (" + response.status + ")");
         return response.text();
       });
-    return sourceRequest.then((text) => {
-      setViewMode("split");
-      setSourceEditMode(true);
-      if (sourceEditor) {
-        sourceEditor.value = text;
-        saveSourceDraft(text);
-      }
-      sourceView.textContent = text;
-      setCanvasState("recovery", "Source is available", "Edit the Jet source, then check it before applying a change.", [
-        { label: "Close", run: clearCanvasState }
-      ]);
-      return text;
-    })
+    return sourceRequest
+      .catch((error) => {
+        if (currentSource !== null) return currentSource;
+        throw error;
+      })
+      .then((text) => {
+        setViewMode("split");
+        setSourceEditMode(true);
+        if (sourceEditor) {
+          sourceEditor.value = text;
+          saveSourceDraft(text);
+        }
+        sourceView.textContent = text;
+        setCanvasState("recovery", "Source is available", "Edit the Jet source, then check it before applying a change.", [
+          { label: "Close", run: clearCanvasState }
+        ]);
+        return text;
+      })
       .catch((error) => {
         setCanvasState("error", "Source unavailable", "Canvas could not read Jet source. Retry when the server is reachable.", [
           { label: "Retry", primary: true, run: openSourceRecovery }
@@ -514,11 +521,17 @@
           searchState.stale = true;
           searchState.renamePlan = null;
           renderSearchResults();
-          setCanvasState("stale", "Search results are stale", "The source or project changed while Canvas searched. Previous results stay visible; search again for the current revision.", [
-            { label: "Show source", run: openSourceRecovery },
-            { label: "Retry", primary: true, run: () => postQuery(body) }
-          ]);
-          setSaveState("source unchanged", "error");
+          // A background query can finish after a source edit has already
+          // moved the debugger into its own stale state. Keep that primary
+          // source/debug surface visible; the search rail still marks its
+          // result stale and the toast names the discarded response.
+          if (window.__jetCanvasDebugState?.state !== "stale") {
+            setCanvasState("stale", "Search results are stale", "The source or project changed while Canvas searched. Previous results stay visible; search again for the current revision.", [
+              { label: "Show source", run: openSourceRecovery },
+              { label: "Retry", primary: true, run: () => postQuery(body) }
+            ]);
+            setSaveState("source unchanged", "error");
+          }
           showToast("Canvas query result is stale; reload the current source", { isError: true });
           return null;
         }

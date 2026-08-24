@@ -1004,8 +1004,8 @@ fn bare_project_run_prefers_run_jet() {
     .unwrap();
     fs::write(dir.join("run.jet"), "fn run() { print(\"run.jet\") }\n").unwrap();
     fs::write(
-        dir.join("src/main.jet"),
-        "fn run() { print(\"legacy main.jet\") }\n",
+        dir.join("src/run.jet"),
+        "fn run() { print(\"src/run.jet\") }\n",
     )
     .unwrap();
 

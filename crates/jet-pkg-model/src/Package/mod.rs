@@ -848,7 +848,7 @@ impl PackageFacts {
     ) -> Result<Option<CheckedFile>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
-        if migrate_retired_entry(resolver.root(), &self.origin)? {
+        if migrate_retired_entry(resolver.root(), &self.origin, &self.name)? {
             let fresh = AuthorityResolver::open(resolver.root())
                 .map_err(|error| format!("{}: {error}", self.origin))?;
             return self.resolve_run_entry_checked(&fresh);
@@ -1316,7 +1316,11 @@ impl PackageFacts {
 /// locations before a default run resolves its authority snapshot. The old
 /// `.jet/main.jet` layout wrote generated state beside source, so it maps to
 /// the project-root `run.jet`; `src/main.jet` stays under `src`.
-fn migrate_retired_entry(root: &Path, origin: &str) -> Result<bool, String> {
+fn migrate_retired_entry(
+    root: &Path,
+    origin: &str,
+    package_name: &str,
+) -> Result<bool, String> {
     let resolver = AuthorityResolver::open(root)
         .map_err(|error| format_entry_error(origin, error.to_string()))?;
     let candidates = [
@@ -1334,14 +1338,29 @@ fn migrate_retired_entry(root: &Path, origin: &str) -> Result<bool, String> {
             PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
         ),
     ];
+    let mut canonical_paths = vec![
+        PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
+        Path::new("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
+    ];
+    if !package_name.is_empty() {
+        let named = PathBuf::from(format!(
+            "{package_name}.{}",
+            crate::Syntax::FILE_EXT
+        ));
+        if !canonical_paths.contains(&named) {
+            canonical_paths.push(named);
+        }
+    }
     let mut retired = Vec::new();
     let mut canonical = Vec::new();
-    for (old, new) in &candidates {
-        match resolver.checked_file(new) {
-            Ok(_) => canonical.push(new.clone()),
+    for path in &canonical_paths {
+        match resolver.checked_file(path) {
+            Ok(_) => canonical.push(path.clone()),
             Err(error) if error.is_missing() => {}
             Err(error) => return Err(format_entry_error(origin, error.to_string())),
         }
+    }
+    for (old, _) in &candidates {
         match resolver.checked_file(old) {
             Ok(file) => retired.push((file, old.clone())),
             Err(error) if error.is_missing() => {}

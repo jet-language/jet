@@ -65,6 +65,16 @@ fn jet_process_resource_limits_check(
         ));
     }
     #[cfg(windows)]
+    if spec.policy_wire.is_some()
+        && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some())
+    {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "authority-bound Windows CPU and memory limits are unsupported by the captured runner; refusing before spawn",
+        ));
+    }
+    #[cfg(windows)]
     if spec.detached && (spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some()) {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
@@ -511,6 +521,22 @@ fn jet_process_command_with_identity(
     }
     jet_process_command_base_with_identity(spec, executable_identity)
 }
+
+fn jet_process_pipeline_resource_limits_check(
+    spec: &jet_std::ProcessSpec,
+) -> Result<(), jet_std::IOError> {
+    jet_process_resource_limits_check(spec)?;
+    #[cfg(windows)]
+    if spec.cpu_time_limit_ms.is_some() || spec.memory_limit_bytes.is_some() {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Resolve,
+            spec.cmd.first().cloned(),
+            "Windows process pipelines cannot attach declared CPU or memory Job Object limits; refusing before spawn",
+        ));
+    }
+    Ok(())
+}
+
 fn jet_process_spec_spawn(
     spec: &jet_std::ProcessSpec,
 ) -> Result<jet_std::ProcessChild, jet_std::IOError> {
@@ -1498,6 +1524,9 @@ fn jet_process_spec_pipeline(
             Some("process.pipeline needs at least one command".to_string()),
         )));
     }
+    for spec in specs {
+        jet_process_pipeline_resource_limits_check(spec)?;
+    }
     if specs.iter().any(|spec| spec.policy_wire.is_some()) {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
@@ -1649,12 +1678,13 @@ fn jet_process_spec_pipeline(
     let mut success = true;
     let mut timed_out = false;
     let mut output_limit_exceeded = false;
+    let mut resource_limit = None;
     let mut stage_finished = vec![false; children.len()];
     'stages: for index in 0..children.len() {
         if stage_finished[index] {
             continue;
         }
-        let status = loop {
+        let status = 'wait: loop {
             if pipeline_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
                 jet_process_pipeline_cleanup(&mut children);
                 output_limit_exceeded = true;
@@ -1665,6 +1695,13 @@ fn jet_process_spec_pipeline(
                 if stage_finished[stage] {
                     continue;
                 }
+                if let Some(limit) =
+                    jet_process_live_resource_limit(children[stage].id(), &specs[stage])
+                {
+                    jet_process_pipeline_cleanup(&mut children);
+                    resource_limit = Some(limit);
+                    break 'wait None;
+                }
                 if let Some(status) = children[stage].try_wait().map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Close,
@@ -1672,6 +1709,11 @@ fn jet_process_spec_pipeline(
                         error,
                     )
                 })? {
+                    if let Some(limit) = jet_process_status_resource_limit(&status, &specs[stage]) {
+                        jet_process_pipeline_cleanup(&mut children);
+                        resource_limit = Some(limit);
+                        break 'wait None;
+                    }
                     stage_finished[stage] = true;
                     #[cfg(unix)]
                     let _ = jet_process_pty::signal_group(
@@ -1715,6 +1757,9 @@ fn jet_process_spec_pipeline(
         let result = jet_process_finish_output_drain(drain, "pipeline stderr")?;
         output_exceeded |= result.exceeded;
         errors.push_str(&result.text);
+    }
+    if let Some(limit) = resource_limit {
+        return Err(jet_std::IOError::ResourceLimit(limit));
     }
     if output_exceeded || output_limit_exceeded {
         return Err(jet_std::IOError::ResourceLimit(
@@ -1823,9 +1868,13 @@ fn jet_process_live_resource_limit(
     #[cfg(target_os = "linux")]
     {
         if let Some(limit) = spec.memory_limit_bytes {
-            if jet_process_linux_vm_size(pid)
-                .is_some_and(|used| used >= limit.max(0) as u64)
-            {
+            // RLIMIT_AS can reject the next allocation while VmSize is still
+            // just below the declared ceiling. Leave a small observation
+            // window so the parent supervisor reports the typed limit before
+            // the child turns that exhaustion into an untyped allocator exit.
+            const MEMORY_OBSERVATION_WINDOW: u64 = 1024 * 1024;
+            let threshold = (limit.max(0) as u64).saturating_sub(MEMORY_OBSERVATION_WINDOW);
+            if jet_process_linux_vm_size(pid).is_some_and(|used| used >= threshold) {
                 return Some(jet_std::ProcessResourceLimit::Memory);
             }
         }

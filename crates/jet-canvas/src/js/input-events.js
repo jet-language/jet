@@ -4,8 +4,11 @@
   function exactBodyHelperForExecTarget(graph, target) {
     const node = nodeForPin(graph, target);
     if (!node || !latestDoc || !latestDoc.source_text || !node.source_span) return null;
-    const targetSource = latestDoc.source_text.slice(node.source_span.start, node.source_span.end).trim();
-    if (!targetSource || targetSource.includes("\n")) return null;
+    const selection = convergenceTargetSelection(graph, target);
+    const targetSpan = selection && selection.span || sourceBackedExecSpan(latestDoc.source_text, node);
+    if (!targetSpan) return null;
+    const targetSource = latestDoc.source_text.slice(targetSpan.start, targetSpan.end).trim();
+    if (!targetSource) return null;
     const helper = (latestDoc.graphs || []).find((candidate) => {
       if (!candidate || candidate.graph_id === graph.graph_id || !candidate.function) return false;
       const span = candidate.function.source_span;
@@ -30,7 +33,7 @@
         } else if (ch === "}") {
           depth -= 1;
           if (depth === 0) {
-            return latestDoc.source_text.slice(open + 1, i).trim() === targetSource;
+            return normalizedSource(latestDoc.source_text.slice(open + 1, i)) === normalizedSource(targetSource);
           }
         }
       }
@@ -82,28 +85,219 @@
     return -1;
   }
 
-  function convergenceBranchBody(source, node, pinName) {
+  function matchingSourceDelimiter(source, open, opening, closing) {
+    let depth = 0;
+    let quote = null;
+    let escaped = false;
+    let lineComment = false;
+    for (let i = open; i < source.length; i++) {
+      const ch = source[i];
+      const next = source[i + 1];
+      if (lineComment) {
+        if (ch === "\n") lineComment = false;
+        continue;
+      }
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === "/" && next === "/") {
+        lineComment = true;
+        i += 1;
+      } else if (ch === opening) {
+        depth += 1;
+      } else if (ch === closing) {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  function findSourceChar(source, start, wanted) {
+    let quote = null;
+    let escaped = false;
+    let lineComment = false;
+    for (let i = Math.max(0, start); i < source.length; i++) {
+      const ch = source[i];
+      const next = source[i + 1];
+      if (lineComment) {
+        if (ch === "\n") lineComment = false;
+        continue;
+      }
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === "/" && next === "/") {
+        lineComment = true;
+        i += 1;
+      } else if (ch === wanted) return i;
+    }
+    return -1;
+  }
+
+  function normalizedSource(source) {
+    let normalized = "";
+    let quote = null;
+    let escaped = false;
+    for (const ch of String(source || "")) {
+      if (quote) {
+        normalized += ch;
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === quote) quote = null;
+      } else if (ch === '"' || ch === "'") {
+        quote = ch;
+        normalized += ch;
+      } else if (!/\s/.test(ch)) {
+        normalized += ch;
+      }
+    }
+    return normalized;
+  }
+
+  function sourceBackedExecSpan(source, node) {
     const span = node && node.source_span;
     if (!span) return null;
     const start = Number(span.start);
-    const end = Number(span.end);
-    const open = source.indexOf("{", start);
-    if (open < start || open >= end) return null;
-    const close = matchingSourceBrace(source, open);
-    if (close < 0 || close > end) return null;
-    if (pinName === "then" || /^arm1$/.test(pinName)) return { start: open + 1, end: close };
-    const tail = source.slice(close + 1, end);
+    const anchorEnd = Number(span.end);
+    if (!Number.isFinite(start) || !Number.isFinite(anchorEnd)) return null;
+    let expressionStart = start;
+    const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+    let first = lineStart;
+    while (/\s/.test(source[first] || "")) first += 1;
+    const prefix = source.slice(first, start).trim();
+    if (!prefix || /^[A-Za-z_][A-Za-z0-9_.]*$/.test(prefix)) expressionStart = first;
+    const lineEnd = source.indexOf("\n", anchorEnd);
+    const open = findSourceChar(source, anchorEnd, "(");
+    if (open < 0 || (lineEnd >= 0 && open > lineEnd)) {
+      return { start: expressionStart, end: anchorEnd };
+    }
+    const close = matchingSourceDelimiter(source, open, "(", ")");
+    if (close < 0) return { start: expressionStart, end: anchorEnd };
+    let end = close + 1;
+    while (source[end] === "?") end += 1;
+    return { start: expressionStart, end };
+  }
+
+  function convergenceTargetSelection(graph, target) {
+    const targetNode = nodeForPin(graph, target);
+    if (!targetNode || !latestDoc || !latestDoc.source_text) return null;
+    const targetSpan = sourceBackedExecSpan(latestDoc.source_text, targetNode);
+    if (!targetSpan) return null;
+    const hasExecInput = (node) => (graph.pins || []).some((pin) => {
+      return pin.node_id === node.node_id && pin.direction === "input" && pin.type === "exec";
+    });
+    const selected = [...(selectedNodeIds || [])]
+      .map((nodeId) => (graph.nodes || []).find((node) => node.node_id === nodeId))
+      .filter((node) => node && hasExecInput(node))
+      .map((node) => ({ node, span: sourceBackedExecSpan(latestDoc.source_text, node) }))
+      .filter((entry) => entry.span)
+      .filter((entry) => entry.span.start <= targetSpan.start && entry.span.end >= targetSpan.end
+        || entry.span.start >= targetSpan.start && entry.span.end <= targetSpan.end
+        || (entry.span.start < targetSpan.end && targetSpan.start < entry.span.end))
+      .sort((a, b) => a.span.start - b.span.start);
+    if (!selected.some((entry) => entry.node.node_id === targetNode.node_id)) {
+      selected.push({ node: targetNode, span: targetSpan });
+      selected.sort((a, b) => a.span.start - b.span.start);
+    }
+    return {
+      span: {
+        start: Math.min(...selected.map((entry) => entry.span.start)),
+        end: Math.max(...selected.map((entry) => entry.span.end))
+      },
+      nodes: selected.map((entry) => entry.node)
+    };
+  }
+
+  function nextSourceElse(source, start) {
+    let cursor = Math.max(0, start);
+    while (cursor < source.length) {
+      if (/\s/.test(source[cursor])) {
+        cursor += 1;
+        continue;
+      }
+      if (source[cursor] === "/" && source[cursor + 1] === "/") {
+        const newline = source.indexOf("\n", cursor + 2);
+        cursor = newline < 0 ? source.length : newline + 1;
+        continue;
+      }
+      break;
+    }
+    return source.slice(cursor, cursor + 4) === "else"
+      && !/[A-Za-z0-9_]/.test(source[cursor - 1] || "")
+      && !/[A-Za-z0-9_]/.test(source[cursor + 4] || "")
+      ? cursor
+      : -1;
+  }
+
+  function sourceBackedBranchSpan(source, node) {
+    const span = node && node.source_span;
+    if (!span) return null;
+    const start = Number(span.start);
+    const open = findSourceChar(source, start, "{");
+    if (open < 0) return null;
+    const firstClose = matchingSourceBrace(source, open);
+    if (firstClose < 0) return null;
+    let end = firstClose + 1;
+    while (true) {
+      const elseStart = nextSourceElse(source, end);
+      if (elseStart < 0) break;
+      const nextOpen = findSourceChar(source, elseStart + 4, "{");
+      if (nextOpen < 0) break;
+      const nextClose = matchingSourceBrace(source, nextOpen);
+      if (nextClose < 0) break;
+      end = nextClose + 1;
+    }
+    return { start, end, open, firstClose };
+  }
+
+  function sourceBackedDispatchBodies(source, branchSpan) {
+    const bodies = [];
+    let cursor = branchSpan.open + 1;
+    while (cursor < branchSpan.firstClose) {
+      const open = findSourceChar(source, cursor, "{");
+      if (open < 0 || open >= branchSpan.firstClose) break;
+      const close = matchingSourceBrace(source, open);
+      if (close < 0 || close > branchSpan.firstClose) break;
+      bodies.push({ start: open + 1, end: close });
+      cursor = close + 1;
+    }
+    return bodies;
+  }
+
+  function convergenceBranchBody(source, node, pinName) {
+    const branchSpan = sourceBackedBranchSpan(source, node);
+    if (!branchSpan) return null;
+    if (node.kind === "dispatch") {
+      const bodies = sourceBackedDispatchBodies(source, branchSpan);
+      if (pinName === "else") return bodies.length ? bodies[bodies.length - 1] : null;
+      const index = pinName === "then" ? 0 : Number(String(pinName).replace(/^arm/, "")) - 1;
+      return Number.isInteger(index) && index >= 0 ? bodies[index] || null : null;
+    }
+    if (pinName === "then" || /^arm1$/.test(pinName)) {
+      return { start: branchSpan.open + 1, end: branchSpan.firstClose };
+    }
+    const tail = source.slice(branchSpan.firstClose + 1, branchSpan.end);
     const elseMatch = /\belse\b/.exec(tail);
     if (!elseMatch) {
       return pinName === "else"
         ? { reason: "Convergence refused: this execution pin has no source-backed path; source unchanged." }
         : null;
     }
-    const elseOpen = close + 1 + elseMatch.index + elseMatch[0].length;
-    const bodyOpen = source.indexOf("{", elseOpen);
-    if (bodyOpen < 0 || bodyOpen >= end) return null;
+    const elseOpen = branchSpan.firstClose + 1 + elseMatch.index + elseMatch[0].length;
+    const bodyOpen = findSourceChar(source, elseOpen, "{");
+    if (bodyOpen < 0 || bodyOpen >= branchSpan.end) return null;
     const bodyClose = matchingSourceBrace(source, bodyOpen);
-    return bodyClose < 0 || bodyClose > end ? null : { start: bodyOpen + 1, end: bodyClose };
+    return bodyClose < 0 || bodyClose > branchSpan.end ? null : { start: bodyOpen + 1, end: bodyClose };
   }
 
   function convergenceScopeRefusal(graph, preview) {
@@ -118,8 +312,9 @@
     if (body.reason) return body.reason;
     const inBody = (span) => span && Number(span.start) >= body.start && Number(span.end) <= body.end;
     const branchStart = Number(branch.source_span && branch.source_span.start);
+    const targetNodeIds = new Set(preview.target_node_ids || [target.node_id]);
     const targetInputs = new Set((graph.pins || [])
-      .filter((pin) => pin.node_id === target.node_id && pin.direction === "input" && pin.type !== "exec")
+      .filter((pin) => targetNodeIds.has(pin.node_id) && pin.direction === "input" && pin.type !== "exec")
       .map((pin) => pin.pin_id));
     for (const wire of graph.wires || []) {
       if (wire.wire_kind !== "data" || !targetInputs.has(wire.to_pin)) continue;
@@ -239,6 +434,7 @@
     const input = fromPin.direction === "input" ? fromPin : target;
     const fromNode = nodeForPin(graph, fromPin);
     const targetNode = nodeForPin(graph, input);
+    const targetSelection = convergenceTargetSelection(graph, input);
     const helper = exactBodyHelperForExecTarget(graph, input);
     window.__jetCanvasExecConvergencePreview = {
       graph_id: graph.graph_id,
@@ -247,7 +443,8 @@
       to_pin_id: target.pin_id,
       from_pin_name: fromPin.name,
       from_source_span: fromNode && fromNode.source_span || fromPin.source_span || null,
-      target_source_span: targetNode && targetNode.source_span || input.source_span || null,
+      target_source_span: targetSelection && targetSelection.span || targetNode && targetNode.source_span || input.source_span || null,
+      target_node_ids: targetSelection && targetSelection.nodes.map((node) => node.node_id) || (targetNode ? [targetNode.node_id] : []),
       function_name: defaultExecConvergenceFunctionName(graph, input),
       incoming_wire_id: (graph.wires || []).find((wire) => wire.wire_kind === "control" && wire.to_pin === input.pin_id)?.wire_id || null,
       strategy: "extract",

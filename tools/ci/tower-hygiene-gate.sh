@@ -50,7 +50,10 @@ else
   tower_dir="$data_path"
   tower_file="$tower_dir/tower.json"
 fi
-history_file="$tower_dir/history.json"
+if [ -d "$tower_dir" ]; then
+  tower_dir="$(cd "$tower_dir" && pwd -P)"
+  tower_file="$tower_dir/$(basename "$tower_file")"
+fi
 
 report_path="${JET_TOWER_HYGIENE_REPORT:-}"
 if [ -z "$report_path" ]; then
@@ -61,8 +64,8 @@ elif [[ "$report_path" != /* ]]; then
 fi
 
 case "$report_path" in
-  "$ROOT/plugins/tower"|"$ROOT/plugins/tower"/*)
-    errors+=("audit report may not be written under plugins/tower")
+  "$ROOT/plugins/tower"|"$ROOT/plugins/tower"/*|"$tower_dir"|"$tower_dir"/*)
+    errors+=("audit report may not be written under Tower data")
     report_path="$ROOT/.tmp/tower-hygiene/unsafe-report.txt"
     ;;
 esac
@@ -73,6 +76,7 @@ if ! node_path="$(command -v node 2>/dev/null)"; then
 else
   node_version="$("$node_path" --version 2>/dev/null || printf 'unavailable')"
   if [ "$node_version" = "unavailable" ]; then
+    node_path=""
     errors+=("node runner did not report a version")
   fi
 fi
@@ -89,6 +93,18 @@ if [ ! -d "$spec_root" ]; then
 fi
 if [ ! -f "$tower_file" ]; then
   errors+=("Tower store is missing: $tower_file")
+fi
+
+lint_blocked=0
+repair_journal="$tower_dir/backups/repair-transaction.json"
+store_lock="$tower_file.lock"
+if [ -e "$repair_journal" ] || [ -L "$repair_journal" ]; then
+  lint_blocked=1
+  errors+=("Tower store has a pending repair transaction: $repair_journal")
+fi
+if [ -e "$store_lock" ] || [ -L "$store_lock" ]; then
+  lint_blocked=1
+  errors+=("Tower store has an active or stale write lock: $store_lock")
 fi
 
 if [ -d "$docs_root" ]; then
@@ -111,27 +127,47 @@ cleanup() {
 }
 trap cleanup EXIT
 
-hash_file() {
+hash_tree() {
   local path="$1"
-  if [ ! -e "$path" ]; then
+  if [ ! -d "$path" ]; then
     printf 'missing'
     return 0
   fi
-  if [ ! -f "$path" ]; then
-    printf 'not-regular'
-    return 0
-  fi
-  "$node_path" -e 'const {createHash}=require("node:crypto");const {readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"));' "$path"
+  "$node_path" - "$path" <<'NODE'
+const { createHash } = require('node:crypto');
+const { lstatSync, readFileSync, readlinkSync, readdirSync } = require('node:fs');
+const { relative, resolve, join } = require('node:path');
+
+const root = resolve(process.argv[2]);
+const hash = createHash('sha256');
+function walk(dir) {
+  for (const name of readdirSync(dir).sort()) {
+    const path = join(dir, name);
+    const rel = relative(root, path);
+    const stat = lstatSync(path);
+    const kind = stat.isDirectory() ? 'd' : stat.isFile() ? 'f' : stat.isSymbolicLink() ? 'l' : 'o';
+    hash.update(`${kind}\0${stat.mode}\0${rel}\0`);
+    if (stat.isDirectory()) walk(path);
+    else if (stat.isFile()) hash.update(readFileSync(path));
+    else if (stat.isSymbolicLink()) hash.update(readlinkSync(path));
+  }
+}
+walk(root);
+process.stdout.write(hash.digest('hex'));
+NODE
 }
 
 tower_before="unavailable"
-history_before="unavailable"
 if [ -n "${node_path:-}" ]; then
-  tower_before="$(hash_file "$tower_file")"
-  history_before="$(hash_file "$history_file")"
+  if ! tower_before="$(hash_tree "$tower_dir")"; then
+    tower_before="unavailable"
+    errors+=("Tower store could not be fingerprinted before lint")
+  fi
 fi
 
-if [ -n "${node_path:-}" ] && [ -f "$TOWER" ] && [ -d "$spec_root" ]; then
+lint_json_status="not-run"
+lint_repeat_json_status="not-run"
+if [ -n "${node_path:-}" ] && [ -f "$TOWER" ] && [ -d "$spec_root" ] && [ "$lint_blocked" -eq 0 ]; then
   set +e
   (
     cd "$ROOT"
@@ -145,19 +181,59 @@ if [ -n "${node_path:-}" ] && [ -f "$TOWER" ] && [ -d "$spec_root" ]; then
   lint_repeat_status=$?
   set -e
 else
-  errors+=("Tower lint was not run because a required runner, entrypoint, or scope is missing")
+  if [ "$lint_blocked" -eq 1 ]; then
+    errors+=("Tower lint was not run because the Tower store is not in a safe read-only state")
+  else
+    errors+=("Tower lint was not run because a required runner, entrypoint, or scope is missing")
+  fi
 fi
 
 tower_after="unavailable"
-history_after="unavailable"
 if [ -n "${node_path:-}" ]; then
-  tower_after="$(hash_file "$tower_file")"
-  history_after="$(hash_file "$history_file")"
-  if [ "$tower_before" != "$tower_after" ] || [ "$history_before" != "$history_after" ]; then
+  if ! tower_after="$(hash_tree "$tower_dir")"; then
+    tower_after="unavailable"
+    errors+=("Tower store could not be fingerprinted after lint")
+  fi
+  if [ "$tower_before" = "unavailable" ] || [ "$tower_after" = "unavailable" ] ||
+     [ "$tower_before" = "missing" ] || [ "$tower_after" = "missing" ]; then
+    read_only="fail"
+    errors+=("Tower store fingerprint is unavailable; read-only state is unproven")
+  elif [ "$lint_blocked" -eq 1 ]; then
+    read_only="blocked"
+  elif [ "$tower_before" != "$tower_after" ]; then
     read_only="fail"
     errors+=("Tower store changed during read-only lint")
   else
     read_only="pass"
+  fi
+fi
+
+validate_lint_json() {
+  local path="$1"
+  "$node_path" - "$path" <<'NODE'
+const { readFileSync } = require('node:fs');
+const value = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+if (!Array.isArray(value) || value.some((finding) =>
+  !finding || typeof finding !== 'object' ||
+  typeof finding.rule !== 'string' || typeof finding.ref !== 'string' ||
+  typeof finding.msg !== 'string')) process.exit(1);
+NODE
+}
+
+if [ "$lint_status" != "not-run" ]; then
+  if validate_lint_json "$lint_output"; then
+    lint_json_status="pass"
+  else
+    lint_json_status="fail"
+    errors+=("tower lint did not emit a valid JSON finding array")
+  fi
+fi
+if [ "$lint_repeat_status" != "not-run" ]; then
+  if validate_lint_json "$lint_repeat_output"; then
+    lint_repeat_json_status="pass"
+  else
+    lint_repeat_json_status="fail"
+    errors+=("repeat tower lint did not emit a valid JSON finding array")
   fi
 fi
 
@@ -196,11 +272,11 @@ fi
   printf 'tower_store=%s\n' "$tower_file"
   printf 'tower_store_before_sha256=%s\n' "$tower_before"
   printf 'tower_store_after_sha256=%s\n' "$tower_after"
-  printf 'history_before_sha256=%s\n' "$history_before"
-  printf 'history_after_sha256=%s\n' "$history_after"
   printf 'read_only=%s\n' "$read_only"
   printf 'lint_exit=%s\n' "$lint_status"
   printf 'lint_repeat_exit=%s\n' "$lint_repeat_status"
+  printf 'lint_json=%s\n' "$lint_json_status"
+  printf 'lint_repeat_json=%s\n' "$lint_repeat_json_status"
   printf 'errors=%s\n' "${#errors[@]}"
   for error in "${errors[@]}"; do
     printf 'error=%s\n' "$error"

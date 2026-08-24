@@ -712,10 +712,16 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
 "#,
     )
     .unwrap();
+    fs::write(
+        fixture.join("tower/read-only-marker.txt"),
+        "must not change\n",
+    )
+    .unwrap();
     fs::write(fixture.join("docs/spec/ok.md"), "D-OK1\n").unwrap();
 
     let tower_before = fs::read(fixture.join("tower/tower.json")).unwrap();
     let history_before = fs::read(fixture.join("tower/history.json")).unwrap();
+    let marker_before = fs::read(fixture.join("tower/read-only-marker.txt")).unwrap();
     let success_report = fixture.join("success.txt");
     let success = run_tower_hygiene_gate(
         &repo,
@@ -732,7 +738,15 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     assert!(success_text.contains("status=pass"), "{success_text}");
     assert!(success_text.contains("read_only=pass"), "{success_text}");
     assert!(success_text.contains("lint_exit=0"), "{success_text}");
-    assert!(success_text.contains("lint_repeat_exit=0"), "{success_text}");
+    assert!(
+        success_text.contains("lint_repeat_exit=0"),
+        "{success_text}"
+    );
+    assert!(success_text.contains("lint_json=pass"), "{success_text}");
+    assert!(
+        success_text.contains("lint_repeat_json=pass"),
+        "{success_text}"
+    );
     assert!(success_text.contains("candidate_commit="), "{success_text}");
     assert!(success_text.contains("runner_os="), "{success_text}");
     assert!(success_text.contains("node=v"), "{success_text}");
@@ -744,6 +758,10 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     assert_eq!(
         history_before,
         fs::read(fixture.join("tower/history.json")).unwrap()
+    );
+    assert_eq!(
+        marker_before,
+        fs::read(fixture.join("tower/read-only-marker.txt")).unwrap()
     );
 
     fs::write(fixture.join("docs/spec/bad.md"), "D-MISSING1\n").unwrap();
@@ -762,7 +780,10 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
     let failure_text = fs::read_to_string(&failure_report).unwrap();
     assert!(failure_text.contains("status=fail"), "{failure_text}");
     assert!(failure_text.contains("lint_exit=1"), "{failure_text}");
-    assert!(failure_text.contains("lint_repeat_exit=1"), "{failure_text}");
+    assert!(
+        failure_text.contains("lint_repeat_exit=1"),
+        "{failure_text}"
+    );
     assert!(
         failure_text.contains("spec-decision-ref-missing"),
         "{failure_text}"
@@ -776,6 +797,34 @@ fn tower_hygiene_gate_is_read_only_and_blocks_missing_records() {
         history_before,
         fs::read(fixture.join("tower/history.json")).unwrap()
     );
+    assert_eq!(
+        marker_before,
+        fs::read(fixture.join("tower/read-only-marker.txt")).unwrap()
+    );
+
+    fs::create_dir_all(fixture.join("tower/tower.json.lock")).unwrap();
+    fs::write(
+        fixture.join("tower/tower.json.lock/info.json"),
+        "{\"pid\": 1, \"at\": 0}\n",
+    )
+    .unwrap();
+    let locked_report = fixture.join("locked.txt");
+    let locked = run_tower_hygiene_gate(
+        &repo,
+        &fixture.join("tower"),
+        &fixture.join("docs"),
+        &locked_report,
+    );
+    assert!(
+        !locked.status.success(),
+        "a Tower write lock must block the read-only gate:\n{}",
+        String::from_utf8_lossy(&locked.stdout)
+    );
+    let locked_text = fs::read_to_string(&locked_report).unwrap();
+    assert!(locked_text.contains("read_only=blocked"), "{locked_text}");
+    assert!(locked_text.contains("lint_exit=not-run"), "{locked_text}");
+    assert!(locked_text.contains("write lock"), "{locked_text}");
+    let _ = fs::remove_dir_all(fixture.join("tower/tower.json.lock"));
 
     let verify = fs::read_to_string(repo.join("scripts/agent/verify-full.sh")).unwrap();
     assert!(

@@ -130,7 +130,10 @@ lock reasons, and diff.
   cross-file references, rename impact, source jumps, and package boundaries.
   The `My Canvas` component tree is the compact source-backed entry point for
   files, function graphs, and the current function's typed variables; its
-  `New` and `Add` affordances use the existing checked source transactions.
+  `New`, `Callback`, and `Add` affordances use the existing checked source
+  transactions. `on_*` functions expose callback handler labels and graph
+  navigation from the current `event_views` projection; no handler graph or
+  callback registry is stored outside Jet source.
 - Diagnostics Pane: grouped by workspace, package, file, target, and manifest.
   Only Jet diagnostics appear.
 - Trust/Provenance Pane: grants, lock reasons, envelopes, SBOM/audit facts,
@@ -228,6 +231,10 @@ Ratified 2026-07-08:
 - File graphs and queries now accept project-relative `source_id`, resolving
   through the projected source-truth file set with a bounded project-root
   fallback for new live files.
+- Source-backed layout editing is complete through the browser path: node and
+  graph organization gestures persist only local view state, source edits
+  reproject from the checked graph transaction, and failed/stale undo restores
+  preserve both the current source and the recoverable history entry.
 - `/canvas/source-control` now reports package/workspace Git text truth:
   `project_revision`, dirty file count, per-file status/diff, and entry history.
 - Project transactions now include `create_package`, which creates real

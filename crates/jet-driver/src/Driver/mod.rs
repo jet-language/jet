@@ -5349,7 +5349,15 @@ pub fn check_file_with_effect_facts_and_settings(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, "dev", setting_overrides);
+        check_file_with_effect_facts_impl(
+            file,
+            &overlays,
+            is_lsp,
+            None,
+            None,
+            "dev",
+            setting_overrides,
+        );
     (diagnostics, bundle, facts)
 }
 
@@ -5367,7 +5375,15 @@ pub fn check_file_with_effect_facts_profile(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None, profile, &BTreeMap::new());
+        check_file_with_effect_facts_impl(
+            file,
+            &overlays,
+            is_lsp,
+            None,
+            None,
+            profile,
+            &BTreeMap::new(),
+        );
     (diagnostics, bundle, facts)
 }
 
@@ -5383,7 +5399,15 @@ pub fn check_file_with_effect_facts_incremental(
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache), "dev", &BTreeMap::new());
+        check_file_with_effect_facts_impl(
+            file,
+            &overlays,
+            is_lsp,
+            Some(cache),
+            None,
+            "dev",
+            &BTreeMap::new(),
+        );
     (diagnostics, bundle, facts)
 }
 
@@ -5398,7 +5422,38 @@ pub fn check_file_with_effect_facts_incremental_overlays(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
-    check_file_with_effect_facts_impl(file, overlays, is_lsp, Some(cache), "dev", &BTreeMap::new())
+    check_file_with_effect_facts_impl(
+        file,
+        overlays,
+        is_lsp,
+        Some(cache),
+        None,
+        "dev",
+        &BTreeMap::new(),
+    )
+}
+
+pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
+    file: &str,
+    overlays: &[(&Path, &str)],
+    _is_lsp: bool,
+    cache: &mut crate::Sema::IncrementalSemaCache,
+    prepared_frontend: &mut crate::Loader::PreparedFrontend,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+    Vec<std::path::PathBuf>,
+) {
+    check_file_with_effect_facts_impl(
+        file,
+        overlays,
+        true,
+        Some(cache),
+        Some(prepared_frontend),
+        "dev",
+        &BTreeMap::new(),
+    )
 }
 
 fn check_file_with_effect_facts_impl(
@@ -5406,6 +5461,7 @@ fn check_file_with_effect_facts_impl(
     overlays: &[(&Path, &str)],
     is_lsp: bool,
     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
+    prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> (
@@ -5420,6 +5476,7 @@ fn check_file_with_effect_facts_impl(
             overlays,
             is_lsp,
             incremental,
+            prepared_frontend,
             profile,
             setting_overrides,
         )
@@ -5431,6 +5488,7 @@ fn check_file_on_compiler_stack(
     overlays: &[(&Path, &str)],
     is_lsp: bool,
     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
+    prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> (
@@ -5439,10 +5497,18 @@ fn check_file_on_compiler_stack(
     crate::Sema::SemIndexEffectFacts,
     Vec<std::path::PathBuf>,
 ) {
-    let (loaded, dependencies, loader_diagnostics) =
-        crate::Loader::load_entry_with_overlays_and_dependencies_with_diagnostics(
+    let (loaded, dependencies, loader_diagnostics) = match prepared_frontend {
+        Some(prepared_frontend) =>
+            crate::Loader::load_entry_with_overlays_and_prepared_frontend_with_diagnostics(
+                file,
+                overlays,
+                is_lsp,
+                prepared_frontend,
+            ),
+        None => crate::Loader::load_entry_with_overlays_and_dependencies_with_diagnostics(
             file, overlays, is_lsp,
-        );
+        ),
+    };
     match loaded {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
@@ -5520,7 +5586,15 @@ pub fn check_file_with_overlays(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(file, overlays, is_lsp, None, "dev", &BTreeMap::new());
+        check_file_with_effect_facts_impl(
+            file,
+            overlays,
+            is_lsp,
+            None,
+            None,
+            "dev",
+            &BTreeMap::new(),
+        );
     (diagnostics, bundle, facts)
 }
 

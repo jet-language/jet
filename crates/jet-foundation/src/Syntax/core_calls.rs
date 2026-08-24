@@ -8,6 +8,7 @@
 //! authority explicitly instead of copying sema's `Type` construction.
 
 use crate::Effects::Effect;
+use crate::Syntax::KNOWN_CORE_MODULES;
 use crate::Syntax::sinks::SinkClass;
 use crate::Syntax::VAULT_KEY_REF_TYPE;
 
@@ -4228,6 +4229,62 @@ pub fn core_call(module: &str, member: &str) -> Option<&'static CoreCallRecord> 
     CORE_CALLS
         .iter()
         .find(|row| row.receiver_types.is_empty() && row.module == module && row.member == member)
+}
+
+/// Resolve the unique Core module behind a bare module alias.
+///
+/// Prefer the projection rows so a bare alias follows the same registry as
+/// the compiler consumers. Fall back to the module registry for modules that
+/// have no plain-call row yet.
+pub fn core_module_for_alias(alias: &str) -> Option<&'static str> {
+    let mut found = None;
+    for module in CORE_CALLS
+        .iter()
+        .filter(|row| row.receiver_types.is_empty())
+        .map(|row| row.module)
+        .filter(|module| module.rsplit('.').next() == Some(alias))
+    {
+        if found.is_some_and(|known| known != module) {
+            return None;
+        }
+        found = Some(module);
+    }
+    if found.is_some() {
+        return found;
+    }
+
+    let mut found = None;
+    for module in KNOWN_CORE_MODULES
+        .iter()
+        .copied()
+        .filter(|module| module.rsplit('.').next() == Some(alias))
+    {
+        if found.is_some_and(|known| known != module) {
+            return None;
+        }
+        found = Some(module);
+    }
+    found
+}
+
+/// Resolve a Core call's canonical submodule.
+///
+/// Most callers already name the concrete module. The root encoding namespace
+/// keeps the historical JSON shorthand, so that alias is resolved here with
+/// the rest of the shared Core-call lookup rather than in an editor table.
+pub fn core_module_for_call(module: &str, member: &str) -> Option<&'static str> {
+    if let Some(row) = core_call(module, member) {
+        return Some(row.module);
+    }
+    if module == "core.encoding"
+        && one_of(
+            member,
+            &["parse", "decode", "to_string", "to_string_pretty", "canonical", "events"],
+        )
+    {
+        return Some("core.encoding.json");
+    }
+    None
 }
 
 /// Find marker metadata on an ordinary Core declaration row.

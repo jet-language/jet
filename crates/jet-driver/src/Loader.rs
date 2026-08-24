@@ -20,13 +20,18 @@ use std::sync::mpsc;
 
 const MAX_FRONTEND_WORKERS: usize = 8;
 
-enum PreparedFrontendModule {
+pub(crate) enum PreparedFrontendModule {
     Parsed(crate::AST::Program, Vec<Diagnostic>),
     LexFailed(Vec<Diagnostic>),
     ParseFailed(Vec<Diagnostic>),
 }
 
-type PreparedFrontend = HashMap<PathBuf, PreparedFrontendModule>;
+pub(crate) struct PreparedFrontendEntry {
+    pub(crate) source: String,
+    pub(crate) module: PreparedFrontendModule,
+}
+
+pub(crate) type PreparedFrontend = HashMap<PathBuf, PreparedFrontendEntry>;
 
 fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
     let (tokens, lex_diags) = Lexer::lex(source);
@@ -50,9 +55,20 @@ fn frontend_worker_count(job_count: usize) -> usize {
 /// results by source order. The loader still consumes the results serially so
 /// module discovery, diagnostics, and sema keep their canonical order.
 fn prepare_overlay_frontend(overlays: &[(&Path, &str)]) -> PreparedFrontend {
-    let mut sources = overlays
+    let sources = overlays
         .iter()
         .map(|(path, source)| (normalize_path(path), (*source).to_string()))
+        .collect::<Vec<_>>();
+    prepare_frontend_sources(sources)
+}
+
+/// Lex and parse a deterministic source batch with a bounded worker pool.
+/// The caller still consumes the returned map serially, so diagnostics and
+/// module discovery keep the loader's canonical order.
+pub(crate) fn prepare_frontend_sources(sources: Vec<(PathBuf, String)>) -> PreparedFrontend {
+    let mut sources = sources
+        .into_iter()
+        .map(|(path, source)| (normalize_path(&path), source))
         .collect::<HashMap<_, _>>();
     let mut jobs = sources.drain().collect::<Vec<_>>();
     jobs.sort_by(|left, right| left.0.cmp(&right.0));
@@ -89,7 +105,9 @@ fn prepare_overlay_frontend(overlays: &[(&Path, &str)]) -> PreparedFrontend {
     });
     jobs.into_iter()
         .zip(results)
-        .filter_map(|((path, _), prepared)| prepared.map(|prepared| (path, prepared)))
+        .filter_map(|((path, source), prepared)| {
+            prepared.map(|module| (path, PreparedFrontendEntry { source, module }))
+        })
         .collect()
 }
 
@@ -590,6 +608,30 @@ pub(crate) fn load_entry_with_overlays_and_dependencies_with_diagnostics(
         false,
         &mut dependencies,
         Some(&mut prepared_frontend),
+        Some(&mut diagnostics),
+    );
+    (result, dependencies, diagnostics)
+}
+
+pub(crate) fn load_entry_with_overlays_and_prepared_frontend_with_diagnostics(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+    prepared_frontend: &mut PreparedFrontend,
+) -> (
+    Result<ProgramBundle, Vec<Diagnostic>>,
+    Vec<PathBuf>,
+    Vec<LoaderDiagnostic>,
+) {
+    let mut dependencies = Vec::new();
+    let mut diagnostics = Vec::new();
+    let result = load_entry_with_overlays_mode_with_sink(
+        entry_path,
+        overlays,
+        for_check,
+        false,
+        &mut dependencies,
+        Some(prepared_frontend),
         Some(&mut diagnostics),
     );
     (result, dependencies, diagnostics)
@@ -2157,7 +2199,9 @@ fn load_file(
 
     let prepared = prepared_frontend
         .as_deref_mut()
-        .and_then(|cache| cache.remove(&norm));
+        .and_then(|cache| cache.remove(&norm))
+        .filter(|entry| entry.source == source)
+        .map(|entry| entry.module);
     let mut prog = match prepared {
         Some(PreparedFrontendModule::Parsed(program, teaching)) => {
             parse_teaching.extend(teaching);
@@ -3005,11 +3049,11 @@ mod stale_manifest_name_tests {
         assert!(frontend_worker_count(overlays.len()) <= MAX_FRONTEND_WORKERS);
         assert_eq!(prepared.len(), overlays.len());
         assert!(matches!(
-            prepared.get(&normalize_path(&first)),
+            prepared.get(&normalize_path(&first)).map(|entry| &entry.module),
             Some(PreparedFrontendModule::Parsed(_, _))
         ));
         assert!(matches!(
-            prepared.get(&normalize_path(&second)),
+            prepared.get(&normalize_path(&second)).map(|entry| &entry.module),
             Some(PreparedFrontendModule::Parsed(_, _))
         ));
     }

@@ -258,7 +258,7 @@ one owner. Fifteen are closed.
 **Project step.** The polyglot example projects call a foreign module that
 `jet inspect bind <language> <source> --pkg <name>` generates. The generated
 `*.jet` binding is deterministic Jet source, so each project now carries the
-exact file its real bind step produced, and `main.jet` checks on a host without
+exact file its real bind step produced, and `run.jet` checks on a host without
 that foreign toolchain. The machine-specific output beside it (native archives,
 class files, worker scripts, provenance, resolved host paths) stays ignored.
 
@@ -301,7 +301,7 @@ Two coherent features remain. Neither is stubbed and neither weakens a gate.
    field lowered method calls already carry, and routes the three names to the
    existing embed and find helpers.
 
-2. **Build-plan-aware checking** — `programmable_build/main.jet`. A root
+2. **Build-plan-aware checking** — `programmable_build/run.jet`. A root
    `fn build` selects the program to compile, and its generated sources join the
    bundle only on the build path. A single-file check never sees them, and
    `jet build` fails the same way: the perf-budget gate re-checks the entry file

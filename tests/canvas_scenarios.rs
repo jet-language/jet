@@ -297,6 +297,19 @@ fn run() {
 }
 "#;
 
+const CALLBACK_DEMO: &str = r#"fn on_start() {
+    print("start")
+}
+
+fn helper() Int -> {
+    return 1
+}
+
+fn run() {
+    on_start()
+}
+"#;
+
 const DEBUG_DEMO: &str = r#"fn helper() Int -> {
     return 1
 }
@@ -543,6 +556,46 @@ fn component_tree_and_palette() {
 }
 
 #[test]
+fn canvas_rad_callback_creation() {
+    run_canvas_scenario("canvas-rad-callback-creation");
+}
+
+#[test]
+fn canvas_rad_callback_undo() {
+    run_canvas_scenario("canvas-rad-callback-undo");
+}
+
+#[test]
+fn canvas_rad_callback_redo() {
+    run_canvas_scenario("canvas-rad-callback-redo");
+}
+
+#[test]
+fn canvas_rad_callback_escape() {
+    run_canvas_scenario("canvas-rad-callback-escape");
+}
+
+#[test]
+fn canvas_rad_callback_focus() {
+    run_canvas_scenario("canvas-rad-callback-focus");
+}
+
+#[test]
+fn canvas_rad_callback_fresh_projection() {
+    run_canvas_scenario("canvas-rad-callback-fresh-projection");
+}
+
+#[test]
+fn canvas_rad_callback_failure() {
+    run_canvas_scenario("canvas-rad-callback-failure");
+}
+
+#[test]
+fn canvas_rad_handler_navigation() {
+    run_canvas_scenario("canvas-rad-handler-navigation");
+}
+
+#[test]
 fn palette_insert_core_fn() {
     run_canvas_scenario("palette-insert-core-fn");
 }
@@ -615,6 +668,11 @@ fn exec_convergence_structured_join() {
 #[test]
 fn exec_convergence_apply() {
     run_canvas_scenario("exec-convergence-apply");
+}
+
+#[test]
+fn exec_convergence_selected_span() {
+    run_canvas_scenario("exec-convergence-selected-span");
 }
 
 #[test]
@@ -724,6 +782,10 @@ fn rename_variable_sidebar() {
 
 #[test]
 fn project_rename_preview_commit() {
+    assert!(
+        canvas_tools().is_some(),
+        "checked cross-file edit proof requires Chromium and Node; run scripts/agent/jet-env full"
+    );
     run_canvas_scenario("project-rename-preview-commit");
 }
 
@@ -783,6 +845,11 @@ fn undo_restores_source() {
 }
 
 #[test]
+fn undo_failure_preserves_history() {
+    run_canvas_scenario("undo-failure-preserves-history");
+}
+
+#[test]
 fn undo_depth_20_mixed_run() {
     run_canvas_scenario("undo-depth-20-mixed-run");
 }
@@ -794,11 +861,19 @@ fn run_button_output_visible() {
 
 #[test]
 fn debug_live_session() {
+    assert!(
+        canvas_tools().is_some(),
+        "debug live-session proof requires Chromium and Node; run scripts/agent/jet-env full"
+    );
     run_canvas_scenario("debug-live-session");
 }
 
 #[test]
 fn debug_runtime_values_staleness_liveness() {
+    assert!(
+        canvas_tools().is_some(),
+        "debug staleness/liveness proof requires Chromium and Node; run scripts/agent/jet-env full"
+    );
     run_canvas_scenario("debug-runtime-values-staleness-liveness");
 }
 
@@ -810,6 +885,15 @@ fn debug_breakpoints_run_control_gestures() {
 #[test]
 fn graph_source_toggle_preserves_selection() {
     run_canvas_scenario("graph-source-toggle-preserves-selection");
+}
+
+#[test]
+fn canvas_rad_two_way_round_trip() {
+    assert!(
+        canvas_tools().is_some(),
+        "Canvas RAD round-trip proof requires Chromium and Node; run scripts/agent/jet-env full"
+    );
+    run_canvas_scenario("canvas-rad-two-way-round-trip");
 }
 
 #[test]
@@ -1099,6 +1183,10 @@ impl CanvasCase {
                         | "debug-runtime-values-staleness-liveness"
                 ) {
                     DEBUG_DEMO
+                } else if name.starts_with("canvas-rad-callback-")
+                    || name == "canvas-rad-handler-navigation"
+                {
+                    CALLBACK_DEMO
                 } else {
                     DEMO
                 };

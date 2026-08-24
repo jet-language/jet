@@ -302,6 +302,7 @@ impl AuthorityError {
                 crate::WorkspacePlan::e1239_ambiguous_workspace(&refs)
             }
             Self::WorkspaceNoModule => crate::WorkspacePlan::e0995_no_workspace_module(),
+            Self::Symlink(_) | Self::Unsupported(_) => self.diagnostic(),
             other => Diagnostic::error(
                 "E1239",
                 "couldn't inspect workspace sources".to_string(),

@@ -929,7 +929,7 @@ fn core_catalog_action_json(
         json_str(&authority.version),
         json_str(&authority.touched_file),
         json_str(&member.signature),
-        json_str(core_member_return_type(module_path, &member.name)),
+        json_str(&core_member_return_type(module_path, &member.name)),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source),
@@ -1141,16 +1141,7 @@ fn core_member_direct_exclusion(
             "Needs parameter details before Canvas can insert it.".to_string(),
         ));
     }
-    if !core_module_has_canvas_defaults(module_path) {
-        if params.is_empty() {
-            return None;
-        }
-        return Some((
-            "needs_canvas_defaults",
-            "Needs Canvas argument defaults before this entry can be inserted.".to_string(),
-        ));
-    }
-    if module_path.starts_with("core.encoding.") && !core_encoding_member_has_canvas_defaults(module_path, &member.name) {
+    if !jet_driver::Sema::core_call_has_safe_defaults(module_path, &member.name) {
         if params.is_empty() {
             return None;
         }
@@ -1197,34 +1188,6 @@ fn core_member_requires_unsafe(module_path: &str, member: &str) -> bool {
         ),
         _ => false,
     }
-}
-
-fn core_module_has_canvas_defaults(module_path: &str) -> bool {
-    matches!(
-        module_path,
-        "core.math"
-            | "core.encoding.json"
-            | "core.encoding.jsonl"
-            | "core.encoding.csv"
-            | "core.encoding.toml"
-            | "core.encoding.yaml"
-            | "core.encoding.xml"
-            | "core.encoding.cbor"
-            | "core.encoding.hex"
-            | "core.encoding.base64"
-            | "core.encoding.base32"
-    )
-}
-
-fn core_encoding_member_has_canvas_defaults(module_path: &str, member: &str) -> bool {
-    matches!(
-        (module_path, member),
-        ("core.encoding.json", "parse" | "decode")
-            | (
-                "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
-                "decode" | "decode_url"
-            )
-    )
 }
 
 fn core_export_resolves(exports: &[(String, Vec<String>)], module_path: &str, member: &str) -> bool {
@@ -1686,7 +1649,7 @@ fn core_member_json(src: &str, module_path: &str, member: &CoreCatalogMember) ->
         json_str(descriptor_id),
         rank_fields,
         json_str(&member.signature),
-        json_str(core_member_return_type(module_path, &member.name)),
+        json_str(&core_member_return_type(module_path, &member.name)),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source),
@@ -1849,60 +1812,22 @@ pub(super) fn core_member_params(module_path: &str, member_name: &str, signature
     if let Some(params) = params_from_signature(signature) {
         return params;
     }
-    match (module_path, member_name) {
-        ("core.math", "abs") => {
-            vec![("value".to_string(), "Int".to_string())]
-        }
-        (
-            "core.math",
-            "sqrt" | "floor" | "ceil" | "round" | "sin" | "cos" | "tan" | "asin" | "acos"
-            | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10"
-            | "trunc" | "fract" | "sign" | "degrees" | "radians",
-        ) => {
-            vec![("value".to_string(), "Float".to_string())]
-        }
-        ("core.math", "int_pow" | "gcd" | "lcm") => vec![
-            ("left".to_string(), "Int".to_string()),
-            ("right".to_string(), "Int".to_string()),
-        ],
-        ("core.math", "pow" | "atan2" | "hypot") => vec![
-            ("left".to_string(), "Float".to_string()),
-            ("right".to_string(), "Float".to_string()),
-        ],
-        ("core.math", "min" | "max") => vec![
-            ("left".to_string(), "Int".to_string()),
-            ("right".to_string(), "Int".to_string()),
-        ],
-        ("core.math", "clamp") => vec![
-            ("value".to_string(), "Int".to_string()),
-            ("min".to_string(), "Int".to_string()),
-            ("max".to_string(), "Int".to_string()),
-        ],
-        ("core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml", "parse" | "decode") => {
-            vec![("text".to_string(), "String".to_string())]
-        }
-        ("core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32", "decode" | "decode_url") => {
-            vec![("text".to_string(), "String".to_string())]
-        }
-        _ => Vec::new(),
-    }
+    jet_driver::Sema::core_call_surface_signature(module_path, member_name)
+        .map(|(params, _)| {
+            params
+                .into_iter()
+                .enumerate()
+                .map(|(index, (_, ty))| (format!("arg{}", index + 1), ty.name()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-fn core_member_return_type(module_path: &str, member_name: &str) -> &'static str {
-    match (module_path, member_name) {
-        ("core.math", "abs" | "int_pow" | "gcd" | "lcm" | "min" | "max" | "clamp") => "Int",
-        ("core.math", "round") => "Int",
-        (
-            "core.math",
-            "sqrt" | "pow" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
-            | "atan2" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "hypot"
-            | "trunc" | "fract" | "sign" | "degrees" | "radians" | "lerp" | "pi" | "e",
-        ) => "Float",
-        ("core.math", "is_nan" | "is_inf" | "is_finite" | "is_even" | "is_odd") => "Bool",
-        ("core.event", "policy_sync") => "EventPolicy",
-        ("core.event", "scope") => "EventScope",
-        _ => "Void",
-    }
+fn core_member_return_type(module_path: &str, member_name: &str) -> String {
+    jet_driver::Sema::core_call_surface_signature(module_path, member_name)
+        .and_then(|(_, ret)| ret)
+        .map(|ret| ret.name())
+        .unwrap_or_else(|| "Void".to_string())
 }
 
 fn params_from_signature(signature: &str) -> Option<Vec<(String, String)>> {

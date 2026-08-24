@@ -486,7 +486,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           </section>
           <section id="graphs-panel" class="component-tree-section">
             <details open>
-              <summary><span>Functions</span><span class="component-tree-section-actions"><button id="canvas-new-function" type="button" title="Create a source-backed function">+ New</button><span id="graph-count" class="count">0</span></span></summary>
+              <summary><span>Functions</span><span class="component-tree-section-actions"><button id="canvas-new-function" type="button" title="Create a source-backed function">+ New</button><button id="canvas-new-callback" type="button" title="Create a source-backed callback handler">+ Callback</button><span id="graph-count" class="count">0</span></span></summary>
               <div id="graph-list" class="graph-list"></div>
             </details>
           </section>

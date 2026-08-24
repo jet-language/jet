@@ -1435,7 +1435,10 @@
         const item = document.createElement("div");
         item.className = "pin-row";
         appendText(item, "b", "", event.title || event.function);
-        appendText(item, "span", "tag", "Function event");
+        appendText(item, "span", "tag", "Callback handler");
+        const openHandler = appendButton(item, "", "Open handler", "wide", { "data-event-handler": event.function });
+        openHandler.title = "Open callback handler: " + event.function;
+        openHandler.addEventListener("click", () => openFunctionGraph(event.function));
         list.appendChild(item);
       }
       eventsSection.appendChild(list);

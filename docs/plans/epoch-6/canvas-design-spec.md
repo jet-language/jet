@@ -123,13 +123,19 @@ The left `My Canvas` rail is one source-backed tree over the current project:
 - `Files` selects a source file and keeps its file revision visible to Canvas.
 - `Functions` selects a projected function graph; `New` uses the existing
   checked function transaction.
+- `Callback` creates an ordinary `fn on_<name>()` handler through that same
+  checked function transaction. A projected `on_*` function is marked as a
+  framework callback view; selecting its `handler` row opens the source-backed
+  function graph.
 - `Variables` lists the open function's parameters and local bindings with
   their types; `Add` promotes a selected value expression through the
   existing checked binding transaction.
 
 Tree navigation changes the selected projection only. It never creates a
 parallel graph or variable model; every item carries the current source ID and
-revision and is re-rendered after a source transaction.
+revision and is re-rendered after a source transaction. Callback labels and
+handler navigation are derived from `event_views`; they do not create an event
+sidecar or alter saved Jet text.
 
 ## Typography
 

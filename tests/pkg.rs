@@ -3635,10 +3635,10 @@ fn cli_jet_new_creates_project_structure() {
 
 #[test]
 fn cli_run_migrates_all_retired_entry_layouts() {
-    if !jet_bin().is_file() {
-        eprintln!("note: skipping cli_run_migrates_all_retired_entry_layouts (run `cargo build` first)");
-        return;
-    }
+    assert!(
+        jet_bin().is_file(),
+        "the Cargo-provided jet binary must exist"
+    );
 
     let tmp = tmp_dir("cli_run_entry_migration");
     let store = tmp.join("store");
@@ -3677,10 +3677,10 @@ fn cli_run_migrates_all_retired_entry_layouts() {
 
 #[test]
 fn cli_run_reports_ambiguous_retired_entry_layout() {
-    if !jet_bin().is_file() {
-        eprintln!("note: skipping cli_run_reports_ambiguous_retired_entry_layout (run `cargo build` first)");
-        return;
-    }
+    assert!(
+        jet_bin().is_file(),
+        "the Cargo-provided jet binary must exist"
+    );
 
     let tmp = tmp_dir("cli_run_entry_ambiguous");
     let store = tmp.join("store");
@@ -3694,6 +3694,7 @@ fn cli_run_reports_ambiguous_retired_entry_layout() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("ambiguous project entry"), "{stderr}");
     assert!(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}");
+    assert_eq!(stderr.matches("`run.jet`").count(), 1, "{stderr}");
     assert!(tmp.join("main.jet").is_file());
     assert!(tmp.join("run.jet").is_file());
 
@@ -3701,11 +3702,39 @@ fn cli_run_reports_ambiguous_retired_entry_layout() {
 }
 
 #[test]
+fn cli_run_reports_named_canonical_retired_entry_layout() {
+    assert!(
+        jet_bin().is_file(),
+        "the Cargo-provided jet binary must exist"
+    );
+
+    let tmp = tmp_dir("cli_run_named_entry_ambiguous");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "package.jet", &min_manifest("ambiguous", "0.1.0"));
+    write(&tmp, "ambiguous.jet", "fn run() { print(\"current\") }\n");
+    write(&tmp, "main.jet", "fn run() { print(\"retired\") }\n");
+
+    let out = jet_cmd(&["run"], &tmp, &store);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("ambiguous project entry"), "{stderr}");
+    assert!(
+        stderr.contains("main.jet") && stderr.contains("ambiguous.jet"),
+        "{stderr}"
+    );
+    assert!(tmp.join("main.jet").is_file());
+    assert!(tmp.join("ambiguous.jet").is_file());
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
 fn cli_run_keeps_explicit_retired_entry_target() {
-    if !jet_bin().is_file() {
-        eprintln!("note: skipping cli_run_keeps_explicit_retired_entry_target (run `cargo build` first)");
-        return;
-    }
+    assert!(
+        jet_bin().is_file(),
+        "the Cargo-provided jet binary must exist"
+    );
 
     let tmp = tmp_dir("cli_run_explicit_retired");
     let store = tmp.join("store");
@@ -3721,6 +3750,46 @@ fn cli_run_keeps_explicit_retired_entry_target() {
     assert_eq!(String::from_utf8_lossy(&out.stdout), "explicit\n");
     assert!(tmp.join("main.jet").is_file());
     assert!(!tmp.join("run.jet").exists());
+
+    fs::remove_dir_all(&tmp).unwrap();
+}
+
+#[test]
+fn unsupported_authority_reports_a_host_recovery() {
+    let diagnostic = jet::Authority::AuthorityError::Unsupported(
+        "descriptor-relative no-follow authority is unavailable on this platform".to_string(),
+    )
+    .diagnostic();
+    assert_eq!(diagnostic.code, "E1334");
+    assert!(diagnostic.what.contains("unavailable on this platform"));
+    assert!(diagnostic.why.contains("descriptor-relative no-follow"));
+    assert!(diagnostic.fix.contains("use a platform"));
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_run_authority_failure_offers_specific_recovery() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tmp_dir("cli_run_authority_recovery");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+    write(&tmp, "package.jet", &min_manifest("authority", "0.1.0"));
+    write(&tmp, "real.jet", "fn run() { print(\"real\") }\n");
+    symlink("real.jet", tmp.join("run.jet")).unwrap();
+
+    let out = jet_cmd(&["run"], &tmp, &store);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Error [E1334]:"), "{stderr}");
+    assert!(
+        stderr.contains("run.jet") && stderr.contains("symlink"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("replace the symlink with the expected regular file"),
+        "{stderr}"
+    );
 
     fs::remove_dir_all(&tmp).unwrap();
 }

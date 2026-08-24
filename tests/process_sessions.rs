@@ -151,6 +151,43 @@ fn run() {{
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn process_session_pipeline_cpu_limit_is_typed_all_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_session_pipeline_cpu_limit_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    cpu_budget :: Duration.milliseconds(1000) ?? panic("duration failed")
+    result :: process.pipeline([
+        process.cmd(["{fixture}", "cpu"]).cpu_time_limit(cpu_budget),
+        process.cmd(["cat"])
+    ])
+    if result == {{
+        .Ok(_) -> print("cpu:missed")
+        .Err(error) -> {{
+            if error == {{
+                .ResourceLimit(limit) -> print(if limit == .CpuTime -> "cpu:typed" else -> "cpu:wrong")
+                else -> print("cpu:wrong")
+            }}
+        }}
+    }}
+}}
+"#,
+        fixture = fixture,
+    );
+    tir_support::assert_tiers_agree("process_session_pipeline_cpu_limit", &src, "cpu:typed\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn process_session_resource_limits_match_all_execution_tiers() {
@@ -226,12 +263,7 @@ fn run() {{
         .Ok(_) -> print("cpu:missed")
         .Err(error) -> {{
             if error == {{
-                .ResourceLimit(limit) -> {{
-                    if limit == {{
-                        .CpuTime -> print("cpu:typed")
-                        else -> print("cpu:wrong")
-                    }}
-                }}
+                .ResourceLimit(limit) -> print(if limit == .CpuTime -> "cpu:typed" else -> "cpu:wrong")
                 else -> print("cpu:wrong")
             }}
         }}
@@ -241,12 +273,7 @@ fn run() {{
         .Ok(_) -> print("memory:missed")
         .Err(error) -> {{
             if error == {{
-                .ResourceLimit(limit) -> {{
-                    if limit == {{
-                        .Memory -> print("memory:typed")
-                        else -> print("memory:wrong")
-                    }}
-                }}
+                .ResourceLimit(limit) -> print(if limit == .Memory -> "memory:typed" else -> "memory:wrong")
                 else -> print("memory:wrong")
             }}
         }}
@@ -256,12 +283,7 @@ fn run() {{
         .Ok(_) -> print("files:missed")
         .Err(error) -> {{
             if error == {{
-                .ResourceLimit(limit) -> {{
-                    if limit == {{
-                        .OpenFiles -> print("files:typed")
-                        else -> print("files:wrong")
-                    }}
-                }}
+                .ResourceLimit(limit) -> print(if limit == .OpenFiles -> "files:typed" else -> "files:wrong")
                 else -> print("files:wrong")
             }}
         }}

@@ -780,6 +780,8 @@ fn run_jit_once_on_compiler_stack(
 ) -> RunWithLints {
     crate::RunCache::reset_phases();
     let started = std::time::Instant::now();
+    let timing = crate::PhaseTiming::enabled();
+    let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let entry = std::path::Path::new(file);
     if let Some(result) = job_help_if_requested(file, program_args, gates, setting_overrides) {
         return result;
@@ -790,6 +792,11 @@ fn run_jit_once_on_compiler_stack(
     // the shared job selector.
     if !surface_lints && requested.is_none() && setting_overrides.is_empty() {
         if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+            if timing {
+                timer.metric("cache_hit", 1);
+                timer.lap("jit_cache_hit");
+                write_jit_timing(&timer);
+            }
             return RunWithLints {
                 outcome,
                 lints: Vec::new(),
@@ -798,10 +805,18 @@ fn run_jit_once_on_compiler_stack(
     }
     match checked_bundle_with_entry(file, gates, requested, "dev", setting_overrides) {
         Ok(checked) => {
+            if timing {
+                timer.lap("frontend");
+            }
             let lints = checked.lints;
             let bundle = checked.bundle;
             if surface_lints && requested.is_none() && setting_overrides.is_empty() {
                 if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+                    if timing {
+                        timer.metric("cache_hit", 1);
+                        timer.lap("jit_cache_hit");
+                        write_jit_timing(&timer);
+                    }
                     return RunWithLints { outcome, lints };
                 }
             }
@@ -886,6 +901,9 @@ fn run_jit_once_on_compiler_stack(
                 },
                 RunOutcome::Problems(diags) => RunOutcome::Problems(diags),
             };
+            if timing {
+                timer.lap("jit");
+            }
             if selected.is_none()
                 && setting_overrides.is_empty()
                 && matches!(outcome, RunOutcome::Ran { .. })
@@ -895,13 +913,27 @@ fn run_jit_once_on_compiler_stack(
             if !json {
                 crate::RunCache::maybe_signpost(started, crate::RunCache::stderr_is_tty());
             }
+            if timing {
+                write_jit_timing(&timer);
+            }
             RunWithLints { outcome, lints }
         }
-        Err(diags) => RunWithLints {
-            outcome: RunOutcome::Problems(diags),
-            lints: Vec::new(),
-        },
+        Err(diags) => {
+            if timing {
+                timer.lap("frontend");
+                write_jit_timing(&timer);
+            }
+            RunWithLints {
+                outcome: RunOutcome::Problems(diags),
+                lints: Vec::new(),
+            }
+        }
     }
+}
+
+fn write_jit_timing(timer: &crate::PhaseTiming::PhaseTimer) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    timer.write_to(&cwd);
 }
 
 /// Run one program through the tier-0 interpreter with the same argv shape as

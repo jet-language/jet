@@ -52,6 +52,39 @@
     return true;
   }
 
+  function callbackEventView(graph) {
+    return (graph && graph.event_views || []).find((event) => event.kind === "callback_event" && event.function) || null;
+  }
+
+  function createCanvasCallback() {
+    const trigger = document.getElementById("canvas-new-callback");
+    if (!latestDoc) return false;
+    const name = window.prompt("Callback name", "on_event");
+    if (name === null) {
+      window.__jetCanvasLastTx = null;
+      window.__jetCanvasLastTxResult = { ok: false, changed: false, code: "client_cancelled", message: "Callback creation cancelled" };
+      if (trigger) trigger.focus({ preventScroll: true });
+      return false;
+    }
+    if (!/^on_[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      const message = "Callback name must start with on_ and be a Jet identifier";
+      window.__jetCanvasLastTx = null;
+      window.__jetCanvasLastTxResult = { ok: false, changed: false, code: "client_callback_gate", message };
+      showToast(message, { isError: true });
+      if (trigger) trigger.focus({ preventScroll: true });
+      return false;
+    }
+    const request = postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Void" });
+    if (request && typeof request.then === "function") {
+      return request.then((result) => {
+        if (result && result.ok && result.json && result.json.changed) openFunctionGraph(name);
+        if (trigger) trigger.focus({ preventScroll: true });
+        return result;
+      });
+    }
+    return request;
+  }
+
   function addCanvasVariable() {
     const graph = currentGraphOrNull();
     const expr = graph && selectedNodeId
@@ -131,6 +164,15 @@
         event.preventDefault();
         event.stopPropagation();
         createCanvasFunction();
+      });
+    }
+    const newCallback = document.getElementById("canvas-new-callback");
+    if (newCallback && newCallback.dataset.bound !== "true") {
+      newCallback.dataset.bound = "true";
+      newCallback.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        createCanvasCallback();
       });
     }
     const addVariable = document.getElementById("canvas-add-variable");
@@ -372,6 +414,7 @@
     graphList.innerHTML = "";
     for (const graph of doc.graphs || []) {
       const button = document.createElement("button");
+      const callback = callbackEventView(graph);
       button.className = "graph-item" + (graph.graph_id === selectedGraphId ? " is-active" : "");
       button.type = "button";
       button.setAttribute("role", "treeitem");
@@ -379,7 +422,13 @@
       button.setAttribute("aria-selected", graph.graph_id === selectedGraphId ? "true" : "false");
       button.setAttribute("data-canvas-tree-item", "function");
       button.setAttribute("data-sidebar-graph", graph.graph_id);
-      button.innerHTML = "<span>" + escapeHtml(graph.title) + "</span><span class=\"count\">" + graph.nodes.length + "</span>";
+      if (callback) {
+        button.setAttribute("data-callback-handler", callback.function);
+        button.title = "Open callback handler: " + callback.function;
+        button.innerHTML = "<span>" + escapeHtml(graph.title) + " <span class=\"tag\">handler</span></span><span class=\"count\">" + graph.nodes.length + "</span>";
+      } else {
+        button.innerHTML = "<span>" + escapeHtml(graph.title) + "</span><span class=\"count\">" + graph.nodes.length + "</span>";
+      }
       button.addEventListener("click", () => {
         switchGraph(graph.graph_id);
       });
@@ -1362,11 +1411,13 @@
     if (graphCount) graphCount.textContent = String((doc.graphs || []).length);
     for (const graph of doc.graphs || []) {
       const button = document.createElement("button");
+      const callback = callbackEventView(graph);
       button.type = "button";
       button.className = "graph-tab" + (graph.graph_id === selectedGraphId ? " is-active" : "");
       button.setAttribute("data-graph-tab", graph.graph_id);
-      button.title = "Open graph: " + graph.title;
-      button.innerHTML = "<span class=\"graph-tab-kind\">fn</span><span class=\"graph-tab-title\">" + escapeHtml(graph.title) + "</span><span class=\"graph-tab-count\">" + graph.nodes.length + "</span>";
+      button.title = callback ? "Open callback handler: " + callback.function : "Open graph: " + graph.title;
+      if (callback) button.setAttribute("data-callback-handler", callback.function);
+      button.innerHTML = "<span class=\"graph-tab-kind\">" + (callback ? "callback" : "fn") + "</span><span class=\"graph-tab-title\">" + escapeHtml(graph.title) + "</span><span class=\"graph-tab-count\">" + graph.nodes.length + "</span>";
       button.addEventListener("click", (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -1383,10 +1434,8 @@
     const graph = currentGraphOrNull();
     const actions = [
       { title: "Fit graph", detail: "viewport", group: "view", run: fitGraph },
-      { title: "New function", detail: "source", group: "function", run: () => {
-        const name = window.prompt("Function name", "helper");
-        if (name) postTransaction({ schema_version: 1, op: "create_function", revision: latestDoc.revision, name, params: "", ret_type: "Int" });
-      } },
+      { title: "New function", detail: "source", group: "function", run: createCanvasFunction },
+      { title: "New callback", detail: "source handler", group: "function", run: createCanvasCallback },
       { title: "Show source", detail: "toggle", group: "Execution", run: () => setViewMode("code") },
       { title: "Paste", detail: "selection", group: "Execution", run: pasteSelection },
       { title: "Paste as staged", detail: "local selection", group: "Execution", run: pasteAsStaged },
@@ -1553,7 +1602,7 @@
     if (debugState.staleBreakpoints.length && (!previous || previous.revision !== doc.revision)) {
       showToast(debugState.staleBreakpoints.length + " breakpoint" + (debugState.staleBreakpoints.length === 1 ? " is" : "s are") + " stale; source was kept", { isError: true });
     }
-    syncDebugSessionPicker();
+    syncDebugActive();
   }
 
   function saveDebugState() {

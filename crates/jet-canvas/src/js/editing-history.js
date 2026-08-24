@@ -46,7 +46,7 @@
   }
 
   function recordUndoEntry(body, before, after) {
-    if (!before || !after || before === after) return;
+    if (typeof before !== "string" || typeof after !== "string" || before === after) return;
     pushHistory(undoStack, { before, after, label: transactionUndoLabel(body), op: body && body.op || "edit" });
     redoStack = [];
     persistHistory();
@@ -469,7 +469,7 @@
     });
     const descriptorAction = candidates.length === 1 ? candidates[0] : null;
     const resolvedAction = sourceAction.insert_callee ? sourceAction : descriptorAction;
-    const checkedFallbackCallee = candidates.length === 0
+    const clipboardFallbackCallee = candidates.length === 0
       && descriptor.transaction === "insert_call"
       && node.title
       ? node.title
@@ -478,7 +478,7 @@
       && !(resolvedAction
         && typeof resolvedAction.insert_callee === "string"
         && resolvedAction.insert_callee.trim())
-      && !checkedFallbackCallee.trim()) return null;
+      && !clipboardFallbackCallee.trim()) return null;
     const pins = (node.pins || []).map((pin) => Object.assign({}, pin));
     const output = pins.find((pin) => pin.direction === "output" && !isExecPin(pin));
     return Object.assign({}, resolvedAction || sourceAction, {
@@ -486,8 +486,8 @@
       kind: node.kind || descriptor.kind,
       node_descriptor_id: descriptor.id,
       op: node.action && node.action.op || descriptor.transaction || "",
-      callee: resolvedAction && resolvedAction.callee || checkedFallbackCallee,
-      insert_callee: resolvedAction && resolvedAction.insert_callee || checkedFallbackCallee,
+      callee: resolvedAction && resolvedAction.callee || clipboardFallbackCallee,
+      insert_callee: resolvedAction && resolvedAction.insert_callee || clipboardFallbackCallee,
       ret: node.action && node.action.ret || output && output.type || "Void",
       pins
     });
@@ -774,9 +774,10 @@
     }
     if (!changed) return false;
     saveEditorState();
-    selectedNodeIds = new Set();
-    selectedNodeId = null;
-    selectionExplicitlyCleared = true;
+    const remaining = (editorState.stagedNodes || []).filter((node) => node.graph_id === selectedGraphId);
+    selectedNodeIds = remaining.length ? new Set([remaining[0].node_id]) : new Set();
+    selectedNodeId = remaining[0] && remaining[0].node_id || null;
+    selectionExplicitlyCleared = selectedNodeIds.size === 0;
     showToast("Removed local item");
     if (latestDoc) drawGraph(latestDoc);
     return true;
@@ -1068,7 +1069,8 @@
     window.__jetCanvasDebugState = {
       state: debugConnectionState,
       live: !!(debugSessionId && debugConnectionState === "live" && debugOverlay && debugOverlay.runtime_state === "live"),
-      revision: debugOverlay && debugOverlay.revision || null
+      revision: debugOverlay && debugOverlay.revision || null,
+      staleBreakpoints: (debugState.staleBreakpoints || []).slice(0, 128)
     };
   }
 

@@ -1269,12 +1269,14 @@ entry runs, and generated-Rust bytes), prints
 to `jet-lsp-timing.json`. Other values do not enable timing. All gated by the
 env var (zero cost otherwise; I6 hand-rolled JSON, no external crate).
 **`tools/perf/corpus.tsv`** pins representative source and golden-output
-digests. **`tools/perf/dashboard.sh`** builds that checked corpus through the
-optimized production AOT path with an isolated cold cache, checks output parity,
-and records phase totals, generated-Rust bytes, binary bytes, release stage, and
-machine identity. **`tools/perf/ci-perf-check.sh`** fails on changed or missing
-corpus/identity/timing evidence or a sema-time/binary-size regression over the
-15% threshold; **`tools/perf/update-baseline.sh`** refreshes the pinned baseline.
+digests. **`tools/perf/dashboard.sh`** drives that corpus through the production
+default JIT and optimized AOT paths, with clean and incremental rows, isolated
+caches, exact output parity, wall latency, peak RSS, phase totals, and sample
+variance. It records the compiler/toolchain, target, host, kernel, CPU,
+memory, governor, and stage identity. **`tools/perf/ci-perf-check.sh`** fails on
+changed or missing corpus/identity/timing evidence, output drift, variance over
+100%, or latency/peak-RSS regression over the pinned 15% threshold;
+**`tools/perf/update-baseline.sh`** refreshes the pinned baseline.
 
 **NixOS / flake:** `nix develop` provides `cargo`, `rustc`, `gcc`, `nodejs`,
 and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then

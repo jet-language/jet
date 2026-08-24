@@ -374,6 +374,217 @@ reports the failure.
 - Native platform APIs remain reachable through typed expert handles without
   forking component semantics.
 
+#### UI architecture option — one model, update, and view loop (card #1588)
+
+This is a design option for the future user-facing UI framework. It is not
+ratified UI law, a syntax decision, or an implementation instruction. Canopy /
+Blueprint remains a source projection editor. This section evaluates the
+application UI architecture that a later UI-framework design must ballot.
+
+The Elm retrospective mined on 2026-08-06 identifies one prescribed
+model-update-view architecture and one mutation site as Elm's most exported
+asset. Bubble Tea, iced, Redux, and Lustre carry the same shape. Gleam's lack
+of one leaves each user to choose an architecture. The Jet fit is strong:
+I8 gets one application-state mechanism, while the existing `UiNode`, event,
+reactive, and backend surfaces remain implementation parts of that mechanism.
+
+The proposed contract is small:
+
+- `init` creates the first `Model`.
+- `update` is the only application-state transition. It receives a `Msg` and
+  returns the next `Model`.
+- `view` reads the `Model` and returns one `UiNode` tree.
+- The framework owns the input queue, the model slot, view scheduling, and
+  backend mount. Event adapters turn input into `Msg`; they do not write the
+  `Model`.
+
+The minimal triad uses current Jet syntax. `Msg`, `Model`, and `UiNode` are
+illustrative application types; this block does not add a language keyword or
+a new construction form.
+
+```jet
+use core.ui as ui
+
+enum Msg {
+    Increment
+    Reset
+    NoOp
+}
+
+struct Model {
+    count: Int
+    revision: Int
+}
+
+fn init() Model -[]> {
+    return Model{count: 0, revision: 0}
+}
+
+fn update(model: Model, msg: Msg) Model -[]> {
+    if msg == {
+        .Increment -> {
+            return Model{count: model.count + 1, revision: model.revision + 1}
+        }
+        .Reset -> {
+            return Model{count: 0, revision: model.revision + 1}
+        }
+        .NoOp -> { return model }
+    }
+    return model
+}
+
+fn view(model: Model) UiNode -[]> {
+    return ui.box([
+        ui.text("count: {model.count}"),
+        ui.button("Increment"),
+        ui.button("Reset")
+    ])
+}
+```
+
+The framework maps the two button identities to `Msg.Increment` and
+`Msg.Reset`. That mapping is an event-adapter fact, not a second state or
+event syntax. The existing typed event family can carry the messages.
+
+Before: a naive loop lets every input callback mutate state and rebuild the
+tree. It also mounts after an input that does not change the state.
+
+```jet
+// Naive sketch. `inputs` and `backend` stand for the host loop.
+fn run() {
+    count := 0
+    loop input in inputs() -> {
+        if input == .Increment -> count += 1
+        ui.mount(backend, ui.box([ui.text("count: {count}")]))
+    }
+}
+```
+
+After: the framework has one state write, and user code has one place that
+decides the next state.
+
+```jet
+// Framework-owned loop. The assignment replaces the one application model
+// slot; callbacks only enqueue Msg values.
+model := init()
+loop msg in inputs() -> {
+    model = update(model, msg)
+    ui.mount(backend, view(model))
+}
+```
+
+The second form makes the deep module seam clear. The application learns three
+small function interfaces. The framework hides queue ordering, backend
+measurement, layout, paint, focus, and accessibility work. Tests can call
+`init`, `update`, and `view` without opening a window or starting a scheduler.
+
+#### Lazy view rendering
+
+Default lazy rendering is recommended. The framework should skip the `view`
+call and tree reconciliation when every view input is unchanged. A no-op
+message therefore runs `update` but does not allocate or diff a new tree.
+Backend work remains separate: a viewport, theme, locale, accessibility mode,
+or backend change must invalidate the cache even when the `Model` is unchanged.
+
+The cache belongs to the framework, not to user `Model` state. This is the
+smallest mechanism sketch:
+
+```jet
+struct ViewInputs {
+    model: Model
+    key: Int
+}
+
+struct RenderCache {
+    key: Int
+    tree: UiNode
+}
+
+fn cached_view(cache: RenderCache?, inputs: ViewInputs) RenderCache -[]> {
+    if cache == .Val(previous) && previous.key == inputs.key -> {
+        // The framework marks this frame reused. `view` is not called.
+        return previous
+    }
+    return RenderCache{
+        key: inputs.key,
+        tree: view(inputs.model)
+    }
+}
+```
+
+In this sketch, `key` is derived from all values that `view` can read. The
+`Model.revision` field is enough for a model-only view. A real framework must
+also include viewport, theme, locale, accessibility, backend capability, and
+any other explicit view input. Hidden signal reads or clock reads are not
+allowed in a cached `view`; they make the key incomplete. A cached tree must
+carry stable `Msg` routes, or the framework must invalidate handler closures
+that capture old state. Reusing a tree with a stale callback is incorrect.
+
+The default has a clear cost:
+
+- Each update pays one key comparison.
+- The framework retains one tree per mounted view, so memory grows with tree
+  size, not with message count.
+- Key creation or structural equality costs CPU. A cheap monotonic revision is
+  useful when `update` already constructs immutable model values.
+- A bad key gives a stale screen. The framework must prefer a safe miss to a
+  possible stale hit and expose cache invalidation in its audit output.
+
+The cache does not replace backend reconciliation. When the key changes,
+`view` creates a new tree and the backend applies its keyed diff. When only the
+window changes, the framework may skip `view` but must still measure and lay
+out the cached tree for the new constraint.
+
+#### Beginner and expert passes
+
+Beginner default:
+
+- Write `init`, `update`, and `view`. Do not write a render loop, cache, task
+  queue, lifecycle table, or backend adapter.
+- Keep `Model` as ordinary data. Keep `view` pure and let the framework select
+  automatic caching, FIFO message delivery, safe focus behavior, and the
+  accessible backend path.
+- Give each event a named `Msg` variant. Diagnostics explain which function
+  owns initialization, state transition, or rendering.
+
+Expert control:
+
+- Keep `view` at `-[]>` by default. Put network, file, task, and native work in
+  typed effect-bearing functions such as `-[Net]>` and return or enqueue their
+  result as a `Msg`. No effect hides in `view`.
+- Permit an explicit cache policy: automatic unchanged-input caching is the
+  default; expert code may disable it for a deliberately time-dependent view,
+  force invalidation, or select a measured key. A cache override must be
+  visible in source and in `jet report`.
+- Permit an explicit scheduling policy over the same message queue: FIFO is
+  the default; experts may select frame-bounded, coalesced, or manually stepped
+  delivery when latency or determinism requires it. The policy must not change
+  `update` ordering without an explicit setting.
+- Keep lower-level `reactive`, `event`, `ui.mount`, and backend measure/layout/
+  paint calls as expert seams. They must feed the same `Model`/`Msg`/`UiNode`
+  meaning, not create a second application-state architecture.
+
+#### Future ballot slate
+
+This slate belongs in the dedicated UI-framework design doc. It is not a
+ballot on card #1588, and no implementation starts before the owner ratifies
+the chosen option.
+
+1. **Application architecture:** A — one canonical `init`/`update`/`view`
+   loop with one model mutation site (recommended); B — reactive values and
+   effects as the primary application state model; C — component lifecycle
+   methods with framework-owned local state.
+2. **Render default:** A — automatic unchanged-input cache with safe misses
+   (recommended); B — always call `view`; C — cache only when the user opts in.
+3. **Acceptance terms:** the chosen option must name the event-to-message
+   route, effect boundary, update ordering, cache invalidation inputs, stale
+   callback rule, backend-change rule, accessibility behavior, and the
+   beginner and expert escape paths.
+
+The ballot must also decide whether the existing typed UI-tree spelling remains
+closed until this architecture choice is ratified. This section changes no
+syntax decision and does not authorize implementation.
+
 ### UL10 — data, ML, and accelerator computing
 
 - Reopen #237/#307 against their ratified full table/dataframe surface: typed

@@ -122,7 +122,7 @@ Use the [examples index](../examples/README.md) when the first run is complete.
 | The source is invalid | Run `jet check run.jet`, read the stable diagnostic code and fix, then use the recovery exercises in #1035. |
 | The first install is offline | The generated project has no registry dependency, but the installer still needs its package source. Reconnect and finish installation before the first run. |
 | An old project uses `pkg.jet`, `pack.jet`, `payload.jet`, or `jet.toml` | Rename the manifest to `package.jet`; Jet reports E1226 with that fix. |
-| An old project uses `main.jet` | Rename the entry file to `run.jet`; the old spelling is retired under D-VERDICT-678-1. |
+| An old project uses `main.jet` | Run bare `jet run` in the project. Jet renames one retired entry to `run.jet` and prints a notice. If a canonical entry already exists, keep one and run again. |
 
 Do not teach SSH plus a manual rebuild as the remote path. Installation ends
 when a local supported host runs the project. Later remote updates use

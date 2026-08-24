@@ -264,7 +264,21 @@
       .then((result) => {
         if (!result.ok) {
           window.__jetCanvasLastTxResult = result.json;
-          if (!acceptDiagnosticsPayload(result.json, "Transaction")) {
+          const conflict = result.json && result.json.kind === "conflict";
+          if (conflict) {
+            const message = String(result.json.message || "Source changed while this Canvas edit was prepared");
+            const recovery = "Selection is stale; copy the current selection again. " + message + ". Canvas kept the current source; reload before retrying.";
+            setCanvasState("stale", "Edit not applied", recovery, [
+              { label: "Show source", run: openSourceRecovery },
+              { label: "Reload", primary: true, run: () => loadGraph() }
+            ]);
+            setSaveState("source unchanged", "error");
+            if (body.op === "replace_source" && body.source_edit === "paste_clone") {
+              pasteRenameChips = [];
+              pasteRenameChipsExpanded = false;
+            }
+            showToast(recovery, { isError: true });
+          } else if (!acceptDiagnosticsPayload(result.json, "Transaction")) {
             setCanvasState("error", "Edit not saved", "Jet source stayed unchanged. Review the request, then retry or open Code.", [
               { label: "Open source", run: openSourceRecovery },
               { label: "Retry", primary: true, run: () => postTransaction(body) }
@@ -310,7 +324,7 @@
               return { ok: true, json: result.json };
             });
         }
-        if (result.json.changed && beforeSource && result.json.source_text) {
+        if (result.json.changed && typeof beforeSource === "string" && typeof result.json.source_text === "string") {
           recordUndoEntry(body, beforeSource, result.json.source_text);
           searchState.stale = true;
           searchState.diff = { text: "source changed by " + transactionUndoLabel(body) };
@@ -352,7 +366,7 @@
   }
 
   function restoreSource(source, redoEntry, undoEntry, action) {
-    if (!latestDoc || !source) return;
+    if (!latestDoc || typeof source !== "string") return;
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const request = { schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" };
     const sourceId = currentCanvasSourceId();
@@ -367,8 +381,18 @@
           if (redoEntry) pushHistory(undoStack, redoEntry);
           if (undoEntry) pushHistory(redoStack, undoEntry);
           persistHistory();
-          if (!acceptDiagnosticsPayload(result.json, "Undo")) showToast(result.json.message || "Undo rejected");
-          return;
+          if (!acceptDiagnosticsPayload(result.json, action || "Restore")) {
+            const message = String(result.json && result.json.message || ((action || "Restore") + " rejected"));
+            const stale = result.json && result.json.kind === "conflict";
+            setCanvasState(stale ? "stale" : "error", (action || "Restore") + " not applied", message + ". Canvas kept the current source and undo history. Reload before retry.", [
+              { label: "Open source", run: openSourceRecovery },
+              { label: "Reload", primary: true, run: () => loadGraph() }
+            ]);
+            setSaveState("source unchanged", "error");
+            showToast(message, { isError: true });
+            if (latestDoc) drawGraph(latestDoc);
+          }
+          return { ok: false, json: result.json };
         }
         if (latestDoc && result.json.revision) {
           if (result.json.revision !== latestDoc.revision) {
@@ -397,25 +421,38 @@
         });
       })
       .catch((e) => {
-        setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : "Restore failed", "Jet source was not changed. Retry when the connection is ready.", [
+        if (redoEntry) pushHistory(undoStack, redoEntry);
+        if (undoEntry) pushHistory(redoStack, undoEntry);
+        persistHistory();
+        const failure = { ok: false, kind: "io", message: String(e) };
+        window.__jetCanvasLastTxResult = failure;
+        setCanvasState(navigator.onLine === false ? "offline" : "error", navigator.onLine === false ? "Offline" : "Restore failed", "Jet source was not changed. Undo history was preserved. Retry when the connection is ready.", [
           { label: "Open source", run: openSourceRecovery },
-          { label: "Retry", primary: true, run: () => restoreSource(source, redoEntry, undoEntry, action) }
+          { label: "Reload", primary: true, run: () => loadGraph() }
         ]);
         setSaveState("source unchanged", "error");
         showToast(String(e), { isError: true });
+        if (latestDoc) drawGraph(latestDoc);
+        return failure;
       });
   }
 
   function undoTransaction() {
+    if (historyRequest) return historyRequest;
     const entry = undoStack.pop();
     if (!entry) return showToast("Nothing to undo");
-    return restoreSource(entry.before, entry, null, "Undo");
+    historyRequest = Promise.resolve(restoreSource(entry.before, entry, null, "Undo"))
+      .finally(() => { historyRequest = null; });
+    return historyRequest;
   }
 
   function redoTransaction() {
+    if (historyRequest) return historyRequest;
     const entry = redoStack.pop();
     if (!entry) return showToast("Nothing to redo");
-    return restoreSource(entry.after, null, entry, "Redo");
+    historyRequest = Promise.resolve(restoreSource(entry.after, null, entry, "Redo"))
+      .finally(() => { historyRequest = null; });
+    return historyRequest;
   }
 
   function graphRequestUrl(sourceId) {
@@ -685,9 +722,6 @@
       })
       .catch((error) => {
         if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
-        if (!actionEntries.length && typeof loadCoreCatalogActions === "function") {
-          return loadCoreCatalogActions().then(() => actionEntries);
-        }
         const offline = navigator.onLine === false;
         setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Checked actions unavailable", offline
           ? "Jet source and the current graph stay visible. Reconnect, then retry the checked action query."

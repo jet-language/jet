@@ -15,7 +15,7 @@ use super::graph_helpers::{
 use super::graph_json::{canvas_collapse_hints, func_source_span};
 use super::graph_projection::trait_method_signature;
 use super::project_scan::project_file;
-use super::query_actions::{core_member_params, default_arg_for_type};
+use super::query_actions::default_arg_for_type;
 use super::source_model::{write_source_if_unchanged, SourceWriteError};
 use super::validation_json::{
     extract_params, find_comment_hint, find_hint_region, find_simple_helper, json_str,
@@ -668,41 +668,24 @@ fn core_target_for_callee(
         });
     }
     let alias = parts[0];
-    let mut modules = jet_driver::Syntax::KNOWN_CORE_MODULES
-        .iter()
-        .copied()
-        .filter(|module| {
-            module
-                .strip_prefix("core.")
-                .and_then(|path| path.rsplit('.').next())
-                == Some(alias)
+    if let Some(module) = jet_driver::Syntax::core_module_for_alias(alias) {
+        let suffix = if parts.len() > 2 {
+            format!(".{}", parts[1..parts.len() - 1].join("."))
+        } else {
+            String::new()
+        };
+        return Some(CoreCallTarget {
+            module: format!("{module}{suffix}"),
+            member,
         });
-    if let Some(module) = modules.next() {
-        if modules.next().is_none() {
-            let suffix = if parts.len() > 2 {
-                format!(".{}", parts[1..parts.len() - 1].join("."))
-            } else {
-                String::new()
-            };
-            return Some(CoreCallTarget {
-                module: format!("{module}{suffix}"),
-                member,
-            });
-        }
     }
     None
 }
 
 fn normalize_core_module(module: &str, member: &str) -> String {
-    if module == "core.encoding"
-        && matches!(
-            member,
-            "parse" | "decode" | "to_string" | "to_string_pretty" | "canonical" | "events"
-        )
-    {
-        return "core.encoding.json".to_string();
-    }
-    module.to_string()
+    jet_driver::Syntax::core_module_for_call(module, member)
+        .unwrap_or(module)
+        .to_string()
 }
 
 fn core_call_prefix_and_import(src: &str, module: &str) -> (String, Option<TextEdit>) {
@@ -804,29 +787,35 @@ fn core_import_insert_point(src: &str) -> (usize, bool) {
 }
 
 fn core_default_args(module: &str, member: &str) -> Vec<String> {
-    core_member_params(module, member, "")
-        .into_iter()
-        .map(|(_, ty)| default_arg_for_type(&ty))
-        .collect()
+    core_call_signature(module, member)
+        .map(|(params, _)| {
+            params
+                .into_iter()
+                .map(|(_, ty)| default_arg_for_type(&ty.name()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn core_call_signature(
+    module: &str,
+    member: &str,
+) -> Option<(Vec<(AST::AccessConvention, AST::Type)>, Option<AST::Type>)> {
+    if let Some(row) = jet_driver::Syntax::core_call(module, member) {
+        if let Some(signature) = jet_driver::Sema::core_fixed_sig_for_row(row) {
+            return Some(signature);
+        }
+    }
+    jet_driver::Sema::core_call_surface_signature(module, member)
 }
 
 fn core_call_is_fallible(module: &str, member: &str) -> bool {
-    matches!(
-        (module, member),
-        (
-            "core.encoding.json"
-                | "core.encoding.jsonl"
-                | "core.encoding.csv"
-                | "core.encoding.toml"
-                | "core.encoding.yaml"
-                | "core.encoding.xml"
-                | "core.encoding.cbor"
-                | "core.encoding.hex"
-                | "core.encoding.base64"
-                | "core.encoding.base32",
-            "parse" | "decode" | "decode_url"
-        )
-    )
+    if let Some(row) = jet_driver::Syntax::core_call(module, member) {
+        if let Some((_, ret)) = jet_driver::Sema::core_fixed_sig_for_row(row) {
+            return ret.is_some_and(|ret| ret.is_fallible());
+        }
+    }
+    jet_driver::Sema::core_call_is_fallible(module, member)
 }
 
 pub(super) fn canvas_action_candidate(
@@ -1528,21 +1517,21 @@ pub(super) fn apply_exec_convergence(
     }
 
     let func = checked_func_for_graph(path, src, graph_id)?;
-    let Some(target) = find_expression_statement(&func.body, target_span, src) else {
+    let Some(target) = find_expression_selection(&func.body, target_span, src) else {
         return Err(edit_error(
             "not_found",
-            "Canvas convergence target step no longer exists",
+            "Canvas convergence target source selection no longer exists",
         ));
     };
     let target_text = src
-        .get(target.expr.start..target.expr.end)
+        .get(target.span.start..target.span.end)
         .ok_or_else(|| edit_error("bad_request", "Canvas convergence target span is stale"))?
         .trim()
         .to_string();
-    if target_text.is_empty() || target_text.contains('\n') {
+    if target_text.is_empty() {
         return Err(edit_error(
             "ambiguous",
-            "Canvas can converge one ordinary source statement at a time",
+            "Canvas needs one or more complete ordinary source statements to converge",
         ));
     }
 
@@ -1552,14 +1541,14 @@ pub(super) fn apply_exec_convergence(
             "Canvas convergence source path no longer exists",
         ));
     };
-    if insertion.branch && target.expr.start >= insertion.owner.end {
+    if insertion.branch && target.span.start >= insertion.owner.end {
         return Err(edit_error(
             "structured_join",
             "This source already has a structured join after the branch; keep the downstream step single",
         ));
     }
 
-    let params = convergence_params(path, target.expr)?;
+    let params = convergence_params(path, target.span)?;
     let args = params
         .iter()
         .map(|(name, _)| name.as_str())
@@ -1630,7 +1619,7 @@ pub(super) fn apply_exec_convergence(
 
     if strategy != "duplicate" {
         let suffix = src
-            .get(target.expr.end..target.full.end)
+            .get(target.span.end..target.full.end)
             .ok_or_else(|| edit_error("bad_request", "Canvas convergence target line is stale"))?;
         let replacement = format!(
             "{}{}{}",
@@ -1686,8 +1675,8 @@ fn convergence_params(path: &Path, target: SourceSpan) -> Result<Vec<(String, St
 }
 
 #[derive(Clone, Copy)]
-struct ExpressionStatementLocation {
-    expr: SourceSpan,
+struct ExpressionSelection {
+    span: SourceSpan,
     full: SourceSpan,
 }
 
@@ -1699,33 +1688,123 @@ struct ExecInsertion {
     branch: bool,
 }
 
-fn find_expression_statement(
+fn find_expression_selection(
     stmts: &[Stmt],
     target: SourceSpan,
     src: &str,
-) -> Option<ExpressionStatementLocation> {
+) -> Option<ExpressionSelection> {
+    if let Some(found) = find_expression_selection_in_block(stmts, target, src) {
+        return Some(found);
+    }
     for stmt in stmts {
-        if let Stmt::Expr(expr) = stmt {
-            let expr_span: SourceSpan = expr.span().into();
-            if same_span(expr_span, target) {
-                return Some(ExpressionStatementLocation {
-                    expr: expr_span,
-                    full: stmt_text_span(src, stmt),
-                });
-            }
-        }
-        if let Some(found) = find_expression_statement_in_children(stmt, target, src) {
+        if let Some(found) = find_expression_selection_in_children(stmt, target, src) {
             return Some(found);
         }
     }
     None
 }
 
-fn find_expression_statement_in_children(
+fn find_expression_selection_in_block(
+    stmts: &[Stmt],
+    target: SourceSpan,
+    src: &str,
+) -> Option<ExpressionSelection> {
+    let mut first = None;
+    let mut last = None;
+    for (index, stmt) in stmts.iter().enumerate() {
+        let Stmt::Expr(expr) = stmt else {
+            continue;
+        };
+        let anchor: SourceSpan = expr.span().into();
+        let expr_span = source_expression_span(src, expr);
+        if same_span(anchor, target)
+            || same_span(expr_span, target)
+            || span_contains(expr_span, target)
+            || span_contains(target, expr_span)
+            || source_spans_overlap(expr_span, target)
+        {
+            first.get_or_insert(index);
+            last = Some(index);
+        }
+    }
+    let (Some(first), Some(last)) = (first, last) else {
+        return None;
+    };
+    let mut selected = Vec::with_capacity(last - first + 1);
+    for stmt in &stmts[first..=last] {
+        let Stmt::Expr(expr) = stmt else {
+            return None;
+        };
+        selected.push(source_expression_span(src, expr));
+    }
+    let span = SourceSpan {
+        start: selected.first()?.start,
+        end: selected.last()?.end,
+    };
+    if selected.len() > 1
+        && (span.start < target.start || span.end > target.end)
+    {
+        return None;
+    }
+    Some(ExpressionSelection {
+        span,
+        full: SourceSpan {
+            start: line_start(src, span.start),
+            end: line_after(src, span.end),
+        },
+    })
+}
+
+fn source_expression_span(src: &str, expr: &Expr) -> SourceSpan {
+    let start = match expr {
+        Expr::Call(call) => call.name_span.start,
+        Expr::MethodCall { receiver, .. } => source_expression_span(src, receiver).start,
+        Expr::Try(inner, ..) | Expr::OrFallback { value: inner, .. } => {
+            source_expression_span(src, inner).start
+        }
+        Expr::Paren(_, span) => span.start,
+        _ => expr.span().start,
+    };
+    let fallback_end = expr.span().end;
+    let end = match expr {
+        Expr::Call(call) => call_source_end(src, call.name_span.end, fallback_end),
+        Expr::MethodCall { method_span, .. } => {
+            call_source_end(src, method_span.end, fallback_end)
+        }
+        Expr::Try(inner, span, ..) => {
+            let inner_end = source_expression_span(src, inner).end;
+            let mut end = inner_end.max(span.end);
+            if src.as_bytes().get(end) == Some(&b'?') {
+                end += 1;
+            }
+            end
+        }
+        _ => fallback_end,
+    };
+    SourceSpan { start, end: end.max(start) }
+}
+
+fn call_source_end(src: &str, name_end: usize, fallback_end: usize) -> usize {
+    let Some(open) = find_unquoted_char(src, name_end, '(') else {
+        return fallback_end;
+    };
+    matching_delimiter(src, open, '(', ')')
+        .map_or(fallback_end, |close| close.saturating_add(1))
+}
+
+fn span_contains(outer: SourceSpan, inner: SourceSpan) -> bool {
+    inner.start >= outer.start && inner.end <= outer.end
+}
+
+fn source_spans_overlap(a: SourceSpan, b: SourceSpan) -> bool {
+    a.start < b.end && b.start < a.end
+}
+
+fn find_expression_selection_in_children(
     stmt: &Stmt,
     target: SourceSpan,
     src: &str,
-) -> Option<ExpressionStatementLocation> {
+) -> Option<ExpressionSelection> {
     match stmt {
         Stmt::While { body, .. }
         | Stmt::For { body, .. }
@@ -1746,7 +1825,7 @@ fn find_expression_statement_in_children(
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. }
-        | Stmt::ScopeMember { body, .. } => find_expression_statement(body, target, src),
+        | Stmt::ScopeMember { body, .. } => find_expression_selection(body, target, src),
         Stmt::Switch {
             arms, else_body, ..
         }
@@ -1754,20 +1833,20 @@ fn find_expression_statement_in_children(
             arms, else_body, ..
         } => arms
             .iter()
-            .find_map(|arm| find_expression_statement(&arm.body, target, src))
+            .find_map(|arm| find_expression_selection(&arm.body, target, src))
             .or_else(|| {
                 else_body
                     .as_deref()
-                    .and_then(|body| find_expression_statement(body, target, src))
+                    .and_then(|body| find_expression_selection(body, target, src))
             }),
         Stmt::ComptimeIf {
             then_body,
             else_body,
             ..
-        } => find_expression_statement(then_body, target, src).or_else(|| {
+        } => find_expression_selection(then_body, target, src).or_else(|| {
             else_body
                 .as_deref()
-                .and_then(|body| find_expression_statement(body, target, src))
+                .and_then(|body| find_expression_selection(body, target, src))
         }),
         _ => None,
     }
@@ -1829,19 +1908,65 @@ fn exec_branch_node_matches(stmt: &Stmt, node_span: SourceSpan) -> bool {
 
 fn branch_source_span(src: &str, stmt: &Stmt) -> SourceSpan {
     let line = line_start(src, stmt.span().start);
-    let keyword = src[line..]
-        .find("if")
-        .map(|offset| line + offset)
-        .unwrap_or(stmt.span().start);
-    let Some(open_rel) = src[keyword..].find('{') else {
+    let keyword = find_word(src, line, "if").unwrap_or(stmt.span().start);
+    let Some(open) = find_unquoted_char(src, keyword, '{') else {
         return stmt.span().into();
     };
-    let open = keyword + open_rel;
-    let mut depth = 0usize;
+    let mut close = matching_delimiter(src, open, '{', '}').unwrap_or(stmt.span().end);
+    loop {
+        let Some(else_start) = find_word(src, close + 1, "else") else {
+            break;
+        };
+        let between = &src[close + 1..else_start];
+        if !between.chars().all(char::is_whitespace) {
+            break;
+        }
+        let Some(next_open) = find_unquoted_char(src, else_start + "else".len(), '{') else {
+            break;
+        };
+        let Some(next_close) = matching_delimiter(src, next_open, '{', '}') else {
+            break;
+        };
+        close = next_close;
+    }
+    SourceSpan {
+        start: keyword,
+        end: close.saturating_add(1),
+    }
+}
+
+fn find_word(src: &str, start: usize, word: &str) -> Option<usize> {
+    let mut cursor = start.min(src.len());
+    while let Some(relative) = src[cursor..].find(word) {
+        let found = cursor + relative;
+        let before = found.checked_sub(1).and_then(|i| src.as_bytes().get(i));
+        let after = src.as_bytes().get(found + word.len());
+        if !before.is_some_and(u8::is_ascii_alphanumeric)
+            && !before.is_some_and(|byte| *byte == b'_')
+            && !after.is_some_and(u8::is_ascii_alphanumeric)
+            && !after.is_some_and(|byte| *byte == b'_')
+        {
+            return Some(found);
+        }
+        cursor = found + word.len();
+    }
+    None
+}
+
+fn find_unquoted_char(src: &str, start: usize, wanted: char) -> Option<usize> {
     let mut quote = None;
     let mut escaped = false;
-    for (offset, ch) in src[open..].char_indices() {
-        if let Some(quoted) = quote {
+    let mut line_comment = false;
+    let mut cursor = start.min(src.len());
+    while cursor < src.len() {
+        let ch = src[cursor..].chars().next()?;
+        let width = ch.len_utf8();
+        let next = src[cursor + width..].chars().next();
+        if line_comment {
+            if ch == '\n' {
+                line_comment = false;
+            }
+        } else if let Some(quoted) = quote {
             if escaped {
                 escaped = false;
             } else if ch == '\\' {
@@ -1849,23 +1974,57 @@ fn branch_source_span(src: &str, stmt: &Stmt) -> SourceSpan {
             } else if ch == quoted {
                 quote = None;
             }
-            continue;
-        }
-        if ch == '"' || ch == '\'' {
+        } else if ch == '"' || ch == '\'' {
             quote = Some(ch);
-        } else if ch == '{' {
+        } else if ch == '/' && next == Some('/') {
+            line_comment = true;
+            cursor += width;
+        } else if ch == wanted {
+            return Some(cursor);
+        }
+        cursor += width;
+    }
+    None
+}
+
+fn matching_delimiter(src: &str, open: usize, opening: char, closing: char) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut line_comment = false;
+    let mut cursor = open.min(src.len());
+    while cursor < src.len() {
+        let ch = src[cursor..].chars().next()?;
+        let width = ch.len_utf8();
+        let next = src[cursor + width..].chars().next();
+        if line_comment {
+            if ch == '\n' {
+                line_comment = false;
+            }
+        } else if let Some(quoted) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quoted {
+                quote = None;
+            }
+        } else if ch == '"' || ch == '\'' {
+            quote = Some(ch);
+        } else if ch == '/' && next == Some('/') {
+            line_comment = true;
+            cursor += width;
+        } else if ch == opening {
             depth += 1;
-        } else if ch == '}' {
+        } else if ch == closing {
             depth = depth.saturating_sub(1);
             if depth == 0 {
-                return SourceSpan {
-                    start: keyword,
-                    end: open + offset + ch.len_utf8(),
-                };
+                return Some(cursor);
             }
         }
+        cursor += width;
     }
-    stmt.span().into()
+    None
 }
 
 fn find_exec_insertion_in_children(
@@ -2055,39 +2214,35 @@ fn exact_body_helper_name(
     ) -> Option<String> {
         for item in items {
             match item {
-                Item::Func(func) if func.name != current && func.body.len() == 1 => {
-                    if let Stmt::Expr(expr) = &func.body[0] {
-                        if snippet(src, expr.span()) == target {
-                            return Some(func.name.clone());
-                        }
+                Item::Func(func) if func.name != current => {
+                    if expression_body_source(src, &func.body)
+                        .is_some_and(|body| formatted_expression_matches(&body, target))
+                    {
+                        return Some(func.name.clone());
                     }
                 }
                 Item::Struct(structure) => {
                     if let Some(found) = structure.methods.iter().find_map(|method| {
-                        if method.name == current || method.body.len() != 1 {
+                        if method.name == current {
                             return None;
                         }
-                        match &method.body[0] {
-                            Stmt::Expr(expr) if snippet(src, expr.span()) == target => {
-                                Some(method.name.clone())
-                            }
-                            _ => None,
-                        }
+                        expression_body_source(src, &method.body).and_then(|body| {
+                            formatted_expression_matches(&body, target)
+                                .then(|| method.name.clone())
+                        })
                     }) {
                         return Some(found);
                     }
                 }
                 Item::Impl(implementation) => {
                     if let Some(found) = implementation.methods.iter().find_map(|method| {
-                        if method.name == current || method.body.len() != 1 {
+                        if method.name == current {
                             return None;
                         }
-                        match &method.body[0] {
-                            Stmt::Expr(expr) if snippet(src, expr.span()) == target => {
-                                Some(method.name.clone())
-                            }
-                            _ => None,
-                        }
+                        expression_body_source(src, &method.body).and_then(|body| {
+                            formatted_expression_matches(&body, target)
+                                .then(|| method.name.clone())
+                        })
                     }) {
                         return Some(found);
                     }
@@ -2107,6 +2262,58 @@ fn exact_body_helper_name(
     bundle.modules.iter().find_map(|module| {
         in_items(&module.items, src, target, current)
     })
+}
+
+fn expression_body_source(src: &str, body: &[Stmt]) -> Option<String> {
+    let mut spans = Vec::with_capacity(body.len());
+    for stmt in body {
+        let Stmt::Expr(expr) = stmt else {
+            return None;
+        };
+        spans.push(source_expression_span(src, expr));
+    }
+    let start = spans.first()?.start;
+    let end = spans.last()?.end;
+    Some(source_snippet(src, SourceSpan { start, end }).trim().to_string())
+}
+
+fn source_snippet(src: &str, span: SourceSpan) -> String {
+    src.get(span.start..span.end).unwrap_or_default().to_string()
+}
+
+fn formatted_expression_matches(left: &str, right: &str) -> bool {
+    let wrap = |expr: &str| {
+        let candidate = format!("fn canvas_match() {{\n    {}\n}}\n", expr.trim());
+        jet_driver::Formatter::format_source(&candidate)
+            .unwrap_or_else(|_| candidate.clone())
+    };
+    let left = wrap(left);
+    let right = wrap(right);
+    left == right || normalized_source_shape(&left) == normalized_source_shape(&right)
+}
+
+fn normalized_source_shape(source: &str) -> String {
+    let mut normalized = String::with_capacity(source.len());
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in source.chars() {
+        if let Some(quoted) = quote {
+            normalized.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quoted {
+                quote = None;
+            }
+        } else if ch == '"' || ch == '\'' {
+            quote = Some(ch);
+            normalized.push(ch);
+        } else if !ch.is_whitespace() {
+            normalized.push(ch);
+        }
+    }
+    normalized
 }
 
 fn function_name_exists(bundle: &AST::ProgramBundle, name: &str) -> bool {
@@ -3462,7 +3669,10 @@ fn stmt_canvas_anchor(stmt: &Stmt) -> Span {
 }
 
 fn stmt_text_span(src: &str, stmt: &Stmt) -> SourceSpan {
-    let span = stmt_source_span(stmt);
+    let span = match stmt {
+        Stmt::Expr(expr) => source_expression_span(src, expr),
+        _ => stmt_source_span(stmt),
+    };
     SourceSpan {
         start: line_start(src, span.start),
         end: line_after(src, span.end),

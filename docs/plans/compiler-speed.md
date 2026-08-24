@@ -47,8 +47,9 @@ LLVM optimizes). Interim levers, all invariant-clean:
   digest-verified and the shared runtime cache is bounded.
 - Promote the jet-queries demand cache onto the batch compile path: per-module
   memoized check, module-interface fingerprints, and dependent-only invalidation.
-- Hand-rolled (I6) bounded staged-source lex/parse fan-out; deterministic
-  diagnostics and stable module discovery order.
+- Hand-rolled (I6) bounded staged-source lex/parse fan-out for open and
+  already-discovered disk sources; deterministic diagnostics and stable module
+  discovery order.
 - Widen JIT TIR coverage so `jet dev` reloads never touch rustc for pure-Jet
   programs.
 
@@ -78,6 +79,11 @@ toolchain identity. It does not claim the clean/incremental JIT and optimized
 AOT budgets until those rows and their variance are present. The same report
 must retain the failure rail for cache invalidation, nondeterminism, pathological
 inputs, and unstable samples.
+
+The checked-corpus dashboard uses one warmup and three measured samples for
+each clean and incremental JIT/AOT row. Its committed policy allows at most
+15% latency or peak-RSS regression against the pinned row and a range/median
+sample variance of at most 100%; output and phase records must remain exact.
 
 ## Anti-goals from Xcode / Swift (Theo, 2026-08-05)
 

@@ -179,6 +179,117 @@ pub fn core_fixed_sig(
     core_fixed_sig_impl(module, name)
 }
 
+/// Project the signature used by a plain Core-call consumer.
+///
+/// A registered row is authoritative for the ordinary call path. Some
+/// polymorphic spellings still have a fixed default shape in this module; use
+/// that shape only when the row projection cannot carry the resolved type.
+pub fn core_call_signature(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if let Some(row) = Syntax::core_call(module, name) {
+        if let Some(signature) = core_fixed_sig_for_row(row) {
+            return Some(signature);
+        }
+    }
+    core_fixed_sig_impl(module, name)
+}
+
+/// Complete the signature projection for polymorphic Core spellings whose
+/// ordinary Canvas/default-call shape is still known to sema. The row and
+/// fixed-signature paths remain first; this is only the resolved surface
+/// fallback for generic math and encoding calls.
+pub fn core_call_surface_signature(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    if let Some(signature) = core_call_signature(module, name) {
+        return Some(signature);
+    }
+    let read = AccessConvention::Read;
+    let int = Type::Int;
+    let float = Type::Float;
+    let result = |value| {
+        Some((
+            vec![(read, Type::String)],
+            Some(result_ty(value, Type::String)),
+        ))
+    };
+    match (module, name) {
+        ("core.math", "abs") => Some((vec![(read, int.clone())], Some(int))),
+        (
+            "core.math",
+            "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
+            | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10"
+            | "trunc" | "fract" | "sign" | "degrees" | "radians",
+        ) => Some((vec![(read, float.clone())], Some(float))),
+        ("core.math", "round") => Some((vec![(read, float)], Some(int))),
+        ("core.math", "int_pow" | "gcd" | "lcm") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(int),
+        )),
+        ("core.math", "pow" | "atan2" | "hypot") => Some((
+            vec![(read, float.clone()), (read, float)],
+            Some(Type::Float),
+        )),
+        ("core.math", "min" | "max") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(int),
+        )),
+        ("core.math", "clamp") => Some((
+            vec![(read, int.clone()), (read, int.clone()), (read, int)],
+            Some(Type::Int),
+        )),
+        ("core.math", "lerp") => Some((
+            vec![(read, float.clone()), (read, float.clone()), (read, float)],
+            Some(Type::Float),
+        )),
+        ("core.math", "pi" | "e") => Some((vec![], Some(Type::Float))),
+        ("core.math", "is_nan" | "is_inf" | "is_finite" | "is_even" | "is_odd") => {
+            Some((vec![(read, Type::Float)], Some(Type::Bool)))
+        }
+        (
+            "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
+            | "core.encoding.yaml",
+            "parse" | "decode",
+        ) => result(Type::String),
+        (
+            "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
+            "decode" | "decode_url",
+        ) => result(Type::String),
+        ("core.encoding.xml" | "core.encoding.cbor", "parse" | "decode" | "decode_bytes") => {
+            result(Type::String)
+        }
+        ("core.event", "policy_sync") => Some((
+            vec![],
+            Some(Type::Named("EventPolicy".to_string())),
+        )),
+        ("core.event", "scope") => Some((vec![], Some(Type::Named("EventScope".to_string())))),
+        _ => None,
+    }
+}
+
+/// Whether the canonical sema signature for a plain Core call is fallible.
+pub fn core_call_is_fallible(module: &str, name: &str) -> bool {
+    core_call_surface_signature(module, name)
+        .and_then(|(_, ret)| ret)
+        .is_some_and(|ret| ret.is_fallible())
+}
+
+/// Whether Canvas may synthesize safe starter arguments for this Core call.
+pub fn core_call_has_safe_defaults(module: &str, name: &str) -> bool {
+    module == "core.math"
+        || matches!(
+            (module, name),
+            ("core.encoding.json", "parse" | "decode")
+                | (
+                    "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32",
+                    "decode" | "decode_url"
+                )
+        )
+}
+
 fn core_fixed_sig_impl(
     module: &str,
     name: &str,

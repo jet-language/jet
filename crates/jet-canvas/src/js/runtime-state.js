@@ -104,6 +104,7 @@
   const UNDO_DEPTH = 50;
   let undoStack = [];
   let redoStack = [];
+  let historyRequest = null;
   let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false };
   let clipboardState = null;
   let wireStyle = "bezier";

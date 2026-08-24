@@ -12,7 +12,7 @@
   `9f7df17053f573ddb891d2991edf3104d28ba5322d041c3c94b3add695667d92`.
 - Local C oracle: `corpus/oracle.c`, SHA-256
   `07bac2a1e5bef83b2a6718f8b0f8f1e6691d9e8df12ba6222533e0561405f891`.
-- Jet port and executable entry: `main.jet`, SHA-256
+- Jet port and executable entry: `run.jet`, SHA-256
   `4510be1687b99a67d842aa0a20ddf6840787238aa00ca1b31b7089ddd96e3e71`.
 - Golden output: `../../expected/ports/murmur3_x86_32.out`, SHA-256
   `521dca7f6ed0f4380b682fa6b6a5fca87afb575f1e3bfe2aa069435fd2ea5f52`.

@@ -1393,6 +1393,67 @@ fn run() {
 }
 
 #[test]
+fn canvas_exec_convergence_preserves_selected_statement_span_and_helper_formatting() {
+    let path = write_fixture(
+        "convergence_selected_span",
+        r#"fn shared_work(value: Int) {
+    notify ( value )
+    bump_metric ( )
+}
+
+fn converge(flag: Bool) {
+    value :: 1
+    if flag {
+        notify(value)
+        bump_metric()
+        print(value)
+    } else {
+        print(value)
+    }
+}
+
+fn notify(value: Int) {
+    print(value)
+}
+
+fn bump_metric() {
+    print("metric")
+}
+
+fn run() {
+    converge(true)
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("selected convergence graph");
+    let graph_id = graph_id_for_title(&graph, "converge");
+    let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+    let source = fs::read_to_string(&path).unwrap();
+    let target_start = source.find("notify(value)").expect("selected span start");
+    let target_end = source
+        .find("bump_metric()\n        print(value)")
+        .map(|offset| offset + "bump_metric()".len())
+        .expect("selected span end");
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"helper\",\"function\":\"shared_work\",\"helper_name\":\"shared_work\"}}",
+        jet::Canvas::source_revision(&source),
+        graph_id,
+        from_start,
+        from_end,
+        target_start,
+        target_end
+    );
+    let result = jet::Canvas::apply_transaction_json(&path, &request)
+        .expect("selected convergence helper");
+    assert!(result.contains("\"changed\":true"), "{result}");
+    let after = fs::read_to_string(&path).unwrap();
+    assert_eq!(after.matches("shared_work(value)").count(), 2, "{after}");
+    assert!(after.contains("fn shared_work(value: Int)"), "{after}");
+    assert!(!after.contains("notify(value)\n    bump_metric()\n        print(value)"), "{after}");
+    assert_eq!(after, jet::format_source(&after).expect("formatted selected convergence"));
+}
+
+#[test]
 fn canvas_projection_dedupes_variable_getters_with_fanout() {
     let path = write_fixture(
         "getter_fanout",
@@ -2869,6 +2930,79 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     let error = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
     assert!(error.contains("diagnostic") || error.contains("E"), "{error}");
     assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
+}
+
+#[test]
+fn canvas_actions_preserve_nested_imported_module_callee() {
+    let dir = temp_dir("actions_nested_import");
+    fs::write(
+        dir.join("helper.jet"),
+        "module tools {\n    pub fn square(n: Int) Int -> {\n        return n * n\n    }\n}\n",
+    )
+    .unwrap();
+    let path = dir.join("main.jet");
+    let src = "use \"./helper\" as h\n\nfn run() {\n    limit :: 4\n    print(limit)\n}\n";
+    fs::write(&path, src).unwrap();
+
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        jet::Canvas::source_revision(src)
+    );
+    let actions = jet::Canvas::query_json_for_file(&path, &request).expect("nested actions query");
+    let square = json_top_level_objects(json_array_field(&actions, "actions"))
+        .into_iter()
+        .find(|action| action.contains("\"title\":\"square\""))
+        .expect("nested imported action");
+    assert!(
+        square.contains("\"callee\":\"h.tools.square\"")
+            && square.contains("\"insert_callee\":\"h.tools.square\"")
+            && square.contains("\"node_descriptor_id\":\"function_pure\""),
+        "nested imported action must retain checked callee and descriptor: {square}"
+    );
+    assert!(
+        !square.contains("\"callee\":\"h.square\"")
+            && !square.contains("\"insert_callee\":\"h.square\""),
+        "nested imported action must not flatten its checked scope: {square}"
+    );
+
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("nested import graph");
+    let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
+    let insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"h.tools.square\",\"args\":[\"limit\"]}}",
+        jet::Canvas::source_revision(src),
+        graph_id
+    );
+    jet::Canvas::apply_transaction_json(&path, &insert).expect("nested imported insert");
+    let changed = fs::read_to_string(&path).unwrap();
+    assert!(changed.contains("h.tools.square(limit)"), "{changed}");
+    assert_eq!(
+        jet::Formatter::format_source(&changed).unwrap(),
+        changed,
+        "nested imported insert must remain canonical"
+    );
+
+    let reloaded = jet::Canvas::graph_json_for_file(&path).expect("reload nested import graph");
+    let square_node = json_top_level_objects(json_array_field(&reloaded, "nodes"))
+        .into_iter()
+        .find(|node| node.contains(":method:square"))
+        .expect("reloaded nested imported call node");
+    assert!(
+        square_node.contains("\"node_descriptor_id\":\"function_pure\"")
+            && square_node.contains("\"source_span\":{\"start\":"),
+        "nested imported call must retain descriptor and provenance: {square_node}"
+    );
+
+    let stale = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"h.square\",\"args\":[\"limit\"]}}",
+        jet::Canvas::source_revision(&changed),
+        graph_id
+    );
+    let stale_error = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
+    assert!(
+        stale_error.contains("diagnostic") || stale_error.contains("E"),
+        "flattened nested callee must fail sema: {stale_error}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), changed);
 }
 
 #[test]
@@ -4850,6 +4984,10 @@ fn canvas_editor_shell_matches_round3_contract() {
         "Canvas must not invent a callee for an incomplete action: {js}"
     );
     assert!(js.contains("const candidates = actionEntries.filter"), "{js}");
+    assert!(
+        !js.contains("checkedFallbackCallee"),
+        "Canvas must not turn a display title into an insertion callee: {js}"
+    );
     assert!(
         !js.contains("const sourceCallee = descriptor.transaction"),
         "Canvas must not derive a callee from a node title: {js}"

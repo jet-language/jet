@@ -4038,9 +4038,12 @@ MARKER_SHARED): `#Local` rejects task/channel/parallel crossings (E1102);
 in generated Rust (`/* jet-reactive-upgrade: … */`) and `jet report`. Events and hooks are compiler-known Core values
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
 `EventPolicy`, and `EventTrace`. Render backends implement measure/layout/paint
-(`JetBackend`; `NullBackend`/`TuiBackend` shipped). UI trees are typed dot-construction
-(`.Button.{ label: "OK" }`); `Style` is one flat record; motion uses the
-injectable `Clock`; constraint layout is `name :: Layout.{ … }` (D-DOTCTOR3
+(`JetBackend`; `NullBackend`/`TuiBackend` shipped). The typed dot-construction
+UI-tree spelling (`.Button.{ label: "OK" }`) is ratified but unbuilt. The shipped
+`ui.*` surface is the callable `core.ui` API, including `ui.text`, `ui.button`,
+`ui.box`, and `ui.mount`; it does not include that spelling. The spelling decision
+reopens with card #1588's architecture result. `Style` is one flat record; motion
+uses the injectable `Clock`; constraint layout is `name :: Layout.{ … }` (D-DOTCTOR3
 element body of `Constraint` handles; D-LAYOUT-CTOR1) with a first-party
 simplex solver (E2932–E2936).
 Components distribute copy-in-and-own: `jetpack add <Component>` copies

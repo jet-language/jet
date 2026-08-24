@@ -13,6 +13,7 @@ const FAST_BACKENDS: [&str; 2] = ["mold", "lld"];
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selection {
     driver: Option<String>,
+    identity_driver: Option<String>,
     backend: Option<String>,
     backend_program: Option<String>,
     explicit: bool,
@@ -20,8 +21,13 @@ pub struct Selection {
 
 impl Selection {
     fn system() -> Self {
+        Self::system_with_identity(None)
+    }
+
+    fn system_with_identity(identity_driver: Option<String>) -> Self {
         Self {
             driver: None,
+            identity_driver,
             backend: None,
             backend_program: None,
             explicit: false,
@@ -30,7 +36,8 @@ impl Selection {
 
     fn explicit(driver: String) -> Self {
         Self {
-            driver: Some(driver),
+            driver: Some(driver.clone()),
+            identity_driver: Some(driver),
             backend: None,
             backend_program: None,
             explicit: true,
@@ -40,6 +47,7 @@ impl Selection {
     fn auto(driver: &str, backend: &str, backend_program: &str) -> Self {
         Self {
             driver: Some(driver.to_string()),
+            identity_driver: Some(driver.to_string()),
             backend: Some(backend.to_string()),
             backend_program: Some(backend_program.to_string()),
             explicit: false,
@@ -66,7 +74,7 @@ impl Selection {
 
     pub fn identity(&self) -> (Option<&str>, Option<&str>, Option<&str>) {
         (
-            self.driver.as_deref(),
+            self.identity_driver.as_deref(),
             self.backend.as_deref(),
             self.backend_program.as_deref(),
         )
@@ -97,11 +105,27 @@ pub fn for_target(cross_target: Option<&str>) -> Selection {
 }
 
 fn explicit_linker() -> Option<String> {
-    ["RUSTC_LINKER", "CC"].iter().copied().find_map(|name| {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    })
+    explicit_linker_from(|name| std::env::var(name).ok())
+}
+
+fn explicit_linker_from(mut get: impl FnMut(&str) -> Option<String>) -> Option<String> {
+    ["RUSTC_LINKER", "CC"]
+        .iter()
+        .copied()
+        .find_map(|name| get(name).filter(|value| !value.trim().is_empty()))
+}
+
+/// Identity-only query. An empty `rustc_args()` keeps rustc's target-specific
+/// system-linker choice intact when no fast backend is available.
+fn system_linker() -> Option<String> {
+    Command::new("rustc")
+        .args(["--print", "linker"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn detect_host() -> Selection {
@@ -110,7 +134,7 @@ fn detect_host() -> Selection {
         "lld" => command_available("lld") || command_available("ld.lld"),
         _ => false,
     }) else {
-        return Selection::system();
+        return Selection::system_with_identity(system_linker());
     };
     let backend_program = if backend == "lld" && !command_available("lld") {
         "ld.lld"
@@ -150,7 +174,7 @@ fn command_available(program: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{preferred_backend, Selection};
+    use super::{explicit_linker_from, preferred_backend, Selection};
 
     #[test]
     fn preferred_backend_is_ordered_mold_then_lld() {
@@ -175,5 +199,30 @@ mod tests {
             ]
         );
         assert_eq!(selection.label(), "lld via cc");
+    }
+
+    #[test]
+    fn explicit_linker_prefers_rustc_linker_then_cc_and_skips_blanks() {
+        let selection = explicit_linker_from(|name| match name {
+            "RUSTC_LINKER" => Some("  ".into()),
+            "CC" => Some("clang".into()),
+            _ => None,
+        });
+        assert_eq!(selection.as_deref(), Some("clang"));
+
+        let selection = explicit_linker_from(|name| match name {
+            "RUSTC_LINKER" => Some("custom-linker".into()),
+            "CC" => Some("cc".into()),
+            _ => None,
+        });
+        assert_eq!(selection.as_deref(), Some("custom-linker"));
+    }
+
+    #[test]
+    fn system_identity_does_not_override_rustc_linker_choice() {
+        let selection = Selection::system_with_identity(Some("cc".into()));
+        assert!(selection.rustc_args().is_empty());
+        assert_eq!(selection.identity(), (Some("cc"), None, None));
+        assert_eq!(selection.label(), "system via cc");
     }
 }

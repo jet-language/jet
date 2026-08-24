@@ -68,6 +68,7 @@ impl CompilerQueries {
             .map(|(path, text)| (path.clone(), text.clone()))
             .collect::<Vec<_>>();
         overlays.sort_by(|left, right| left.0.cmp(&right.0));
+        let frontend_sources = self.frontend_sources(&root);
         let query = QueryKey::for_file(
             if is_lsp { "checked.lsp" } else { "checked" },
             file.clone(),
@@ -79,6 +80,8 @@ impl CompilerQueries {
             let engine = &mut self.engine;
             let sema = self.sema.entry(root.clone()).or_default();
             engine.query(query, |queries| {
+                let mut prepared_frontend =
+                    crate::Loader::prepare_frontend_sources(frontend_sources);
                 let text = queries
                     .input_text(&InputKey::file(file.clone()))
                     .unwrap_or_default();
@@ -91,11 +94,12 @@ impl CompilerQueries {
                     .map(|(path, text)| (path.as_path(), text.as_str()))
                     .collect::<Vec<_>>();
                 let (diagnostics, bundle, facts, dependencies) =
-                    crate::Driver::check_file_with_effect_facts_incremental_overlays(
+                    crate::Driver::check_file_with_effect_facts_incremental_overlays_prepared(
                         &path,
                         &overlay_refs,
                         is_lsp,
                         sema,
+                        &mut prepared_frontend,
                     );
                 CheckedQuery {
                     diagnostics: Arc::new(diagnostics),
@@ -111,11 +115,11 @@ impl CompilerQueries {
 
     pub fn check_disk(&mut self, path: &str, is_lsp: bool) -> CheckedQuery {
         let root = canonical_path(Path::new(path));
-        let file = FileKey::new(root.to_string_lossy());
-        self.invalidate_file(&file);
         match std::fs::read_to_string(path) {
             Ok(text) => self.check_text(path, &text, is_lsp),
             Err(_) => {
+                let file = FileKey::new(root.to_string_lossy());
+                self.invalidate_file(&file);
                 let (diagnostics, bundle, facts) =
                     crate::Driver::check_file_with_effect_facts(path, None, is_lsp);
                 CheckedQuery {
@@ -195,6 +199,25 @@ impl CompilerQueries {
         self.overlays.insert(path.clone(), text.to_string());
         self.engine
             .set_input(InputKey::file(FileKey::new(path.to_string_lossy())), text.to_string());
+    }
+
+    fn frontend_sources(&self, root: &Path) -> Vec<(PathBuf, String)> {
+        let mut sources = self.overlays.clone();
+        if let Some(files) = self.external_files.get(root) {
+            for path in files {
+                if sources.contains_key(path)
+                    || path.extension().and_then(|extension| extension.to_str()) != Some("jet")
+                {
+                    continue;
+                }
+                if let Ok(source) = std::fs::read_to_string(path) {
+                    sources.insert(path.clone(), source);
+                }
+            }
+        }
+        let mut sources = sources.into_iter().collect::<Vec<_>>();
+        sources.sort_by(|left, right| left.0.cmp(&right.0));
+        sources
     }
 
     fn invalidate_file(&mut self, file: &FileKey) {
@@ -317,6 +340,13 @@ mod tests {
         )
     }
 
+    fn batch_checked_key(path: impl AsRef<Path>) -> QueryKey {
+        QueryKey::for_file(
+            "checked",
+            FileKey::new(canonical_path(path.as_ref()).to_string_lossy()),
+        )
+    }
+
     fn diagnostic_summary(
         diagnostics: &[crate::Diagnostics::Diagnostic],
     ) -> Vec<(String, String, String, String, Option<crate::Diagnostics::Span>)> {
@@ -388,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_interface_change_keeps_unrelated_module_warm() {
+    fn batch_disk_interface_change_keeps_unrelated_module_warm() {
         let root = std::env::temp_dir().join(format!(
             "jet-query-batch-interface-{}",
             std::process::id()
@@ -399,7 +429,7 @@ mod tests {
         let dependency = root.join("b.jet");
         let unrelated = root.join("c.jet");
         let main_source =
-            "module b;\nmodule c;\nfn run() Int -> { return b.value() }\n";
+            "module b;\nmodule c;\nfn run() Int -> { return b.value() + c.other() }\n";
         let dependency_source = "pub fn value() Int -> { return 1 }\n";
         let changed_dependency = "pub fn value() String -> { return \"changed\" }\n";
         let unrelated_source = "pub fn other() Int -> { return 2 }\n";
@@ -408,16 +438,37 @@ mod tests {
         std::fs::write(&unrelated, unrelated_source).unwrap();
 
         let mut service = CompilerQueries::new();
-        service.set_document(&dependency.to_string_lossy(), dependency_source);
-        service.set_document(&unrelated.to_string_lossy(), unrelated_source);
-        assert!(service
-            .check_text(&main.to_string_lossy(), main_source, false)
-            .diagnostics
-            .is_empty());
+        let first = service.check_disk(&main.to_string_lossy(), false);
+        assert!(first.diagnostics.is_empty(), "{:#?}", first.diagnostics);
+        assert_eq!(
+            service.recompute_count(&batch_checked_key(&main)),
+            1,
+            "the first disk batch check must compute the root"
+        );
+
+        let discovered = service.check_disk(&main.to_string_lossy(), false);
+        assert!(discovered.diagnostics.is_empty());
+        assert_eq!(
+            service.recompute_count(&batch_checked_key(&main)),
+            2,
+            "the first dependency discovery must settle the external input set"
+        );
         let cold = service.stats();
 
-        service.set_document(&dependency.to_string_lossy(), changed_dependency);
-        let changed = service.check_text(&main.to_string_lossy(), main_source, false);
+        let unchanged = service.check_disk(&main.to_string_lossy(), false);
+        assert!(unchanged.diagnostics.is_empty());
+        assert_eq!(
+            service.recompute_count(&batch_checked_key(&main)),
+            2,
+            "an unchanged disk batch must reuse the checked query"
+        );
+        assert!(
+            service.stats().hits > cold.hits,
+            "an unchanged disk batch must record a query hit"
+        );
+
+        std::fs::write(&dependency, changed_dependency).unwrap();
+        let changed = service.check_disk(&main.to_string_lossy(), false);
         assert!(
             !changed.diagnostics.is_empty(),
             "a changed imported interface must recheck the real batch path"
@@ -425,14 +476,12 @@ mod tests {
         let warm = service.stats();
         assert!(
             warm.item_hits > cold.item_hits,
-            "an unrelated module must remain reusable after dependency invalidation"
+            "an unrelated module must remain reusable after dependency invalidation: cold={cold:?}, warm={warm:?}"
         );
 
         let fresh = {
             let mut fresh = CompilerQueries::new();
-            fresh.set_document(&dependency.to_string_lossy(), changed_dependency);
-            fresh.set_document(&unrelated.to_string_lossy(), unrelated_source);
-            fresh.check_text(&main.to_string_lossy(), main_source, false)
+            fresh.check_disk(&main.to_string_lossy(), false)
         };
         assert_eq!(
             diagnostic_summary(&changed.diagnostics),
