@@ -3510,6 +3510,23 @@ fn provider_first_ref_is_coded_and_snapshot_pinned() {
 }
 
 #[test]
+fn declared_source_package_named_like_provider_resolves_as_package() {
+    let src = r#"
+module env.dev {
+    sources: { default: NixOS/nixpkgs/nixos-unstable@github }
+    packages: [default.[cargo]]
+}
+"#;
+    let plan = jet_env_model::ModuleEval::evaluate_env(src, Path::new(env!("CARGO_MANIFEST_DIR")))
+        .unwrap();
+    assert_eq!(plan.package_refs, ["cargo@default"]);
+
+    let spec = jetpack::RefSpec::classify_in(&plan.package_refs[0], &plan.table).unwrap();
+    assert_eq!(spec.package, "cargo");
+    assert_eq!(spec.source, jetpack::RefSpec::Source::Named("default".into()));
+}
+
+#[test]
 fn retired_path_provider_is_coded_and_snapshot_pinned() {
     let root = Scratch::new("ref-path-provider");
     let out = jetpack()

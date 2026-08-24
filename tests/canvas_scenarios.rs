@@ -17,6 +17,7 @@ static BUILD_JET: Once = Once::new();
 static NEXT_CANVAS_CASE: AtomicU64 = AtomicU64::new(0);
 const MAX_CANVAS_BROWSERS: usize = 4;
 const BIG_PROJECT_SCENARIO: &str = "big-project-perf";
+const DEVSERVER_REAL_CLIENT_SCENARIO: &str = "devserver-real-client-survival";
 const BIG_FUNCTION_COUNT: usize = 300;
 const BIG_MODULE_COUNT: usize = 12;
 const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
@@ -484,6 +485,11 @@ fn keyboard_cheat_sheet_accessibility_states() {
 #[test]
 fn open_and_render() {
     run_canvas_scenario("open-and-render");
+}
+
+#[test]
+fn canvas_real_client_loads_projection_and_keeps_devserver_alive() {
+    run_canvas_scenario(DEVSERVER_REAL_CLIENT_SCENARIO);
 }
 
 #[test]
@@ -1021,6 +1027,10 @@ fn run_browser_scenario(
     let output = command
         .output()
         .expect("run Canvas scenario driver");
+    let server_exit = server
+        .child
+        .try_wait()
+        .expect("poll Canvas devserver after browser load");
     let server_log = server.stop();
     if !output.status.success() {
         panic!(
@@ -1030,6 +1040,10 @@ fn run_browser_scenario(
             server_log
         );
     }
+    assert!(
+        server_exit.is_none(),
+        "Canvas devserver exited after the real browser loaded its projection: {server_exit:?}\n\n--- jet dev ---\n{server_log}"
+    );
     eprintln!("{}", String::from_utf8_lossy(&output.stdout));
 }
 
@@ -1161,6 +1175,10 @@ impl CanvasCase {
                 &entry,
             )
             .expect("copy Canvas onboarding example source");
+            None
+        } else if name == DEVSERVER_REAL_CLIENT_SCENARIO {
+            fs::copy(repo.join("examples/features/web/ui_showcase.jet"), &entry)
+                .expect("copy Canvas devserver regression source");
             None
         } else {
             if matches!(name, "library-panel" | "library-panel-events") {

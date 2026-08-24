@@ -420,8 +420,8 @@ pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
 
 /// Classify a ref, accepting built-in sources plus any named source declared in
 /// `table` (D-JPK17). D-JPK-REF1=A puts the package before `@`; a local path is
-/// bare. A provider word before `@` is a teaching error, not a valid package
-/// name, because silently accepting `github@owner/repo` would hide the flip.
+/// bare. A provider word before `@` is a teaching error only when the suffix is
+/// not a source; a valid source suffix makes the left half a package name.
 pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
 
@@ -437,9 +437,6 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
         if source.is_empty() || package.is_empty() {
             return Err(RefError::EmptyHalf(raw.to_string()));
         }
-        if Source::is_builtin(package) {
-            return Err(provider_first(package, source, raw));
-        }
         let src = match Source::builtin(source) {
             Some(Source::Path) => {
                 return Err(RefError::PathProviderRetired {
@@ -449,6 +446,9 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
             }
             Some(b) => b,
             None if table.upstream(source).is_some() => Source::Named(source.to_string()),
+            None if Source::is_builtin(package) => {
+                return Err(provider_first(package, source, raw))
+            }
             None => {
                 return Err(RefError::UnknownSource {
                     source: source.to_string(),

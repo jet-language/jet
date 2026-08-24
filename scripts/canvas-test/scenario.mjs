@@ -1762,6 +1762,14 @@ export const scenarios = {
     await ctx.screenshot("rendered");
   },
 
+  "devserver-real-client-survival": async (ctx) => {
+    await ctx.openCanvas();
+    const state = await ctx.state();
+    if (!state || state.nodeCount < 1 || !state.graphTitle) {
+      throw new Error(`Canvas projection did not arrive: ${JSON.stringify(state)}`);
+    }
+  },
+
   "keyboard-cheat-sheet-accessibility-states": async (ctx) => {
     await ctx.openCanvas();
     if (await ctx.driver.evaluate("document.getElementById('first-run-tour')?.classList.contains('is-open')")) {

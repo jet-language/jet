@@ -71,10 +71,16 @@ jobs:
       # Nix has no Windows runner, so the Windows rows use native tooling.
       - name: Install Nix
         if: matrix.os != 'windows-latest'
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+
+      - name: Allow unprivileged user namespaces (bubblewrap sandbox)
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        run: |
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Windows core.path normalization runtime proof
         if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
@@ -133,10 +139,16 @@ jobs:
       # Windows runner, so that row runs native tooling directly.
       - name: Install Nix
         if: matrix.os != 'windows-latest'
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+
+      - name: Allow unprivileged user namespaces (bubblewrap sandbox)
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        run: |
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # Card #1186 rows: native PTY fixtures on every supported platform.
       # Every row below uses `!cancelled()` so one red row still reports the
