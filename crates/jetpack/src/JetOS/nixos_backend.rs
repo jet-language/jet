@@ -14,10 +14,10 @@ use super::options_rendering::{
 };
 use super::types::OSFlags;
 use super::vm_proof::{file_sha256, require_real_vm_tools};
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -58,10 +58,7 @@ enum OfflineInputError {
     Tool(String),
 }
 
-fn require_offline_inputs(
-    dir: &Path,
-    mapping: &NixosMapping,
-) -> Result<(), OfflineInputError> {
+fn require_offline_inputs(dir: &Path, mapping: &NixosMapping) -> Result<(), OfflineInputError> {
     let result = Command::new("nix")
         .args(["flake", "metadata", "--offline", "--json", "path:."])
         .current_dir(dir)
@@ -200,7 +197,10 @@ fn is_known_option_key(key: &str) -> bool {
         return rest.split('.').count() >= 2;
     }
     if let Some(rest) = key.strip_prefix("groups.") {
-        return rest.split_once('.').map(|(_, f)| f == "members").unwrap_or(false);
+        return rest
+            .split_once('.')
+            .map(|(_, f)| f == "members")
+            .unwrap_or(false);
     }
     if key.strip_prefix("performance.sysctl.").is_some() {
         return true;
@@ -254,13 +254,7 @@ fn parse_package_ref_names(value: &str) -> Vec<String> {
         .split(|c: char| c == '[' || c == ']' || c == ',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
-        .map(|part| {
-            part.rsplit('.')
-                .next()
-                .unwrap_or(part)
-                .trim()
-                .to_string()
-        })
+        .map(|part| part.rsplit('.').next().unwrap_or(part).trim().to_string())
         .filter(|name| !name.is_empty() && name != "nixpkgs")
         .collect()
 }
@@ -308,7 +302,9 @@ fn map_system_to_nixos(
             } else {
                 format!("{}.{}", pkg.source, pkg.name)
             };
-            unmapped.push(format!("package `{label}` (non-nixpkgs source in real tier)"));
+            unmapped.push(format!(
+                "package `{label}` (non-nixpkgs source in real tier)"
+            ));
         }
     }
 
@@ -341,7 +337,10 @@ fn map_system_to_nixos(
         body_lines.push(format!("  i18n.defaultLocale = {};", nix_string(&v)));
     }
     if let Some(v) = resolved_option_value(system, "services.localization.keyboardLayout") {
-        body_lines.push(format!("  services.xserver.xkb.layout = {};", nix_string(&v)));
+        body_lines.push(format!(
+            "  services.xserver.xkb.layout = {};",
+            nix_string(&v)
+        ));
     }
     if let Some(v) = resolved_option_value(system, "boot.loader") {
         match clean_symbol(&v).as_str() {
@@ -366,7 +365,10 @@ fn map_system_to_nixos(
             .unwrap_or_default();
         params.push("console=ttyS0,115200".to_string());
         params.push("console=tty0".to_string());
-        body_lines.push(format!("  boot.kernelParams = {};", nix_string_list(&params)));
+        body_lines.push(format!(
+            "  boot.kernelParams = {};",
+            nix_string_list(&params)
+        ));
     }
 
     // Kernel: `.CachyOS` rides on a declared `nix-cachyos-kernel` flake
@@ -375,15 +377,18 @@ fn map_system_to_nixos(
     if let Some(v) = resolved_option_value(system, "boot.kernel") {
         match clean_symbol(&v).as_str() {
             "CachyOS" => {
-                let declared = table.declarations().into_iter().find_map(|(_, upstream, _)| {
-                    let rest = upstream.strip_prefix("github:")?;
-                    let mut parts = rest.splitn(3, '/');
-                    let owner = parts.next()?.to_string();
-                    let repo = parts.next()?.to_string();
-                    let rev = parts.next().unwrap_or("release").to_string();
-                    repo.eq_ignore_ascii_case("nix-cachyos-kernel")
-                        .then_some((owner, repo, rev))
-                });
+                let declared = table
+                    .declarations()
+                    .into_iter()
+                    .find_map(|(_, upstream, _)| {
+                        let rest = upstream.strip_prefix("github:")?;
+                        let mut parts = rest.splitn(3, '/');
+                        let owner = parts.next()?.to_string();
+                        let repo = parts.next()?.to_string();
+                        let rev = parts.next().unwrap_or("release").to_string();
+                        repo.eq_ignore_ascii_case("nix-cachyos-kernel")
+                            .then_some((owner, repo, rev))
+                    });
                 match declared {
                     Some(input) => {
                         let attr = match resolved_option_value(system, "boot.kernel.profile")
@@ -449,10 +454,19 @@ fn map_system_to_nixos(
         body_lines.push("  };".to_string());
     }
     for (key, nixos) in [
-        ("services.virtualization.libvirtd.enable", "virtualisation.libvirtd.enable"),
-        ("services.virtualization.docker.enable", "virtualisation.docker.enable"),
+        (
+            "services.virtualization.libvirtd.enable",
+            "virtualisation.libvirtd.enable",
+        ),
+        (
+            "services.virtualization.docker.enable",
+            "virtualisation.docker.enable",
+        ),
         ("services.gaming.steam.enable", "programs.steam.enable"),
-        ("services.gaming.gamemode.enable", "programs.gamemode.enable"),
+        (
+            "services.gaming.gamemode.enable",
+            "programs.gamemode.enable",
+        ),
         ("services.smartcard.pcscd.enable", "services.pcscd.enable"),
         ("hardware.bluetooth.enable", "hardware.bluetooth.enable"),
         ("apps.flatpak.enable", "services.flatpak.enable"),
@@ -522,7 +536,10 @@ fn map_system_to_nixos(
         body_lines.push("  };".to_string());
     }
     if let Some(v) = resolved_option_value(system, "services.audio.rtkit.enable") {
-        body_lines.push(format!("  security.rtkit.enable = {};", clean_bool_json(&v)));
+        body_lines.push(format!(
+            "  security.rtkit.enable = {};",
+            clean_bool_json(&v)
+        ));
     }
 
     let mut fish_enabled = false;
@@ -610,7 +627,10 @@ fn map_system_to_nixos(
                 if let Some(ports) = service_extra(service, &["ports"]) {
                     let ports = parse_int_list(&ports);
                     if !ports.is_empty() {
-                        body_lines.push(format!("  services.openssh.ports = {};", nix_int_list(&ports)));
+                        body_lines.push(format!(
+                            "  services.openssh.ports = {};",
+                            nix_int_list(&ports)
+                        ));
                     }
                 }
             }
@@ -628,12 +648,18 @@ fn map_system_to_nixos(
                         "    enable = {};",
                         if service.enable { "true" } else { "false" }
                     ));
-                    body_lines.push(format!("    serviceConfig.ExecStart = {};", nix_string(&exec)));
+                    body_lines.push(format!(
+                        "    serviceConfig.ExecStart = {};",
+                        nix_string(&exec)
+                    ));
                     body_lines.push("  };".to_string());
                     if let Some(timer) = service_extra(service, &["timer"]) {
                         body_lines.push(format!("  systemd.timers.{attr} = {{"));
                         body_lines.push("    wantedBy = [ \"timers.target\" ];".to_string());
-                        body_lines.push(format!("    timerConfig.OnCalendar = {};", nix_string(&timer)));
+                        body_lines.push(format!(
+                            "    timerConfig.OnCalendar = {};",
+                            nix_string(&timer)
+                        ));
                         body_lines.push("  };".to_string());
                     }
                 } else {
@@ -861,10 +887,7 @@ fn render_configuration_nix(system: &SystemPlan, mapping: &NixosMapping) -> Stri
     out.push_str(
         &CONFIGURATION_PROOF_SERVICE
             .replace("@@USER@@", &proof_user)
-            .replace(
-                "@@DESKTOP_SHELL_PROCESS@@",
-                &mapping.desktop_shell_process,
-            )
+            .replace("@@DESKTOP_SHELL_PROCESS@@", &mapping.desktop_shell_process)
             .replace("@@DESKTOP_NAME@@", desktop_name)
             .replace("@@HOST@@", &system.name),
     );
@@ -879,7 +902,10 @@ fn write_nixos_backend(
     mapping: &NixosMapping,
 ) -> std::io::Result<()> {
     verify_private_stage(dir)?;
-    fs::write(dir.join("flake.nix"), render_flake_nix(&system.name, mapping))?;
+    fs::write(
+        dir.join("flake.nix"),
+        render_flake_nix(&system.name, mapping),
+    )?;
     fs::write(
         dir.join("configuration.nix"),
         render_configuration_nix(system, mapping),
@@ -926,7 +952,10 @@ fn real_qemu_prove_argv(
         "-smp".to_string(),
         "4".to_string(),
         "-drive".to_string(),
-        format!("if=pflash,format=raw,readonly=on,file={}", ovmf_code.display()),
+        format!(
+            "if=pflash,format=raw,readonly=on,file={}",
+            ovmf_code.display()
+        ),
         "-drive".to_string(),
         format!("if=pflash,format=raw,file={}", ovmf_vars.display()),
         "-drive".to_string(),
@@ -956,10 +985,7 @@ fn write_migration_plan(
     let ovmf_vars = dir.join("OVMF_VARS.fd");
     let build_commands: [(&str, Vec<String>); 2] = [
         ("nix-build-disk", nix_build_argv("disk", offline)),
-        (
-            "nix-build-firmware",
-            nix_build_argv("firmware", offline),
-        ),
+        ("nix-build-firmware", nix_build_argv("firmware", offline)),
     ];
     let mut commands_json = build_commands
         .iter()
@@ -968,7 +994,10 @@ fn write_migration_plan(
                 "{{\"phase\":{},\"cwd\":{},\"argv\":[{}]}}",
                 JSON::quote(phase),
                 JSON::quote(&dir.display().to_string()),
-                argv.iter().map(|a| JSON::quote(a)).collect::<Vec<_>>().join(",")
+                argv.iter()
+                    .map(|a| JSON::quote(a))
+                    .collect::<Vec<_>>()
+                    .join(",")
             )
         })
         .collect::<Vec<_>>();
@@ -976,7 +1005,11 @@ fn write_migration_plan(
     commands_json.push(format!(
         "{{\"phase\":{},\"cwd\":null,\"argv\":[{}]}}",
         JSON::quote("boot-real-guest"),
-        boot_argv.iter().map(|a| JSON::quote(a)).collect::<Vec<_>>().join(",")
+        boot_argv
+            .iter()
+            .map(|a| JSON::quote(a))
+            .collect::<Vec<_>>()
+            .join(",")
     ));
     let text = format!(
         "{{\"kind\":\"nixos.migration.plan\",\"host\":{},\"disk\":{},\"commands\":[{}]}}\n",
@@ -1028,7 +1061,10 @@ pub(super) fn cmd_migrate_compare_nixos(
         );
         return 2;
     }
-    let parent = out.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = out
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     if let Err(error) = fs::create_dir_all(parent) {
         theme.error(
             "could not prepare the NixOS comparison output",
@@ -1085,12 +1121,7 @@ pub(super) fn cmd_migrate_compare_nixos(
         }
     }
     let result = (|| -> Result<(), String> {
-        let plan = write_migration_plan(
-            &stage,
-            system,
-            &disk.display().to_string(),
-            flags.offline,
-        )
+        let plan = write_migration_plan(&stage, system, &disk.display().to_string(), flags.offline)
             .map_err(|error| format!("writing migration plan failed: {error}"))?;
         let run = run_migration_build_and_boot(&stage, &disk, flags.offline)?;
         publish_migration_bundle(out, system, &mapping, &disk, &plan, &run)
@@ -1117,9 +1148,7 @@ pub(super) fn cmd_migrate_compare_nixos(
             }
             0
         }
-        Err(error) => {
-            report_migration_failure(theme, system, &error)
-        }
+        Err(error) => report_migration_failure(theme, system, &error),
     }
 }
 
@@ -1127,7 +1156,10 @@ fn report_migration_failure(theme: &Theme, system: &SystemPlan, error: &str) -> 
     theme.error_coded(
         "E1285",
         "NixOS comparison guest proof has not run",
-        &format!("the NixOS build and boot for `{}` failed: {error}.", system.name),
+        &format!(
+            "the NixOS build and boot for `{}` failed: {error}.",
+            system.name
+        ),
         "fix the build or guest failure, then run the explicit migration command again.",
     );
     2
@@ -1340,7 +1372,8 @@ fn find_qcow2(disk_out: &Path) -> Result<PathBuf, String> {
 }
 
 fn make_writable(path: &Path) -> Result<(), String> {
-    let meta = fs::metadata(path).map_err(|e| format!("reading `{}` failed: {e}", path.display()))?;
+    let meta =
+        fs::metadata(path).map_err(|e| format!("reading `{}` failed: {e}", path.display()))?;
     let mut perms = meta.permissions();
     #[cfg(unix)]
     {
@@ -1455,8 +1488,12 @@ fn qmp_screendump_and_powerdown(sock_path: &Path, _screenshot: &Path) -> Result<
 fn qmp_screendump_and_powerdown(sock_path: &Path, screenshot: &Path) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
-    let stream = UnixStream::connect(sock_path)
-        .map_err(|e| format!("connecting QMP socket `{}` failed: {e}", sock_path.display()))?;
+    let stream = UnixStream::connect(sock_path).map_err(|e| {
+        format!(
+            "connecting QMP socket `{}` failed: {e}",
+            sock_path.display()
+        )
+    })?;
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("setting QMP read timeout failed: {e}"))?;
@@ -1615,7 +1652,10 @@ mod tests {
                     name: "backup".to_string(),
                     enable: true,
                     extra: vec![
-                        ("exec".to_string(), "/run/current-system/sw/bin/hello".to_string()),
+                        (
+                            "exec".to_string(),
+                            "/run/current-system/sw/bin/hello".to_string(),
+                        ),
                         ("timer".to_string(), "daily".to_string()),
                     ],
                 },
@@ -1657,7 +1697,10 @@ mod tests {
             mapping.nixpkgs_rev,
             "fef9403a3e4d31b0a23f0bacebbec52c248fbb51"
         );
-        assert_eq!(mapping.system_packages, vec!["firefox".to_string(), "btop".to_string()]);
+        assert_eq!(
+            mapping.system_packages,
+            vec!["firefox".to_string(), "btop".to_string()]
+        );
         assert!(mapping
             .body_lines
             .contains(&"  networking.hostName = \"halcyon-gnome\";".to_string()));
@@ -1670,7 +1713,10 @@ mod tests {
         assert!(mapping
             .body_lines
             .contains(&"  services.displayManager.gdm.enable = true;".to_string()));
-        assert!(mapping.body_lines.iter().any(|l| l.contains("shell = pkgs.fish;")));
+        assert!(mapping
+            .body_lines
+            .iter()
+            .any(|l| l.contains("shell = pkgs.fish;")));
         assert!(mapping
             .body_lines
             .contains(&"  programs.fish.enable = true;".to_string()));
@@ -1705,7 +1751,8 @@ mod tests {
         assert!(configuration.contains("system.stateVersion = \"26.05\";"));
         assert!(!configuration.contains("system.nixos.distroName"));
         assert!(!configuration.contains("system.nixos.distroId"));
-        assert!(configuration.contains("environment.systemPackages = map jetosPkg [ \"firefox\" \"btop\" ];"));
+        assert!(configuration
+            .contains("environment.systemPackages = map jetosPkg [ \"firefox\" \"btop\" ];"));
         assert!(configuration.contains("programs.bash.promptInit = lib.mkAfter"));
         assert!(configuration.contains("PS1='NixOS comparison $ '"));
         assert!(configuration.contains("environment.etc.issue.text = \"NixOS comparison guest"));
@@ -1722,10 +1769,13 @@ mod tests {
     fn unmapped_option_key_is_rejected() {
         let table = table_with_nixpkgs();
         let mut system = full_system();
-        system.options.push(opt("apps.workload.bogusFeature", "true"));
+        system
+            .options
+            .push(opt("apps.workload.bogusFeature", "true"));
         let err = map_system_to_nixos(&system, &table).unwrap_err();
         assert!(
-            err.iter().any(|m| m.contains("option `apps.workload.bogusFeature`")),
+            err.iter()
+                .any(|m| m.contains("option `apps.workload.bogusFeature`")),
             "{err:?}"
         );
     }
@@ -1734,9 +1784,14 @@ mod tests {
     fn non_nixpkgs_package_is_rejected() {
         let table = table_with_nixpkgs();
         let mut system = full_system();
-        system.packages.push(jet_pkg_model::Merge::Pkg::new("mine", "hello"));
+        system
+            .packages
+            .push(jet_pkg_model::Merge::Pkg::new("mine", "hello"));
         let err = map_system_to_nixos(&system, &table).unwrap_err();
-        assert!(err.iter().any(|m| m.contains("package `mine.hello`")), "{err:?}");
+        assert!(
+            err.iter().any(|m| m.contains("package `mine.hello`")),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -1749,12 +1804,16 @@ mod tests {
             extra: vec![],
         });
         let err = map_system_to_nixos(&system, &table).unwrap_err();
-        assert!(err.iter().any(|m| m.contains("service `mystery`")), "{err:?}");
+        assert!(
+            err.iter().any(|m| m.contains("service `mystery`")),
+            "{err:?}"
+        );
     }
 
     #[test]
     fn missing_nixpkgs_pin_is_rejected() {
-        let table = RefSpec::SourceTable::from_decls(Vec::<(String, String, RefSpec::ProviderKind)>::new());
+        let table =
+            RefSpec::SourceTable::from_decls(Vec::<(String, String, RefSpec::ProviderKind)>::new());
         let system = SystemPlan {
             packages: vec![],
             services: vec![],
@@ -1763,17 +1822,16 @@ mod tests {
         };
         let err = map_system_to_nixos(&system, &table).unwrap_err();
         assert!(
-            err.iter().any(|m| m.contains("needs exactly one nixpkgs pin")),
+            err.iter()
+                .any(|m| m.contains("needs exactly one nixpkgs pin")),
             "{err:?}"
         );
     }
 
     #[test]
     fn nixos_migration_plan_snapshots_build_and_boot_argv() {
-        let dir_root = std::env::temp_dir().join(format!(
-            "nixos-migration-test-plan-{}",
-            std::process::id()
-        ));
+        let dir_root =
+            std::env::temp_dir().join(format!("nixos-migration-test-plan-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir_root);
         fs::create_dir_all(&dir_root).unwrap();
         let system = full_system();
@@ -1794,10 +1852,8 @@ mod tests {
 
     #[test]
     fn migration_bundle_preserves_observed_guest_identity() {
-        let root = std::env::temp_dir().join(format!(
-            "nixos-migration-guest-fact-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("nixos-migration-guest-fact-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let disk = root.join("staged.qcow2");
@@ -1845,11 +1901,12 @@ mod tests {
     #[test]
     fn cleanup_failure_preserves_the_root_cause() {
         let stage = Path::new("/private-stage");
-        let error = finish_private_stage_with(
-            stage,
-            Err("root build failure".to_string()),
-            |_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied")),
-        )
+        let error = finish_private_stage_with(stage, Err("root build failure".to_string()), |_| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "denied",
+            ))
+        })
         .unwrap_err();
         assert!(error.contains("root build failure"));
         assert!(error.contains("cleanup also failed"));

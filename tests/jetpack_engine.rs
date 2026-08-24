@@ -60,6 +60,8 @@ mod common;
 
 #[path = "support/jetpack_fixtures.rs"]
 mod jetpack_fixtures;
+#[path = "support/nix_index_cache_server.rs"]
+mod nix_index_cache_server;
 use jetpack_fixtures::*;
 
 #[test]
@@ -4103,27 +4105,36 @@ module dev {
 }
 
 #[test]
-fn no_nix_nixpkgs_package_reports_e1272() {
+fn no_nix_unindexed_nixpkgs_package_reports_e1349() {
+    let project = Scratch::new("unindexed-nixpkgs-project");
     let root = Scratch::new("root");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_unindexed(&project.path);
+    server.install(&root.path);
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"nixpkgs\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::REVISION
+        ),
+    )
+    .unwrap();
     let output = jetpack()
         .args(["build", "postgres@nixpkgs", "--no-color"])
+        .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", "")
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E1272"), "stderr: {stderr}");
-    assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
+    assert!(stderr.contains("E1349"), "stderr: {stderr}");
+    assert!(stderr.contains("postgres"), "stderr: {stderr}");
+    assert!(stderr.contains("not covered"), "stderr: {stderr}");
     assert!(
-        stderr.contains("pinned compatibility output"),
-        "stderr: {stderr}"
+        !stderr.contains("E1272"),
+        "unindexed signed record must not use the retired bridge diagnostic: {stderr}"
     );
-    assert!(
-        stderr.contains("does not invoke an installed Nix executable"),
-        "stderr: {stderr}"
-    );
-    assert!(stderr.contains("--adapt"), "stderr: {stderr}");
     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
 }
@@ -4509,6 +4520,125 @@ module dev {
         lock.contains("exact = \"github:acme/tools#v1.2.0\""),
         "lock mutated: {lock}"
     );
+}
+
+#[test]
+fn automatic_channel_refresh_writes_lock_and_manifest_without_update() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { automatic: #auto omp@nixpkgs }
+    env.dev: Env{ packages: [] }
+}
+"#,
+    )
+    .unwrap();
+    write_channel_fixture(
+        &fixtures.path,
+        "nixpkgs:omp",
+        "latest",
+        "nixpkgs:omp#1.2.3",
+    );
+
+    let build = jetpack()
+        .args(["build", "--no-color", "--yes", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+    assert!(lock.contains("name = \"automatic\""), "lock: {lock}");
+    assert!(
+        lock.contains("exact = \"nixpkgs:omp#1.2.3\""),
+        "lock: {lock}"
+    );
+    let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
+    assert!(
+        manifest.contains("#auto omp#1.2.3@nixpkgs"),
+        "manifest: {manifest}"
+    );
+}
+
+#[test]
+fn update_of_pinned_source_is_e1352() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { stable: rustc@nixpkgs }
+    env.dev: Env{ packages: [] }
+}
+"#,
+    )
+    .unwrap();
+    let out = jetpack()
+        .args(["update", "stable", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1352"), "stderr: {stderr}");
+    assert!(stderr.contains("#auto"), "stderr: {stderr}");
+}
+
+#[test]
+fn outdated_labels_pinned_manual_and_automatic_sources() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: {
+        pinned: rustc@nixpkgs,
+        manual: #latest jq@nixpkgs,
+        automatic: #auto omp@nixpkgs,
+    }
+    env.dev: Env{ packages: [] }
+}
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(proj.join(".jet")).unwrap();
+    fs::write(
+        proj.join(".jet/lock"),
+        "version = 1\n\n[[source_channel]]\nname = \"manual\"\nchannel = \"latest\"\nexact = \"nixpkgs:jq#1.0\"\n\n[[source_channel]]\nname = \"automatic\"\nchannel = \"latest\"\nexact = \"nixpkgs:omp#1.0\"\n\n[root]\ndependencies = []\n",
+    )
+    .unwrap();
+    write_channel_fixture(&fixtures.path, "nixpkgs:jq", "latest", "nixpkgs:jq#1.0");
+    write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", "nixpkgs:omp#1.0");
+
+    let out = jetpack()
+        .args(["outdated", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("pinned"), "stderr: {stderr}");
+    assert!(stderr.contains("manual"), "stderr: {stderr}");
+    assert!(stderr.contains("automatic"), "stderr: {stderr}");
 }
 
 #[test]

@@ -1,8 +1,7 @@
 use super::entry::default_config_path;
 use super::generation::build_generation;
 use super::generation_files::{
-    diff_packages, dir_size_bytes, generation_ordinal, read_generation_packages,
-    render_plan_json,
+    diff_packages, dir_size_bytes, generation_ordinal, read_generation_packages, render_plan_json,
 };
 use super::generations_activation::{
     activate_generation, find_rollback_generation, generation_named, latest_generation_for,
@@ -384,7 +383,10 @@ pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OSFlags) -> i3
         );
         return 2;
     };
-    let Some(out) = rest.get(out_index + 1).filter(|value| !value.starts_with('-')) else {
+    let Some(out) = rest
+        .get(out_index + 1)
+        .filter(|value| !value.starts_with('-'))
+    else {
         theme.error(
             "NixOS comparison output directory is missing",
             "`--out` must be followed by one directory.",

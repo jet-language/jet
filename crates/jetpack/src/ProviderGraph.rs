@@ -802,7 +802,10 @@ fn npm_report(document: &str) -> ProviderFactReport {
     facts.scripts = json_keys(&metadata, "scripts");
     facts.bins = match metadata.get("bin") {
         Some(JSONValue::Object(values)) => {
-            if values.values().any(|value| !matches!(value, JSONValue::String(_))) {
+            if values
+                .values()
+                .any(|value| !matches!(value, JSONValue::String(_)))
+            {
                 losses.push("npm `bin` object values must be strings".to_string());
             }
             values.keys().cloned().collect()
@@ -818,10 +821,9 @@ fn npm_report(document: &str) -> ProviderFactReport {
         facts.name = json_string(&metadata, "name").unwrap_or_default();
     }
     if metadata != object {
-        if let (Some(top_name), Some(package_name)) = (
-            json_string(&object, "name"),
-            json_string(&metadata, "name"),
-        ) {
+        if let (Some(top_name), Some(package_name)) =
+            (json_string(&object, "name"), json_string(&metadata, "name"))
+        {
             if top_name != package_name {
                 conflicts.push(format!(
                     "npm packument name `{top_name}` conflicts with package name `{package_name}`"
@@ -829,12 +831,12 @@ fn npm_report(document: &str) -> ProviderFactReport {
             }
         }
         match metadata.get("version") {
-            Some(JSONValue::String(version)) if version != &facts.version => conflicts.push(
-                format!(
+            Some(JSONValue::String(version)) if version != &facts.version => {
+                conflicts.push(format!(
                     "npm packument version `{}` conflicts with package version `{version}`",
                     facts.version
-                ),
-            ),
+                ))
+            }
             Some(_) => losses.push("npm package `version` must be a string".to_string()),
             None => losses.push("npm packument package has no version".to_string()),
         }
@@ -933,7 +935,9 @@ fn npm_report(document: &str) -> ProviderFactReport {
                 requirement,
             );
             if !matches!(requirement, JSONValue::String(_)) {
-                losses.push(format!("npm engine `{engine}` must be a string requirement"));
+                losses.push(format!(
+                    "npm engine `{engine}` must be a string requirement"
+                ));
             }
         }
     } else if metadata.contains_key("engines") {
@@ -1292,8 +1296,7 @@ fn toml_string_value(value: &str) -> bool {
 fn toml_dependency_value(value: &str) -> bool {
     let value = toml_value_without_comment(value);
     let value = value.trim();
-    toml_string_value(value)
-        || (value.starts_with('{') && value.ends_with('}') && value.len() >= 2)
+    toml_string_value(value) || (value.starts_with('{') && value.ends_with('}') && value.len() >= 2)
 }
 
 fn cargo_dependency_kind(section: &str) -> Option<&'static str> {
@@ -1513,20 +1516,18 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
             }
         }
     }
-    if let (Some(info_name), Some(root_name)) = (
-        json_string(info, "name"),
-        json_string(object, "name"),
-    ) {
+    if let (Some(info_name), Some(root_name)) =
+        (json_string(info, "name"), json_string(object, "name"))
+    {
         if info != object && info_name != root_name {
             conflicts.push(format!(
                 "PyPI metadata declares conflicting name values: {info_name}, {root_name}"
             ));
         }
     }
-    if let (Some(info_version), Some(root_version)) = (
-        json_string(info, "version"),
-        json_string(object, "version"),
-    ) {
+    if let (Some(info_version), Some(root_version)) =
+        (json_string(info, "version"), json_string(object, "version"))
+    {
         if info != object && info_version != root_version {
             conflicts.push(format!(
                 "PyPI metadata declares conflicting version values: {info_version}, {root_version}"
@@ -1745,9 +1746,7 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                 vulnerability,
             );
             if !matches!(vulnerability, JSONValue::Object(_)) {
-                losses.push(format!(
-                    "PyPI vulnerability {index} must be an object"
-                ));
+                losses.push(format!("PyPI vulnerability {index} must be an object"));
             }
         }
     }
@@ -1863,7 +1862,10 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
         let state = match pin.get("state") {
             Some(JSONValue::Object(state)) => Some(state),
             Some(_) => {
-                losses.push(format!("SwiftPM pin `{}` state must be an object", facts.name));
+                losses.push(format!(
+                    "SwiftPM pin `{}` state must be an object",
+                    facts.name
+                ));
                 None
             }
             None => None,
@@ -1999,7 +2001,9 @@ fn maven_xml_loss(document: &str) -> Option<String> {
     while cursor < document.len() {
         let Some(relative_start) = document[cursor..].find('<') else {
             if !document[cursor..].trim().is_empty() && root_seen && stack.is_empty() {
-                return Some("Maven POM has non-whitespace text outside the project element".to_string());
+                return Some(
+                    "Maven POM has non-whitespace text outside the project element".to_string(),
+                );
             }
             break;
         };
@@ -4632,9 +4636,7 @@ fn nix_hooks(
                 },
                 "hooks" => matches!(
                     value,
-                    JSONValue::String(_)
-                        | JSONValue::Array(_)
-                        | JSONValue::Object(_)
+                    JSONValue::String(_) | JSONValue::Array(_) | JSONValue::Object(_)
                 ),
                 _ => matches!(value, JSONValue::String(_)),
             };
@@ -5841,9 +5843,7 @@ mod tests {
     fn npm_pretty_documents_and_malformed_typed_fields_stay_explicit() {
         let pretty = "{\n  \"name\": \"web\",\n  \"version\": \"1.0.0\",\n  \"dist\": {\"integrity\": \"sha512-abc\"}\n}";
         let report = normalize_provider_document(ProviderFamily::Npm, pretty);
-        report
-            .validate()
-            .expect("pretty npm JSON remains lossless");
+        report.validate().expect("pretty npm JSON remains lossless");
         assert_eq!(report.native_document, pretty);
 
         let malformed = normalize_provider_document(

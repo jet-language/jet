@@ -151,6 +151,10 @@ fi
 # decision surface. The gate writes only its audit report, never board data.
 bash "$repo/tools/ci/tower-hygiene-gate.sh"
 
+# The shell manifest comparison is deliberately independent of Nix. CI runs it
+# before the Nix-backed stop-line so package selection cannot hide a parity gap.
+node "$repo/scripts/agent/verify-jet-shell-parity.js"
+
 "$repo/scripts/agent/verify-nix-eval-stopline.sh"
 
 # Compile every selected workspace test target before running tests.

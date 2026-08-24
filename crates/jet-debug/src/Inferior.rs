@@ -504,7 +504,7 @@ impl Inferior {
     pub(crate) fn resume_and_locate(&mut self, resume_cmd: &str) -> std::io::Result<ResumeResult> {
         self.write_resume(resume_cmd)?;
         let full = self.read_until_resume_settled(String::new())?;
-        if full.contains("exited with") {
+        if full.contains("exited with") || full.contains("exited due to") {
             self.debuggee_exited = true;
             return Ok(ResumeResult::Exited {
                 status: parse_exit_status(&full),
@@ -963,10 +963,27 @@ impl Inferior {
         let safe = match type_name.trim() {
             "bool" | "Bool" => matches!(raw, "true" | "false"),
             "f32" | "f64" | "Float" => raw.parse::<f64>().is_ok(),
-            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "Int" => {
+            "int"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "isize"
+            | "i128"
+            | "long"
+            | "long long"
+            | "Int" => {
                 raw.parse::<i128>().is_ok()
             }
-            "u8" | "u16" | "u32" | "u64" | "usize" | "u128" => raw.parse::<u128>().is_ok(),
+            "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "usize"
+            | "u128"
+            | "unsigned"
+            | "unsigned long"
+            | "unsigned long long" => raw.parse::<u128>().is_ok(),
             "alloc::string::String" | "std::string::String" | "String" | "&str" => {
                 complete_quoted_literal(raw).is_some_and(|value| value.len() == raw.len())
             }
@@ -984,8 +1001,24 @@ impl Inferior {
         match raw.trim() {
             "bool" => Some("Bool"),
             "f32" | "f64" => Some("Float"),
-            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "u8" | "u16" | "u32"
-            | "u64" | "usize" | "u128" => Some("Int"),
+            "int"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "isize"
+            | "i128"
+            | "long"
+            | "long long"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "usize"
+            | "u128"
+            | "unsigned"
+            | "unsigned long"
+            | "unsigned long long" => Some("Int"),
             "alloc::string::String" | "std::string::String" | "String" | "&str" => Some("String"),
             "()" => Some("Unit"),
             _ => None,
@@ -1093,9 +1126,13 @@ fn sentinel_echo_at_end(buf: &[u8]) -> bool {
 }
 
 fn resume_settled(text: &str) -> bool {
-    text.contains("stop reason =")
-        || text.contains("exited with")
-        || text.contains("exited due to")
+    text.split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
+        .any(|line| {
+            line.contains("stop reason =")
+                || line.contains("exited with")
+                || line.contains("exited due to")
+        })
 }
 
 impl Drop for Inferior {
@@ -1188,6 +1225,8 @@ pub(crate) fn parse_exit_signal(output: &str) -> Option<String> {
             "stop reason = signal "
         } else if line.contains("stopped with signal ") {
             "stopped with signal "
+        } else if line.contains("exited due to signal ") {
+            "exited due to signal "
         } else {
             return None;
         };
@@ -1670,6 +1709,10 @@ mod tests {
             Some(17)
         );
         assert_eq!(lldb_quote("a file\\name.rs"), "\"a file\\\\name.rs\"");
+        assert_eq!(
+            parse_exit_signal("Process 1 exited due to signal SIGTERM\n"),
+            Some("SIGTERM".to_string())
+        );
     }
 
     #[test]
@@ -1688,10 +1731,12 @@ mod tests {
     #[test]
     fn resume_wait_requires_a_real_process_event() {
         assert!(!resume_settled("(lldb) run\nProcess 1 launched\n"));
+        assert!(!resume_settled("Process 1 exited with"));
         assert!(resume_settled(
             "Process 1 stopped\n* thread #1, stop reason = breakpoint 1.1\n"
         ));
         assert!(resume_settled("Process 1 exited with status = 0\n"));
+        assert!(resume_settled("Process 1 exited due to signal SIGTERM\n"));
     }
 
     #[test]
@@ -1840,6 +1885,14 @@ mod tests {
         assert_eq!(Inferior::safe_value("u128", max), max);
         assert_eq!(Inferior::safe_value("u128", "-1"), "<unavailable>");
         assert_eq!(Inferior::jet_type_name("u128"), Some("Int"));
+    }
+
+    #[test]
+    fn lldb_integer_aliases_keep_jet_integer_meaning() {
+        assert_eq!(Inferior::safe_value("long", "7"), "7");
+        assert_eq!(Inferior::safe_value("unsigned long", "7"), "7");
+        assert_eq!(Inferior::jet_type_name("long"), Some("Int"));
+        assert_eq!(Inferior::jet_type_name("unsigned long"), Some("Int"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use super::parse::Parsed;
 use super::realize::{
     channel_download_size_from_fixture, channel_sources, load_project_plan, offline_refusal,
-    report_provider_error, resolve_source_channel,
+    report_provider_error, resolve_source_channel, rewrite_channel_manifest,
 };
 use super::workspace_sources::{fixtures_for, workspace_root};
 use crate::Output::{self, Theme};
@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 /// `jetpack update [<source>]` — resolve channel source refs and move only
 /// their lock entries. Does not realize packages.
 pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.positional.first().map(String::as_str) == Some(Syntax::TOOL_PROFILE_NAME) {
+        return super::tool::update_user_tools(theme, parsed);
+    }
     if parsed.flags.offline {
         return offline_refusal(theme, "update");
     }
@@ -22,6 +25,25 @@ pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let only = parsed.positional.first().map(String::as_str);
     let sources = channel_sources(&plan.table);
+    if let Some(name) = only {
+        if plan
+            .table
+            .declared_names()
+            .iter()
+            .any(|declared| declared == name)
+            && !sources.iter().any(|source| source.name == name)
+        {
+            theme.error_coded(
+                "E1352",
+                &format!("source `{name}` is pinned and cannot be updated"),
+                "a pinned source has no moving channel policy, so Jetpack must never change its lock or manifest",
+                &format!(
+                    "declare `{name}` with `#latest` for manual movement or `#auto` for automatic movement"
+                ),
+            );
+            return 2;
+        }
+    }
     let selected: Vec<_> = sources
         .into_iter()
         .filter(|s| only.is_none_or(|name| name == s.name))
@@ -80,6 +102,16 @@ pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
         return 0;
     }
     for (source, exact) in updates {
+        if let Err(error) = rewrite_channel_manifest(&project_dir, &source, &exact) {
+            theme.error_coded(
+                "E1340",
+                &format!("channel `{}` could not update the manifest", source.name),
+                &error,
+                "fix the manifest permissions and run the command again",
+            );
+            ok = false;
+            continue;
+        }
         Lock::record_source_channel(
             &project_dir,
             Lock::LockedSourceChannel {
@@ -95,7 +127,11 @@ pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
             exact
         ));
     }
-    0
+    if ok {
+        0
+    } else {
+        2
+    }
 }
 
 /// `jetpack outdated` — read-only channel freshness report. It may query
@@ -110,19 +146,29 @@ pub(super) fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
         Err(code) => return code,
     };
     let sources = channel_sources(&plan.table);
-    if sources.is_empty() {
-        theme.status("no channel sources.");
+    let declarations = plan.table.declarations();
+    if declarations.is_empty() {
+        theme.status("no declared sources.");
         return 0;
     }
     let mut any = false;
     let mut ok = true;
-    for source in &sources {
+    for (name, _, _) in declarations {
+        let policy = plan.table.channel_policy(&name);
+        let Some(source) = sources.iter().find(|source| source.name == name) else {
+            theme.detail(&format!(
+                "{}  {}  never moves",
+                theme.bold(&name),
+                theme.gray(policy.as_str())
+            ));
+            continue;
+        };
         let locked = Lock::locked_source_channel(&project_dir, &source.name);
         let Some(locked) = locked else {
             theme.detail(&format!(
                 "{}  {}  unlocked (run `jetpack update {}`)",
                 theme.bold(&source.name),
-                theme.gray(source.channel.as_str()),
+                theme.gray(policy.as_str()),
                 source.name
             ));
             any = true;
@@ -134,12 +180,16 @@ pub(super) fn cmd_outdated(theme: &Theme, parsed: &Parsed) -> i32 {
                 theme.detail(&format!(
                     "{}  {}  {} → {}",
                     theme.bold(&source.name),
-                    theme.gray(source.channel.as_str()),
+                    theme.gray(policy.as_str()),
                     locked.exact,
                     latest
                 ));
             }
-            Ok(_) => {}
+            Ok(_) => theme.detail(&format!(
+                "{}  {}  current",
+                theme.bold(&source.name),
+                theme.gray(policy.as_str())
+            )),
             Err(e) => {
                 report_provider_error(theme, &e);
                 ok = false;
@@ -436,23 +486,20 @@ fn cmd_explain_overlay(theme: &Theme, parsed: &Parsed, query: &str) -> i32 {
             return 2;
         }
     };
-    let records = match Overlay::semantic_records(
-        &plan.overlay_policy,
-        "workspace",
-        std::env::consts::OS,
-    ) {
-        Ok(records) => records,
-        Err(error) => {
-            return explain_error(
-                theme,
-                parsed,
-                "E0998",
-                "workspace overlay policy is malformed",
-                &error.message(),
-                "fix the conflicting overlay facts in `workspace.jet`.",
-            );
-        }
-    };
+    let records =
+        match Overlay::semantic_records(&plan.overlay_policy, "workspace", std::env::consts::OS) {
+            Ok(records) => records,
+            Err(error) => {
+                return explain_error(
+                    theme,
+                    parsed,
+                    "E0998",
+                    "workspace overlay policy is malformed",
+                    &error.message(),
+                    "fix the conflicting overlay facts in `workspace.jet`.",
+                );
+            }
+        };
     let lock = SemanticLock::SemanticLockFile {
         records,
         ..Default::default()
@@ -715,7 +762,8 @@ pub(super) fn shell_on_failed_build(theme: &Theme, roots: &Roots, package: &str)
         return;
     }
     let Some(scratch) = verified_failed_scratch(roots, &attempt, package) else {
-        theme.detail("failed-build shell skipped: preserved scratch is not a real Hangar directory");
+        theme
+            .detail("failed-build shell skipped: preserved scratch is not a real Hangar directory");
         return;
     };
     let shell = std::env::var("JETPACK_SHELL_ON_FAIL")

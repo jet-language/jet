@@ -726,19 +726,39 @@ fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
     let mut target = Command::new(&binary)
         .spawn()
         .expect("start the matching native debug target");
-    let attach = format!(
-        "{}{}",
-        dap_frame(&format!(
-            r#"{{"seq":2,"type":"request","command":"attach","arguments":{{"processId":{},"program":"{}","map":"{}"}}}}"#,
-            target.id(),
-            binary.display(),
-            map.display()
-        )),
-        dap_frame(r#"{"seq":3,"type":"request","command":"disconnect","arguments":{}}"#),
-    );
+    let attach = dap_frame(&format!(
+        r#"{{"seq":2,"type":"request","command":"attach","arguments":{{"processId":{},"program":"{}","map":"{}"}}}}"#,
+        target.id(),
+        binary.display(),
+        map.display()
+    ));
     input
         .write_all(attach.as_bytes())
-        .expect("send attach and disconnect requests");
+        .expect("send attach request");
+    input.flush().expect("flush attach request");
+    let attach_deadline = Instant::now() + Duration::from_secs(30);
+    let mut target_stopped = false;
+    while Instant::now() < attach_deadline {
+        if adapter
+            .try_wait()
+            .expect("check production DAP process during attach")
+            .is_some()
+        {
+            break;
+        }
+        let state = std::fs::read_to_string(format!("/proc/{}/stat", target.id()))
+            .ok()
+            .and_then(|stat| stat.split_whitespace().nth(2).map(str::to_owned));
+        if matches!(state.as_deref(), Some("T" | "t")) {
+            target_stopped = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let disconnect =
+        dap_frame(r#"{"seq":3,"type":"request","command":"disconnect","arguments":{}}"#);
+    let _ = input.write_all(disconnect.as_bytes());
+    let _ = input.flush();
     drop(input);
     let output = adapter
         .wait_with_output()
@@ -771,6 +791,10 @@ fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
         target_alive,
         "production disconnect must leave an attached target alive"
     );
+    assert!(
+        target_stopped,
+        "production attach must stop the real target before disconnect"
+    );
 }
 
 #[test]
@@ -781,7 +805,7 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
     let tag = format!("dap_cli_success_{}", std::process::id());
     let file = native_fixture(&tag, LOOPS);
     let input = format!(
-        "{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}{}",
         dap_frame(
             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true}}"#
         ),

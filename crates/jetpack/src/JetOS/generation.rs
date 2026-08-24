@@ -1,21 +1,19 @@
 use super::generation_files::{
-    GenerationRootProof, generation_dir, sync_generation_tree, validate_generation_root_proof,
-    write_generation_files, write_generation_root_proof, write_generation_source_proof,
+    generation_dir, sync_generation_tree, validate_generation_root_proof, write_generation_files,
+    write_generation_root_proof, write_generation_source_proof, GenerationRootProof,
 };
-use super::generations_activation::{
-    append_generation, generation_ledger_timestamp, now_secs,
-};
+use super::generations_activation::{append_generation, generation_ledger_timestamp, now_secs};
 use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloads};
 use super::options_rendering::boot_profile;
 use super::store_realize::{
     desktop_default_required_packages, first_party_package_ref, jetos_runtime_package_ref,
     realize_ref, try_realize_ref,
 };
-use super::types::{CACHYOS_KERNEL_PACKAGE, Generation, OSFlags, SYSTEMD_INIT_PACKAGE};
-use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
+use super::types::{Generation, OSFlags, CACHYOS_KERNEL_PACKAGE, SYSTEMD_INIT_PACKAGE};
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Store;
+use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -79,14 +77,14 @@ pub(super) fn build_generation(
         system.packages.iter().map(|p| p.name.as_str()).collect();
     let explicit_total = system.packages.len();
     let boot_for_progress = boot_profile(system);
-    let implicit_systemd = boot_for_progress.init == "/sbin/init"
-        && !explicit_names.contains(SYSTEMD_INIT_PACKAGE);
+    let implicit_systemd =
+        boot_for_progress.init == "/sbin/init" && !explicit_names.contains(SYSTEMD_INIT_PACKAGE);
     let implicit_desktop = desktop_default_required_packages(system)
         .iter()
         .filter(|name| !explicit_names.contains(*name))
         .count();
-    let implicit_cachyos = boot_for_progress.kernel == "CachyOS"
-        && !explicit_names.contains(CACHYOS_KERNEL_PACKAGE);
+    let implicit_cachyos =
+        boot_for_progress.kernel == "CachyOS" && !explicit_names.contains(CACHYOS_KERNEL_PACKAGE);
     let progress_total = explicit_total
         + usize::from(implicit_cachyos)
         + usize::from(implicit_systemd)
@@ -172,8 +170,7 @@ pub(super) fn build_generation(
             .iter()
             .any(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
     {
-        let Some(raw) =
-            jetos_runtime_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE, flags.offline)
+        let Some(raw) = jetos_runtime_package_ref(&plan.table, SYSTEMD_INIT_PACKAGE, flags.offline)
         else {
             theme.error_coded(
                 "E1281",
@@ -309,7 +306,10 @@ pub(super) fn build_generation(
         if !final_dir.is_dir() {
             theme.error(
                 "could not publish the jetos generation",
-                &format!("atomically installing `{}` failed: {e}.", final_dir.display()),
+                &format!(
+                    "atomically installing `{}` failed: {e}.",
+                    final_dir.display()
+                ),
                 "check generation storage permissions, then retry with the same name.",
             );
             return None;
@@ -466,10 +466,7 @@ fn publish_generation(
 
 fn generation_staging_dir(final_dir: &Path) -> PathBuf {
     let sequence = GENERATION_STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let name = final_dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
+    let name = final_dir.file_name().unwrap_or_default().to_string_lossy();
     final_dir.with_file_name(format!(
         ".{name}.{}.{}.partial",
         std::process::id(),
@@ -478,15 +475,17 @@ fn generation_staging_dir(final_dir: &Path) -> PathBuf {
 }
 
 fn generation_failpoint(name: &str) -> bool {
-    cfg!(debug_assertions)
-        && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
+    cfg!(debug_assertions) && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
 }
 
 fn immutable_generation_error(theme: &Theme, dir: &Path, error: &std::io::Error) {
     theme.error_coded(
         "E1278",
         "jetos generation name is already published",
-        &format!("immutable generation `{}` cannot be reused: {error}.", dir.display()),
+        &format!(
+            "immutable generation `{}` cannot be reused: {error}.",
+            dir.display()
+        ),
         "choose a new generation name, or restore the exact sealed generation and retry.",
     );
 }

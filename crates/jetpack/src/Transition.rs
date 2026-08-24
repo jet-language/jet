@@ -6,9 +6,9 @@
 //! recorded by its journal. A plan is safe to preview, apply, and fold without
 //! relying on timestamps or last-writer-wins behavior.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
-use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -98,7 +98,11 @@ struct Journal {
 }
 
 /// Plan and apply one of the ratified jet split transitions.
-pub fn split(root: &Path, target: SplitTarget, check_only: bool) -> Result<TransitionResult, TransitionError> {
+pub fn split(
+    root: &Path,
+    target: SplitTarget,
+    check_only: bool,
+) -> Result<TransitionResult, TransitionError> {
     let plan = split_plan(root, target)?;
     let summary = plan.summary();
     if check_only {
@@ -110,7 +114,11 @@ pub fn split(root: &Path, target: SplitTarget, check_only: bool) -> Result<Trans
 /// Plan and apply the reverse of a recorded transition. path is the generated
 /// file named by jet fold, relative to the Package root or an absolute path
 /// inside it.
-pub fn fold(root: &Path, path: &Path, check_only: bool) -> Result<TransitionResult, TransitionError> {
+pub fn fold(
+    root: &Path,
+    path: &Path,
+    check_only: bool,
+) -> Result<TransitionResult, TransitionError> {
     let plan = fold_plan(root, path)?;
     let summary = plan.summary();
     if check_only {
@@ -137,7 +145,10 @@ pub fn init(root: &Path, check_only: bool) -> Result<TransitionResult, Transitio
 /// Restore the last successful role-file migration. This is deliberately
 /// separate from fold: it is the explicit migration-epoch escape hatch
 /// promised by jet init --restore-role-files.
-pub fn restore_role_files(root: &Path, check_only: bool) -> Result<TransitionResult, TransitionError> {
+pub fn restore_role_files(
+    root: &Path,
+    check_only: bool,
+) -> Result<TransitionResult, TransitionError> {
     let root = canonical_root(root)?;
     let journal_path = latest_legacy_journal(&root)?;
     let journal = read_journal(&journal_path)?;
@@ -202,9 +213,8 @@ impl TransitionPlan {
     fn apply(self) -> Result<TransitionResult, TransitionError> {
         let root = self.root.clone();
         RuntimePolicy::with_lock(&root, "package-transition", || {
-            self.apply_locked().map_err(|error| {
-                io::Error::new(io::ErrorKind::Other, error.0)
-            })
+            self.apply_locked()
+                .map_err(|error| io::Error::new(io::ErrorKind::Other, error.0))
         })
         .map_err(|error| TransitionError(format!("couldn't lock package transition: {error}")))
     }
@@ -279,7 +289,8 @@ impl TransitionPlan {
                     Ok(current) if current.as_ref() == state.as_ref() => {}
                     Ok(current) if current.as_deref() == expected_written => {
                         if let Err(rollback) = apply_state(&self.root, path, state.as_deref()) {
-                            rollback_errors.push(format!("{}: {rollback}", change.relative.display()));
+                            rollback_errors
+                                .push(format!("{}: {rollback}", change.relative.display()));
                         }
                     }
                     Ok(_) => rollback_errors.push(format!(
@@ -359,7 +370,10 @@ fn split_plan(root: &Path, target: SplitTarget) -> Result<TransitionPlan, Transi
             let existing_member_names = package
                 .member_names_in(&root)
                 .map_err(|error| TransitionError(error.to_string()))?;
-            if existing_member_names.iter().any(|existing| existing == &name) {
+            if existing_member_names
+                .iter()
+                .any(|existing| existing == &name)
+            {
                 return Err(TransitionError(format!(
                     "member Package name `{name}` is declared more than once"
                 )));
@@ -423,7 +437,9 @@ fn split_plan(root: &Path, target: SplitTarget) -> Result<TransitionPlan, Transi
     }
 
     if root_after.as_bytes() == package_bytes {
-        return Err(TransitionError("the requested split would not change package.jet".to_string()));
+        return Err(TransitionError(
+            "the requested split would not change package.jet".to_string(),
+        ));
     }
     changes.push(FileChange {
         relative: PathBuf::from(PACKAGE_FILE),
@@ -450,8 +466,9 @@ fn fold_plan(root: &Path, path: &Path) -> Result<TransitionPlan, TransitionError
     })?;
     let mut matches = Vec::new();
     for entry in entries {
-        let entry =
-            entry.map_err(|error| TransitionError(format!("couldn't read transition journal: {error}")))?;
+        let entry = entry.map_err(|error| {
+            TransitionError(format!("couldn't read transition journal: {error}"))
+        })?;
         if !entry
             .file_type()
             .map_err(|error| TransitionError(error.to_string()))?
@@ -513,7 +530,8 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
     }
     if role_files.iter().any(|(name, _)| *name == "pkg.jet") && existing_package.is_some() {
         return Err(TransitionError(
-            "both package.jet and pkg.jet exist; choose one Package root before migration".to_string(),
+            "both package.jet and pkg.jet exist; choose one Package root before migration"
+                .to_string(),
         ));
     }
     let root_bytes = existing_package
@@ -537,11 +555,9 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
         root_text = render_legacy_package_root(&root_text)?;
     }
     let before_text = root_text.clone();
-    let root_facts = PackageFacts::parse_uncomposed(
-        &before_text,
-        package_path.display().to_string(),
-    )
-    .map_err(|error| package_error(&package_path, error))?;
+    let root_facts =
+        PackageFacts::parse_uncomposed(&before_text, package_path.display().to_string())
+            .map_err(|error| package_error(&package_path, error))?;
     // Compose from the in-memory `root_facts` rather than re-reading the
     // Package root from disk: a migration-era `pkg.jet` still holds its raw
     // `payload:`/`identity:` wrapper on disk until this fold writes the
@@ -552,12 +568,12 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
     before_facts
         .compose_configs(&root)
         .map_err(|error| package_error(&package_path, error))?;
-    before_facts
-        .validate_defaults()
-        .map_err(|error| TransitionError(format!(
+    before_facts.validate_defaults().map_err(|error| {
+        TransitionError(format!(
             "typed Package {} is invalid: {error}",
             package_path.display()
-        )))?;
+        ))
+    })?;
     before_facts
         .validate_members_in(&root)
         .map_err(|error| package_error(&package_path, error))?;
@@ -579,9 +595,7 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
             let (_, members) = required_field(&entries, "members", &PathBuf::from(name))?;
             for entry in entries {
                 if entry.field.as_deref() != Some("members") {
-                    let field = entry
-                        .field
-                        .unwrap_or_else(|| entry.raw.trim().to_string());
+                    let field = entry.field.unwrap_or_else(|| entry.raw.trim().to_string());
                     return Err(TransitionError(format!(
                         "workspace.jet contains unsupported field `{field}`; migration stops before writing"
                     )));
@@ -597,11 +611,8 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
                         "env.jet declares environment `{module_name}` more than once; migration stops before writing"
                     )));
                 }
-                let environment = format!(
-                    "{{ {}: Environment{{\n{}\n}} }}",
-                    module_name,
-                    body.trim()
-                );
+                let environment =
+                    format!("{{ {}: Environment{{\n{}\n}} }}", module_name, body.trim());
                 let config_text = render_config(&module_name, "environments", &environment);
                 let destination = PathBuf::from(format!(
                     "package/{}-{}.jet",
@@ -758,7 +769,10 @@ fn validate_composed_root(
 }
 
 fn package_error(path: &Path, error: PackageParseError) -> TransitionError {
-    TransitionError(format!("typed Package {} is invalid: {error}", path.display()))
+    TransitionError(format!(
+        "typed Package {} is invalid: {error}",
+        path.display()
+    ))
 }
 
 fn transition_parse_error(path: &Path, error: PackageParseError) -> TransitionError {
@@ -828,7 +842,10 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, TransitionError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| TransitionError(format!("couldn't read {}: {error}", path.display())))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(TransitionError(format!("{} must be a regular file", path.display())));
+        return Err(TransitionError(format!(
+            "{} must be a regular file",
+            path.display()
+        )));
     }
     if metadata.len() > MAX_JOURNAL_BYTES as u64 {
         return Err(TransitionError(format!(
@@ -853,12 +870,9 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, TransitionError> {
 
 fn safe_path(root: &Path, relative: &Path) -> Result<PathBuf, TransitionError> {
     if relative.is_absolute()
-        || relative.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::Prefix(_)
-            )
-        })
+        || relative
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
     {
         return Err(TransitionError(format!(
             "transition path {} escapes the Package root",
@@ -894,7 +908,9 @@ fn relative_inside(root: &Path, path: &Path) -> Result<PathBuf, TransitionError>
         ))
     })?;
     if relative.as_os_str().is_empty() {
-        return Err(TransitionError("fold needs a generated transition file".to_string()));
+        return Err(TransitionError(
+            "fold needs a generated transition file".to_string(),
+        ));
     }
     let _ = safe_path(root, relative)?;
     Ok(relative.to_path_buf())
@@ -928,15 +944,16 @@ fn remove_regular(root: &Path, path: &Path) -> Result<(), TransitionError> {
     let relative = relative_inside(root, path)?;
     let _ = safe_path(root, &relative)?;
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
-            TransitionError(format!(
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(TransitionError(format!(
                 "{} is not a removable regular file",
                 path.display()
-            )),
-        ),
+            )))
+        }
         Ok(_) => {
-            fs::remove_file(path)
-                .map_err(|error| TransitionError(format!("couldn't remove {}: {error}", path.display())))?;
+            fs::remove_file(path).map_err(|error| {
+                TransitionError(format!("couldn't remove {}: {error}", path.display()))
+            })?;
             sync_directory(path.parent().unwrap_or(root)).map_err(|error| {
                 TransitionError(format!("couldn't sync {}: {error}", path.display()))
             })
@@ -962,9 +979,9 @@ fn apply_state(root: &Path, path: &Path, state: Option<&[u8]>) -> Result<(), Tra
 }
 
 fn create_real_dirs(root: &Path, directory: &Path) -> Result<(), TransitionError> {
-    let relative = directory
-        .strip_prefix(root)
-        .map_err(|_| TransitionError("transition directory escapes the Package root".to_string()))?;
+    let relative = directory.strip_prefix(root).map_err(|_| {
+        TransitionError("transition directory escapes the Package root".to_string())
+    })?;
     let mut cursor = root.to_path_buf();
     for component in relative.components() {
         cursor.push(component.as_os_str());
@@ -1010,9 +1027,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), TransitionError> {
     ));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
-    let mut file = options.open(&temp).map_err(|error| {
-        TransitionError(format!("couldn't stage {}: {error}", path.display()))
-    })?;
+    let mut file = options
+        .open(&temp)
+        .map_err(|error| TransitionError(format!("couldn't stage {}: {error}", path.display())))?;
     use std::io::Write;
     if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
         let _ = fs::remove_file(&temp);
@@ -1029,9 +1046,8 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), TransitionError> {
             path.display()
         )));
     }
-    sync_directory(parent).map_err(|error| {
-        TransitionError(format!("couldn't sync {}: {error}", path.display()))
-    })?;
+    sync_directory(parent)
+        .map_err(|error| TransitionError(format!("couldn't sync {}: {error}", path.display())))?;
     Ok(())
 }
 
@@ -1120,12 +1136,9 @@ fn read_journal(path: &Path) -> Result<Journal, TransitionError> {
         let relative = PathBuf::from(parts.next().unwrap_or_default());
         if relative.as_os_str().is_empty()
             || relative.is_absolute()
-            || relative.components().any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::Prefix(_)
-                )
-            })
+            || relative
+                .components()
+                .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
         {
             return Err(TransitionError(format!(
                 "journal {} contains an escaping path",
@@ -1202,11 +1215,7 @@ fn validate_journal_fingerprint(
     Ok(())
 }
 
-fn journal_value(
-    line: Option<&str>,
-    key: &str,
-    path: &Path,
-) -> Result<String, TransitionError> {
+fn journal_value(line: Option<&str>, key: &str, path: &Path) -> Result<String, TransitionError> {
     line.and_then(|line| line.strip_prefix(&format!("{key}=")))
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -1237,7 +1246,10 @@ fn decode_state(value: Option<&str>, path: &Path) -> Result<Option<Vec<u8>>, Tra
         return Ok(None);
     }
     let hex = value.strip_prefix('f').ok_or_else(|| {
-        TransitionError(format!("journal {} has an invalid file state", path.display()))
+        TransitionError(format!(
+            "journal {} has an invalid file state",
+            path.display()
+        ))
     })?;
     if hex.len() % 2 != 0 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(TransitionError(format!(
@@ -1404,9 +1416,8 @@ fn required_field<'a>(
         )));
     }
     let entry = matches[0];
-    let value = field_value(&entry.raw, field).ok_or_else(|| {
-        TransitionError(format!("{field} has no value in {}", path.display()))
-    })?;
+    let value = field_value(&entry.raw, field)
+        .ok_or_else(|| TransitionError(format!("{field} has no value in {}", path.display())))?;
     Ok((entry, value))
 }
 
@@ -1416,9 +1427,8 @@ fn required_record_entry<'a>(
     scope: &str,
     path: &Path,
 ) -> Result<(String, String), TransitionError> {
-    let body = record_body(value).ok_or_else(|| {
-        TransitionError(format!("{scope} in {} is not a record", path.display()))
-    })?;
+    let body = record_body(value)
+        .ok_or_else(|| TransitionError(format!("{scope} in {} is not a record", path.display())))?;
     let entries = source_entries(body);
     let matches = entries
         .iter()
@@ -1447,8 +1457,9 @@ fn require_output_declaration(
         .iter()
         .find(|entry| entry.field.as_deref() == Some("outputs"))
     {
-        let value = field_value(&entry.raw, "outputs")
-            .ok_or_else(|| TransitionError(format!("outputs has no value in {}", path.display())))?;
+        let value = field_value(&entry.raw, "outputs").ok_or_else(|| {
+            TransitionError(format!("outputs has no value in {}", path.display()))
+        })?;
         let _ = required_record_entry(&value, name, "outputs", path)?;
         return Ok(());
     }
@@ -1553,8 +1564,8 @@ fn matching_delimiter(value: &str, open: usize, left: u8, right: u8) -> Option<u
 }
 
 fn record_names(value: &str, scope: &str) -> Result<Vec<String>, TransitionError> {
-    let body = record_body(value)
-        .ok_or_else(|| TransitionError(format!("{scope} is not a record")))?;
+    let body =
+        record_body(value).ok_or_else(|| TransitionError(format!("{scope} is not a record")))?;
     Ok(source_entries(body)
         .into_iter()
         .filter_map(|entry| entry.field)
@@ -1647,7 +1658,11 @@ fn add_config_reference(
                 "configs is not a closed list; migration stopped before writing".to_string(),
             ));
         }
-        let inner = value.trim().trim_start_matches('[').trim_end_matches(']').trim();
+        let inner = value
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim();
         let list = if inner.is_empty() {
             format!("[{}]", quote(&reference))
         } else {
@@ -1667,9 +1682,10 @@ fn add_member_reference(
         .parent()
         .map(|parent| parent.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|| destination.to_string_lossy().into_owned());
-    if existing.iter().any(
-        |member| matches!(member, crate::Package::MemberRef::Path(path) if path == &reference),
-    ) {
+    if existing
+        .iter()
+        .any(|member| matches!(member, crate::Package::MemberRef::Path(path) if path == &reference))
+    {
         return Err(TransitionError(format!(
             "member {reference} is already listed"
         )));
@@ -1686,7 +1702,11 @@ fn add_member_reference(
                     .to_string(),
             ));
         }
-        let inner = value.trim().trim_start_matches('[').trim_end_matches(']').trim();
+        let inner = value
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim();
         let list = if inner.is_empty() {
             format!("[{}]", quote(&reference))
         } else {
@@ -1701,7 +1721,10 @@ fn render_config(name: &str, field: &str, value: &str) -> String {
     if field == "raw" {
         format!("pub {name} :: Config{{\n{}\n}}\n", value.trim())
     } else {
-        format!("pub {name} :: Config{{\n    {field}: {}\n}}\n", value.trim())
+        format!(
+            "pub {name} :: Config{{\n    {field}: {}\n}}\n",
+            value.trim()
+        )
     }
 }
 
@@ -1721,7 +1744,14 @@ fn render_member_package(name: &str, body: &str) -> String {
 fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
     validate_legacy_manifest_fields(source)?;
     const IDENTITY_FIELDS: &[&str] = &[
-        "name", "version", "jet", "edition", "license", "description", "repository", "target",
+        "name",
+        "version",
+        "jet",
+        "edition",
+        "license",
+        "description",
+        "repository",
+        "target",
         "runtime",
     ];
     const REJECTED_BLOCKS: &[&str] = &["packages", "build", "effects", "grants", "policy"];
@@ -1731,12 +1761,16 @@ fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
     let mut identity: BTreeMap<String, String> = BTreeMap::new();
     let mut deps_value: Option<String> = None;
     for entry in &entries {
-        let Some(field) = entry.field.as_deref() else { continue };
+        let Some(field) = entry.field.as_deref() else {
+            continue;
+        };
         if matches!(field, "payload" | "identity") {
             let value = field_value(&entry.raw, field).unwrap_or_default();
             let body = record_body(&value).unwrap_or_default();
             for nested in source_entries(body) {
-                let Some(nested_field) = nested.field.as_deref() else { continue };
+                let Some(nested_field) = nested.field.as_deref() else {
+                    continue;
+                };
                 if let Some(value) = field_value(&nested.raw, nested_field) {
                     identity.insert(nested_field.to_string(), value);
                 }
@@ -1761,10 +1795,24 @@ fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
 
     let mut output = format!(
         "name: {}\nversion: {}\n",
-        identity.get("name").cloned().unwrap_or_else(|| "\"\"".to_string()),
-        identity.get("version").cloned().unwrap_or_else(|| "\"\"".to_string()),
+        identity
+            .get("name")
+            .cloned()
+            .unwrap_or_else(|| "\"\"".to_string()),
+        identity
+            .get("version")
+            .cloned()
+            .unwrap_or_else(|| "\"\"".to_string()),
     );
-    for field in ["jet", "edition", "license", "description", "repository", "target", "runtime"] {
+    for field in [
+        "jet",
+        "edition",
+        "license",
+        "description",
+        "repository",
+        "target",
+        "runtime",
+    ] {
         if let Some(value) = identity.get(field) {
             output.push_str(&format!("{field}: {value}\n"));
         }
@@ -1772,7 +1820,9 @@ fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
     output.push_str("deps: .{\n");
     if let Some(deps_value) = deps_value.as_deref().and_then(record_body) {
         for entry in source_entries(deps_value) {
-            let Some(name) = entry.field.as_deref() else { continue };
+            let Some(name) = entry.field.as_deref() else {
+                continue;
+            };
             if let Some(value) = field_value(&entry.raw, name) {
                 output.push_str(&format!("    {name}: {value}\n"));
             }
@@ -1854,10 +1904,14 @@ fn validate_legacy_manifest_fields(source: &str) -> Result<(), TransitionError> 
             }
             identity_blocks += 1;
             let value = field_value(&entry.raw, field).ok_or_else(|| {
-                TransitionError(format!("{field} has no value; migration stops before writing"))
+                TransitionError(format!(
+                    "{field} has no value; migration stops before writing"
+                ))
             })?;
             let body = record_body(&value).ok_or_else(|| {
-                TransitionError(format!("{field} is not a closed identity record; migration stops before writing"))
+                TransitionError(format!(
+                    "{field} is not a closed identity record; migration stops before writing"
+                ))
             })?;
             for nested in source_entries(body) {
                 let Some(nested_field) = nested.field.as_deref() else {
@@ -1903,7 +1957,9 @@ fn validate_legacy_identity_body(body: &str) -> Result<(), TransitionError> {
 
 fn validate_legacy_dependency_block(value: &str) -> Result<(), TransitionError> {
     let body = record_body(value).ok_or_else(|| {
-        TransitionError("pkg.jet deps is not a closed record; migration stops before writing".to_string())
+        TransitionError(
+            "pkg.jet deps is not a closed record; migration stops before writing".to_string(),
+        )
     })?;
     for entry in source_entries(body) {
         let Some(name) = entry.field.as_deref() else {
@@ -1950,10 +2006,7 @@ fn render_fleet_config(host: &str, system: &str) -> String {
 }
 
 fn quote(value: &str) -> String {
-    format!(
-        "\"{}\"",
-        value.replace('\\', "\\\\").replace('"', "\\\"")
-    )
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn validate_name(name: &str, role: &str) -> Result<(), TransitionError> {
@@ -2078,10 +2131,7 @@ fn mask_comments(value: &str) -> String {
     String::from_utf8(bytes).expect("comment masking preserves UTF-8 outside comments")
 }
 
-fn module_body<'a>(
-    source: &'a str,
-    module: &str,
-) -> Result<Option<&'a str>, TransitionError> {
+fn module_body<'a>(source: &'a str, module: &str) -> Result<Option<&'a str>, TransitionError> {
     let marker = format!("module {module}");
     let clean = mask_comments(source);
     let Some(start) = clean.match_indices(&marker).find_map(|(start, _)| {
@@ -2100,13 +2150,12 @@ fn module_body<'a>(
         return Ok(None);
     };
     let after = &clean[start + marker.len()..];
-    let open = after.find('{').ok_or_else(|| {
-        TransitionError(format!("module {module} is missing its body"))
-    })?;
+    let open = after
+        .find('{')
+        .ok_or_else(|| TransitionError(format!("module {module} is missing its body")))?;
     let absolute = start + marker.len() + open;
-    let close = matching_delimiter(&clean, absolute, b'{', b'}').ok_or_else(|| {
-        TransitionError(format!("module {module} has an unclosed body"))
-    })?;
+    let close = matching_delimiter(&clean, absolute, b'{', b'}')
+        .ok_or_else(|| TransitionError(format!("module {module} has an unclosed body")))?;
     Ok(Some(&source[absolute + 1..close]))
 }
 
@@ -2139,8 +2188,9 @@ fn env_modules<'a>(source: &'a str) -> Result<Vec<(String, &'a str)>, Transition
             .ok_or_else(|| {
                 TransitionError("env.jet is missing its environment body".to_string())
             })?;
-        let close = matching_delimiter(&clean, open, b'{', b'}')
-            .ok_or_else(|| TransitionError("env.jet has an unclosed environment body".to_string()))?;
+        let close = matching_delimiter(&clean, open, b'{', b'}').ok_or_else(|| {
+            TransitionError("env.jet has an unclosed environment body".to_string())
+        })?;
         modules.push((name, &source[open + 1..close]));
         search_from = close + 1;
     }
@@ -2168,10 +2218,7 @@ fn semantic_fingerprint(package: &PackageFacts) -> String {
         package.environments,
         package.defaults
     );
-    format!(
-        "sha256:{}",
-        crate::SHA256::sha256_hex(text.as_bytes())
-    )
+    format!("sha256:{}", crate::SHA256::sha256_hex(text.as_bytes()))
 }
 
 fn output_fingerprint(output: &crate::Package::OutputFact) -> String {
@@ -2276,8 +2323,16 @@ mod tests {
             false,
         )
         .unwrap_err();
-        assert!(error.0.contains("member Package name `app` is declared more than once"), "{error}");
-        assert_eq!(fs::read_to_string(root.join(PACKAGE_FILE)).unwrap(), original);
+        assert!(
+            error
+                .0
+                .contains("member Package name `app` is declared more than once"),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PACKAGE_FILE)).unwrap(),
+            original
+        );
         assert!(!root.join("packages/app/package.jet").exists());
         fs::remove_dir_all(root).unwrap();
     }
@@ -2285,8 +2340,7 @@ mod tests {
     #[test]
     fn hosts_split_and_fold_restore_exact_root() {
         let root = temp_root("hosts");
-        let original =
-            b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n";
+        let original = b"name: \"demo\"\noutputs: .{ server: System{ name: \"server\" } }\n";
         fs::write(root.join(PACKAGE_FILE), original).unwrap();
         split(
             &root,
@@ -2297,7 +2351,10 @@ mod tests {
         )
         .unwrap();
         let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
-        assert!(fleet.contains("hosts: .{ server: system.server }"), "{fleet}");
+        assert!(
+            fleet.contains("hosts: .{ server: system.server }"),
+            "{fleet}"
+        );
         fold(&root, Path::new("package/fleet.jet"), false).unwrap();
         assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original);
         assert!(!root.join("package/fleet.jet").exists());
@@ -2321,7 +2378,10 @@ mod tests {
         )
         .unwrap();
         let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
-        assert!(fleet.contains("hosts: .{ server: system.halcyon }"), "{fleet}");
+        assert!(
+            fleet.contains("hosts: .{ server: system.halcyon }"),
+            "{fleet}"
+        );
         let facts = PackageFacts::load(&root).unwrap().unwrap();
         let projection = jet_env_model::ModuleEval::project_package_outputs(&facts).unwrap();
         assert_eq!(projection.systems[0].name, "halcyon");
@@ -2424,7 +2484,12 @@ mod tests {
             false,
         )
         .unwrap_err();
-        assert!(ambiguous.0.contains("host extraction needs a System Output"), "{ambiguous}");
+        assert!(
+            ambiguous
+                .0
+                .contains("host extraction needs a System Output"),
+            "{ambiguous}"
+        );
         assert!(!ambiguous_root.join("package/fleet.jet").exists());
         fs::remove_dir_all(ambiguous_root).unwrap();
     }
@@ -2466,8 +2531,7 @@ mod tests {
             .iter()
             .any(|change| change.path == Path::new(PACKAGE_FILE)));
         assert_ne!(
-            preview.summary.before_fingerprint,
-            preview.summary.after_fingerprint,
+            preview.summary.before_fingerprint, preview.summary.after_fingerprint,
             "migration must fingerprint distinct pre/post fact graphs"
         );
         init(&root, false).unwrap();
@@ -2505,7 +2569,10 @@ mod tests {
         )
         .unwrap();
         let error = init(&root, false).unwrap_err();
-        assert!(error.0.contains("identity contains unknown field `future`"), "{error}");
+        assert!(
+            error.0.contains("identity contains unknown field `future`"),
+            "{error}"
+        );
         assert!(!root.join(PACKAGE_FILE).exists());
         assert!(!root.join(".jet/package-transition").exists());
         fs::remove_dir_all(root).unwrap();
@@ -2520,7 +2587,12 @@ mod tests {
         )
         .unwrap();
         let error = init(&root, false).unwrap_err();
-        assert!(error.0.contains("dependency `tool` contains unknown field `future`"), "{error}");
+        assert!(
+            error
+                .0
+                .contains("dependency `tool` contains unknown field `future`"),
+            "{error}"
+        );
         assert!(!root.join(PACKAGE_FILE).exists());
         assert!(!root.join(".jet/package-transition").exists());
         fs::remove_dir_all(root).unwrap();
@@ -2553,14 +2625,21 @@ mod tests {
     #[test]
     fn legacy_restore_refuses_stale_root_without_mutation() {
         let root = temp_root("legacy-stale-restore");
-        fs::write(root.join("pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\n").unwrap();
+        fs::write(
+            root.join("pkg.jet"),
+            "payload: { name: \"demo\", version: \"0.1.0\" }\n",
+        )
+        .unwrap();
         let result = init(&root, false).unwrap();
         let journal = result.summary.journal;
         let package = root.join(PACKAGE_FILE);
         fs::write(&package, "name: \"tampered\"\nversion: \"0.1.0\"\n").unwrap();
         let error = restore_role_files(&root, false).unwrap_err();
         assert!(error.0.contains("stale transition"), "{error}");
-        assert_eq!(fs::read_to_string(&package).unwrap(), "name: \"tampered\"\nversion: \"0.1.0\"\n");
+        assert_eq!(
+            fs::read_to_string(&package).unwrap(),
+            "name: \"tampered\"\nversion: \"0.1.0\"\n"
+        );
         assert!(journal.is_file());
         fs::remove_dir_all(root).unwrap();
     }
@@ -2568,15 +2647,23 @@ mod tests {
     #[test]
     fn duplicate_legacy_environment_is_rejected_before_writes() {
         let root = temp_root("legacy-duplicate-env");
-        fs::write(root.join("pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\n")
-            .unwrap();
+        fs::write(
+            root.join("pkg.jet"),
+            "payload: { name: \"demo\", version: \"0.1.0\" }\n",
+        )
+        .unwrap();
         fs::write(
             root.join("env.jet"),
             "module env.dev { tools: [\"git@nixpkgs\"] }\nmodule env.dev { tools: [\"cargo@nixpkgs\"] }\n",
         )
         .unwrap();
         let error = init(&root, false).unwrap_err();
-        assert!(error.0.contains("declares environment `dev` more than once"), "{error}");
+        assert!(
+            error
+                .0
+                .contains("declares environment `dev` more than once"),
+            "{error}"
+        );
         assert!(!root.join(PACKAGE_FILE).exists());
         assert!(!root.join("package/env-dev.jet").exists());
         fs::remove_dir_all(root).unwrap();

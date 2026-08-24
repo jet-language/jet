@@ -97,7 +97,11 @@ pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
 /// Repository state can request roles, but only this host config chooses
 /// mirrors, trust keys, credentials, and write authority.
 pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
-    let action = parsed.positional.first().map(String::as_str).unwrap_or("list");
+    let action = parsed
+        .positional
+        .first()
+        .map(String::as_str)
+        .unwrap_or("list");
     let roots = Store::resolve();
     match action {
         "bind" => {
@@ -137,7 +141,11 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                             "bound cache role `{}` to {} ordered mirror(s){}",
                             binding.role,
                             binding.mirrors.len(),
-                            if binding.allow_write { " with write authority" } else { "" }
+                            if binding.allow_write {
+                                " with write authority"
+                            } else {
+                                ""
+                            }
                         ));
                     }
                     0
@@ -157,7 +165,11 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                             "{}  {} mirror(s){}{}",
                             theme.bold(&binding.role),
                             binding.mirrors.len(),
-                            if binding.allow_write { "  write" } else { "  read-only" },
+                            if binding.allow_write {
+                                "  write"
+                            } else {
+                                "  read-only"
+                            },
                             binding
                                 .credential_provider
                                 .as_deref()
@@ -207,7 +219,10 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                                 "ok",
                                 true,
                                 "cache-remove",
-                                &format!(",\"role\":{},\"removed\":false", crate::JSON::quote(role)),
+                                &format!(
+                                    ",\"role\":{},\"removed\":false",
+                                    crate::JSON::quote(role)
+                                ),
                             )
                         );
                         return 0;
@@ -310,12 +325,7 @@ fn cache_confirm_apply(theme: &Theme, parsed: &Parsed, action: &str) -> bool {
     }
     println!(
         "{}",
-        jet_foundation::Report::render_status_json(
-            "plan",
-            true,
-            action,
-            ",\"applied\":false",
-        )
+        jet_foundation::Report::render_status_json("plan", true, action, ",\"applied\":false",)
     );
     false
 }
@@ -720,11 +730,7 @@ fn report_external_root_error(
     error: Store::ExternalRootError,
 ) -> i32 {
     match error {
-        Store::ExternalRootError::Conflict {
-            label,
-            current,
-            ..
-        } => {
+        Store::ExternalRootError::Conflict { label, current, .. } => {
             let fix = match current {
                 Some(current) => format!(
                     "Read the current etag `{current}` and retry with `--if-etag {current}`."
@@ -937,8 +943,7 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     };
     let version = flag_value(parsed, "--version").unwrap_or_default();
-    let platform_artifact_kind =
-        flag_value(parsed, "--platform-artifact-kind").unwrap_or_default();
+    let platform_artifact_kind = flag_value(parsed, "--platform-artifact-kind").unwrap_or_default();
     let dir = match positional_path_after(parsed, "ingest") {
         Some(p) => p,
         None => {
@@ -952,8 +957,7 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
             );
         }
     };
-    let reference =
-        flag_value(parsed, "--ref").unwrap_or_else(|| dir.display().to_string());
+    let reference = flag_value(parsed, "--ref").unwrap_or_else(|| dir.display().to_string());
     let mut outputs = std::collections::BTreeMap::new();
     outputs.insert("out".to_string(), dir.clone());
     if let Some(dev) = flag_value(parsed, "--output-dev") {
@@ -1020,11 +1024,9 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
         };
         let mut verified = 0usize;
         for entry in &entries {
-            if let Err(error) = Store::verify_archive(
-                &roots,
-                &entry.id,
-                parsed.flags.archive_key.as_deref(),
-            ) {
+            if let Err(error) =
+                Store::verify_archive(&roots, &entry.id, parsed.flags.archive_key.as_deref())
+            {
                 return report_archive_error(theme, parsed, "verify", error);
             }
             verified += 1;
@@ -1055,11 +1057,7 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
             theme,
             parsed,
             "verify",
-            Store::verify_archive(
-                &roots,
-                &target,
-                parsed.flags.archive_key.as_deref(),
-            ),
+            Store::verify_archive(&roots, &target, parsed.flags.archive_key.as_deref()),
         );
     }
     let Some(entry) = entries.iter().find(|e| {
@@ -1097,10 +1095,20 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
     match action {
         "export" => {
             let Some(target) = target else {
-                return archive_usage(theme, parsed, "`hangar export` needs an entry id, reference, or output digest", "jetpack hangar export <entry> --to <archive.hangar> --yes");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar export` needs an entry id, reference, or output digest",
+                    "jetpack hangar export <entry> --to <archive.hangar> --yes",
+                );
             };
             let Some(destination) = parsed.flags.archive_to.as_deref() else {
-                return archive_usage(theme, parsed, "`hangar export` needs `--to <archive.hangar>`", "write one signed archive, then import it on the target Hangar");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar export` needs `--to <archive.hangar>`",
+                    "write one signed archive, then import it on the target Hangar",
+                );
             };
             if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
@@ -1114,7 +1122,12 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "import" => {
             let Some(source) = target else {
-                return archive_usage(theme, parsed, "`hangar import` needs an archive path", "jetpack hangar import <archive.hangar> --yes");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar import` needs an archive path",
+                    "jetpack hangar import <archive.hangar> --yes",
+                );
             };
             let bytes = match Store::read_archive_file(std::path::Path::new(&source)) {
                 Ok(bytes) => bytes,
@@ -1142,7 +1155,12 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
                 );
             }
             let Some(target) = target else {
-                return archive_usage(theme, parsed, "`hangar dump` needs an entry id or reference", "jetpack hangar dump <entry> > closure.hangar");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar dump` needs an entry id or reference",
+                    "jetpack hangar dump <entry> > closure.hangar",
+                );
             };
             match Store::export_archive(&roots, &target, !parsed.flags.archive_no_deps, key) {
                 Ok((bytes, _)) => {
@@ -1191,10 +1209,20 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "copy" => {
             let Some(target) = target else {
-                return archive_usage(theme, parsed, "`hangar copy` needs an entry id or reference", "jetpack hangar copy <entry> --to <hangar-root> --yes");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar copy` needs an entry id or reference",
+                    "jetpack hangar copy <entry> --to <hangar-root> --yes",
+                );
             };
             let Some(destination) = parsed.flags.archive_to.as_deref() else {
-                return archive_usage(theme, parsed, "`hangar copy` needs `--to <hangar-root>`", "copy uses the signed export/import backbone");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar copy` needs `--to <hangar-root>`",
+                    "copy uses the signed export/import backbone",
+                );
             };
             if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
@@ -1208,7 +1236,12 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
         }
         "sign" => {
             let Some(target) = target else {
-                return archive_usage(theme, parsed, "`hangar sign` needs an entry id or archive path", "jetpack hangar sign <entry-or-archive> [--to <path>] --yes");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar sign` needs an entry id or archive path",
+                    "jetpack hangar sign <entry-or-archive> [--to <path>] --yes",
+                );
             };
             if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
@@ -1217,17 +1250,17 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
                 theme,
                 parsed,
                 action,
-                Store::sign_archive(
-                    &roots,
-                    &target,
-                    parsed.flags.archive_to.as_deref(),
-                    key,
-                ),
+                Store::sign_archive(&roots, &target, parsed.flags.archive_to.as_deref(), key),
             )
         }
         "repair" => {
             let Some(target) = target else {
-                return archive_usage(theme, parsed, "`hangar repair` needs an entry id or reference", "jetpack hangar repair <entry> --from <signed.hangar> --yes");
+                return archive_usage(
+                    theme,
+                    parsed,
+                    "`hangar repair` needs an entry id or reference",
+                    "jetpack hangar repair <entry> --from <signed.hangar> --yes",
+                );
             };
             if !hangar_confirm_apply(theme, parsed, action) {
                 return 0;
@@ -1236,12 +1269,7 @@ fn cmd_hangar_archive(theme: &Theme, parsed: &Parsed, action: &str) -> i32 {
                 theme,
                 parsed,
                 action,
-                Store::repair_archive(
-                    &roots,
-                    &target,
-                    parsed.flags.archive_from.as_deref(),
-                    key,
-                ),
+                Store::repair_archive(&roots, &target, parsed.flags.archive_from.as_deref(), key),
             )
         }
         _ => unreachable!("archive action is closed at the Hangar dispatcher"),
@@ -1567,7 +1595,9 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
                     theme.detail(&format!("  {label}:       {value}"));
                 }
             }
-            Err(error) => theme.detail(&format!("  provenance:   <invalid producer record: {error}>")),
+            Err(error) => theme.detail(&format!(
+                "  provenance:   <invalid producer record: {error}>"
+            )),
         }
     }
     0
@@ -1647,10 +1677,7 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
                     &format!("{} file(s)", plan.optimized_files),
                     "hardlinked",
                 );
-                theme.detail(&format!(
-                    "would save {}",
-                    human_bytes(plan.optimized_bytes)
-                ));
+                theme.detail(&format!("would save {}", human_bytes(plan.optimized_bytes)));
             }
             if !theme.confirm_apply(parsed.flags.assume_yes) {
                 return 0;

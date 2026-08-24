@@ -15,6 +15,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub(super) fn cmd_profile(theme: &Theme, parsed: &Parsed) -> i32 {
+    if parsed.positional.get(1).map(String::as_str) == Some(Syntax::TOOL_PROFILE_NAME) {
+        return super::tool::cmd_tool_profile(theme, parsed);
+    }
     match parsed.positional.first().map(String::as_str) {
         Some(v) if v == Syntax::PROFILE_VERB_PLAN => profile_plan(theme, parsed),
         Some(v) if v == Syntax::PROFILE_VERB_BUILD => profile_build(theme, parsed),

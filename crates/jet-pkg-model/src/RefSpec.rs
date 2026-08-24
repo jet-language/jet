@@ -171,6 +171,34 @@ impl ProviderKind {
 struct SourceEntry {
     upstream: String,
     via: ProviderKind,
+    policy: ChannelPolicy,
+    raw: String,
+}
+
+/// D-CHANNEL-AUTO1=A: who is allowed to move a source pin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChannelPolicy {
+    /// No channel marker: the declaration never moves.
+    #[default]
+    Pinned,
+    /// Existing channel declarations move only through `jetpack update`.
+    Manual,
+    /// `#auto`: realization refreshes the channel and writes the exact pin back.
+    Automatic,
+}
+
+impl ChannelPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pinned => "pinned",
+            Self::Manual => "manual",
+            Self::Automatic => "automatic",
+        }
+    }
+
+    pub fn moves(self) -> bool {
+        !matches!(self, Self::Pinned)
+    }
 }
 
 /// The named sources an `env.jet` declares (D-JPK17): name → upstream/pin and
@@ -196,8 +224,35 @@ impl SourceTable {
         SourceTable {
             named: decls
                 .into_iter()
-                .map(|(name, upstream, via)| (name, SourceEntry { upstream, via }))
+                .map(|(name, upstream, via)| {
+                    let policy = policy_for_upstream(&upstream);
+                    let raw = upstream.clone();
+                    (
+                        name,
+                        SourceEntry {
+                            upstream,
+                            via,
+                            policy,
+                            raw,
+                        },
+                    )
+                })
                 .collect(),
+        }
+    }
+
+    /// Set the authoring policy and raw source spelling for a declaration.
+    /// `SourceTable::from_decls` remains the compatibility constructor for
+    /// callers that only have the resolved upstream form.
+    pub fn set_channel_metadata(
+        &mut self,
+        name: &str,
+        policy: ChannelPolicy,
+        raw: impl Into<String>,
+    ) {
+        if let Some(entry) = self.named.get_mut(name) {
+            entry.policy = policy;
+            entry.raw = raw.into();
         }
     }
 
@@ -209,6 +264,16 @@ impl SourceTable {
     /// The provider a declared name uses (defaults to `nix` if undeclared).
     pub fn provider(&self, name: &str) -> ProviderKind {
         self.named.get(name).map(|e| e.via).unwrap_or_default()
+    }
+
+    /// The source's movement policy. Undeclared names are pinned.
+    pub fn channel_policy(&self, name: &str) -> ChannelPolicy {
+        self.named.get(name).map(|e| e.policy).unwrap_or_default()
+    }
+
+    /// The original source spelling used for manifest writeback.
+    pub fn source_ref(&self, name: &str) -> Option<&str> {
+        self.named.get(name).map(|e| e.raw.as_str())
     }
 
     /// Declared names, sorted — used to make "unknown source" errors helpful.
@@ -594,7 +659,28 @@ pub struct ProviderRef {
     pub provider: Source,
     pub target: String,
     pub channel: Option<ChannelRef>,
+    pub policy: ChannelPolicy,
     pub raw: String,
+}
+
+impl ProviderRef {
+    /// Reconstruct the provider-first upstream form without dropping a
+    /// channel selector. The source table uses this form for lock/update
+    /// resolution, so channel intent must survive the typed lowering pass.
+    pub fn upstream(&self) -> String {
+        let channel = self
+            .channel
+            .as_ref()
+            .map(|channel| format!("{}{}", Syntax::REF_CHANNEL_MARKER, channel.as_str()))
+            .unwrap_or_default();
+        format!(
+            "{}{}{}{}",
+            self.provider.label(),
+            Syntax::REF_SEPARATOR,
+            self.target,
+            channel
+        )
+    }
 }
 
 /// D-JPK-CHANNEL1=A: a source ref tracking intent, resolved only by update
@@ -609,8 +695,8 @@ pub enum ChannelRef {
 impl ChannelRef {
     pub fn parse_selector(selector: &str) -> Option<ChannelRef> {
         match selector {
-            "latest" => Some(ChannelRef::Latest),
-            "main" => Some(ChannelRef::Main),
+            Syntax::REF_CHANNEL_LATEST => Some(ChannelRef::Latest),
+            Syntax::REF_CHANNEL_MAIN => Some(ChannelRef::Main),
             s if is_semver_mask(s) => Some(ChannelRef::SemverMask(s.to_string())),
             _ => None,
         }
@@ -618,8 +704,8 @@ impl ChannelRef {
 
     pub fn as_str(&self) -> &str {
         match self {
-            ChannelRef::Latest => "latest",
-            ChannelRef::Main => "main",
+            ChannelRef::Latest => Syntax::REF_CHANNEL_LATEST,
+            ChannelRef::Main => Syntax::REF_CHANNEL_MAIN,
             ChannelRef::SemverMask(s) => s,
         }
     }
@@ -647,31 +733,55 @@ pub fn split_channel_ref(s: &str) -> (&str, Option<ChannelRef>) {
     }
 }
 
+/// Parse the owner-ratified leading policy marker. The marker is intentionally
+/// separate from the existing trailing channel selector so `#auto jq@nixpkgs`
+/// keeps the package/source reading order.
+pub fn split_channel_policy(s: &str) -> (ChannelPolicy, &str) {
+    let s = s.trim();
+    if let Some(rest) = s.strip_prefix(Syntax::REF_CHANNEL_MARKER) {
+        if let Some(rest) = rest.strip_prefix(Syntax::REF_CHANNEL_AUTO) {
+            return (ChannelPolicy::Automatic, rest.trim_start());
+        }
+        if let Some(rest) = rest.strip_prefix(Syntax::REF_CHANNEL_LATEST) {
+            return (ChannelPolicy::Manual, rest.trim_start());
+        }
+    }
+    (ChannelPolicy::Pinned, s)
+}
+
+fn policy_for_upstream(upstream: &str) -> ChannelPolicy {
+    split_channel_ref(upstream)
+        .1
+        .map_or(ChannelPolicy::Pinned, |_| ChannelPolicy::Manual)
+}
+
 /// Classify a `target@provider` source ref or a bare local path.
 pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
     let raw = raw.trim();
-    if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
+    let (prefix_policy, raw_ref) = split_channel_policy(raw);
+    if is_bare_path(raw_ref) && !raw_ref.contains(Syntax::REF_PROVIDER_AT) {
         return Ok(ProviderRef {
             provider: Source::Path,
-            target: raw.to_string(),
+            target: raw_ref.to_string(),
             channel: None,
+            policy: prefix_policy,
             raw: raw.to_string(),
         });
     }
-    let (target, provider) = match raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
+    let (target, provider) = match raw_ref.rsplit_once(Syntax::REF_PROVIDER_AT) {
         Some(parts) => parts,
-        None => return Err(RefError::MissingSeparator(raw.to_string())),
+        None => return Err(RefError::MissingSeparator(raw_ref.to_string())),
     };
     if provider.is_empty() || target.is_empty() {
-        return Err(RefError::EmptyHalf(raw.to_string()));
+        return Err(RefError::EmptyHalf(raw_ref.to_string()));
     }
     if Source::is_builtin(target) {
-        return Err(provider_first(target, provider, raw));
+        return Err(provider_first(target, provider, raw_ref));
     }
     let provider = match Source::builtin(provider) {
         Some(Source::Path) => {
             return Err(RefError::PathProviderRetired {
-                raw: raw.to_string(),
+                raw: raw_ref.to_string(),
                 path: target.to_string(),
             })
         }
@@ -679,16 +789,35 @@ pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
         None => {
             return Err(RefError::UnknownSource {
                 source: provider.to_string(),
-                raw: raw.to_string(),
+                raw: raw_ref.to_string(),
                 declared: Vec::new(),
             })
         }
     };
-    let (_, channel) = split_channel_ref(target);
+    let auto_suffix = format!(
+        "{}{}",
+        Syntax::REF_CHANNEL_MARKER,
+        Syntax::REF_CHANNEL_AUTO
+    );
+    let (target, suffix_policy) = if let Some(base) = target.strip_suffix(&auto_suffix) {
+        (base, ChannelPolicy::Automatic)
+    } else {
+        (target, ChannelPolicy::Manual)
+    };
+    let (target, channel) = split_channel_ref(target);
+    let policy = if prefix_policy != ChannelPolicy::Pinned {
+        prefix_policy
+    } else if suffix_policy != ChannelPolicy::Manual || channel.is_some() {
+        suffix_policy
+    } else {
+        ChannelPolicy::Pinned
+    };
+    let channel = channel.or_else(|| policy.moves().then_some(ChannelRef::Latest));
     Ok(ProviderRef {
         provider,
         target: target.to_string(),
         channel,
+        policy,
         raw: raw.to_string(),
     })
 }
@@ -1016,6 +1145,23 @@ mod tests {
         let r = classify_provider_ref("nixpkgs-unstable@nixpkgs").unwrap();
         assert_eq!(r.provider, Source::Nixpkgs);
         assert_eq!(r.target, "nixpkgs-unstable");
+    }
+
+    #[test]
+    fn channel_policies_are_checked_and_keep_channel_intent() {
+        let pinned = classify_provider_ref("rustc@nixpkgs").unwrap();
+        assert_eq!(pinned.policy, ChannelPolicy::Pinned);
+        assert_eq!(pinned.channel, None);
+
+        let manual = classify_provider_ref("#latest jq@nixpkgs").unwrap();
+        assert_eq!(manual.policy, ChannelPolicy::Manual);
+        assert_eq!(manual.target, "jq");
+        assert_eq!(manual.channel, Some(ChannelRef::Latest));
+
+        let automatic = classify_provider_ref("#auto omp@nixpkgs").unwrap();
+        assert_eq!(automatic.policy, ChannelPolicy::Automatic);
+        assert_eq!(automatic.target, "omp");
+        assert_eq!(automatic.channel, Some(ChannelRef::Latest));
     }
 
     #[test]

@@ -3708,8 +3708,19 @@ one builds bridge dependencies; this one pins the Jet compiler itself.
 ## Source channels and outdated (D-JPK-CHANNEL1=A, U21)
 
 Source refs may carry channel selectors: `#latest`, `#main`, or a major-series
-mask such as `#v0.x`. The channel is tracking intent; `.jet/lock` records the
-exact source that intent resolved to:
+mask such as `#v0.x`. Each source also has one movement policy: no marker is
+pinned forever, `#latest` moves only through `jetpack update`, and leading
+`#auto` opts into automatic movement. Moving policies keep their marker when
+the exact resolved selector is written back to the declarative source:
+
+```jet
+rustc@nixpkgs
+#latest jq@nixpkgs
+#auto omp@releases
+```
+
+The channel is tracking intent; `.jet/lock` records the exact source that intent
+resolved to:
 
 ```toml
 [[source_channel]]

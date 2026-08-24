@@ -197,7 +197,9 @@ impl PublisherIdentity {
                     || key_uri.starts_with("pkcs11:"))
                 {
                     return Err(TrustError::InvalidPublisher {
-                        detail: format!("kms key URI must start with kms:, hsm:, or pkcs11: (got `{key_uri}`)"),
+                        detail: format!(
+                            "kms key URI must start with kms:, hsm:, or pkcs11: (got `{key_uri}`)"
+                        ),
                     });
                 }
                 require_ed25519_pub_hex("kms.public_key_hex", public_key_hex)?;
@@ -252,9 +254,12 @@ impl BoundIdentity {
         require_nonempty("identity.name", &self.name)?;
         match self.kind {
             IdentityKind::Publisher => {
-                let proof = self.publisher.as_ref().ok_or(TrustError::InvalidPublisher {
-                    detail: "publisher identity requires a hybrid proof".into(),
-                })?;
+                let proof = self
+                    .publisher
+                    .as_ref()
+                    .ok_or(TrustError::InvalidPublisher {
+                        detail: "publisher identity requires a hybrid proof".into(),
+                    })?;
                 proof.validate()?;
             }
             _ => {
@@ -542,7 +547,11 @@ fn validate_receipt_witness(witness: &str) -> Result<(), TrustError> {
 }
 
 /// Stable host-owned identity for one cache builder input domain.
-pub fn cache_builder_identity(provider: &str, immutable_source: &str, source_digest: &str) -> String {
+pub fn cache_builder_identity(
+    provider: &str,
+    immutable_source: &str,
+    source_digest: &str,
+) -> String {
     let mut canonical = String::from("jet-cache-builder-v1\n");
     for value in [provider, immutable_source, source_digest] {
         canonical.push_str(&value.len().to_string());
@@ -550,7 +559,10 @@ pub fn cache_builder_identity(provider: &str, immutable_source: &str, source_dig
         canonical.push_str(value);
         canonical.push('\n');
     }
-    format!("cache-builder:sha256:{}", SHA256::sha256_hex(canonical.as_bytes()))
+    format!(
+        "cache-builder:sha256:{}",
+        SHA256::sha256_hex(canonical.as_bytes())
+    )
 }
 
 fn cache_role_component(role: &str) -> Result<(), TrustError> {
@@ -911,10 +923,7 @@ impl RoleKeys {
         }
         if threshold > key_ids.len() {
             return Err(TrustError::InvalidThreshold {
-                detail: format!(
-                    "threshold {threshold} exceeds key count {}",
-                    key_ids.len()
-                ),
+                detail: format!("threshold {threshold} exceeds key count {}", key_ids.len()),
             });
         }
         let mut seen = BTreeSet::new();
@@ -940,7 +949,9 @@ pub struct Delegation {
 
 impl Delegation {
     pub fn allows_path(&self, path: &str) -> bool {
-        self.path_prefixes.iter().any(|p| path.starts_with(p.as_str()))
+        self.path_prefixes
+            .iter()
+            .any(|p| path.starts_with(p.as_str()))
     }
 }
 
@@ -999,29 +1010,90 @@ pub struct Signed<T> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TrustError {
-    BootstrapPinMismatch { expected: String, actual: String },
+    BootstrapPinMismatch {
+        expected: String,
+        actual: String,
+    },
     BootstrapMissing,
-    SignatureStripped { role: MetadataRole },
-    SignatureInvalid { role: MetadataRole, detail: String },
-    ThresholdUnmet { role: MetadataRole, have: usize, need: usize },
-    Rollback { role: MetadataRole, current: u64, incoming: u64 },
-    Expired { role: MetadataRole, expires_unix: u64, now_unix: u64 },
-    BadClock { skew_secs: u64, max_secs: u64 },
-    MetadataTooLarge { role: MetadataRole, size: usize, max: usize },
-    ConsistentSnapshotMismatch { role: String, detail: String },
-    DelegationDenied { path: String, detail: String },
-    UnknownKey { key_id: String },
-    InvalidKey { detail: String },
-    InvalidThreshold { detail: String },
-    InvalidPublisher { detail: String },
-    IdentityKindMismatch { kind: IdentityKind, detail: String },
-    RotationRejected { detail: String },
-    CacheReceiptExpired { expires_unix: u64, now_unix: u64 },
-    CacheReceiptInvalid { detail: String },
-    CacheKeyChanged { role: String, expected: String, actual: String },
-    CacheKeyMissing { role: String },
-    CacheBuilderRevoked { builder: String },
-    IO { detail: String },
+    SignatureStripped {
+        role: MetadataRole,
+    },
+    SignatureInvalid {
+        role: MetadataRole,
+        detail: String,
+    },
+    ThresholdUnmet {
+        role: MetadataRole,
+        have: usize,
+        need: usize,
+    },
+    Rollback {
+        role: MetadataRole,
+        current: u64,
+        incoming: u64,
+    },
+    Expired {
+        role: MetadataRole,
+        expires_unix: u64,
+        now_unix: u64,
+    },
+    BadClock {
+        skew_secs: u64,
+        max_secs: u64,
+    },
+    MetadataTooLarge {
+        role: MetadataRole,
+        size: usize,
+        max: usize,
+    },
+    ConsistentSnapshotMismatch {
+        role: String,
+        detail: String,
+    },
+    DelegationDenied {
+        path: String,
+        detail: String,
+    },
+    UnknownKey {
+        key_id: String,
+    },
+    InvalidKey {
+        detail: String,
+    },
+    InvalidThreshold {
+        detail: String,
+    },
+    InvalidPublisher {
+        detail: String,
+    },
+    IdentityKindMismatch {
+        kind: IdentityKind,
+        detail: String,
+    },
+    RotationRejected {
+        detail: String,
+    },
+    CacheReceiptExpired {
+        expires_unix: u64,
+        now_unix: u64,
+    },
+    CacheReceiptInvalid {
+        detail: String,
+    },
+    CacheKeyChanged {
+        role: String,
+        expected: String,
+        actual: String,
+    },
+    CacheKeyMissing {
+        role: String,
+    },
+    CacheBuilderRevoked {
+        builder: String,
+    },
+    IO {
+        detail: String,
+    },
 }
 
 impl fmt::Display for TrustError {
@@ -1033,7 +1105,11 @@ impl fmt::Display for TrustError {
             ),
             TrustError::BootstrapMissing => write!(f, "trusted-root bootstrap pin is missing"),
             TrustError::SignatureStripped { role } => {
-                write!(f, "{} metadata has no signatures (signature stripping rejected)", role.as_str())
+                write!(
+                    f,
+                    "{} metadata has no signatures (signature stripping rejected)",
+                    role.as_str()
+                )
             }
             TrustError::SignatureInvalid { role, detail } => {
                 write!(f, "{} signature invalid: {detail}", role.as_str())
@@ -1043,37 +1119,49 @@ impl fmt::Display for TrustError {
                 "{} threshold unmet: have {have}, need {need}",
                 role.as_str()
             ),
-            TrustError::Rollback { role, current, incoming } => write!(
+            TrustError::Rollback {
+                role,
+                current,
+                incoming,
+            } => write!(
                 f,
                 "{} version rollback rejected: current {current}, incoming {incoming}",
                 role.as_str()
             ),
-            TrustError::Expired { role, expires_unix, now_unix } => write!(
+            TrustError::Expired {
+                role,
+                expires_unix,
+                now_unix,
+            } => write!(
                 f,
                 "{} metadata expired at {expires_unix} (trusted now {now_unix})",
                 role.as_str()
             ),
-            TrustError::BadClock { skew_secs, max_secs } => write!(
-                f,
-                "bad clock: skew {skew_secs}s exceeds max {max_secs}s"
-            ),
-            TrustError::MetadataTooLarge { role, size, max } => write!(
-                f,
-                "{} metadata too large: {size} > {max}",
-                role.as_str()
-            ),
+            TrustError::BadClock {
+                skew_secs,
+                max_secs,
+            } => write!(f, "bad clock: skew {skew_secs}s exceeds max {max_secs}s"),
+            TrustError::MetadataTooLarge { role, size, max } => {
+                write!(f, "{} metadata too large: {size} > {max}", role.as_str())
+            }
             TrustError::ConsistentSnapshotMismatch { role, detail } => {
                 write!(f, "consistent snapshot mismatch for `{role}`: {detail}")
             }
             TrustError::CacheReceiptExpired {
                 expires_unix,
                 now_unix,
-            } => write!(f, "cache receipt expired at {expires_unix} (trusted now {now_unix})"),
+            } => write!(
+                f,
+                "cache receipt expired at {expires_unix} (trusted now {now_unix})"
+            ),
             TrustError::CacheKeyChanged {
                 role,
                 expected,
                 actual,
-            } => write!(f, "cache key for `{role}` changed: expected {expected}, got {actual}"),
+            } => write!(
+                f,
+                "cache key for `{role}` changed: expected {expected}, got {actual}"
+            ),
             TrustError::CacheKeyMissing { role } => {
                 write!(f, "cache key pin for `{role}` is missing")
             }
@@ -1161,10 +1249,18 @@ impl Keyring {
         self.keys.get(key_id)
     }
 
-    pub fn verify(&self, key_id: &str, message: &[u8], signature: &Signature) -> Result<(), TrustError> {
-        let key = self.keys.get(key_id).ok_or_else(|| TrustError::UnknownKey {
-            key_id: key_id.to_string(),
-        })?;
+    pub fn verify(
+        &self,
+        key_id: &str,
+        message: &[u8],
+        signature: &Signature,
+    ) -> Result<(), TrustError> {
+        let key = self
+            .keys
+            .get(key_id)
+            .ok_or_else(|| TrustError::UnknownKey {
+                key_id: key_id.to_string(),
+            })?;
         if signature.algorithm != ALG_HMAC_SHA256 && signature.algorithm != key.algorithm {
             return Err(TrustError::SignatureInvalid {
                 role: MetadataRole::Root,
@@ -1228,7 +1324,9 @@ fn atomic_trust_write(path: &Path, body: &[u8]) -> Result<(), TrustError> {
     for attempt in 0..16u32 {
         let temporary = dir.join(format!(
             ".{}.{}.{}.tmp",
-            path.file_name().and_then(|name| name.to_str()).unwrap_or("trust"),
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("trust"),
             std::process::id(),
             attempt
         ));
@@ -1485,11 +1583,13 @@ impl TrustEngine {
         enforce_size(MetadataRole::Root, canonical.len(), &self.policy)?;
         check_clock(&self.policy, clock)?;
         // New root must be signed by the **current** root threshold (recovery).
-        let current_role = self.root.roles.get(&MetadataRole::Root).ok_or(
-            TrustError::InvalidThreshold {
-                detail: "current root missing root role".into(),
-            },
-        )?;
+        let current_role =
+            self.root
+                .roles
+                .get(&MetadataRole::Root)
+                .ok_or(TrustError::InvalidThreshold {
+                    detail: "current root missing root role".into(),
+                })?;
         verify_role_signatures(
             MetadataRole::Root,
             &canonical,
@@ -1544,7 +1644,8 @@ impl TrustEngine {
         self.root = signed_root.signed.clone();
         self.root_digest = digest.clone();
         self.versions.clear();
-        self.versions.insert(MetadataRole::Root, signed_root.signed.version);
+        self.versions
+            .insert(MetadataRole::Root, signed_root.signed.version);
         self.metadata_digests.clear();
         self.metadata_digests.insert(MetadataRole::Root, digest);
         Ok(())
@@ -1558,11 +1659,13 @@ impl TrustEngine {
         signers: &[&TrustKey],
         clock: &dyn TrustedClock,
     ) -> Result<(), TrustError> {
-        let role = self.root.roles.get(&MetadataRole::Root).ok_or(
-            TrustError::InvalidThreshold {
-                detail: "current root missing root role".into(),
-            },
-        )?;
+        let role =
+            self.root
+                .roles
+                .get(&MetadataRole::Root)
+                .ok_or(TrustError::InvalidThreshold {
+                    detail: "current root missing root role".into(),
+                })?;
         if signers.len() >= role.threshold {
             return Err(TrustError::RotationRejected {
                 detail: "drill requires fewer than threshold signers".into(),
@@ -1627,11 +1730,13 @@ impl TrustEngine {
         let canonical = canonical_snapshot(&signed.signed);
         enforce_size(MetadataRole::Snapshot, canonical.len(), &self.policy)?;
         check_clock(&self.policy, clock)?;
-        let role = self.root.roles.get(&MetadataRole::Snapshot).ok_or(
-            TrustError::InvalidThreshold {
-                detail: "root missing snapshot role".into(),
-            },
-        )?;
+        let role =
+            self.root
+                .roles
+                .get(&MetadataRole::Snapshot)
+                .ok_or(TrustError::InvalidThreshold {
+                    detail: "root missing snapshot role".into(),
+                })?;
         verify_role_signatures(
             MetadataRole::Snapshot,
             &canonical,
@@ -1641,7 +1746,12 @@ impl TrustEngine {
         )?;
         check_expiry(MetadataRole::Snapshot, signed.signed.expires_unix, clock)?;
         enforce_monotonic(self, MetadataRole::Snapshot, signed.signed.version)?;
-        require_metadata_digest(self, MetadataRole::Targets, targets_version, targets_canonical)?;
+        require_metadata_digest(
+            self,
+            MetadataRole::Targets,
+            targets_version,
+            targets_canonical,
+        )?;
         if self.root.consistent_snapshot {
             let entry = signed.signed.meta.get("targets").ok_or(
                 TrustError::ConsistentSnapshotMismatch {
@@ -1652,18 +1762,11 @@ impl TrustEngine {
             if entry.version != targets_version {
                 return Err(TrustError::ConsistentSnapshotMismatch {
                     role: "targets".into(),
-                    detail: format!(
-                        "version {} != targets {}",
-                        entry.version, targets_version
-                    ),
+                    detail: format!("version {} != targets {}", entry.version, targets_version),
                 });
             }
             let want = SHA256::sha256_hex(targets_canonical.as_bytes());
-            let got = entry
-                .hashes
-                .get("sha256")
-                .cloned()
-                .unwrap_or_default();
+            let got = entry.hashes.get("sha256").cloned().unwrap_or_default();
             if got != want {
                 return Err(TrustError::ConsistentSnapshotMismatch {
                     role: "targets".into(),
@@ -1673,11 +1776,7 @@ impl TrustEngine {
             if entry.length as usize != targets_canonical.len() {
                 return Err(TrustError::ConsistentSnapshotMismatch {
                     role: "targets".into(),
-                    detail: format!(
-                        "length {} != {}",
-                        entry.length,
-                        targets_canonical.len()
-                    ),
+                    detail: format!("length {} != {}", entry.length, targets_canonical.len()),
                 });
             }
         }
@@ -1702,11 +1801,13 @@ impl TrustEngine {
         let canonical = canonical_timestamp(&signed.signed);
         enforce_size(MetadataRole::Timestamp, canonical.len(), &self.policy)?;
         check_clock(&self.policy, clock)?;
-        let role = self.root.roles.get(&MetadataRole::Timestamp).ok_or(
-            TrustError::InvalidThreshold {
-                detail: "root missing timestamp role".into(),
-            },
-        )?;
+        let role =
+            self.root
+                .roles
+                .get(&MetadataRole::Timestamp)
+                .ok_or(TrustError::InvalidThreshold {
+                    detail: "root missing timestamp role".into(),
+                })?;
         verify_role_signatures(
             MetadataRole::Timestamp,
             &canonical,
@@ -1716,7 +1817,12 @@ impl TrustEngine {
         )?;
         check_expiry(MetadataRole::Timestamp, signed.signed.expires_unix, clock)?;
         enforce_monotonic(self, MetadataRole::Timestamp, signed.signed.version)?;
-        require_metadata_digest(self, MetadataRole::Snapshot, snapshot_version, snapshot_canonical)?;
+        require_metadata_digest(
+            self,
+            MetadataRole::Snapshot,
+            snapshot_version,
+            snapshot_canonical,
+        )?;
         if signed.signed.snapshot.version != snapshot_version {
             return Err(TrustError::ConsistentSnapshotMismatch {
                 role: "snapshot".into(),
@@ -1795,7 +1901,10 @@ impl TrustEngine {
     }
 }
 
-pub fn sign_root(root: &RootMetadata, keys: &[&TrustKey]) -> Result<Signed<RootMetadata>, TrustError> {
+pub fn sign_root(
+    root: &RootMetadata,
+    keys: &[&TrustKey],
+) -> Result<Signed<RootMetadata>, TrustError> {
     let canonical = canonical_root(root);
     let signatures = keys.iter().map(|k| k.sign(canonical.as_bytes())).collect();
     Ok(Signed {
@@ -2017,7 +2126,9 @@ fn enforce_metadata_digest(
             }
             return Err(TrustError::ConsistentSnapshotMismatch {
                 role: role.as_str().to_string(),
-                detail: format!("same version has different canonical bytes: {previous} != {digest}"),
+                detail: format!(
+                    "same version has different canonical bytes: {previous} != {digest}"
+                ),
             });
         }
     }
@@ -2044,7 +2155,10 @@ fn require_metadata_digest(
         }),
         None => Err(TrustError::ConsistentSnapshotMismatch {
             role: role.as_str().to_string(),
-            detail: format!("{} metadata was not accepted in this session", role.as_str()),
+            detail: format!(
+                "{} metadata was not accepted in this session",
+                role.as_str()
+            ),
         }),
     }
 }
@@ -2060,7 +2174,11 @@ fn enforce_size(role: MetadataRole, size: usize, policy: &TrustPolicy) -> Result
     Ok(())
 }
 
-fn check_expiry(role: MetadataRole, expires_unix: u64, clock: &dyn TrustedClock) -> Result<(), TrustError> {
+fn check_expiry(
+    role: MetadataRole,
+    expires_unix: u64,
+    clock: &dyn TrustedClock,
+) -> Result<(), TrustError> {
     let now = clock.now_unix();
     if now >= expires_unix {
         return Err(TrustError::Expired {
@@ -2216,10 +2334,8 @@ mod tests {
 
     fn scratch_dir(tag: &str) -> PathBuf {
         let n = SCRATCH.fetch_add(1, Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!(
-            "jet-trustroot-{tag}-{}-{n}",
-            std::process::id()
-        ));
+        let p =
+            std::env::temp_dir().join(format!("jet-trustroot-{tag}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
@@ -2362,10 +2478,7 @@ mod tests {
                 "jetsrc/core".into(),
                 TargetMeta {
                     length: 4,
-                    hashes: BTreeMap::from([(
-                        "sha256".into(),
-                        SHA256::sha256_hex(b"blob"),
-                    )]),
+                    hashes: BTreeMap::from([("sha256".into(), SHA256::sha256_hex(b"blob"))]),
                     custom: BTreeMap::new(),
                 },
             )]),
@@ -2388,7 +2501,10 @@ mod tests {
                 SnapshotMetaEntry {
                     version: 1,
                     length: t_canon.len() as u64,
-                    hashes: BTreeMap::from([("sha256".into(), SHA256::sha256_hex(t_canon.as_bytes()))]),
+                    hashes: BTreeMap::from([(
+                        "sha256".into(),
+                        SHA256::sha256_hex(t_canon.as_bytes()),
+                    )]),
                 },
             )]),
         };

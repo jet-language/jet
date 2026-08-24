@@ -304,6 +304,9 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
     assert!(home.join(".jet/tools/generations/1/complete").is_file());
     let profile = fs::read_to_string(home.join(".jet/tools/profile.json")).unwrap();
     assert!(profile.contains("\"current\": 1"), "{profile}");
+    let manifest = fs::read_to_string(home.join(".jet/tools/manifest.json")).unwrap();
+    assert!(manifest.contains("\"reference\":\"greet@nixpkgs\""), "{manifest}");
+    assert!(manifest.contains("\"resolved\":\"greet@nixpkgs\""), "{manifest}");
     let current = fs::read_to_string(home.join(".jet/tools/current")).unwrap();
     assert!(current.contains("generation\t1"), "{current}");
     assert!(current.contains("checksum\tsha256-"), "{current}");
@@ -395,6 +398,107 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         !roots_after_empty.contains(&ascii_hex("profile-generation:user:tools:2")),
         "empty generation must not create a root: {roots_after_empty}"
     );
+}
+
+#[test]
+fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation() {
+    let (base, _project, root) = core_hello_project("user-tools-declarative");
+    let repo = base.join("jet-pkgs");
+    let outside = Scratch::new("user-tools-outside");
+    let home = Scratch::new("user-tools-home");
+    let manifest_dir = home.join(".jet/tools");
+    fs::create_dir_all(&manifest_dir).unwrap();
+    fs::write(
+        manifest_dir.join("manifest.json"),
+        format!(
+            "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"mine\",\"policy\":\"pinned\",\"provider\":\"core\",\"raw\":{:?},\"upstream\":{:?}}}],\n  \"tools\":[{{\"bins\":[],\"members\":[],\"name\":\"hello\",\"reference\":\"hello@mine\",\"resolved\":\"hello@mine\",\"tier\":\"pinned\"}}]\n}}\n",
+            repo.to_string_lossy(),
+            repo.to_string_lossy(),
+        ),
+    )
+    .unwrap();
+
+    let switch = || {
+        jetpack()
+            .args(["profile", "switch", "tools", "--no-color", "--offline"])
+            .current_dir(&outside.path)
+            .env("JETPACK_ROOT", &root)
+            .env("HOME", &home.path)
+            .output()
+            .unwrap()
+    };
+    let first = switch();
+    assert!(
+        first.status.success(),
+        "first declarative switch failed\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let tool = home.join(".jet/bin/hello");
+    let run = |tool: &Path| {
+        Command::new(tool)
+            .env("JETPACK_ROOT", &root)
+            .env("HOME", &home.path)
+            .output()
+            .unwrap()
+    };
+    let first_run = run(&tool);
+    assert_eq!(
+        String::from_utf8_lossy(&first_run.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+
+    fs::write(
+        repo.join("pkgs/hello/bin/hello"),
+        "#!/bin/sh\necho hello from user-tools generation two\n",
+    )
+    .unwrap();
+    let second = switch();
+    assert!(
+        second.status.success(),
+        "second declarative switch failed\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_run = run(&tool);
+    assert_eq!(
+        String::from_utf8_lossy(&second_run.stdout).trim(),
+        "hello from user-tools generation two"
+    );
+
+    let rollback = jetpack()
+        .args(["profile", "rollback", "tools", "--no-color"])
+        .current_dir(&outside.path)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        rollback.status.success(),
+        "rollback failed\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&rollback.stdout),
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+    let rolled_back = run(&tool);
+    assert_eq!(
+        String::from_utf8_lossy(&rolled_back.stdout).trim(),
+        "hello from jet-pkgs"
+    );
+
+    let generations = jetpack()
+        .args(["profile", "generations", "tools", "--no-color", "--json"])
+        .current_dir(&outside.path)
+        .env("JETPACK_ROOT", &root)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(generations.status.success());
+    let report = String::from_utf8_lossy(&generations.stdout);
+    assert!(report.contains("\"profile_bytes\":"), "{report}");
+    assert!(report.contains("\"generations_bytes\":"), "{report}");
+    assert!(report.contains("\"generation\":1"), "{report}");
+    assert!(report.contains("\"generation\":2"), "{report}");
+    assert!(report.contains("\"current\":true"), "{report}");
 }
 
 #[cfg(windows)]

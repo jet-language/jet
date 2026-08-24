@@ -63,7 +63,10 @@ pub fn write_runtime_plan(project_dir: &Path, specs: &[SecretSpec]) -> Result<()
             || has_plan_control_character(template)
             || inputs.iter().any(|name| has_plan_control_character(name))
         {
-            return Err(format!("secret composition plan for {} contains a control character", spec.name));
+            return Err(format!(
+                "secret composition plan for {} contains a control character",
+                spec.name
+            ));
         }
         lines.push_str(&spec.name);
         lines.push('\t');
@@ -81,7 +84,9 @@ pub fn write_runtime_plan(project_dir: &Path, specs: &[SecretSpec]) -> Result<()
 }
 
 fn has_plan_control_character(value: &str) -> bool {
-    value.chars().any(|character| matches!(character, '\n' | '\r' | '\t'))
+    value
+        .chars()
+        .any(|character| matches!(character, '\n' | '\r' | '\t'))
 }
 
 pub fn store_age(project_dir: &Path) -> Result<Option<std::time::Duration>, String> {
@@ -224,7 +229,10 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("secret");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("secret");
     let temp = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
     let result = (|| {
         let mut file = std::fs::OpenOptions::new()
@@ -313,7 +321,8 @@ fn read_text_or_absent(path: &Path) -> Result<String, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
         Err(error) => return Err(format!("couldn't inspect `{}`: {error}", path.display())),
     }
-    std::fs::read_to_string(path).map_err(|error| format!("couldn't read `{}`: {error}", path.display()))
+    std::fs::read_to_string(path)
+        .map_err(|error| format!("couldn't read `{}`: {error}", path.display()))
 }
 
 /// Read + decrypt the whole store. An absent store is an empty one (a fresh
@@ -393,8 +402,8 @@ fn write_store_unlocked(project_dir: &Path, pairs: &[(String, String)]) -> Resul
     if path.is_file() {
         let identity = std::fs::read_to_string(identity_path())
             .map_err(|e| format!("couldn't read the secrets identity: {e}"))?;
-        let ciphertext = std::fs::read(&path)
-            .map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
+        let ciphertext =
+            std::fs::read(&path).map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
         let decrypted = run_helper(
             &helper,
             &format!("decrypt {} {}", identity.trim(), hex_encode(&ciphertext)),
@@ -553,11 +562,19 @@ fn spawn_helper(helper: &Path, command: &str) -> Result<std::process::Output, St
     spawn_helper_command(helper, command, None)
 }
 
-fn spawn_helper_in(helper: &Path, command: &str, directory: &Path) -> Result<std::process::Output, String> {
+fn spawn_helper_in(
+    helper: &Path,
+    command: &str,
+    directory: &Path,
+) -> Result<std::process::Output, String> {
     spawn_helper_command(helper, command, Some(directory))
 }
 
-fn spawn_helper_command(helper: &Path, command: &str, directory: Option<&Path>) -> Result<std::process::Output, String> {
+fn spawn_helper_command(
+    helper: &Path,
+    command: &str,
+    directory: Option<&Path>,
+) -> Result<std::process::Output, String> {
     let mut child = Command::new(helper)
         .current_dir(directory.unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::piped())
@@ -725,8 +742,8 @@ mod tests {
         ));
         std::fs::create_dir_all(dir.join(".jet")).unwrap();
         std::fs::write(dir.join(".jet/.locks"), "not a directory").unwrap();
-        let error = add_recipient(&dir, "age1failure")
-            .expect_err("lock failure must remain an error");
+        let error =
+            add_recipient(&dir, "age1failure").expect_err("lock failure must remain an error");
         assert!(error.contains("couldn't lock"), "{error}");
         assert!(!recipients_path(&dir).exists());
         std::fs::remove_dir_all(dir).ok();
@@ -754,7 +771,9 @@ mod tests {
             std::thread::current().id()
         ));
         std::fs::create_dir_all(recipients_path(&dir)).unwrap();
-        assert!(list_recipients(&dir).unwrap_err().contains("not a regular file"));
+        assert!(list_recipients(&dir)
+            .unwrap_err()
+            .contains("not a regular file"));
         std::fs::remove_dir_all(recipients_path(&dir)).unwrap();
         std::fs::create_dir_all(store_path(&dir)).unwrap();
         assert!(read_store(&dir).unwrap_err().contains("not a regular file"));
@@ -859,7 +878,10 @@ mod tests {
             "file.sync_all()",
             "directory.sync_all()",
         ] {
-            assert!(source.contains(required), "missing atomic-write law: {required}");
+            assert!(
+                source.contains(required),
+                "missing atomic-write law: {required}"
+            );
         }
     }
 

@@ -851,7 +851,10 @@ fn push_unique(values: &mut Vec<String>, value: String) {
 }
 
 fn merge_secret_spec(specs: &mut Vec<SecretSpec>, incoming: SecretSpec) -> Result<(), Diagnostic> {
-    let Some(index) = specs.iter().position(|existing| existing.name == incoming.name) else {
+    let Some(index) = specs
+        .iter()
+        .position(|existing| existing.name == incoming.name)
+    else {
         specs.push(incoming);
         return Ok(());
     };
@@ -867,7 +870,8 @@ fn merge_secret_spec(specs: &mut Vec<SecretSpec>, incoming: SecretSpec) -> Resul
         "E1333",
         format!("secret `{}` is declared more than once", incoming.name),
         "one selected environment has one declaration for each secret name".to_string(),
-        "merge the metadata into one map entry or give the declarations different names".to_string(),
+        "merge the metadata into one map entry or give the declarations different names"
+            .to_string(),
         None,
     ))
 }
@@ -1064,6 +1068,8 @@ fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
 /// `path:./local`, `nixpkgs:channel`).
 fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
     let mut maps: Vec<BTreeMap<String, String>> = Vec::new();
+    let mut policies: BTreeMap<String, RefSpec::ChannelPolicy> = BTreeMap::new();
+    let mut raw_refs: BTreeMap<String, String> = BTreeMap::new();
     // U9: the provider kind is *inferred*, never declared. We record each
     // source's kind here, keyed by name, as we resolve its target. The §6 merge
     // guarantees a given name resolves to one upstream (else E0967), so the
@@ -1086,14 +1092,18 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                 let span = if is_root { Some(s.ref_span) } else { None };
                 let pref = RefSpec::classify_provider_ref(ref_text)
                     .map_err(|_| bad_source_ref(ref_text, span))?;
-                let upstream = format!(
-                    "{}{}{}",
-                    pref.provider.label(),
-                    Syntax::REF_SEPARATOR,
-                    pref.target
-                );
+                let upstream = pref.upstream();
                 if let Some(existing) = map.get(&s.name) {
                     if existing != &upstream {
+                        return Err(merge_error_to_diagnostic(
+                            &Merge::MergeError::SourceConflict {
+                                name: s.name.clone(),
+                                a: existing.clone(),
+                                b: upstream,
+                            },
+                        ));
+                    }
+                    if policies.get(&s.name).copied() != Some(pref.policy) {
                         return Err(merge_error_to_diagnostic(
                             &Merge::MergeError::SourceConflict {
                                 name: s.name.clone(),
@@ -1120,18 +1130,27 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                 } else {
                     kinds.insert(s.name.clone(), kind);
                 }
+                policies.insert(s.name.clone(), pref.policy);
+                raw_refs.insert(s.name.clone(), pref.raw.clone());
                 map.insert(s.name.clone(), upstream);
             }
             maps.push(map);
         }
     }
     let merged = Merge::merge_sources(&maps).map_err(|e| merge_error_to_diagnostic(&e))?;
-    Ok(SourceTable::from_decls(merged.into_iter().map(
-        |(name, upstream)| {
-            let via = kinds.get(&name).copied().unwrap_or_default();
-            (name, upstream, via)
-        },
-    )))
+    let mut table = SourceTable::from_decls(merged.into_iter().map(|(name, upstream)| {
+        let via = kinds.get(&name).copied().unwrap_or_default();
+        (name, upstream, via)
+    }));
+    for name in table.declared_names() {
+        let policy = policies.get(&name).copied().unwrap_or_default();
+        let raw = raw_refs
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| table.upstream(&name).unwrap_or_default().to_string());
+        table.set_channel_metadata(&name, policy, raw);
+    }
+    Ok(table)
 }
 
 /// U9: infer whether a source is realized by the first-party `core` provider or

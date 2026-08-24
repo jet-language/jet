@@ -7,26 +7,26 @@ use super::Doctor;
 use super::Output::Theme;
 use std::path::PathBuf;
 
+#[doc(hidden)]
+pub mod ProfileDispatch;
+mod add_remove_push_image;
+mod bridge_os_studio;
+mod browser;
+mod format;
+mod package_hangar_vendor;
 mod parse;
-mod workspace_sources;
+mod profile;
 mod realize;
 mod run_enter_dev;
 mod services_secrets_config;
-mod trust_env_build;
-mod package_hangar_vendor;
 mod shared_store;
-mod update_search_info;
-mod add_remove_push_image;
-mod bridge_os_studio;
 mod studio_server;
 mod studio_transactions;
 mod tool;
-mod profile;
-mod browser;
-mod format;
-#[doc(hidden)]
-pub mod ProfileDispatch;
+mod trust_env_build;
+mod update_search_info;
 mod usage_tests;
+mod workspace_sources;
 
 use parse::Parsed;
 

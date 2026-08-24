@@ -105,7 +105,11 @@ fn browser_lock(theme: &Theme, parsed: &Parsed) -> i32 {
             0
         }
         Err(error) => {
-            theme.error("browser lock failed", &error.to_string(), "fix the binary path and retry.");
+            theme.error(
+                "browser lock failed",
+                &error.to_string(),
+                "fix the binary path and retry.",
+            );
             2
         }
     }

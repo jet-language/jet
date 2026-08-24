@@ -6,13 +6,13 @@
 //! fetches; missing data stays missing until a normal resolver/update path
 //! records it.
 
-use jet_env_model::ModuleEval::AdapterPlan;
 use super::Provider;
 use super::RefSpec::RefSpec;
 use super::Store::StoreEntry;
 use super::JSON::{self, JSONValue};
 use crate::Lock::{LockFile, LockSource};
 use crate::Syntax;
+use jet_env_model::ModuleEval::AdapterPlan;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -246,16 +246,15 @@ pub fn merge_refs(
 
 pub fn merge_store_entries(index: &mut Index, store_entries: &[StoreEntry]) {
     for entry in store_entries {
-        let (source, name) = if let Some((name, source)) =
-            entry.reference.rsplit_once(Syntax::REF_PROVIDER_AT)
-        {
-            (source, name)
-        } else if let Some((source, name)) = entry.reference.split_once(Syntax::REF_SEPARATOR) {
-            // Read pre-D-JPK-REF1 hangar metadata without rewriting it.
-            (source, name)
-        } else {
-            continue;
-        };
+        let (source, name) =
+            if let Some((name, source)) = entry.reference.rsplit_once(Syntax::REF_PROVIDER_AT) {
+                (source, name)
+            } else if let Some((source, name)) = entry.reference.split_once(Syntax::REF_SEPARATOR) {
+                // Read pre-D-JPK-REF1 hangar metadata without rewriting it.
+                (source, name)
+            } else {
+                continue;
+            };
         index.add_package(PackageRecord {
             source: source.to_string(),
             name: name.to_string(),
@@ -292,7 +291,11 @@ pub fn service_option_fields() -> Vec<OptionField> {
     vec![
         field("enable", "required", "Turn the service on or off."),
         field("ports", "[]", "TCP ports the service listens on."),
-        field("run", "[String]", "Executable and arguments that start the service."),
+        field(
+            "run",
+            "[String]",
+            "Executable and arguments that start the service.",
+        ),
         field(
             "shutdown",
             ".Term/.Kill",
@@ -303,10 +306,22 @@ pub fn service_option_fields() -> Vec<OptionField> {
             ".jet/services/<name>/data",
             "Persisted state directory.",
         ),
-        field("ready", "ServiceProbe", "Typed readiness probe polled until ready."),
+        field(
+            "ready",
+            "ServiceProbe",
+            "Typed readiness probe polled until ready.",
+        ),
         field("after", "[String]", "Services that must be healthy first."),
-        field("before_start", "[String]", "Finite tasks to run before start."),
-        field("sockets", "[String]", "Project-relative Unix sockets reserved before start."),
+        field(
+            "before_start",
+            "[String]",
+            "Finite tasks to run before start.",
+        ),
+        field(
+            "sockets",
+            "[String]",
+            "Project-relative Unix sockets reserved before start.",
+        ),
     ]
 }
 
@@ -350,7 +365,8 @@ pub fn merge_lock(index: &mut Index, lock: &LockFile) {
             tier,
             gate_status,
             ..
-        } = &package.source else {
+        } = &package.source
+        else {
             continue;
         };
         index.add_package(PackageRecord {
@@ -611,7 +627,9 @@ mod tests {
         .expect("registry lock parses");
         let mut index = Index::default();
         merge_lock(&mut index, &lock);
-        let record = index.info("jet.textkit").expect("registry record is indexed");
+        let record = index
+            .info("jet.textkit")
+            .expect("registry record is indexed");
         assert_eq!(record.tier, "community");
         assert_eq!(
             record.gate_status,

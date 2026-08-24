@@ -13,10 +13,10 @@ use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
-use crate::SHA256;
-use crate::{ProviderFactValue, ProviderFacts};
 use crate::NixIndex::{IndexKey, NixIndexClient, NixIndexError};
 use crate::Store::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, Roots};
+use crate::SHA256;
+use crate::{ProviderFactValue, ProviderFacts};
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -1279,7 +1279,10 @@ fn locked_nix_index_key_for_project(
             "Nix source `{source_name}` has malformed exact revision `{revision}`"
         )));
     }
-    if !matches!(locked.channel.as_str(), "nixpkgs-unstable" | "nixos-unstable") {
+    if !matches!(
+        locked.channel.as_str(),
+        "nixpkgs-unstable" | "nixos-unstable"
+    ) {
         return Err(ProviderError::Unsupported(format!(
             "Nix channel `{}` is not covered by the signed nixpkgs index",
             locked.channel
@@ -1380,8 +1383,8 @@ impl Provider for NixProvider {
     ) -> Result<Realized, ProviderError> {
         if let Some(dir) = ctx.fixtures {
             let path = dir.join(fixture_name(spec));
-            let stdout = std::fs::read_to_string(&path)
-                .map_err(|_| ProviderError::FixtureMissing(path))?;
+            let stdout =
+                std::fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?;
             let mut realized = parse_realization(spec, &stdout)?;
             realized
                 .producer
@@ -1429,10 +1432,36 @@ impl Provider for NixProvider {
             })
             .collect::<Vec<_>>();
         let admitted = admit_nix_closure(roots, &requests, ctx.offline)
-            .map_err(|error| ProviderError::NixCache(error.to_string()))?;
+            .map_err(|error| nix_cache_error(roots, error))?;
         let realized = realization_from_index(spec, &key, verified, admitted)?;
         finalize_nix_realization(spec, table, ctx, realized)
     }
+}
+
+fn nix_cache_error(roots: &Roots, error: impl std::fmt::Display) -> ProviderError {
+    let mut detail = error.to_string();
+    if let Some(store_path) = missing_nix_store_path(roots) {
+        detail.push_str(&format!("; missing Nix reference `{store_path}`"));
+    }
+    ProviderError::NixCache(detail)
+}
+
+fn missing_nix_store_path(roots: &Roots) -> Option<String> {
+    crate::Store::list_checked(roots)
+        .ok()?
+        .into_iter()
+        .filter_map(|entry| {
+            let producer = crate::Store::ProducerRecord::decode(&entry.producer_record).ok()?;
+            let store_path = producer.facts.get("nix.store-path")?.clone();
+            let digest = crate::Envelope::try_output_hash_of_in_hangar(
+                &entry.out,
+                &roots.hangar_dir(),
+                false,
+            )
+            .ok();
+            (digest.as_deref() != Some(entry.envelope.output_hash.as_str())).then_some(store_path)
+        })
+        .next()
 }
 
 fn finalize_nix_realization(
@@ -1497,14 +1526,8 @@ fn realization_from_index(
             "trusted substitution (signed index + Nix cache)".into(),
         ),
         (NIX_NATIVE_FORMAT.into(), "jet-nixpkgs-index-v1".into()),
-        (
-            NIX_NATIVE_DOCUMENT.into(),
-            verified.record.canonical_json(),
-        ),
-        (
-            "nix.index.proof.v1".into(),
-            verified.proof.canonical_json(),
-        ),
+        (NIX_NATIVE_DOCUMENT.into(), verified.record.canonical_json()),
+        ("nix.index.proof.v1".into(), verified.proof.canonical_json()),
         (
             "nix.index.record.sha256".into(),
             verified.proof.record_sha256.clone(),
@@ -1562,10 +1585,9 @@ fn realization_from_index(
     } else {
         "bin"
     };
-    let primary = named_outputs
-        .get(primary_name)
-        .cloned()
-        .ok_or_else(|| ProviderError::BadOutput("indexed Nix record has no primary output".into()))?;
+    let primary = named_outputs.get(primary_name).cloned().ok_or_else(|| {
+        ProviderError::BadOutput("indexed Nix record has no primary output".into())
+    })?;
     let bin_root = named_outputs.get("bin").unwrap_or(&primary);
     let bin = Path::new(bin_root)
         .join("bin")
@@ -2341,6 +2363,15 @@ pub fn needs_nix_bridge(
     } else {
         None
     }
+}
+
+/// An invalid indexed-Nix cache entry may be repaired by the same signed
+/// index/cache path that created it. Other providers keep the Store's
+/// fail-closed integrity behavior when no generic cache binding exists.
+pub(crate) fn can_repair_indexed_nix(spec: &RefSpec, table: &SourceTable, ctx: &Ctx) -> bool {
+    ctx.fixtures.is_none()
+        && uses_nix_provider(spec, table, ctx.offline, ctx.store_dir)
+        && locked_nix_index_key(spec, table, ctx, host_nix_system().unwrap_or_default()).is_ok()
 }
 
 /// Realize a ref through its provider. The resolver entry point: it never knows

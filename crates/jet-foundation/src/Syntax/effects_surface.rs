@@ -472,9 +472,17 @@ pub const JETOS_BINARY_NAME: &str = "jetos";
 /// `PACK_LOCK_FILE` is superseded by `.jet/lock` (U2/S52).
 pub const PACK_LOCK_FILE: &str = "pack.lock";
 
-/// D-JPK7/15: the `<source>:<package/path>` ref separator. Users never type
-/// Nix's `#` selector; Jetpack translates `:` to the provider's form.
+/// D-JPK7/15: the `<source>:<package/path>` ref separator. Jetpack translates
+/// the canonical channel syntax to the provider's form.
 pub const REF_SEPARATOR: &str = ":";
+
+/// D-CHANNEL-AUTO1=A (owner, 2026-08-24): channel policy markers. `#latest`
+/// is the manual moving tier; `#auto` opts a source into automatic movement.
+/// A source with no marker is pinned.
+pub const REF_CHANNEL_MARKER: &str = "#";
+pub const REF_CHANNEL_LATEST: &str = "latest";
+pub const REF_CHANNEL_MAIN: &str = "main";
+pub const REF_CHANNEL_AUTO: &str = "auto";
 
 /// D-JPK7/15: recognized ref source prefixes.
 pub const REF_SOURCE_NIXPKGS: &str = "nixpkgs";

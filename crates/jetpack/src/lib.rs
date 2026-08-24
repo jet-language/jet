@@ -54,6 +54,117 @@ pub mod JetPin;
 pub mod MemberSelect;
 pub mod MigrationImport;
 pub(crate) mod NixIndex;
+#[cfg(feature = "test-seam")]
+pub mod test_nix_index {
+    use ed25519_dalek::{Signer, SigningKey};
+    use std::collections::BTreeMap;
+
+    pub use crate::NixIndex::NixIndexError;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TestIndexRecord {
+        pub attrpath: Vec<String>,
+        pub version: String,
+        pub drv_path: String,
+        pub outputs: BTreeMap<String, String>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TestSignedIndex {
+        pub index_bytes: Vec<u8>,
+        pub index_signature: Vec<u8>,
+        pub manifest_bytes: Vec<u8>,
+        pub manifest_signature: Vec<u8>,
+        pub target_url: String,
+        pub target_signature_url: String,
+        pub public_key: [u8; 32],
+    }
+
+    pub fn signed(
+        seed: [u8; 32],
+        key_id: &str,
+        endpoint: &str,
+        channel: &str,
+        revision: &str,
+        system: &str,
+        released_unix: u64,
+        generation: u64,
+        issued_unix: u64,
+        expires_unix: u64,
+        records: Vec<TestIndexRecord>,
+        not_indexed: Vec<(Vec<String>, String)>,
+    ) -> Result<TestSignedIndex, NixIndexError> {
+        let signing_key = SigningKey::from_bytes(&seed);
+        let record_count = records.len() as u64;
+        let records = records
+            .into_iter()
+            .map(|record| crate::NixIndex::IndexRecord {
+                attrpath: record.attrpath,
+                version: record.version,
+                drv_path: record.drv_path,
+                outputs: record.outputs,
+            })
+            .collect::<Vec<_>>();
+        let (decoded, compressed) = crate::NixIndex::canonical_test_index(
+            channel,
+            revision,
+            system,
+            released_unix,
+            records,
+            not_indexed,
+        )?;
+        let index_signature = signing_key
+            .sign(&crate::NixIndex::producer_signature_request(&decoded))
+            .to_bytes();
+        let index_signature = crate::NixIndex::signature_sidecar_for_test(key_id, &index_signature);
+        let digest = crate::SHA256::sha256_hex(&compressed);
+        let target_url = format!("{endpoint}/index-v1/{revision}/{system}/{digest}.json.zst");
+        let target_signature_url = format!("{target_url}.sig.json");
+        let target = crate::NixIndex::index_target_for_test(
+            revision,
+            system,
+            endpoint,
+            &compressed,
+            &decoded,
+            &index_signature,
+            record_count,
+        )?;
+        let manifest_bytes = crate::NixIndex::canonical_manifest_for_test(
+            channel,
+            generation,
+            issued_unix,
+            expires_unix,
+            vec![target],
+        )?;
+        let manifest_signature = signing_key
+            .sign(&crate::NixIndex::manifest_signature_request(
+                &manifest_bytes,
+            ))
+            .to_bytes();
+        let manifest_signature =
+            crate::NixIndex::signature_sidecar_for_test(key_id, &manifest_signature);
+        Ok(TestSignedIndex {
+            index_bytes: compressed,
+            index_signature,
+            manifest_bytes,
+            manifest_signature,
+            target_url,
+            target_signature_url,
+            public_key: signing_key.verifying_key().to_bytes(),
+        })
+    }
+
+    pub fn sign(seed: [u8; 32], bytes: &[u8]) -> Vec<u8> {
+        SigningKey::from_bytes(&seed)
+            .sign(bytes)
+            .to_bytes()
+            .to_vec()
+    }
+
+    pub fn public_key(seed: [u8; 32]) -> [u8; 32] {
+        SigningKey::from_bytes(&seed).verifying_key().to_bytes()
+    }
+}
 // Card #367 slice 4: `ModuleEval` (the computed-modules evaluator + plan
 // types) now lives in `jet-env-model` (L2, pure eval) — both realizers,
 // jetpack's env-runtime and JetOS realization, name it directly

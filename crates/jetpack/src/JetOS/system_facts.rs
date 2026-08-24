@@ -9,8 +9,8 @@ use super::root_projection::{copy_file_replace, enable_unit};
 use super::store_realize::RealizedPackage;
 use super::studio_projection::make_executable;
 use super::types::SYSTEMD_INIT_PACKAGE;
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -218,7 +218,10 @@ pub(super) fn write_network_facts(dir: &Path, system: &SystemPlan) -> std::io::R
     )
 }
 
-pub(super) fn write_systemd_timer_socket_units(dir: &Path, system: &SystemPlan) -> std::io::Result<()> {
+pub(super) fn write_systemd_timer_socket_units(
+    dir: &Path,
+    system: &SystemPlan,
+) -> std::io::Result<()> {
     let unit_dir = dir.join("etc/systemd/system");
     fs::create_dir_all(&unit_dir)?;
     for svc in system.services.iter().filter(|s| s.enable) {

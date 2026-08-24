@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2168,
-    "rev": 44051,
+    "rev": 44054,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -28,7 +28,8 @@
         "radar:e11",
         "board-ideas",
         "radar:e10",
-        "radar:e7"
+        "radar:e7",
+        "radar:e5"
       ]
     },
     "completionCursor": "2026-08-24T19:12:15.222Z"
@@ -144400,6 +144401,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-24T19:32:05.843Z"
+        },
+        {
+          "n": 6,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T19:37:01.809Z"
+        },
+        {
+          "n": 7,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T19:37:01.809Z"
+        },
+        {
+          "n": 8,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T19:37:01.809Z"
+        },
+        {
+          "n": 9,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T19:37:01.809Z"
         }
       ],
       "refs": [],
@@ -144407,8 +144444,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T19:32:04.017Z",
-      "updated": "2026-08-24T19:33:09.128Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-24T19:37:01.809Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0zjan5h",
@@ -144496,7 +144533,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Integration note from Main (2026-08-24). A first attempt rewrote crates/jetpack/src/CLI/tool.rs as a CONSUMER of a generation API that was never written, so it did not compile: 18 errors. build_tool_manifest_generation, activate_generation_locked, current_generation_locked and generation_numbers do not exist anywhere in the tree. The edit also broke module scope, since read_tool_manifest is defined at tool.rs:810 yet reported not-found at :131, which suggests a stray nesting or unbalanced brace. The attempt is preserved at .claude/parked/tool.rs.2167-attempt and tool.rs is reverted to the last good version so the tree stays green. This is the third time tonight a lane shipped a consumer ahead of its producer (see also CmdStatus on #2113 and NixIndex on #2158). What this card owes, in order: define the generation model for the user tools profile first (build, activate under a lock, query current, list numbers), then rewrite the tool verbs against it. Groundwork that already exists and should be reused rather than duplicated: jet profile plan/build/switch/rollback/generations, and jet tool install/list/uninstall over ~/.jet/bin."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -144549,7 +144592,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T19:32:09.191Z",
-      "updated": "2026-08-24T19:32:11.170Z",
+      "updated": "2026-08-24T20:01:50.722Z",
       "updatedBy": "Main"
     }
   ],
@@ -199746,8 +199789,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-24T19:33:09.128Z"
+      "status": "ratified",
+      "created": "2026-08-24T19:33:09.128Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-24"
     }
   ],
   "questions": [
@@ -201755,6 +201800,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-24T20:01:50.722Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0brzkry",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-24T19:37:01.810Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CHANNEL-AUTO1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-24T19:37:01.809Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0y7iumo",
+      "note": "#9 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-24T19:37:01.809Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0y7iumo",
+      "note": "#8 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-24T19:37:01.809Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0y7iumo",
+      "note": "#7 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-24T19:37:01.809Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0y7iumo",
+      "note": "#6 Syntax.rs entry updated"
+    },
     {
       "at": "2026-08-24T19:33:09.129Z",
       "by": "Main",
@@ -205212,48 +205299,6 @@
       "action": "card.criteria-meet",
       "ref": "c0zljh8e",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-24T13:00:36.962Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zljh8e",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T13:00:36.566Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zljh8e",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T13:00:36.224Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zljh8e",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T13:00:35.848Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ufv5m3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T13:00:35.493Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ufv5m3",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T13:00:35.109Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ufv5m3",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

@@ -129,7 +129,7 @@ fn run_io(server: &mut DapServer, reader: &mut impl BufRead, out: &mut impl Writ
                 return server.finish(crate::ExitCodes::USER_ERROR);
             }
         };
-        if server.handle(&msg, out).is_none() {
+        if server.handle(&msg, out).is_none() || server.state == State::Terminated {
             break;
         }
     }

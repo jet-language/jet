@@ -2111,7 +2111,11 @@ fn parse_oracle(bytes: &[u8], system: &str) -> Result<Vec<OracleRecord>, NixInde
 #[allow(dead_code)]
 fn validate_oracle_record(record: &IndexRecord) -> Result<(), NixIndexError> {
     validate_attrpath(&record.attrpath)?;
-    if record.version.chars().any(|character| character.is_control()) {
+    if record
+        .version
+        .chars()
+        .any(|character| character.is_control())
+    {
         return Err(NixIndexError::invalid(
             "oracle record version contains a control character",
         ));
@@ -2123,7 +2127,9 @@ fn validate_oracle_record(record: &IndexRecord) -> Result<(), NixIndexError> {
     let mut output_paths = BTreeSet::new();
     for (name, path) in &record.outputs {
         if name.is_empty() {
-            return Err(NixIndexError::invalid("oracle record has an empty output name"));
+            return Err(NixIndexError::invalid(
+                "oracle record has an empty output name",
+            ));
         }
         validate_store_path(path, false)?;
         if !output_paths.insert(path) {
@@ -2775,18 +2781,18 @@ mod tests {
 
         assert!(client
             .check_generation(
-            "nixpkgs-unstable",
-            &ChannelManifest {
-                schema: INDEX_SCHEMA,
-                channel: "nixpkgs-unstable".to_string(),
-                generation: 0,
-                issued_unix: 1_723_000_000,
-                expires_unix: 1_723_604_800,
-                targets: Vec::new(),
-            },
-            b"stale",
-        )
-        .is_err());
+                "nixpkgs-unstable",
+                &ChannelManifest {
+                    schema: INDEX_SCHEMA,
+                    channel: "nixpkgs-unstable".to_string(),
+                    generation: 0,
+                    issued_unix: 1_723_000_000,
+                    expires_unix: 1_723_604_800,
+                    targets: Vec::new(),
+                },
+                b"stale",
+            )
+            .is_err());
         let _ = fs::remove_dir_all(root);
     }
 

@@ -1,7 +1,7 @@
 use super::store_realize::RealizedPackage;
 use super::types::BootProfile;
-use jet_env_model::ModuleEval::{EnvPlan, ImageKind, ServicePlan, SystemPlan};
 use crate::JSON;
+use jet_env_model::ModuleEval::{EnvPlan, ImageKind, ServicePlan, SystemPlan};
 
 pub(super) fn shell_single_quote(s: &str) -> String {
     let mut quoted = String::from("'");
@@ -441,7 +441,11 @@ pub(super) fn clean_bool_json(value: &str) -> &'static str {
     }
 }
 
-pub(super) fn render_proof(system: &SystemPlan, realized: &[RealizedPackage], plan: &EnvPlan) -> String {
+pub(super) fn render_proof(
+    system: &SystemPlan,
+    realized: &[RealizedPackage],
+    plan: &EnvPlan,
+) -> String {
     let mut out = String::new();
     out.push_str(&format!("jetos proof for {}\n", system.name));
     out.push_str(&format!("target: {}\n", system.target));

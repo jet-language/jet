@@ -7,26 +7,24 @@ use super::realize::{
 use super::services_secrets_config::{
     find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_jobs,
     project_job_declared, project_job_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
-    run_lifecycle_hooks_silent,
-    validate_declared_secrets,
-    wait_for_services_ready,
+    run_lifecycle_hooks_silent, validate_declared_secrets, wait_for_services_ready,
 };
 use super::trust_env_build::{compose_env, validate_integration_facts};
 use super::workspace_sources::{
     cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
 };
+use crate::Bridge;
 use crate::EnvFile;
 use crate::EnvFiles;
 use crate::EnvHook;
-use crate::Bridge;
 use crate::MemberSelect::{self, SelectRequest};
-use jet_env_model::ModuleEval;
 use crate::Output::Theme;
 use crate::RefSpec;
 use crate::Shell::{self, Env, ShellKind};
 use crate::Store;
 use crate::Syntax;
 use crate::Trust;
+use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -80,13 +78,20 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                                             Ok(plan) => plan,
                                             Err(code) => return code,
                                         };
-                                        if let Err(code) =
-                                            apply_locked_channels(theme, &project_dir, &mut plan.table)
-                                        {
+                                        if let Err(code) = apply_locked_channels(
+                                            theme,
+                                            &project_dir,
+                                            &mut plan.table,
+                                            &parsed.flags,
+                                        ) {
                                             return code;
                                         }
-                                        let env = match compose_env(theme, &roots, &parsed.flags, &plan)
-                                        {
+                                        let env = match compose_env(
+                                            theme,
+                                            &roots,
+                                            &parsed.flags,
+                                            &plan,
+                                        ) {
                                             Ok(env) => env,
                                             Err(code) => return code,
                                         };
@@ -162,7 +167,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             Err(code) => return code,
         },
     };
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
 
@@ -259,7 +264,7 @@ pub(super) fn run_project_job_with_mode(
     } else {
         empty_job_plan()
     };
-    if let Err(code) = apply_locked_channels(theme, project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
     for raw in &metadata.packages {
@@ -431,21 +436,12 @@ pub(super) fn run_project_job_with_mode(
     .into_iter()
     .chain(task_args)
     .collect::<Vec<_>>();
-    let access_trace = cache_key
-        .as_deref()
-        .map(task_access_trace_path);
+    let access_trace = cache_key.as_deref().map(task_access_trace_path);
     let code = if let Some(trace_path) = access_trace.as_deref() {
         // A strict cache key must describe the complete job environment. The
         // ordinary direct-job path inherits host variables, so cached jobs
         // use the clean composed environment whose values are in the key.
-        match run_job_with_access_trace(
-            &env,
-            &argv,
-            &job_cwd,
-            true,
-            silent,
-            trace_path,
-        ) {
+        match run_job_with_access_trace(&env, &argv, &job_cwd, true, silent, trace_path) {
             Ok(code) => code,
             Err(message) => {
                 theme.error_coded(
@@ -476,7 +472,8 @@ pub(super) fn run_project_job_with_mode(
             let undeclared = access_trace
                 .as_deref()
                 .map(|path| {
-                    let result = task_undeclared_accesses(project_dir, &job_cwd, entry, &metadata, path);
+                    let result =
+                        task_undeclared_accesses(project_dir, &job_cwd, entry, &metadata, path);
                     let _ = std::fs::remove_file(path);
                     result
                 })
@@ -543,7 +540,9 @@ fn resolve_job_jet_binary(env: &Env) -> Result<String, String> {
     {
         return Ok(stable.to_string_lossy().into_owned());
     }
-    Ok(resolve_executable_path(&requested)?.to_string_lossy().into_owned())
+    Ok(resolve_executable_path(&requested)?
+        .to_string_lossy()
+        .into_owned())
 }
 
 fn run_job_with_access_trace(
@@ -555,7 +554,9 @@ fn run_job_with_access_trace(
     trace_path: &Path,
 ) -> Result<i32, String> {
     if !cfg!(target_os = "linux") {
-        return Err("strict cached job access tracing is currently supported only on Linux".to_string());
+        return Err(
+            "strict cached job access tracing is currently supported only on Linux".to_string(),
+        );
     }
     let base_path = if clean {
         crate::Platform::clean_path().to_string()
@@ -637,8 +638,12 @@ fn task_undeclared_accesses(
                 || path.starts_with(project_root.join(".git"))
                 || path.starts_with(project_root.join("target"))
                 || path == entry
-                || declared.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
-                || outputs.iter().any(|allowed| path == *allowed || path.starts_with(allowed))
+                || declared
+                    .iter()
+                    .any(|allowed| path == *allowed || path.starts_with(allowed))
+                || outputs
+                    .iter()
+                    .any(|allowed| path == *allowed || path.starts_with(allowed))
             {
                 continue;
             }
@@ -675,15 +680,15 @@ fn strace_paths(line: &str) -> Vec<PathBuf> {
     };
     let args = strace_argument_tokens(&line[open + 1..]);
     let indices: Vec<usize> = match name {
-        "execve" | "open" | "creat" | "stat" | "lstat" | "access"
-        | "readlink" | "unlink" | "rmdir" | "truncate" | "chmod" | "chown"
-        | "lchown" | "mknod" | "mkdir" | "chdir" | "getxattr" | "lgetxattr"
-        | "setxattr" | "lsetxattr" | "listxattr" | "llistxattr" | "removexattr" => {
+        "execve" | "open" | "creat" | "stat" | "lstat" | "access" | "readlink" | "unlink"
+        | "rmdir" | "truncate" | "chmod" | "chown" | "lchown" | "mknod" | "mkdir" | "chdir"
+        | "getxattr" | "lgetxattr" | "setxattr" | "lsetxattr" | "listxattr" | "llistxattr"
+        | "removexattr" => {
             vec![0]
         }
-        "execveat" | "openat" | "openat2" | "statx" | "newfstatat" | "fstatat64"
-        | "faccessat" | "faccessat2" | "readlinkat" | "unlinkat" | "mkdirat"
-        | "fchmodat" | "fchownat" | "utimensat" => vec![1],
+        "execveat" | "openat" | "openat2" | "statx" | "newfstatat" | "fstatat64" | "faccessat"
+        | "faccessat2" | "readlinkat" | "unlinkat" | "mkdirat" | "fchmodat" | "fchownat"
+        | "utimensat" => vec![1],
         "rename" | "renameat2" | "link" | "linkat" => vec![0, 1, 3],
         "renameat" => vec![1, 3],
         "symlink" => vec![0, 1],
@@ -863,7 +868,11 @@ fn empty_job_env() -> Env {
 fn task_limit_env_name(name: &str) -> String {
     let mut out = String::from("JET_TASK_LIMIT_");
     for ch in name.chars() {
-        out.push(if ch.is_ascii_alphanumeric() { ch.to_ascii_uppercase() } else { '_' });
+        out.push(if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_uppercase()
+        } else {
+            '_'
+        });
     }
     out
 }
@@ -885,7 +894,9 @@ fn job_path(
             .components()
             .any(|component| component == std::path::Component::ParentDir)
     {
-        return Err(format!("job {field} `{relative}` must stay inside the project"));
+        return Err(format!(
+            "job {field} `{relative}` must stay inside the project"
+        ));
     }
     let root = project_dir
         .canonicalize()
@@ -932,8 +943,10 @@ fn task_cache_key(
     identity.push_str(&format!("compiler={}\n", env!("CARGO_PKG_VERSION")));
     identity.push_str(&format!(
         "compiler-build={}\n",
-        crate::SHA256::sha256_file_hex(&compiler_path)
-            .map_err(|error| format!("couldn't hash compiler `{}`: {error}", compiler_path.display()))?
+        crate::SHA256::sha256_file_hex(&compiler_path).map_err(|error| format!(
+            "couldn't hash compiler `{}`: {error}",
+            compiler_path.display()
+        ))?
     ));
     identity.push_str(&format!("platform={}\n", crate::Envelope::host_platform()));
     identity.push_str(
@@ -963,7 +976,11 @@ fn task_cache_key(
     for relative in [Syntax::ENV_FILE, Syntax::UNIFIED_LOCK_FILE] {
         let path = project_dir.join(relative);
         if path.is_file() {
-            identity.push_str(&format!("project-input={relative}:{}\n", crate::SHA256::sha256_file_hex(&path).map_err(|error| format!("couldn't hash `{relative}`: {error}"))?));
+            identity.push_str(&format!(
+                "project-input={relative}:{}\n",
+                crate::SHA256::sha256_file_hex(&path)
+                    .map_err(|error| format!("couldn't hash `{relative}`: {error}"))?
+            ));
         }
     }
     if metadata.inputs.is_empty() {
@@ -977,7 +994,9 @@ fn task_cache_key(
             crate::SHA256::sha256_file_hex(&path)
                 .map_err(|error| format!("couldn't hash job input `{input}`: {error}"))?
         } else {
-            return Err(format!("job input `{input}` is not a regular file or directory"));
+            return Err(format!(
+                "job input `{input}` is not a regular file or directory"
+            ));
         };
         identity.push_str(&format!("input={input}:{digest}\n"));
     }
@@ -1056,7 +1075,9 @@ fn resolve_executable_path_in(program: &str, search: &str) -> Result<PathBuf, St
                 .map_err(|error| format!("couldn't resolve executable `{program}`: {error}"));
         }
     }
-    Err(format!("couldn't resolve executable `{program}` through PATH"))
+    Err(format!(
+        "couldn't resolve executable `{program}` through PATH"
+    ))
 }
 
 fn validate_cached_job_metadata(
@@ -1094,7 +1115,9 @@ fn validate_cached_job_metadata(
         .collect::<Result<Vec<_>, _>>()?;
     for (output, output_path) in outputs {
         if inputs.iter().any(|(_, input)| {
-            input == &output_path || input.starts_with(&output_path) || output_path.starts_with(input)
+            input == &output_path
+                || input.starts_with(&output_path)
+                || output_path.starts_with(input)
         }) {
             return Err(format!(
                 "cached job input `{}` overlaps output `{output}`",
@@ -1137,7 +1160,11 @@ fn validate_cached_job_environment(plan: &RunPlan, env: &Env) -> Result<(), Stri
             dotenv.file
         ));
     }
-    if let Some(name) = env.vars.keys().find(|name| is_sensitive_environment_name(name)) {
+    if let Some(name) = env
+        .vars
+        .keys()
+        .find(|name| is_sensitive_environment_name(name))
+    {
         return Err(format!(
             "strict cached jobs cannot use secret-bearing environment variable `{name}`"
         ));
@@ -1231,14 +1258,16 @@ fn collect_job_scope_files(
     metadata: &crate::AST::JobMetadata,
     files: &mut Vec<(String, String)>,
 ) -> Result<(), String> {
-    let entries = std::fs::read_dir(directory)
-        .map_err(|error| format!("couldn't read job cache scope `{}`: {error}", directory.display()))?;
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        format!(
+            "couldn't read job cache scope `{}`: {error}",
+            directory.display()
+        )
+    })?;
     for entry in entries {
         let entry = entry.map_err(|error| error.to_string())?;
         let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|error| error.to_string())?;
+        let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
         if is_cache_sensitive_path(relative)
             || relative.components().next().is_some_and(|component| {
                 matches!(component, std::path::Component::Normal(name) if name == ".git" || name == "target")
@@ -1254,8 +1283,9 @@ fn collect_job_scope_files(
         } else if file_type.is_file() {
             files.push((
                 relative.to_string_lossy().replace('\\', "/"),
-                crate::SHA256::sha256_file_hex(&path)
-                    .map_err(|error| format!("couldn't hash job scope `{}`: {error}", relative.display()))?,
+                crate::SHA256::sha256_file_hex(&path).map_err(|error| {
+                    format!("couldn't hash job scope `{}`: {error}", relative.display())
+                })?,
             ));
         } else if file_type.is_symlink() {
             return Err(format!(
@@ -1313,7 +1343,10 @@ fn job_cache_path(
     key: &str,
 ) -> PathBuf {
     match metadata.cache {
-        crate::AST::JobCachePolicy::Local => project_dir.join(Syntax::SOURCE_ROOT_DIR).join("jobs").join(format!("{key}.done")),
+        crate::AST::JobCachePolicy::Local => project_dir
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join("jobs")
+            .join(format!("{key}.done")),
         crate::AST::JobCachePolicy::Shared => roots.root.join("jobs").join(format!("{key}.done")),
         crate::AST::JobCachePolicy::Uncached => PathBuf::new(),
     }
@@ -1332,7 +1365,9 @@ fn task_cache_hit(
     metadata: &crate::AST::JobMetadata,
     key: &str,
 ) -> bool {
-    if metadata.cache == crate::AST::JobCachePolicy::Uncached || !job_outputs_exist(project_dir, metadata) {
+    if metadata.cache == crate::AST::JobCachePolicy::Uncached
+        || !job_outputs_exist(project_dir, metadata)
+    {
         return false;
     }
     let path = job_cache_path(project_dir, roots, metadata, key);
@@ -1477,7 +1512,7 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             ),
         });
     }
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
 
@@ -1549,7 +1584,7 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
     if let Err(code) = Trust::gate_with_environment(
@@ -1601,7 +1636,11 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     ) {
         return code;
     }
-    if let Some(command) = parsed.command.as_ref().filter(|command| !command.is_empty()) {
+    if let Some(command) = parsed
+        .command
+        .as_ref()
+        .filter(|command| !command.is_empty())
+    {
         return Shell::run_clean_command(&env, command);
     }
     theme.ok("environment checks passed in a clean process");
@@ -1620,7 +1659,7 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
     let file_plan = match EnvFiles::plan(&project_dir, &plan.environment.files) {
@@ -1634,8 +1673,8 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
             return 2;
         }
     };
-    let source_snapshot = (!plan.environment.files.is_empty())
-        .then(|| file_plan.source_snapshot_hash());
+    let source_snapshot =
+        (!plan.environment.files.is_empty()).then(|| file_plan.source_snapshot_hash());
     if let Err(code) = Trust::gate_with_environment_and_snapshot(
         theme,
         &Trust::store_path(),
@@ -1688,7 +1727,11 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
             0
         }
         Err(error) => {
-            theme.error("managed environment file sync failed", &error, "no partial file change was retained.");
+            theme.error(
+                "managed environment file sync failed",
+                &error,
+                "no partial file change was retained.",
+            );
             2
         }
     }
@@ -2366,7 +2409,14 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         catalog.names().join(", "),
         catalog.fingerprint()
     ));
-    theme.detail(&format!("languages: {}", if languages.is_empty() { "<none>".to_string() } else { languages.join(", ") }));
+    theme.detail(&format!(
+        "languages: {}",
+        if languages.is_empty() {
+            "<none>".to_string()
+        } else {
+            languages.join(", ")
+        }
+    ));
     let expanded = plan
         .environment
         .language_projections
@@ -2375,13 +2425,35 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             format!(
                 "{}: +{} -{}",
                 projection.selection.name,
-                if projection.included.is_empty() { "<none>".to_string() } else { projection.included.join(",") },
-                if projection.omitted.is_empty() { "<none>".to_string() } else { projection.omitted.join(",") },
+                if projection.included.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    projection.included.join(",")
+                },
+                if projection.omitted.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    projection.omitted.join(",")
+                },
             )
         })
         .collect::<Vec<_>>();
-    theme.detail(&format!("language projections: {}", if expanded.is_empty() { "<none>".to_string() } else { expanded.join("; ") }));
-    theme.detail(&format!("packages: {}", if packages.is_empty() { "<none>".to_string() } else { packages.join(", ") }));
+    theme.detail(&format!(
+        "language projections: {}",
+        if expanded.is_empty() {
+            "<none>".to_string()
+        } else {
+            expanded.join("; ")
+        }
+    ));
+    theme.detail(&format!(
+        "packages: {}",
+        if packages.is_empty() {
+            "<none>".to_string()
+        } else {
+            packages.join(", ")
+        }
+    ));
     theme.detail(&format!(
         "formatter: {}",
         plan.environment
@@ -2398,19 +2470,31 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .collect::<Vec<_>>();
     theme.detail(&format!(
         "services: {}",
-        if services.is_empty() { "<none>".to_string() } else { services.join(", ") }
+        if services.is_empty() {
+            "<none>".to_string()
+        } else {
+            services.join(", ")
+        }
     ));
     // D-JOB-NAME2=B: two headings, each reading the same `Syntax` constant the
     // machine key reads, so the human and machine renderings carry one split.
     theme.detail(&format!(
         "{}: {}",
         Syntax::ENV_REPORT_CHECKS_KEY,
-        if checks.is_empty() { "<none>".to_string() } else { checks.join(", ") }
+        if checks.is_empty() {
+            "<none>".to_string()
+        } else {
+            checks.join(", ")
+        }
     ));
     theme.detail(&format!(
         "{}: {}",
         Syntax::ENV_REPORT_JOBS_KEY,
-        if jobs.is_empty() { "<none>".to_string() } else { jobs.join(", ") }
+        if jobs.is_empty() {
+            "<none>".to_string()
+        } else {
+            jobs.join(", ")
+        }
     ));
     let variables = variable_sources
         .iter()
@@ -2418,9 +2502,25 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
         .collect::<Vec<_>>();
     theme.detail(&format!(
         "variables: {}",
-        if variables.is_empty() { "<none>".to_string() } else { variables.join(", ") }
+        if variables.is_empty() {
+            "<none>".to_string()
+        } else {
+            variables.join(", ")
+        }
     ));
-    theme.detail(&format!("managed files: {}", if plan.environment.files.is_empty() { "<none>".to_string() } else { plan.environment.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>().join(", ") }));
+    theme.detail(&format!(
+        "managed files: {}",
+        if plan.environment.files.is_empty() {
+            "<none>".to_string()
+        } else {
+            plan.environment
+                .files
+                .iter()
+                .map(|file| file.destination.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    ));
     theme.detail(&format!(
         "git hooks path: {}",
         plan.environment
@@ -2441,7 +2541,14 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             }
         })
         .collect::<Vec<_>>();
-    theme.detail(&format!("integrations: {}", if integrations.is_empty() { "<none>".to_string() } else { integrations.join(", ") }));
+    theme.detail(&format!(
+        "integrations: {}",
+        if integrations.is_empty() {
+            "<none>".to_string()
+        } else {
+            integrations.join(", ")
+        }
+    ));
     0
 }
 
@@ -2486,8 +2593,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     };
 
     let cwd = std::env::current_dir().unwrap_or_default();
-    let disabled = std::env::var_os(Syntax::ENV_DISABLE_VAR)
-        .is_some_and(|v| !v.is_empty());
+    let disabled = std::env::var_os(Syntax::ENV_DISABLE_VAR).is_some_and(|v| !v.is_empty());
     let target = if disabled {
         None
     } else {
@@ -2500,15 +2606,13 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     let active_hash = std::env::var(Syntax::ENV_HOOK_ACTIVE_HASH_VAR)
         .ok()
         .filter(|s| !s.is_empty());
-    let target_hash = target
-        .as_ref()
-        .and_then(|root| {
-            EnvHook::definition_fingerprint_with_selections(
-                root,
-                parsed.flags.preset.as_deref(),
-                parsed.flags.environment.as_deref(),
-            )
-        });
+    let target_hash = target.as_ref().and_then(|root| {
+        EnvHook::definition_fingerprint_with_selections(
+            root,
+            parsed.flags.preset.as_deref(),
+            parsed.flags.environment.as_deref(),
+        )
+    });
 
     // Nothing changed since the last prompt — stay silent so the hook is a
     // no-op on the vast majority of prompts (and never re-realizes).
@@ -2522,10 +2626,8 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut watched_reload_ready = false;
     if target_s == active_s && target_hash != active_hash {
         if let (Some(root), Some(hash)) = (target.as_ref(), target_hash.as_deref()) {
-            match EnvHook::reload_policy_with_environment(
-                root,
-                parsed.flags.environment.as_deref(),
-            ) {
+            match EnvHook::reload_policy_with_environment(root, parsed.flags.environment.as_deref())
+            {
                 ModuleEval::ReloadPolicy::Never => return 0,
                 ModuleEval::ReloadPolicy::Prompt => {}
                 ModuleEval::ReloadPolicy::Watch { debounce_ms, .. } => {
@@ -2577,7 +2679,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
                 return 0;
             }
         };
-        if apply_locked_channels(theme, &root, &mut plan.table).is_err() {
+        if apply_locked_channels(theme, &root, &mut plan.table, &parsed.flags).is_err() {
             return 0;
         }
 
@@ -2868,7 +2970,7 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
 
@@ -2945,10 +3047,7 @@ mod tests {
 
     #[test]
     fn job_cache_key_changes_when_job_arguments_change() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-job-cache-key-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("jet-job-cache-key-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");
         std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
@@ -2956,10 +3055,30 @@ mod tests {
         let table = RefSpec::SourceTable::empty();
         let compiler = resolve_executable_path(&find_jet_binary()).unwrap();
 
-        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["one".to_string()], &[], &table, "environment-a")
-            .unwrap();
-        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &["two".to_string()], &[], &table, "environment-a")
-            .unwrap();
+        let first = task_cache_key(
+            &root,
+            &entry,
+            "build",
+            &compiler,
+            &metadata,
+            &["one".to_string()],
+            &[],
+            &table,
+            "environment-a",
+        )
+        .unwrap();
+        let second = task_cache_key(
+            &root,
+            &entry,
+            "build",
+            &compiler,
+            &metadata,
+            &["two".to_string()],
+            &[],
+            &table,
+            "environment-a",
+        )
+        .unwrap();
         assert_ne!(first, second);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -2977,18 +3096,15 @@ mod tests {
         assert!(macos.reason_for_host("x86_64-linux").is_some());
         assert!(macos.reason_for_host("aarch64-macos").is_none());
         assert_eq!(
-            job_skip_reason(Some(&crate::AST::JobSkip::Always("manual".to_string())))
-                .as_deref(),
+            job_skip_reason(Some(&crate::AST::JobSkip::Always("manual".to_string()))).as_deref(),
             Some("manual")
         );
     }
 
     #[test]
     fn strict_cached_jobs_need_declared_inputs_and_reject_overlap() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-job-cache-declarations-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-job-cache-declarations-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("input.txt"), "input\n").unwrap();
         let mut metadata = crate::AST::JobMetadata {
@@ -3011,10 +3127,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn strict_cached_jobs_reject_undeclared_project_access() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-job-access-proof-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-job-access-proof-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");
         let input = root.join("input.txt");
@@ -3100,7 +3214,9 @@ mod tests {
             vec![PathBuf::from("space name")]
         );
         assert_eq!(
-            strace_paths(r#"123 statx(AT_FDCWD, "hidden.txt", AT_STATX_SYNC_AS_STAT, STATX_ALL, {}) = 0"#),
+            strace_paths(
+                r#"123 statx(AT_FDCWD, "hidden.txt", AT_STATX_SYNC_AS_STAT, STATX_ALL, {}) = 0"#
+            ),
             vec![PathBuf::from("hidden.txt")]
         );
         assert_eq!(
@@ -3121,20 +3237,20 @@ mod tests {
     fn strict_cached_jobs_reject_secret_environment_names() {
         let mut env = empty_job_env();
         for name in ["API_KEY", "PRIVATE_KEY", "AWS_ACCESS_KEY_ID"] {
-            env.vars.insert(name.to_string(), "not-for-cache".to_string());
-            let error = validate_cached_job_environment(&empty_job_plan(), &env)
-                .unwrap_err();
-            assert!(error.contains("secret-bearing environment variable"), "{name}: {error}");
+            env.vars
+                .insert(name.to_string(), "not-for-cache".to_string());
+            let error = validate_cached_job_environment(&empty_job_plan(), &env).unwrap_err();
+            assert!(
+                error.contains("secret-bearing environment variable"),
+                "{name}: {error}"
+            );
             env.vars.clear();
         }
     }
 
     #[test]
     fn task_cache_key_changes_when_an_unlisted_project_file_changes() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-job-cache-scope-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("jet-job-cache-scope-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");
         std::fs::write(&entry, "#Job fn build() {}\n").unwrap();
@@ -3147,19 +3263,39 @@ mod tests {
         };
         let table = RefSpec::SourceTable::empty();
         let compiler = resolve_executable_path(&find_jet_binary()).unwrap();
-        let first = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table, "environment-a").unwrap();
+        let first = task_cache_key(
+            &root,
+            &entry,
+            "build",
+            &compiler,
+            &metadata,
+            &[],
+            &[],
+            &table,
+            "environment-a",
+        )
+        .unwrap();
         std::fs::write(root.join("undeclared.txt"), "two\n").unwrap();
-        let second = task_cache_key(&root, &entry, "build", &compiler, &metadata, &[], &[], &table, "environment-a").unwrap();
+        let second = task_cache_key(
+            &root,
+            &entry,
+            "build",
+            &compiler,
+            &metadata,
+            &[],
+            &[],
+            &table,
+            "environment-a",
+        )
+        .unwrap();
         assert_ne!(first, second);
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn task_cache_key_changes_when_environment_module_facts_change() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-job-cache-environment-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-job-cache-environment-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");
         std::fs::write(&entry, "#Job fn build() {}\n").unwrap();

@@ -1,5 +1,5 @@
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::Path;
 
@@ -82,15 +82,87 @@ fn studio_first_boot_json(dir: &Path, generation: &str, system: &SystemPlan) -> 
 }
 
 const STUDIO_PAGES: &[(&str, &str, &str, &str, &str, &str, bool)] = &[
-    ("dashboard", "Dashboard", "operations", "dashboard,services,artifacts", "read-only", "system_plan,proof_state", true),
-    ("settings", "Settings", "settings", "options,source", "studio-actions", "system_plan.options,changeset", false),
-    ("monitoring", "Monitoring", "operations", "services,artifacts", "read-only", "system_plan.services,proof_state", true),
-    ("services", "Services", "operations", "services", "read-only", "system_plan.services", true),
-    ("packages", "Packages", "inventory", "packages", "read-only", "system_plan.packages", true),
-    ("secrets", "Secrets", "settings", "options", "read-only", "system_plan.options", true),
-    ("fleet", "Fleet", "operations", "fleet,proof", "read-only", "proof_state", true),
-    ("generations", "Generations", "operations", "artifacts", "studio-actions", "generations,changeset", false),
-    ("changeset", "Changeset", "review", "source,diff,impact", "studio-actions", "changeset", false),
+    (
+        "dashboard",
+        "Dashboard",
+        "operations",
+        "dashboard,services,artifacts",
+        "read-only",
+        "system_plan,proof_state",
+        true,
+    ),
+    (
+        "settings",
+        "Settings",
+        "settings",
+        "options,source",
+        "studio-actions",
+        "system_plan.options,changeset",
+        false,
+    ),
+    (
+        "monitoring",
+        "Monitoring",
+        "operations",
+        "services,artifacts",
+        "read-only",
+        "system_plan.services,proof_state",
+        true,
+    ),
+    (
+        "services",
+        "Services",
+        "operations",
+        "services",
+        "read-only",
+        "system_plan.services",
+        true,
+    ),
+    (
+        "packages",
+        "Packages",
+        "inventory",
+        "packages",
+        "read-only",
+        "system_plan.packages",
+        true,
+    ),
+    (
+        "secrets",
+        "Secrets",
+        "settings",
+        "options",
+        "read-only",
+        "system_plan.options",
+        true,
+    ),
+    (
+        "fleet",
+        "Fleet",
+        "operations",
+        "fleet,proof",
+        "read-only",
+        "proof_state",
+        true,
+    ),
+    (
+        "generations",
+        "Generations",
+        "operations",
+        "artifacts",
+        "studio-actions",
+        "generations,changeset",
+        false,
+    ),
+    (
+        "changeset",
+        "Changeset",
+        "review",
+        "source,diff,impact",
+        "studio-actions",
+        "changeset",
+        false,
+    ),
     (
         "proof-provenance",
         "Proof/Provenance",
@@ -171,7 +243,11 @@ fn studio_artifact_json(dir: &Path, name: &str) -> String {
     format!(
         "{{\"path\":{},\"present\":{}}}",
         JSON::quote(&format!("../{name}")),
-        if dir.join(name).is_file() { "true" } else { "false" }
+        if dir.join(name).is_file() {
+            "true"
+        } else {
+            "false"
+        }
     )
 }
 
@@ -201,14 +277,16 @@ fn studio_index_html(dir: &Path, generation: &str, system: &SystemPlan) -> Strin
     } else {
         "proof not run"
     };
-    let nav = STUDIO_PAGES.iter().map(|(id, title, _, _, _, _, _)| {
-        format!(
-            "<a href=\"#{id}\" data-page=\"{id}\">{}</a>",
-            html_escape(title)
-        )
-    })
-    .collect::<Vec<_>>()
-    .join("");
+    let nav = STUDIO_PAGES
+        .iter()
+        .map(|(id, title, _, _, _, _, _)| {
+            format!(
+                "<a href=\"#{id}\" data-page=\"{id}\">{}</a>",
+                html_escape(title)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
     let packages = system
         .packages
         .iter()

@@ -4,10 +4,18 @@ use crate::Store;
 
 /// `jet shared-store install|enroll|broker` — optional authenticated shared store.
 pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
-    match parsed.positional.first().map(String::as_str).unwrap_or("install") {
+    match parsed
+        .positional
+        .first()
+        .map(String::as_str)
+        .unwrap_or("install")
+    {
         "install" => match Store::install_shared_store(&Store::resolve()) {
             Ok(report) => {
-                theme.status(&format!("installed shared-store config at {}", report.config.display()));
+                theme.status(&format!(
+                    "installed shared-store config at {}",
+                    report.config.display()
+                ));
                 if let Some(socket) = report.socket_unit {
                     theme.detail(&format!("socket unit: {}", socket.display()));
                 }
@@ -58,7 +66,10 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         "status" => match Store::shared_store_config(&Store::resolve()) {
             Ok(Some(config)) => {
-                theme.status(&format!("shared-store broker configured at {}", config.socket.display()));
+                theme.status(&format!(
+                    "shared-store broker configured at {}",
+                    config.socket.display()
+                ));
                 0
             }
             Ok(None) => {
@@ -66,7 +77,11 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
                 0
             }
             Err(error) => {
-                theme.error("shared-store status failed", &error.to_string(), "repair the administrator-installed shared-store config.");
+                theme.error(
+                    "shared-store status failed",
+                    &error.to_string(),
+                    "repair the administrator-installed shared-store config.",
+                );
                 2
             }
         },
@@ -95,7 +110,10 @@ pub(super) fn cmd_shared_store(theme: &Theme, parsed: &Parsed) -> i32 {
             }
             match Store::enroll_shared_store(&Store::resolve(), uid, !read_only) {
                 Ok(path) => {
-                    theme.status(&format!("enrolled shared-store user {uid} at {}", path.display()));
+                    theme.status(&format!(
+                        "enrolled shared-store user {uid} at {}",
+                        path.display()
+                    ));
                     0
                 }
                 Err(error) => {

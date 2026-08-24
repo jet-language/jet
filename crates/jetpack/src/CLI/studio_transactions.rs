@@ -250,7 +250,11 @@ pub(super) fn handle_studio_transaction(
     }
     let response = studio_changeset_response(
         context,
-        if changeset.is_some() { "staged" } else { "empty" },
+        if changeset.is_some() {
+            "staged"
+        } else {
+            "empty"
+        },
         changed,
         false,
         changeset.as_ref(),
@@ -273,7 +277,11 @@ fn studio_changeset_status(
                 "200 OK",
                 studio_changeset_response(
                     context,
-                    if changeset.is_some() { "staged" } else { "empty" },
+                    if changeset.is_some() {
+                        "staged"
+                    } else {
+                        "empty"
+                    },
                     changeset.is_some(),
                     false,
                     changeset.as_ref(),
@@ -468,7 +476,10 @@ fn studio_changeset_stage_rollback(
         Err(e) => {
             return (
                 "500 Internal Server Error",
-                format!("{{\"error\":{}}}", JSON::quote(&format!("reading config failed: {e}"))),
+                format!(
+                    "{{\"error\":{}}}",
+                    JSON::quote(&format!("reading config failed: {e}"))
+                ),
             )
         }
     };
@@ -490,7 +501,8 @@ fn studio_changeset_stage_rollback(
     if changeset.is_some() {
         return (
             "409 Conflict",
-            "{\"error\":\"discard or apply the current Changeset before staging rollback\"}".to_string(),
+            "{\"error\":\"discard or apply the current Changeset before staging rollback\"}"
+                .to_string(),
         );
     }
     let session_id = studio_request_string(request, "session_id").unwrap_or_default();
@@ -616,7 +628,10 @@ fn atomic_write_studio_source_if_revision(
     result
 }
 
-pub(super) fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> (&'static str, String) {
+pub(super) fn handle_studio_run(
+    body: &str,
+    context: Option<&StudioContext>,
+) -> (&'static str, String) {
     let Some(context) = context else {
         return (
             "400 Bad Request",
@@ -638,9 +653,7 @@ pub(super) fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> 
             "{\"error\":\"missing action\"}".to_string(),
         );
     };
-    if !["check", "plan", "build", "proof", "switch", "generations"]
-        .contains(&action.as_str())
-    {
+    if !["check", "plan", "build", "proof", "switch", "generations"].contains(&action.as_str()) {
         return (
             "400 Bad Request",
             "{\"error\":\"unsupported Studio run action\"}".to_string(),
@@ -655,7 +668,8 @@ pub(super) fn handle_studio_run(body: &str, context: Option<&StudioContext>) -> 
     {
         return (
             "409 Conflict",
-            "{\"error\":\"apply or discard the staged Changeset before build, proof, or switch\"}".to_string(),
+            "{\"error\":\"apply or discard the staged Changeset before build, proof, or switch\"}"
+                .to_string(),
         );
     }
     let command = if action == "proof" {
@@ -701,10 +715,7 @@ fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResul
         return Ok(plan);
     }
     let input_plan_revision = studio_source_revision(plan.stdout.trim());
-    let generation_name = format!(
-        "zz-studio-proof-{}",
-        &studio_unique_id()[..16]
-    );
+    let generation_name = format!("zz-studio-proof-{}", &studio_unique_id()[..16]);
     let mut build = run_studio_snapshot_command(
         context,
         &snapshot,
@@ -717,20 +728,12 @@ fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResul
         build.source_revision = Some(source_revision);
         return Ok(build);
     }
-    let mut result = run_studio_snapshot_command(
-        context,
-        &snapshot,
-        "proof",
-        Some(&generation_name),
-        None,
-    )?;
+    let mut result =
+        run_studio_snapshot_command(context, &snapshot, "proof", Some(&generation_name), None)?;
     result.source_revision = Some(source_revision.clone());
     let artifact = if result.success {
-        match validate_studio_proof_artifact(
-            &result.stdout,
-            &source_revision,
-            &input_plan_revision,
-        ) {
+        match validate_studio_proof_artifact(&result.stdout, &source_revision, &input_plan_revision)
+        {
             Ok(artifact) => Some(artifact),
             Err(error) => {
                 result.success = false;
@@ -747,9 +750,7 @@ fn run_studio_proof_action(context: &StudioContext) -> Result<StudioCommandResul
         .unwrap_or(false);
     result.source_changed_after = !unchanged;
     if result.success && unchanged {
-        if let (Some(artifact), Ok(mut proved)) =
-            (artifact, context.proved_source.lock())
-        {
+        if let (Some(artifact), Ok(mut proved)) = (artifact, context.proved_source.lock()) {
             *proved = Some(StudioProvedSource {
                 source: captured,
                 revision: source_revision,
@@ -800,13 +801,8 @@ fn run_studio_switch_action(context: &StudioContext) -> Result<StudioCommandResu
         );
     }
     let previous_generation = studio_current_generation_name();
-    let mut result = run_studio_snapshot_command(
-        context,
-        &snapshot,
-        "switch",
-        Some(&proved.generation),
-        None,
-    )?;
+    let mut result =
+        run_studio_snapshot_command(context, &snapshot, "switch", Some(&proved.generation), None)?;
     result.source_revision = Some(proved.revision);
     let source_unchanged = std::fs::read_to_string(&context.config)
         .map(|source| source == proved.source)
@@ -855,7 +851,10 @@ fn validate_studio_generation_binding(proved: &StudioProvedSource) -> Result<(),
         || string("input_plan_sha256") != Some(proved.plan_revision.as_str())
         || string("plan_sha256") != Some(proved.artifact_plan_revision.as_str())
         || crate::SHA256::sha256_hex(&plan) != proved.artifact_plan_revision
-        || proved.generation_path.file_name().and_then(|name| name.to_str())
+        || proved
+            .generation_path
+            .file_name()
+            .and_then(|name| name.to_str())
             != Some(proved.generation.as_str())
     {
         return Err("proved generation source or plan binding changed".to_string());
@@ -985,10 +984,10 @@ fn create_studio_source_snapshot_platform(
     _context: &StudioContext,
     source: &str,
 ) -> Result<StudioSourceSnapshot, String> {
+    use std::ffi::CString;
     use std::io::Write;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::fs::PermissionsExt;
-    use std::ffi::CString;
     const MFD_ALLOW_SEALING: u32 = 0x0002;
     const F_ADD_SEALS: i32 = 1033;
     const REQUIRED_SEALS: i32 = 0x0001 | 0x0002 | 0x0004 | 0x0008;
@@ -1122,10 +1121,7 @@ fn run_studio_command_target(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     let mut cmd = std::process::Command::new(jet);
-    cmd.arg("os")
-        .arg(&action)
-        .arg(target)
-        .arg("--no-color");
+    cmd.arg("os").arg(&action).arg(target).arg("--no-color");
     if action == "plan" || action == "proof" {
         cmd.arg("--json");
     }
@@ -1178,7 +1174,10 @@ fn studio_command_json(context: &StudioContext, result: &StudioCommandResult) ->
     )
 }
 
-pub(super) fn studio_live_projection(context: &StudioContext, generation_data: &Path) -> Result<String, String> {
+pub(super) fn studio_live_projection(
+    context: &StudioContext,
+    generation_data: &Path,
+) -> Result<String, String> {
     if !context.config.is_file() {
         return std::fs::read_to_string(generation_data)
             .map_err(|e| format!("reading installed Studio projection failed: {e}"));
@@ -1205,10 +1204,16 @@ fn rebuild_studio_projection_from(
     if !plan.success {
         return Err(format!("jet os plan failed: {}", plan.stderr.trim()));
     }
-    let generation = std::fs::read_to_string(generation_data)
-        .unwrap_or_else(|_| "null".to_string());
+    let generation =
+        std::fs::read_to_string(generation_data).unwrap_or_else(|_| "null".to_string());
     let generations = run_studio_command(context, "generations")
-        .map(|result| if result.success { result.stdout } else { result.stderr })
+        .map(|result| {
+            if result.success {
+                result.stdout
+            } else {
+                result.stderr
+            }
+        })
         .unwrap_or_default();
     let current_source = std::fs::read_to_string(&context.config).unwrap_or_default();
     let proof_revision = context
@@ -1358,7 +1363,8 @@ fn source_diff(path: &Path, before: &str, after: &str) -> String {
 fn studio_request(
     body: &str,
 ) -> Result<std::collections::BTreeMap<String, JSON::JSONValue>, String> {
-    let parsed = JSON::parse(body).map_err(|error| format!("invalid Studio JSON request: {error}"))?;
+    let parsed =
+        JSON::parse(body).map_err(|error| format!("invalid Studio JSON request: {error}"))?;
     match parsed {
         JSON::JSONValue::Object(object) => Ok(object),
         _ => Err("Studio request must be a JSON object".to_string()),
@@ -1395,9 +1401,7 @@ fn studio_unique_id() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-    crate::SHA256::sha256_hex(
-        format!("{}:{now}:{nonce}", std::process::id()).as_bytes(),
-    )
+    crate::SHA256::sha256_hex(format!("{}:{now}:{nonce}", std::process::id()).as_bytes())
 }
 
 impl StudioSourceSnapshot {
@@ -1547,8 +1551,7 @@ fn studio_request_owns_changeset(
     request: &std::collections::BTreeMap<String, JSON::JSONValue>,
     changeset: &StudioChangeSet,
 ) -> bool {
-    studio_request_string(request, "session_id").as_deref()
-        == Some(changeset.session_id.as_str())
+    studio_request_string(request, "session_id").as_deref() == Some(changeset.session_id.as_str())
         && studio_request_string(request, "token").as_deref() == Some(changeset.token.as_str())
         && studio_request_string(request, "base_revision").as_deref()
             == Some(changeset.base_revision.as_str())

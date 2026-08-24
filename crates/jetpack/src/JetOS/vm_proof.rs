@@ -4,9 +4,9 @@ use super::generation_files::systems_dir;
 use super::installer_media::write_installer_media;
 use super::load_validate::validate_system_options;
 use super::types::{Generation, OSFlags, VM_GUEST_PROOF_MARKER, VM_PROOF_TIMEOUT_MS, VM_TOOLS};
-use jet_env_model::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
 use crate::Output::Theme;
 use crate::JSON;
+use jet_env_model::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -336,7 +336,11 @@ pub(super) fn require_vm_run_proof(
     require_json_field(&harness_text, "host", &system.name)?;
     require_json_field(&harness_text, "generation", &gen.name)?;
     require_json_field(&harness_text, "disk", disk)?;
-    require_json_field(&harness_text, "media_proof", &media_proof.display().to_string())?;
+    require_json_field(
+        &harness_text,
+        "media_proof",
+        &media_proof.display().to_string(),
+    )?;
     Ok(())
 }
 

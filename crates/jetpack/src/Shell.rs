@@ -564,34 +564,37 @@ fn run_command_in_mode(
     clean: bool,
     silent: bool,
 ) -> i32 {
-    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
+    if !env.validate_cache(&Theme::resolve_choice(
+        jet_foundation::Terminal::ColorChoice::Never,
+    )) {
         return 126;
     }
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let (mut cmd, _projection_keepers, _projection_scratch) = match nix_projection_command(env, program, rest) {
-        Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
-        Ok(None) => {
-            let stable_program = env
-                .cache_leases
-                .iter()
-                .find_map(|lease| lease.executable(program));
-            let mut command = stable_program
-                .as_ref()
-                .map_or_else(|| Command::new(program), Command::new);
-            command.args(rest);
-            (command, Vec::new(), Vec::new())
-        }
-        Err(error) => {
-            report_nix_projection_error(
-                &Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto),
-                program,
-                &error,
-            );
-            return 126;
-        }
-    };
+    let (mut cmd, _projection_keepers, _projection_scratch) =
+        match nix_projection_command(env, program, rest) {
+            Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
+            Ok(None) => {
+                let stable_program = env
+                    .cache_leases
+                    .iter()
+                    .find_map(|lease| lease.executable(program));
+                let mut command = stable_program
+                    .as_ref()
+                    .map_or_else(|| Command::new(program), Command::new);
+                command.args(rest);
+                (command, Vec::new(), Vec::new())
+            }
+            Err(error) => {
+                report_nix_projection_error(
+                    &Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto),
+                    program,
+                    &error,
+                );
+                return 126;
+            }
+        };
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -618,7 +621,9 @@ fn run_command_in_mode(
             jet_foundation::ExitCodes::USER_ERROR
         }
     };
-    if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
+    if !env.validate_cache(&Theme::resolve_choice(
+        jet_foundation::Terminal::ColorChoice::Never,
+    )) {
         return 126;
     }
     code
@@ -638,11 +643,7 @@ pub fn run_clean_command_in(env: &Env, cmd_args: &[String], cwd: Option<&Path>) 
 
 /// Run a clean-shell command without letting job stdout corrupt a generated
 /// activation script.
-pub fn run_clean_command_in_silent(
-    env: &Env,
-    cmd_args: &[String],
-    cwd: Option<&Path>,
-) -> i32 {
+pub fn run_clean_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>) -> i32 {
     run_command_in_mode(env, cmd_args, cwd, true, true)
 }
 
@@ -677,14 +678,15 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
         "nothing is installed",
     ]);
 
-    let (mut cmd, _projection_keepers, _projection_scratch) = match nix_projection_command(env, kind.binary(), &[]) {
-        Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
-        Ok(None) => (Command::new(kind.binary()), Vec::new(), Vec::new()),
-        Err(error) => {
-            report_nix_projection_error(theme, kind.binary(), &error);
-            return 126;
-        }
-    };
+    let (mut cmd, _projection_keepers, _projection_scratch) =
+        match nix_projection_command(env, kind.binary(), &[]) {
+            Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
+            Ok(None) => (Command::new(kind.binary()), Vec::new(), Vec::new()),
+            Err(error) => {
+                report_nix_projection_error(theme, kind.binary(), &error);
+                return 126;
+            }
+        };
     if clean {
         cmd.env_clear();
         env.apply_clean_to(&mut cmd);
@@ -700,19 +702,28 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
     // Per-shell prompt + init wiring. Temp files are cleaned on the way out.
     let _scratch = match kind {
         ShellKind::Bash => {
-            let rc = write_temp("jetpack-bashrc", &bash_rc(&env.label, env.prompt_path, env.prompt_strip));
+            let rc = write_temp(
+                "jetpack-bashrc",
+                &bash_rc(&env.label, env.prompt_path, env.prompt_strip),
+            );
             cmd.arg("--rcfile").arg(&rc).arg("-i");
             Some(Scratch::File(rc))
         }
         ShellKind::Zsh => {
             // zsh reads `.zshrc` from ZDOTDIR; point it at a scratch dir.
             let dir = write_temp_dir("jetpack-zdotdir");
-            std::fs::write(dir.join(".zshrc"), zsh_rc(&env.label, env.prompt_path, env.prompt_strip)).ok();
+            std::fs::write(
+                dir.join(".zshrc"),
+                zsh_rc(&env.label, env.prompt_path, env.prompt_strip),
+            )
+            .ok();
             cmd.env("ZDOTDIR", &dir).arg("-i");
             Some(Scratch::Dir(dir))
         }
         ShellKind::Fish => {
-            cmd.arg("-C").arg(fish_init(&env.label, env.prompt_path, env.prompt_strip)).arg("-i");
+            cmd.arg("-C")
+                .arg(fish_init(&env.label, env.prompt_path, env.prompt_strip))
+                .arg("-i");
             None
         }
     };
@@ -1026,7 +1037,10 @@ mod tests {
     #[test]
     fn run_command_projects_provider_runtime_paths() {
         let mut env = env_with(&[]);
-        env.vars.insert("JET_PROVIDER_PATH_TEST".to_string(), "locked-path".to_string());
+        env.vars.insert(
+            "JET_PROVIDER_PATH_TEST".to_string(),
+            "locked-path".to_string(),
+        );
         let args = vec![
             "sh".to_string(),
             "-c".to_string(),
@@ -1117,7 +1131,10 @@ mod tests {
         assert!(fish.contains("function __jet_help_postexec --on-event fish_postexec"));
 
         for rc in [&bash, &zsh, &fish] {
-            assert!(!rc.contains("eval $picked"), "help selection must never execute");
+            assert!(
+                !rc.contains("eval $picked"),
+                "help selection must never execute"
+            );
         }
     }
 
@@ -1141,57 +1158,127 @@ mod tests {
             permissions.set_mode(0o755);
             std::fs::set_permissions(&fake_jet, permissions).unwrap();
         }
-        let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+        let path = format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
 
-        let bash_file = write_temp("jetpack-help-bashrc", &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off));
-        let bash = format!("PATH={} bash --noprofile --rcfile {} -i", shell_single_quote(&path), bash_file.display());
+        let bash_file = write_temp(
+            "jetpack-help-bashrc",
+            &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off),
+        );
+        let bash = format!(
+            "PATH={} bash --noprofile --rcfile {} -i",
+            shell_single_quote(&path),
+            bash_file.display()
+        );
         let bash_out = pty_prefill_oracle(&bash, &marker, b"\x1b?");
         let _ = std::fs::remove_file(bash_file);
         assert!(bash_out.contains("JET_HELP_WIDGET_RETURNED"), "{bash_out}");
-        assert!(marker.exists(), "bash widget did not preserve selected command:\n{bash_out}");
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        assert!(
+            marker.exists(),
+            "bash widget did not preserve selected command:\n{bash_out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "JET_SELECTED_BYTES"
+        );
         std::fs::remove_file(&marker).unwrap();
 
         let zdir = write_temp_dir("jetpack-help-zdotdir");
-        std::fs::write(zdir.join(".zshrc"), zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off)).unwrap();
-        let zsh = format!("PATH={} ZDOTDIR={} zsh -d -i", shell_single_quote(&path), zdir.display());
+        std::fs::write(
+            zdir.join(".zshrc"),
+            zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off),
+        )
+        .unwrap();
+        let zsh = format!(
+            "PATH={} ZDOTDIR={} zsh -d -i",
+            shell_single_quote(&path),
+            zdir.display()
+        );
         let zsh_out = pty_prefill_oracle(&zsh, &marker, b"\x1b?");
         let _ = std::fs::remove_dir_all(zdir);
         assert!(zsh_out.contains("JET_HELP_WIDGET_RETURNED"), "{zsh_out}");
-        assert!(marker.exists(), "zsh widget did not preserve selected command:\n{zsh_out}");
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        assert!(
+            marker.exists(),
+            "zsh widget did not preserve selected command:\n{zsh_out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "JET_SELECTED_BYTES"
+        );
         std::fs::remove_file(&marker).unwrap();
 
         let fish = format!(
             "PATH={} fish -C {} -i",
             shell_single_quote(&path),
-            shell_single_quote(&fish_init("help", PromptPathMode::Short, PromptStripMode::Off))
+            shell_single_quote(&fish_init(
+                "help",
+                PromptPathMode::Short,
+                PromptStripMode::Off
+            ))
         );
         let fish_out = pty_prefill_oracle(&fish, &marker, b"\x1b?");
         assert!(fish_out.contains("JET_HELP_WIDGET_RETURNED"), "{fish_out}");
-        assert!(marker.exists(), "fish widget did not preserve selected command:\n{fish_out}");
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        assert!(
+            marker.exists(),
+            "fish widget did not preserve selected command:\n{fish_out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "JET_SELECTED_BYTES"
+        );
         std::fs::remove_file(&marker).unwrap();
 
         let fish_literal_out = pty_prefill_oracle(&fish, &marker, b"jet ?\n");
-        assert!(fish_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{fish_literal_out}");
-        assert!(marker.exists(), "literal `jet ?` did not prefill fish:\n{fish_literal_out}");
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        assert!(
+            fish_literal_out.contains("JET_HELP_WIDGET_RETURNED"),
+            "{fish_literal_out}"
+        );
+        assert!(
+            marker.exists(),
+            "literal `jet ?` did not prefill fish:\n{fish_literal_out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "JET_SELECTED_BYTES"
+        );
         std::fs::remove_file(&marker).unwrap();
 
-        let bash_file = write_temp("jetpack-help-bashrc-literal", &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off));
-        let bash = format!("PATH={} bash --noprofile --rcfile {} -i", shell_single_quote(&path), bash_file.display());
+        let bash_file = write_temp(
+            "jetpack-help-bashrc-literal",
+            &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off),
+        );
+        let bash = format!(
+            "PATH={} bash --noprofile --rcfile {} -i",
+            shell_single_quote(&path),
+            bash_file.display()
+        );
         let bash_literal_out = pty_prefill_oracle(&bash, &marker, b"jet ?\n");
         let _ = std::fs::remove_file(bash_file);
-        assert!(bash_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{bash_literal_out}");
-        assert!(marker.exists(), "literal `jet ?` did not prefill bash:\n{bash_literal_out}");
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        assert!(
+            bash_literal_out.contains("JET_HELP_WIDGET_RETURNED"),
+            "{bash_literal_out}"
+        );
+        assert!(
+            marker.exists(),
+            "literal `jet ?` did not prefill bash:\n{bash_literal_out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "JET_SELECTED_BYTES"
+        );
         std::fs::remove_file(&marker).unwrap();
 
         let zdir = write_temp_dir("jetpack-help-zdotdir-literal");
         // Hostile: a one-character pathname must not steal bare `jet ?` via zsh glob.
         std::fs::write(zdir.join("x"), "").unwrap();
-        std::fs::write(zdir.join(".zshrc"), zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off)).unwrap();
+        std::fs::write(
+            zdir.join(".zshrc"),
+            zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off),
+        )
+        .unwrap();
         let zsh = format!(
             "cd {} && PATH={} ZDOTDIR={} zsh -d -i",
             shell_single_quote(&zdir.display().to_string()),
@@ -1200,9 +1287,18 @@ mod tests {
         );
         let zsh_literal_out = pty_prefill_oracle(&zsh, &marker, b"jet ?\n");
         let _ = std::fs::remove_dir_all(zdir);
-        assert!(zsh_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{zsh_literal_out}");
-        assert!(marker.exists(), "literal `jet ?` did not prefill zsh:\n{zsh_literal_out}");
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        assert!(
+            zsh_literal_out.contains("JET_HELP_WIDGET_RETURNED"),
+            "{zsh_literal_out}"
+        );
+        assert!(
+            marker.exists(),
+            "literal `jet ?` did not prefill zsh:\n{zsh_literal_out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "JET_SELECTED_BYTES"
+        );
     }
 
     #[test]
@@ -1214,7 +1310,8 @@ mod tests {
 
     fn pty(shell_command: &str, input: &str, no_color: bool) -> String {
         let mut command = Command::new("script");
-        command.args(["-qec", shell_command, "/dev/null"])
+        command
+            .args(["-qec", shell_command, "/dev/null"])
             .env_remove("NO_COLOR")
             .env_remove("FORCE_COLOR");
         if no_color {
@@ -1248,8 +1345,18 @@ mod tests {
         };
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        child.stdout.take().unwrap().read_to_end(&mut stdout).unwrap();
-        child.stderr.take().unwrap().read_to_end(&mut stderr).unwrap();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_end(&mut stdout)
+            .unwrap();
+        child
+            .stderr
+            .take()
+            .unwrap()
+            .read_to_end(&mut stderr)
+            .unwrap();
         assert!(
             status.success(),
             "stdout:\n{}\nstderr:\n{}",
@@ -1279,11 +1386,18 @@ mod tests {
         stdin.write_all(trigger).unwrap();
         stdin.flush().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(350));
-        assert!(!marker.exists(), "help selection executed before explicit Enter");
-        stdin.write_all(b"; printf 'JET_EXPLICIT_ACCEPT\\n'\n").unwrap();
+        assert!(
+            !marker.exists(),
+            "help selection executed before explicit Enter"
+        );
+        stdin
+            .write_all(b"; printf 'JET_EXPLICIT_ACCEPT\\n'\n")
+            .unwrap();
         stdin.flush().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(150));
-        stdin.write_all(b"echo JET_HELP_WIDGET_RETURNED\nexit 0\n").unwrap();
+        stdin
+            .write_all(b"echo JET_HELP_WIDGET_RETURNED\nexit 0\n")
+            .unwrap();
         drop(stdin);
         let out = child.wait_with_output().unwrap();
         assert!(
@@ -1351,10 +1465,7 @@ mod tests {
         assert_receipt_colors_after_marker(&bash);
         let captured = bash.rsplit_once("JETPACK_CAPTURE_START").unwrap().1;
         assert!(
-            captured.contains(&format!(
-                "\x1b[{}m{LABEL}\x1b[0m",
-                SharedTheme::ACCENT_SGR
-            )),
+            captured.contains(&format!("\x1b[{}m{LABEL}\x1b[0m", SharedTheme::ACCENT_SGR)),
             "generated bash prompt sentinel missing: {captured:?}"
         );
     }
@@ -1404,7 +1515,10 @@ mod tests {
         let _ = std::fs::remove_file(rc);
         assert!(output.contains("build ok"), "{output}");
         assert!(output.contains("test failed (1)"), "{output}");
-        assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
+        assert!(
+            output.contains("-> test failed. Rerun: jet test"),
+            "{output}"
+        );
         let branch = String::from_utf8(
             Command::new("git")
                 .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -1440,7 +1554,10 @@ mod tests {
         );
         assert!(output.contains("build ok"), "{output}");
         assert!(output.contains("test failed (1)"), "{output}");
-        assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
+        assert!(
+            output.contains("-> test failed. Rerun: jet test"),
+            "{output}"
+        );
         assert!(output.contains("JETPACK_FISH_PTY_DONE"), "{output}");
         assert!(output.contains("running build"), "{output}");
         assert_no_esc_after_marker(&output);
@@ -1468,7 +1585,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
         assert!(output.contains("build ok"), "{output}");
         assert!(output.contains("test failed (1)"), "{output}");
-        assert!(output.contains("-> test failed. Rerun: jet test"), "{output}");
+        assert!(
+            output.contains("-> test failed. Rerun: jet test"),
+            "{output}"
+        );
         assert!(output.contains("running build"), "{output}");
         assert!(output.contains("JETPACK_ZSH_PTY_DONE"), "{output}");
         assert_no_esc_after_marker(&output);

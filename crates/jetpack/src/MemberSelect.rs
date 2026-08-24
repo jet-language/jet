@@ -167,11 +167,11 @@ pub fn dependency_order_packages_checked(
     ordered_indices
         .into_iter()
         .map(|index| {
-            let package = checked_packages[index]
-                .take()
-                .ok_or_else(|| jet_pkg_model::Authority::AuthorityError::Unsupported(
+            let package = checked_packages[index].take().ok_or_else(|| {
+                jet_pkg_model::Authority::AuthorityError::Unsupported(
                     "workspace member snapshot was consumed before realization".to_string(),
-                ))?;
+                )
+            })?;
             Ok((members[index].clone(), package))
         })
         .collect()
@@ -208,9 +208,7 @@ pub fn record_member_input_hashes(root: &Path, members: &[WorkspaceMember]) {
 }
 
 fn member_input_hash_path(root: &Path) -> PathBuf {
-    root.join(".jet")
-        .join("cache")
-        .join("member-input-hashes")
+    root.join(".jet").join("cache").join("member-input-hashes")
 }
 
 fn load_member_input_hashes(root: &Path) -> BTreeMap<String, String> {
@@ -305,9 +303,7 @@ fn resolve_git_ref(root: &Path, git_ref: &str) -> Result<String, Diagnostic> {
         .current_dir(root)
         .output();
     match output {
-        Ok(o) if o.status.success() => {
-            Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
-        }
+        Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).trim().to_string()),
         _ => Err(e1292_bad_ref(
             git_ref,
             &suggest_git_refs(root, git_ref),
@@ -318,7 +314,13 @@ fn resolve_git_ref(root: &Path, git_ref: &str) -> Result<String, Diagnostic> {
 
 fn suggest_git_refs(root: &Path, query: &str) -> Vec<String> {
     let output = Command::new("git")
-        .args(["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes", "refs/tags"])
+        .args([
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])
         .current_dir(root)
         .output();
     let Ok(output) = output else {
@@ -381,15 +383,14 @@ fn reverse_dependents(
             }
         }
     }
-    resolver.revalidate_root().map_err(|error| error.diagnostic())?;
+    resolver
+        .revalidate_root()
+        .map_err(|error| error.diagnostic())?;
     Ok(reverse)
 }
 
 fn member_name_index(plan: &WorkspacePlan) -> HashMap<&str, &WorkspaceMember> {
-    plan.members
-        .iter()
-        .map(|m| (m.name.as_str(), m))
-        .collect()
+    plan.members.iter().map(|m| (m.name.as_str(), m)).collect()
 }
 
 fn normalize_member_prefix(path: &str) -> String {
@@ -605,7 +606,12 @@ mod tests {
     #[test]
     fn unknown_dash_p_is_e1231_with_suggestion() {
         let root = unique_dir("unknown");
-        let plan = plan(vec![write_member(&root, "billing", "packages/billing", &[])]);
+        let plan = plan(vec![write_member(
+            &root,
+            "billing",
+            "packages/billing",
+            &[],
+        )]);
         let req = SelectRequest {
             packages: vec!["biling".into()],
             ..Default::default()
@@ -685,12 +691,18 @@ mod tests {
         };
         let got = select_members(&root, &plan, &req).unwrap();
         let names: BTreeSet<_> = got.iter().map(|m| m.name.as_str()).collect();
-        assert!(names.contains("shared"), "changed member missing: {names:?}");
+        assert!(
+            names.contains("shared"),
+            "changed member missing: {names:?}"
+        );
         assert!(
             names.contains("billing"),
             "dependent billing must be included: {names:?}"
         );
-        assert!(!names.contains("ui"), "unrelated ui must stay out: {names:?}");
+        assert!(
+            !names.contains("ui"),
+            "unrelated ui must stay out: {names:?}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

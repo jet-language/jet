@@ -4445,6 +4445,23 @@ with `[T#N]`). Channel refs (`#latest`, `#main`) resolve only in network-class
 verbs; the lock stays exact (D-JPK-CHANNEL1). Git deps that need selectors use
 inline structs (D-JPK23):
 
+**D-CHANNEL-AUTO1=A** *(owner, 2026-08-24; card #2165)*: channel movement has
+three policies on one axis, decided by who moves the pin. A declaration with no
+policy marker is pinned and never moves. `#latest` is the existing manual tier:
+it moves only when the user runs `jetpack update`. `#auto` is the explicit
+automatic tier: realization may refresh it without an update command, and the
+resolved exact selector is written back to the declarative manifest. Moving
+tiers retain their visible policy marker when writeback records the exact pin:
+
+```jet
+rustc@nixpkgs
+#latest jq@nixpkgs
+#auto omp@releases
+```
+
+`#pin` is not a spelling in this ruling. The marker is checked on source
+declarations before channel resolution; pinned entries never propagate.
+
 ```jet
 deps: {
     textkit:  textkit#1.2.0,

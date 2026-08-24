@@ -108,8 +108,7 @@ impl RootWorkspace {
         if let Err(error) = Ingest::ensure_real_directory(
             &independent_roots.hangar_dir(),
             "independent Hangar root",
-        )
-        {
+        ) {
             let _ = super::make_tree_writable_for_removal(&path);
             let _ = fs::remove_dir_all(&path);
             return Err(error);
@@ -207,7 +206,10 @@ pub(crate) fn build_for_cache(
             offline: ctx.offline,
             project_dir: ctx.project_dir,
             nix_index: ctx.nix_index,
-            nix_roots: Some(&left_workspace.roots),
+            // Indexed Nix admission is the durable substitution boundary.
+            // Keep the private root for source-build certification, but publish
+            // the complete Nix closure into the caller's Hangar.
+            nix_roots: ctx.nix_roots,
         };
         let left = match realize_uncached(&left_workspace.roots, &left_ctx, request) {
             Ok(realized) => realized,
@@ -247,7 +249,7 @@ pub(crate) fn build_for_cache(
             offline: ctx.offline,
             project_dir: ctx.project_dir,
             nix_index: ctx.nix_index,
-            nix_roots: Some(&right_workspace.roots),
+            nix_roots: ctx.nix_roots,
         };
         let right = match realize_uncached(&right_workspace.roots, &right_ctx, request) {
             Ok(realized) => realized,

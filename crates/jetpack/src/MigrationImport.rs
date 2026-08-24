@@ -299,10 +299,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
     } else {
         format!("{name}@nix")
     };
-    plan.packages.push(ImportedPackage {
-        name,
-        version,
-    });
+    plan.packages.push(ImportedPackage { name, version });
     retain_normalized_root(
         &mut plan,
         ProviderFamily::Nix,
@@ -331,10 +328,8 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
             });
             let mut facts = ProviderFacts::for_reference("nix", &provider_ref);
             if let JSONValue::Object(_) = pkg {
-                let package_report = normalize_provider_document(
-                    ProviderFamily::Nix,
-                    &nix_json_value(pkg),
-                );
+                let package_report =
+                    normalize_provider_document(ProviderFamily::Nix, &nix_json_value(pkg));
                 merge_provider_projection(
                     &mut facts,
                     &package_report.shared_facts_for(&provider_ref),
@@ -342,11 +337,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                 );
             }
             facts.set_native_document("flake-facts.json", facts_json);
-            facts.add_fact(
-                "package.name",
-                ProviderFactValue::Text(name),
-                source_path,
-            );
+            facts.add_fact("package.name", ProviderFactValue::Text(name), source_path);
             if let Some(source) = immutable_source {
                 if facts.resolved_source.is_empty() {
                     facts.set_resolved_source(&source);
@@ -366,13 +357,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
             }
             if let JSONValue::Object(package) = pkg {
                 for key in [
-                    "pname",
-                    "version",
-                    "revision",
-                    "rev",
-                    "narHash",
-                    "hash",
-                    "drvPath",
+                    "pname", "version", "revision", "rev", "narHash", "hash", "drvPath",
                 ] {
                     if let Some(value) = nix_import_string(package, key) {
                         facts.add_fact(
@@ -417,7 +402,11 @@ fn nix_import_string(
         .map(str::to_string)
 }
 
-fn merge_provider_projection(target: &mut ProviderFacts, source: &ProviderFacts, source_path: &str) {
+fn merge_provider_projection(
+    target: &mut ProviderFacts,
+    source: &ProviderFacts,
+    source_path: &str,
+) {
     if target.resolved_source.is_empty() && !source.resolved_source.is_empty() {
         target.set_resolved_source(&source.resolved_source);
     }
@@ -467,9 +456,7 @@ fn nix_json_value(value: &JSONValue) -> String {
     }
 }
 
-fn nix_import_package(
-    value: &JSONValue,
-) -> Option<(String, String, String, Option<String>, bool)> {
+fn nix_import_package(value: &JSONValue) -> Option<(String, String, String, Option<String>, bool)> {
     let (name, source, version, revision, digest, reference) = match value {
         JSONValue::String(raw) => {
             let raw = raw.trim();
@@ -493,8 +480,7 @@ fn nix_import_package(
             nix_import_string(object, "name")
                 .or_else(|| nix_import_string(object, "pname"))
                 .or_else(|| nix_import_string(object, "package"))?,
-            nix_import_string(object, "source")
-                .or_else(|| nix_import_string(object, "provider")),
+            nix_import_string(object, "source").or_else(|| nix_import_string(object, "provider")),
             nix_import_string(object, "version"),
             nix_import_string(object, "revision").or_else(|| nix_import_string(object, "rev")),
             nix_import_string(object, "digest")
@@ -998,8 +984,7 @@ fn cargo_dependency_sections(raw: &str) -> Vec<(String, bool, &'static str, Opti
                     .and_then(|target| target.strip_suffix(suffix))
                     .map(|_| (kind, suffix))
             }
-        })
-        else {
+        }) else {
             continue;
         };
         let platform = section
@@ -1008,12 +993,7 @@ fn cargo_dependency_sections(raw: &str) -> Vec<(String, bool, &'static str, Opti
             .map(|target| target.trim_matches(['\'', '"']).to_string());
         let header = format!("[{section}]");
         if !sections.iter().any(|(known, _, _, _)| known == &header) {
-            sections.push((
-                header,
-                kind == "dev" || kind == "build",
-                kind,
-                platform,
-            ));
+            sections.push((header, kind == "dev" || kind == "build", kind, platform));
         }
     }
     sections
@@ -1141,9 +1121,7 @@ mod tests {
             "[package]\nname = \"app\" # package name\nversion = \"1.0.0\" # package version\n",
             "",
         );
-        assert!(plan
-            .provider_facts
-            .contains_key("app#version=1.0.0@cargo"));
+        assert!(plan.provider_facts.contains_key("app#version=1.0.0@cargo"));
         assert!(plan
             .todos
             .iter()
@@ -1162,17 +1140,12 @@ mod tests {
             .emit_pkg_jet()
             .contains("ripgrep: ripgrep#version=14.1.1@nixpkgs"));
         assert!(facts.native_document.contains("drvPath"));
-        assert!(facts
-            .facts
-            .contains_key("provider.nix.import.drvPath"));
+        assert!(facts.facts.contains_key("provider.nix.import.drvPath"));
     }
 
     #[test]
     fn nix_import_production_path_reports_mutable_provider_facts() {
-        let plan = import_nix_facts(
-            "flake.nix",
-            r#"{"name":"app","packages":["ripgrep"]}"#,
-        );
+        let plan = import_nix_facts("flake.nix", r#"{"name":"app","packages":["ripgrep"]}"#);
         assert!(!plan.emit_pkg_jet().contains("ripgrep: ripgrep@nixpkgs"));
         assert!(plan.provider_facts["ripgrep@nixpkgs"]
             .losses

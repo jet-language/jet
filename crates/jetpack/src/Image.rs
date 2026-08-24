@@ -410,12 +410,19 @@ pub fn build_with_base(
     fs::create_dir_all(out_dir.join("blobs").join("sha256"))?;
     if let Some(base) = base {
         for layer in &layers[..layers.len().saturating_sub(1)] {
-            let source = base.root.join("blobs").join("sha256").join(digest_hex(&layer.digest)?);
+            let source = base
+                .root
+                .join("blobs")
+                .join("sha256")
+                .join(digest_hex(&layer.digest)?);
             let bytes = read_regular_bounded(&source, layer.size)?;
             if bytes.len() as u64 != layer.size || digest_for(&bytes) != layer.digest {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("base OCI layer `{}` failed its digest or size check", layer.digest),
+                    format!(
+                        "base OCI layer `{}` failed its digest or size check",
+                        layer.digest
+                    ),
                 ));
             }
             write_blob(out_dir, &layer.digest, &bytes)?;
@@ -469,7 +476,9 @@ pub fn copy_layout(source: &Path, destination: &Path) -> io::Result<()> {
         )
     };
     if destination_probe == source || destination_probe.starts_with(&source) {
-        return Err(invalid("OCI copy destination cannot be inside the source layout"));
+        return Err(invalid(
+            "OCI copy destination cannot be inside the source layout",
+        ));
     }
     if destination.exists() {
         return if same_layout(&source, &destination_probe)? {
@@ -629,7 +638,9 @@ fn parse_registry_reference(reference: &str) -> io::Result<RegistryReference> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| invalid("OCI registry reference has no image name"))?;
     if parts.iter().any(|part| part.is_empty()) {
-        return Err(invalid("OCI registry repository has an empty path component"));
+        return Err(invalid(
+            "OCI registry repository has an empty path component",
+        ));
     }
     let (name, tag_or_digest) = if let Some((name, digest)) = leaf.split_once('@') {
         if name.is_empty() {
@@ -722,10 +733,9 @@ fn load_registry_manifest(root: &Path) -> io::Result<RegistryManifest> {
     if computed != digest {
         return Err(invalid("OCI manifest descriptor digest mismatch"));
     }
-    let manifest = JSON::parse(
-        std::str::from_utf8(&raw).map_err(|_| invalid("OCI manifest is not UTF-8"))?,
-    )
-    .map_err(io::Error::other)?;
+    let manifest =
+        JSON::parse(std::str::from_utf8(&raw).map_err(|_| invalid("OCI manifest is not UTF-8"))?)
+            .map_err(io::Error::other)?;
     let manifest = object(&manifest, "OCI manifest")?;
     let config = object(
         manifest
@@ -991,7 +1001,9 @@ fn copy_layout_tree(source: &Path, destination: &Path) -> io::Result<()> {
         let to = destination.join(entry.file_name());
         let metadata = fs::symlink_metadata(&from)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() && !metadata.is_file() {
-            return Err(invalid("OCI layout contains an unsupported filesystem node"));
+            return Err(invalid(
+                "OCI layout contains an unsupported filesystem node",
+            ));
         }
         if let Ok(destination_metadata) = fs::symlink_metadata(&to) {
             if destination_metadata.file_type().is_symlink() {
@@ -1039,7 +1051,9 @@ fn same_layout(left: &Path, right: &Path) -> io::Result<bool> {
             == read_regular_bounded(right, 512 * 1024 * 1024)?);
     }
     if !left_metadata.is_dir() {
-        return Err(invalid("OCI layout contains an unsupported filesystem node"));
+        return Err(invalid(
+            "OCI layout contains an unsupported filesystem node",
+        ));
     }
     let mut left_entries = fs::read_dir(left)?.collect::<Result<Vec<_>, _>>()?;
     let mut right_entries = fs::read_dir(right)?.collect::<Result<Vec<_>, _>>()?;
@@ -1164,12 +1178,15 @@ fn build_config_json_with_diff_ids(
         .map(|p| format!("{}:{{}}", JSON::quote(&format!("{p}/tcp"))))
         .collect::<Vec<_>>()
         .join(",");
-    let health = spec.healthcheck.as_ref().map_or_else(String::new, |command| {
-        format!(
-            ",\"Healthcheck\":{{\"Test\":[\"CMD-SHELL\",{}]}}",
-            JSON::quote(command)
-        )
-    });
+    let health = spec
+        .healthcheck
+        .as_ref()
+        .map_or_else(String::new, |command| {
+            format!(
+                ",\"Healthcheck\":{{\"Test\":[\"CMD-SHELL\",{}]}}",
+                JSON::quote(command)
+            )
+        });
     let diff_ids = diff_ids
         .iter()
         .map(|digest| JSON::quote(digest))
@@ -1228,7 +1245,10 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("OCI base `{}` is not a local OCI image layout", root.display()),
+            format!(
+                "OCI base `{}` is not a local OCI image layout",
+                root.display()
+            ),
         ));
     }
     let layout = JSON::parse(&read_text(root.join("oci-layout"))?).map_err(io::Error::other)?;
@@ -1254,11 +1274,12 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     if manifest_bytes.len() as u64 != manifest_size
         || digest_for(&manifest_bytes) != manifest_digest
     {
-        return Err(invalid("OCI manifest descriptor failed its digest or size check"));
+        return Err(invalid(
+            "OCI manifest descriptor failed its digest or size check",
+        ));
     }
     let manifest = JSON::parse(
-        std::str::from_utf8(&manifest_bytes)
-            .map_err(|_| invalid("OCI manifest is not UTF-8"))?,
+        std::str::from_utf8(&manifest_bytes).map_err(|_| invalid("OCI manifest is not UTF-8"))?,
     )
     .map_err(io::Error::other)?;
     let manifest = object(&manifest, "OCI manifest")?;
@@ -1292,11 +1313,12 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     let config_size = number_field(config, "size")?;
     let config_bytes = read_blob(root, config_digest)?;
     if config_bytes.len() as u64 != config_size || digest_for(&config_bytes) != config_digest {
-        return Err(invalid("OCI config descriptor failed its digest or size check"));
+        return Err(invalid(
+            "OCI config descriptor failed its digest or size check",
+        ));
     }
     let config = JSON::parse(
-        std::str::from_utf8(&config_bytes)
-            .map_err(|_| invalid("OCI config is not UTF-8"))?,
+        std::str::from_utf8(&config_bytes).map_err(|_| invalid("OCI config is not UTF-8"))?,
     )
     .map_err(io::Error::other)?;
     let config = object(&config, "OCI config")?;
@@ -1350,7 +1372,12 @@ fn validate_layer_files(files: &[&LayerFile]) -> io::Result<()> {
         }
         let path = Path::new(&file.path);
         if path.components().any(|component| {
-            matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
         }) {
             return Err(invalid("OCI layer path escapes the image root"));
         }
@@ -1364,7 +1391,9 @@ fn validate_layer_files(files: &[&LayerFile]) -> io::Result<()> {
     let paths: Vec<_> = paths.keys().collect();
     for pair in paths.windows(2) {
         if pair[1].starts_with(&format!("{}/", pair[0])) {
-            return Err(invalid("OCI layer contains a file/directory path collision"));
+            return Err(invalid(
+                "OCI layer contains a file/directory path collision",
+            ));
         }
     }
     Ok(())
@@ -1405,14 +1434,20 @@ fn read_blob(root: &Path, digest: &str) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn object<'a>(value: &'a JSON::JSONValue, label: &str) -> io::Result<&'a std::collections::BTreeMap<String, JSON::JSONValue>> {
+fn object<'a>(
+    value: &'a JSON::JSONValue,
+    label: &str,
+) -> io::Result<&'a std::collections::BTreeMap<String, JSON::JSONValue>> {
     match value {
         JSON::JSONValue::Object(object) => Ok(object),
         _ => Err(invalid(&format!("{label} is not an object"))),
     }
 }
 
-fn array<'a>(value: Option<&'a JSON::JSONValue>, label: &str) -> io::Result<&'a Vec<JSON::JSONValue>> {
+fn array<'a>(
+    value: Option<&'a JSON::JSONValue>,
+    label: &str,
+) -> io::Result<&'a Vec<JSON::JSONValue>> {
     match value {
         Some(JSON::JSONValue::Array(values)) => Ok(values),
         _ => Err(invalid(&format!("{label} is not an array"))),
@@ -1425,7 +1460,9 @@ fn string_field<'a>(
 ) -> io::Result<&'a str> {
     match object.get(field) {
         Some(JSON::JSONValue::String(value)) if !value.is_empty() => Ok(value),
-        _ => Err(invalid(&format!("OCI object field `{field}` is not a string"))),
+        _ => Err(invalid(&format!(
+            "OCI object field `{field}` is not a string"
+        ))),
     }
 }
 
@@ -1439,8 +1476,13 @@ fn number_field(
             if value.is_finite()
                 && *value >= 0.0
                 && *value <= u64::MAX as f64
-                && value.fract() == 0.0 => Ok(*value as u64),
-        _ => Err(invalid(&format!("OCI object field `{field}` is not a non-negative integer"))),
+                && value.fract() == 0.0 =>
+        {
+            Ok(*value as u64)
+        }
+        _ => Err(invalid(&format!(
+            "OCI object field `{field}` is not a non-negative integer"
+        ))),
     }
 }
 
@@ -1821,14 +1863,10 @@ mod tests {
 
     #[test]
     fn base_platform_mismatch_is_rejected() {
-        let base_dir = std::env::temp_dir().join(format!(
-            "jet-oci-test-base-arm64-{}",
-            std::process::id()
-        ));
-        let output_dir = std::env::temp_dir().join(format!(
-            "jet-oci-test-base-mismatch-{}",
-            std::process::id()
-        ));
+        let base_dir =
+            std::env::temp_dir().join(format!("jet-oci-test-base-arm64-{}", std::process::id()));
+        let output_dir =
+            std::env::temp_dir().join(format!("jet-oci-test-base-mismatch-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base_dir);
         let _ = fs::remove_dir_all(&output_dir);
         let base = BuildSpec {

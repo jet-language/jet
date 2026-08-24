@@ -4,8 +4,8 @@
 //! automation resolves a project-pinned install — never a host PATH scrape.
 
 use crate::Lock::{self, LockEnvelope, LockedBrowser};
-use crate::SHA256;
 use crate::Syntax;
+use crate::SHA256;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,8 +14,16 @@ pub enum BrowserLockError {
     UnknownEngine(String),
     MissingBinary(PathBuf),
     MissingLock(String),
-    HashMismatch { engine: String, expected: String, actual: String },
-    SizeMismatch { engine: String, expected: u64, actual: u64 },
+    HashMismatch {
+        engine: String,
+        expected: String,
+        actual: String,
+    },
+    SizeMismatch {
+        engine: String,
+        expected: u64,
+        actual: u64,
+    },
     Io(String),
     InvalidProtocol(String),
 }
@@ -137,9 +145,8 @@ pub fn lock_binary(
 /// Resolve and re-verify a locked browser. Hash and size must still match.
 pub fn resolve(project_root: &Path, engine: &str) -> Result<LockedBrowser, BrowserLockError> {
     let engine = normalize_engine(engine)?;
-    let lock = Lock::load(project_root).ok_or_else(|| {
-        BrowserLockError::MissingLock(engine.to_string())
-    })?;
+    let lock = Lock::load(project_root)
+        .ok_or_else(|| BrowserLockError::MissingLock(engine.to_string()))?;
     let locked = lock
         .browsers
         .into_iter()
@@ -216,9 +223,7 @@ pub fn find_engine_binary(output: &Path, engine: &str) -> Result<PathBuf, Browse
 }
 
 pub fn read_version_label(binary: &Path) -> String {
-    let output = std::process::Command::new(binary)
-        .arg("--version")
-        .output();
+    let output = std::process::Command::new(binary).arg("--version").output();
     match output {
         Ok(out) => {
             let text = format!(
@@ -226,11 +231,7 @@ pub fn read_version_label(binary: &Path) -> String {
                 String::from_utf8_lossy(&out.stdout),
                 String::from_utf8_lossy(&out.stderr)
             );
-            text.lines()
-                .next()
-                .unwrap_or("unknown")
-                .trim()
-                .to_string()
+            text.lines().next().unwrap_or("unknown").trim().to_string()
         }
         Err(_) => "unknown".to_string(),
     }

@@ -15,7 +15,6 @@ use super::module_storage_workload::{
 use super::options_rendering::{boot_profile, render_proof};
 use super::root_projection::{copy_file_replace, write_bootable_root_projection};
 use super::store_realize::RealizedPackage;
-use super::types::OSFlags;
 use super::studio_projection::{make_executable, write_studio_app_projection};
 use super::system_facts::{
     write_hardware_facts, write_init_facts, write_network_facts, write_secret_manifest,
@@ -23,19 +22,19 @@ use super::system_facts::{
 };
 use super::theme_fleet_lifecycle::{
     write_app_module_facts, write_fleet_deploy_facts, write_image_variant_facts,
-    write_lifecycle_facts, write_options_reference, write_service_manager_depth,
-    write_theme_facts,
+    write_lifecycle_facts, write_options_reference, write_service_manager_depth, write_theme_facts,
 };
+use super::types::OSFlags;
 use super::user_flatpak_perf::{
     write_flatpak_facts, write_performance_facts, write_user_environment_facts,
 };
-use jet_env_model::AST::{Expr, Item, StrPart};
+use crate::Store;
+use crate::JSON;
 use jet_env_model::ModuleEval::{EnvPlan, ServicePlan, SystemPlan};
+use jet_env_model::AST::{Expr, Item, StrPart};
 use jet_env_model::{Lexer, Parser, Syntax};
 use jet_pkg_model::Authority::{AuthorityResolver, CheckedPackage};
 use jet_pkg_model::Package::MemberRef;
-use crate::Store;
-use crate::JSON;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -119,7 +118,10 @@ pub(super) fn write_generation_files(
         "systemd timer/socket units",
         write_systemd_timer_socket_units(dir, system),
     )?;
-    generation_stage("terminal environment", write_terminal_environment(dir, system))?;
+    generation_stage(
+        "terminal environment",
+        write_terminal_environment(dir, system),
+    )?;
     generation_stage(
         "activation diff",
         write_activation_diff(dir, published_dir, system, realized),
@@ -139,7 +141,10 @@ pub(super) fn write_generation_files(
     generation_stage("storage facts", write_storage_facts(dir, system))?;
     generation_stage("workload facts", write_workload_facts(dir, system))?;
     generation_stage("theme facts", write_theme_facts(dir, system))?;
-    generation_stage("fleet deploy facts", write_fleet_deploy_facts(dir, system, plan))?;
+    generation_stage(
+        "fleet deploy facts",
+        write_fleet_deploy_facts(dir, system, plan),
+    )?;
     generation_stage("options reference", write_options_reference(dir, system))?;
     generation_stage(
         "image variant facts",
@@ -224,14 +229,8 @@ pub(super) fn write_generation_root_proof(
         .collect::<Vec<_>>();
     output_digests.sort();
     output_digests.dedup();
-    let witness = generation_root_witness(
-        host,
-        name,
-        &source_proof,
-        &plan,
-        &manifest,
-        &output_digests,
-    );
+    let witness =
+        generation_root_witness(host, name, &source_proof, &plan, &manifest, &output_digests);
     write_generation_root_metadata(
         dir,
         host,
@@ -258,12 +257,16 @@ pub(super) fn validate_generation_root_proof(
 ) -> std::io::Result<GenerationRootProof> {
     let root_metadata = fs::symlink_metadata(dir)?;
     if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
-        return Err(invalid_generation("published generation root is not an owned directory"));
+        return Err(invalid_generation(
+            "published generation root is not an owned directory",
+        ));
     }
     let stored_manifest = fs::read(dir.join("generation-files.proof"))?;
     let manifest = generation_files_manifest(dir)?;
     if manifest != stored_manifest {
-        return Err(invalid_generation("generation files proof does not match the sealed tree"));
+        return Err(invalid_generation(
+            "generation files proof does not match the sealed tree",
+        ));
     }
     let source_proof = fs::read(dir.join("source-proof.json"))?;
     let plan = fs::read(dir.join("plan.json"))?;
@@ -276,16 +279,23 @@ pub(super) fn validate_generation_root_proof(
         ("generation", name),
     ] {
         if json_string(&root, key)? != expected {
-            return Err(invalid_generation("generation root identity does not match its path"));
+            return Err(invalid_generation(
+                "generation root identity does not match its path",
+            ));
         }
     }
     for (key, expected) in [
-        ("source_proof_sha256", crate::SHA256::sha256_hex(&source_proof)),
+        (
+            "source_proof_sha256",
+            crate::SHA256::sha256_hex(&source_proof),
+        ),
         ("plan_sha256", crate::SHA256::sha256_hex(&plan)),
         ("files_proof_sha256", crate::SHA256::sha256_hex(&manifest)),
     ] {
         if json_string(&root, key)? != expected {
-            return Err(invalid_generation("generation root hash does not match its durable proof"));
+            return Err(invalid_generation(
+                "generation root hash does not match its durable proof",
+            ));
         }
     }
     let mut output_digests = root
@@ -294,27 +304,30 @@ pub(super) fn validate_generation_root_proof(
         .as_array()
         .map_err(invalid_generation)?
         .iter()
-        .map(|value| value.as_str().map(str::to_string).map_err(invalid_generation))
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .map_err(invalid_generation)
+        })
         .collect::<std::io::Result<Vec<_>>>()?;
     let original = output_digests.clone();
     output_digests.sort();
     output_digests.dedup();
     if output_digests != original {
-        return Err(invalid_generation("generation Hangar targets are not canonical and sorted"));
+        return Err(invalid_generation(
+            "generation Hangar targets are not canonical and sorted",
+        ));
     }
     for digest in &output_digests {
         validate_hangar_digest(roots, digest)?;
     }
-    let witness = generation_root_witness(
-        host,
-        name,
-        &source_proof,
-        &plan,
-        &manifest,
-        &output_digests,
-    );
+    let witness =
+        generation_root_witness(host, name, &source_proof, &plan, &manifest, &output_digests);
     if json_string(&root, "witness")? != witness {
-        return Err(invalid_generation("generation root witness does not match its proofs"));
+        return Err(invalid_generation(
+            "generation root witness does not match its proofs",
+        ));
     }
     Ok(GenerationRootProof {
         witness,
@@ -394,7 +407,9 @@ fn validate_source_proof(
         ("evaluator_semantics", EVALUATOR_SEMANTICS.to_string()),
     ] {
         if json_string(&proof, key)? != expected {
-            return Err(invalid_generation("generation source proof does not match current input"));
+            return Err(invalid_generation(
+                "generation source proof does not match current input",
+            ));
         }
     }
     let real_tier = match proof.get("real_tier").map_err(invalid_generation)? {
@@ -402,7 +417,9 @@ fn validate_source_proof(
         _ => return Err(invalid_generation("generation source tier is not boolean")),
     };
     if real_tier != flags.real_tier {
-        return Err(invalid_generation("generation source proof uses a different realization tier"));
+        return Err(invalid_generation(
+            "generation source proof uses a different realization tier",
+        ));
     }
     Ok(())
 }
@@ -416,7 +433,8 @@ fn generation_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
     if !diagnostics.is_empty() {
         return Err(invalid_generation("generation source closure does not lex"));
     }
-    let program = Parser::parse(&tokens).map_err(|_| invalid_generation("generation source closure does not parse"))?;
+    let program = Parser::parse(&tokens)
+        .map_err(|_| invalid_generation("generation source closure does not parse"))?;
     let source_base = std::env::var_os("JETOS_STUDIO_SOURCE_BASE").map(PathBuf::from);
     let base = source_base
         .as_deref()
@@ -561,20 +579,28 @@ fn json_string(value: &JSON::JSONValue, key: &str) -> std::io::Result<String> {
 fn validate_hangar_digest(roots: &Store::Roots, digest: &str) -> std::io::Result<()> {
     if digest.len() != 71
         || !digest.starts_with("sha256-")
-        || !digest[7..].bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        || !digest[7..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
-        return Err(invalid_generation("generation contains a non-canonical Hangar digest"));
+        return Err(invalid_generation(
+            "generation contains a non-canonical Hangar digest",
+        ));
     }
     let object_root = roots.hangar_dir().join("objects");
     let object = object_root.join(digest);
     let metadata = fs::symlink_metadata(&object)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(invalid_generation("generation Hangar target is not an owned object"));
+        return Err(invalid_generation(
+            "generation Hangar target is not an owned object",
+        ));
     }
     let canonical_root = fs::canonicalize(&object_root)?;
     let canonical_object = fs::canonicalize(&object)?;
     if !canonical_object.starts_with(&canonical_root) || !canonical_object.is_dir() {
-        return Err(invalid_generation("generation Hangar target is not an owned object"));
+        return Err(invalid_generation(
+            "generation Hangar target is not an owned object",
+        ));
     }
     Ok(())
 }
@@ -781,7 +807,9 @@ pub(super) fn render_plan_json(
         .collect::<Vec<_>>()
         .join(",");
     let boot = boot_profile(system);
-    let graph_identity = graph_identity.map(JSON::quote).unwrap_or_else(|| "null".to_string());
+    let graph_identity = graph_identity
+        .map(JSON::quote)
+        .unwrap_or_else(|| "null".to_string());
     format!(
         "{{\"host\":{},\"target\":{},\"graph_identity\":{},\"boot\":{},\"packages\":[{}],\"closure\":[{}],\"services\":[{}],\"options\":[{}]}}",
         JSON::quote(&system.name),
@@ -1181,7 +1209,9 @@ fn rewrite_store_symlinks(root: &Path, path: &Path, store: &Path) -> std::io::Re
             #[cfg(not(unix))]
             {
                 let _ = rewritten;
-                return Err(std::io::Error::other("store symlink rewriting needs Unix symlinks"));
+                return Err(std::io::Error::other(
+                    "store symlink rewriting needs Unix symlinks",
+                ));
             }
         }
         return Ok(());
@@ -1205,7 +1235,9 @@ pub(super) fn relative_path(from: &Path, to: &Path) -> std::io::Result<PathBuf> 
         .take_while(|(left, right)| left == right)
         .count();
     if common == 0 {
-        return Err(std::io::Error::other("cannot relativize generation store path"));
+        return Err(std::io::Error::other(
+            "cannot relativize generation store path",
+        ));
     }
     let mut path = PathBuf::new();
     for _ in common..from.len() {
@@ -1239,11 +1271,7 @@ pub(super) fn copy_runtime_symlink(src: &Path, dst: &Path) -> std::io::Result<()
     copy_file_replace(src, dst)
 }
 
-fn write_jetos_toolchain(
-    dir: &Path,
-    sw_bin: &Path,
-    manifest: &mut String,
-) -> std::io::Result<()> {
+fn write_jetos_toolchain(dir: &Path, sw_bin: &Path, manifest: &mut String) -> std::io::Result<()> {
     let candidates = jet_toolchain_candidates();
     for name in ["jet", "jetpack", "jetos"] {
         let Some(src) = candidates.iter().find(|path| {
@@ -1268,7 +1296,10 @@ fn write_jetos_toolchain(
         make_executable(&dst).map_err(|e| {
             std::io::Error::new(
                 e.kind(),
-                format!("marking jetos tool `{}` executable failed: {e}", dst.display()),
+                format!(
+                    "marking jetos tool `{}` executable failed: {e}",
+                    dst.display()
+                ),
             )
         })?;
         manifest.push_str(&format!("jetos-toolchain {name} {}\n", src.display()));
@@ -1384,8 +1415,8 @@ mod generation_closure_tests {
         let target = Path::new("nix/store/aaaa-package/bin/tool");
         symlink(target, &link).unwrap();
 
-        let error = rewrite_store_symlinks(&generation, &link, Path::new("/nix/store"))
-            .unwrap_err();
+        let error =
+            rewrite_store_symlinks(&generation, &link, Path::new("/nix/store")).unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert_eq!(
@@ -1420,7 +1451,11 @@ mod generation_closure_tests {
         let package_tool = package.join("bin/tool-real");
         fs::write(&package_tool, "#!/bin/sh\nprintf closure-owned").unwrap();
         fs::set_permissions(&package_tool, fs::Permissions::from_mode(0o555)).unwrap();
-        fs::write(dependency.join("bin/dependency-data"), "required closure member").unwrap();
+        fs::write(
+            dependency.join("bin/dependency-data"),
+            "required closure member",
+        )
+        .unwrap();
 
         let helper = guard.0.join("nix-store");
         fs::write(
@@ -1484,7 +1519,9 @@ mod generation_closure_tests {
         drop(lease);
         fs::remove_dir_all(&store).unwrap();
 
-        let owned_tool = generation.join(package.strip_prefix("/").unwrap()).join("bin/tool");
+        let owned_tool = generation
+            .join(package.strip_prefix("/").unwrap())
+            .join("bin/tool");
         assert!(generation
             .join(dependency.strip_prefix("/").unwrap())
             .join("bin/dependency-data")

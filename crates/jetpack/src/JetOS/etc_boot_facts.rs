@@ -5,8 +5,8 @@ use super::options_rendering::{
 use super::root_projection::copy_file_replace;
 use super::store_realize::RealizedPackage;
 use super::types::CACHYOS_KERNEL_PACKAGE;
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -81,7 +81,10 @@ fn write_identity_files(dir: &Path, etc: &Path, system: &SystemPlan) -> std::io:
     fs::write(usr_lib.join("os-release"), &os_release)?;
     fs::write(
         etc.join("machine-id"),
-        format!("{}\n", &crate::SHA256::sha256_hex(system.name.as_bytes())[..32]),
+        format!(
+            "{}\n",
+            &crate::SHA256::sha256_hex(system.name.as_bytes())[..32]
+        ),
     )?;
     fs::write(
         etc.join("nsswitch.conf"),

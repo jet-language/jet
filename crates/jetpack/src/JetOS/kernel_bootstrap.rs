@@ -127,18 +127,16 @@ fn default_cachyos_kernel_env(use_host_defaults: bool) -> Vec<(&'static str, Pat
         return env;
     }
     if std::env::var_os("JETOS_CACHYOS_KERNEL").is_none() {
-        if let Some(kernel) = first_existing_path(&[
-            "/run/booted-system/kernel",
-            "/run/current-system/kernel",
-        ]) {
+        if let Some(kernel) =
+            first_existing_path(&["/run/booted-system/kernel", "/run/current-system/kernel"])
+        {
             env.push(("JETOS_CACHYOS_KERNEL", kernel));
         }
     }
     if std::env::var_os("JETOS_CACHYOS_INITRD").is_none() {
-        if let Some(initrd) = first_existing_path(&[
-            "/run/booted-system/initrd",
-            "/run/current-system/initrd",
-        ]) {
+        if let Some(initrd) =
+            first_existing_path(&["/run/booted-system/initrd", "/run/current-system/initrd"])
+        {
             env.push(("JETOS_CACHYOS_INITRD", initrd));
         }
     }
@@ -166,10 +164,7 @@ fn kernel_module_tree(modules: &Path) -> Option<PathBuf> {
 }
 
 fn first_existing_path(paths: &[&str]) -> Option<PathBuf> {
-    paths
-        .iter()
-        .map(PathBuf::from)
-        .find(|path| path.exists())
+    paths.iter().map(PathBuf::from).find(|path| path.exists())
 }
 
 pub(super) fn validate_boot_payloads(

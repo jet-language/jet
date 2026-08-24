@@ -1,12 +1,12 @@
 use super::entry::default_config_path;
 use super::options_rendering::user_names;
 use super::types::Target;
+use crate::Output::Theme;
+use crate::Package::PackageFacts;
+use crate::Syntax;
 use jet_env_model::ModuleEval::{
     self, env_plan_from_package_outputs, project_package_outputs, EnvPlan, SystemPlan,
 };
-use crate::Package::PackageFacts;
-use crate::Output::Theme;
-use crate::Syntax;
 use std::fs;
 use std::path::{Path, PathBuf};
 

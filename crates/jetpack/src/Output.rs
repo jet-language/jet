@@ -161,7 +161,10 @@ impl Theme {
     /// the same + / - / ~ symbols for deterministic logs and review.
     pub fn plan_row(&self, mark: PlanMark, name: &str, name_w: usize, from: &str, to: &str) {
         let pad = " ".repeat(Syntax::JETPACK_PROMPT_LABEL.len() + 4);
-        eprintln!("{pad}{}", self.render_plan_row(mark, name, name_w, from, to));
+        eprintln!(
+            "{pad}{}",
+            self.render_plan_row(mark, name, name_w, from, to)
+        );
     }
 
     pub fn render_progress_chain(
@@ -282,7 +285,13 @@ impl Theme {
     }
 
     /// `building K/N · <current>` — the live region's header line.
-    pub fn render_live_header(&self, verb: &str, done: usize, total: usize, current: &str) -> String {
+    pub fn render_live_header(
+        &self,
+        verb: &str,
+        done: usize,
+        total: usize,
+        current: &str,
+    ) -> String {
         format!("{verb} {done}/{total} {} {}", self.gray("·"), current)
     }
 
@@ -400,7 +409,10 @@ impl Theme {
             const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let mut i = 0usize;
             while !flag.load(Ordering::Relaxed) {
-                eprint!("\r{pad}\x1b[{accent}m{}\x1b[0m {msg}", FRAMES[i % FRAMES.len()]);
+                eprint!(
+                    "\r{pad}\x1b[{accent}m{}\x1b[0m {msg}",
+                    FRAMES[i % FRAMES.len()]
+                );
                 use std::io::Write;
                 let _ = std::io::stderr().flush();
                 i += 1;
@@ -767,14 +779,7 @@ mod tests {
     fn dependency_status_uses_real_edge_direction_and_stable_plain_text() {
         let theme = Theme { color: false };
         assert_eq!(
-            theme.render_dependency_status(
-                "building",
-                2,
-                5,
-                "nixpkgs",
-                "ripgrep",
-                "resolving",
-            ),
+            theme.render_dependency_status("building", 2, 5, "nixpkgs", "ripgrep", "resolving",),
             "building completed 2/5 · current: nixpkgs -> ripgrep · resolving"
         );
     }
@@ -797,7 +802,10 @@ mod tests {
             theme.render_ready_row("ripgrep", 8, "14.1.0"),
             "✓ ripgrep   14.1.0"
         );
-        assert_eq!(theme.render_ready_row("fd", 8, "9.0.0"), "✓ fd        9.0.0");
+        assert_eq!(
+            theme.render_ready_row("fd", 8, "9.0.0"),
+            "✓ fd        9.0.0"
+        );
     }
 
     #[test]
@@ -847,10 +855,7 @@ mod tests {
 
     #[test]
     fn plan_gen_header_reads_gen_arrow_gen() {
-        assert_eq!(
-            Theme::render_plan_gen_header(42, 43),
-            "Plan  gen 42 → 43"
-        );
+        assert_eq!(Theme::render_plan_gen_header(42, 43), "Plan  gen 42 → 43");
     }
 
     #[test]
@@ -858,7 +863,10 @@ mod tests {
         assert_eq!(Theme::render_download_line(240_000_000), "Download 240 MB");
         assert_eq!(Theme::render_download_line(0), "Download 0 B");
         assert_eq!(Theme::render_download_line(512), "Download 512 B");
-        assert_eq!(Theme::render_download_line(1_300_000_000), "Download 1.3 GB");
+        assert_eq!(
+            Theme::render_download_line(1_300_000_000),
+            "Download 1.3 GB"
+        );
     }
 
     // -- human_size --

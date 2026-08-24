@@ -75,7 +75,10 @@ pub(super) fn cmd_import(theme: &Theme, args: &[String], flags: &OSFlags) -> i32
     if import_args.write {
         match write_nixos_import_output(&import_args, flags, &config, &audit) {
             Ok((config_path, audit_path)) => {
-                theme.ok(&format!("wrote imported jetos config {}", config_path.display()));
+                theme.ok(&format!(
+                    "wrote imported jetos config {}",
+                    config_path.display()
+                ));
                 theme.detail(&format!("wrote import audit {}", audit_path.display()));
                 0
             }
@@ -197,7 +200,10 @@ fn parse_nixos_import_args(theme: &Theme, args: &[String]) -> Option<NixosImport
 
 fn load_nixos_import_plan(args: &NixosImportArgs) -> Result<NixosImportPlan, String> {
     if !args.source.exists() {
-        return Err(format!("import source `{}` does not exist.", args.source.display()));
+        return Err(format!(
+            "import source `{}` does not exist.",
+            args.source.display()
+        ));
     }
     let facts_path = nixos_import_facts_path(&args.source);
     if !args.facts_only {
@@ -233,16 +239,19 @@ fn import_plan_from_json(
     facts_path: &Path,
     text: &str,
 ) -> Result<NixosImportPlan, String> {
-    let json = JSON::parse(text).map_err(|e| format!("parsing `{}` failed: {e}", facts_path.display()))?;
-    let root = json.as_object().map_err(|e| format!("import facts root: {e}"))?;
+    let json =
+        JSON::parse(text).map_err(|e| format!("parsing `{}` failed: {e}", facts_path.display()))?;
+    let root = json
+        .as_object()
+        .map_err(|e| format!("import facts root: {e}"))?;
     let host = args
         .host
         .clone()
         .or_else(|| import_json_string(root, "host"))
         .ok_or_else(|| "import facts need `host`, or pass `--host <name>`.".to_string())?;
     let target = import_json_string(root, "target").unwrap_or_else(|| "linux.x64".to_string());
-    let nixpkgs_ref =
-        import_json_string(root, "nixpkgs").unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
+    let nixpkgs_ref = import_json_string(root, "nixpkgs")
+        .unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
     let (packages, omitted_packages) = import_package_list(root, "packages");
     let services = import_json_string_array(root, "services");
     let mut options = import_json_option_object(root, "options");
@@ -311,7 +320,8 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
         modules.push("flake-parts detected; exact module graph needs semantic facts".to_string());
     }
     if text.contains("home-manager") || text.contains("homeManager") {
-        home_modules.push("Home Manager detected; exact user graph needs semantic facts".to_string());
+        home_modules
+            .push("Home Manager detected; exact user graph needs semantic facts".to_string());
     }
     let mut omissions = vec![
         "no jetos-import-facts.json was present; this is an audited scan draft, not a complete conversion".to_string(),
@@ -330,7 +340,8 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
             packages: Vec::new(),
             sourced_packages: Vec::new(),
             omitted_packages: Vec::new(),
-            home_manager: text.contains(name) && (text.contains("home-manager") || text.contains("homeManager")),
+            home_manager: text.contains(name)
+                && (text.contains("home-manager") || text.contains("homeManager")),
         })
         .collect::<Vec<_>>();
     Ok(NixosImportPlan {
@@ -429,7 +440,9 @@ fn import_json_users(
     };
     let mut users = Vec::new();
     for user_json in users_json.as_array().map_err(|e| format!("users: {e}"))? {
-        let user = user_json.as_object().map_err(|e| format!("user entry: {e}"))?;
+        let user = user_json
+            .as_object()
+            .map_err(|e| format!("user entry: {e}"))?;
         let name = import_json_string(user, "name")
             .ok_or_else(|| "each imported user needs a `name`.".to_string())?;
         if !selected.is_empty() && !selected.iter().any(|wanted| wanted == &name) {
@@ -537,10 +550,7 @@ fn render_nixos_import_config(plan: &NixosImportPlan) -> String {
     out
 }
 
-fn render_import_package_groups(
-    nixpkgs: &[String],
-    sourced: &[(String, Vec<String>)],
-) -> String {
+fn render_import_package_groups(nixpkgs: &[String], sourced: &[(String, Vec<String>)]) -> String {
     let mut refs = Vec::new();
     for package in nixpkgs {
         refs.push(format!("nixpkgs.{package}"));
@@ -602,7 +612,10 @@ fn write_nixos_import_output(
             .join("jetos-import-audit.json");
         (out, audit)
     } else {
-        (out.join(Syntax::CONFIG_FILE), out.join("jetos-import-audit.json"))
+        (
+            out.join(Syntax::CONFIG_FILE),
+            out.join("jetos-import-audit.json"),
+        )
     };
     if config_path.exists() && !flags.assume_yes {
         return Err(format!(
@@ -631,7 +644,11 @@ fn import_render_json_value(value: &JSON::JSONValue) -> String {
         JSON::JSONValue::Bool(value) => value.to_string(),
         JSON::JSONValue::Number(value) => value.to_string(),
         JSON::JSONValue::Flt(value) => {
-            if value.fract() == 0.0 { format!("{}", *value as i64) } else { value.to_string() }
+            if value.fract() == 0.0 {
+                format!("{}", *value as i64)
+            } else {
+                value.to_string()
+            }
         }
         JSON::JSONValue::String(value) => import_render_string(value),
         JSON::JSONValue::Array(values) => {
@@ -665,7 +682,11 @@ fn import_render_json_for_audit(value: &JSON::JSONValue) -> String {
             let parts = map
                 .iter()
                 .map(|(key, value)| {
-                    format!("{}:{}", JSON::quote(key), import_render_json_for_audit(value))
+                    format!(
+                        "{}:{}",
+                        JSON::quote(key),
+                        import_render_json_for_audit(value)
+                    )
                 })
                 .collect::<Vec<_>>()
                 .join(",");

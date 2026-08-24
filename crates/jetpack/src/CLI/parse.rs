@@ -1,14 +1,16 @@
 use super::add_remove_push_image::{cmd_add, cmd_image, cmd_push, cmd_remove};
 use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
-use super::cmd_doctor;
-use super::package_hangar_vendor::{cmd_audit, cmd_cache, cmd_clean, cmd_hangar, cmd_list, cmd_vendor};
-use super::shared_store::cmd_shared_store;
-use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
-use super::format::cmd_fmt;
-use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
-use super::tool::cmd_tool;
-use super::profile::cmd_profile;
 use super::browser::cmd_browser;
+use super::cmd_doctor;
+use super::format::cmd_fmt;
+use super::package_hangar_vendor::{
+    cmd_audit, cmd_cache, cmd_clean, cmd_hangar, cmd_list, cmd_vendor,
+};
+use super::profile::cmd_profile;
+use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
+use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
+use super::shared_store::cmd_shared_store;
+use super::tool::cmd_tool;
 use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
@@ -449,8 +451,8 @@ pub fn main(args: Vec<String>) -> i32 {
     }
     let theme = Theme::resolve_choice(color);
     // Doctor must observe state without repairing or migrating it.
-    let read_only_shared_store_status = verb == "shared-store"
-        && parsed.positional.first().map(String::as_str) == Some("status");
+    let read_only_shared_store_status =
+        verb == "shared-store" && parsed.positional.first().map(String::as_str) == Some("status");
     if verb != "doctor" && !read_only_shared_store_status {
         let roots = Store::resolve();
         if let Err(error) = Store::migrate_legacy_hangar(&roots) {

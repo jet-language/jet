@@ -26,12 +26,19 @@ pub(super) fn validate_declared_secrets(
 ) -> Result<(), i32> {
     let environment = active_environment.unwrap_or("dynamic");
     if let Err(message) = Secrets::write_runtime_plan(project_dir, specs) {
-        theme.error("couldn't install the secret read plan", &message, "fix the project `.jet` directory and try activation again.");
+        theme.error(
+            "couldn't install the secret read plan",
+            &message,
+            "fix the project `.jet` directory and try activation again.",
+        );
         return Err(2);
     }
     for spec in specs {
         if !spec.allowed_environments.is_empty()
-            && !spec.allowed_environments.iter().any(|name| name == environment)
+            && !spec
+                .allowed_environments
+                .iter()
+                .any(|name| name == environment)
         {
             theme.error_coded(
                 "E1333",
@@ -44,7 +51,11 @@ pub(super) fn validate_declared_secrets(
         let missing = match secret_activation_missing(project_dir, spec, specs, &mut Vec::new()) {
             Ok(missing) => missing,
             Err(message) => {
-                theme.error(&format!("couldn't read secret named {}", spec.name), &message, "");
+                theme.error(
+                    &format!("couldn't read secret named {}", spec.name),
+                    &message,
+                    "",
+                );
                 return Err(2);
             }
         };
@@ -66,12 +77,25 @@ pub(super) fn validate_declared_secrets(
                 2
             })? {
                 if age > std::time::Duration::from_secs(seconds) {
-                    let headline = format!("secret named {} is past its rotation age for environment {}", spec.name, environment);
+                    let headline = format!(
+                        "secret named {} is past its rotation age for environment {}",
+                        spec.name, environment
+                    );
                     if spec.required {
-                        theme.error_coded("E1333", &headline, "the required declaration's max-age policy is overdue.", "rotate the named secret and activate again.");
+                        theme.error_coded(
+                            "E1333",
+                            &headline,
+                            "the required declaration's max-age policy is overdue.",
+                            "rotate the named secret and activate again.",
+                        );
                         return Err(2);
                     }
-                    theme.warning_coded("E1333", &headline, "the optional declaration's max-age policy is overdue.", "rotate the named secret when practical.");
+                    theme.warning_coded(
+                        "E1333",
+                        &headline,
+                        "the optional declaration's max-age policy is overdue.",
+                        "rotate the named secret when practical.",
+                    );
                 }
             }
         }
@@ -96,11 +120,14 @@ fn secret_activation_missing(
         ModuleEval::SecretDeclaration::Compose { from, .. } => {
             visiting.push(spec.name.clone());
             for input in from {
-                let Some(input_spec) = specs.iter().find(|candidate| candidate.name == *input) else {
+                let Some(input_spec) = specs.iter().find(|candidate| candidate.name == *input)
+                else {
                     visiting.pop();
                     return Ok(Some(input.clone()));
                 };
-                if let Some(missing) = secret_activation_missing(project_dir, input_spec, specs, visiting)? {
+                if let Some(missing) =
+                    secret_activation_missing(project_dir, input_spec, specs, visiting)?
+                {
                     visiting.pop();
                     return Ok(Some(missing));
                 }

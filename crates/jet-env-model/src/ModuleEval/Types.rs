@@ -112,7 +112,9 @@ impl SecretSpec {
         };
         let default_profiles = match &self.default {
             SecretDefault::None => String::new(),
-            SecretDefault::PerProfile(values) => values.keys().cloned().collect::<Vec<_>>().join(","),
+            SecretDefault::PerProfile(values) => {
+                values.keys().cloned().collect::<Vec<_>>().join(",")
+            }
         };
         let generator = match self.generate {
             SecretGenerator::None => "none".to_string(),
@@ -136,7 +138,10 @@ impl fmt::Debug for SecretSpec {
         formatter
             .debug_struct("SecretSpec")
             .field("name", &self.name)
-            .field("description", &self.description.as_ref().map(|_| "<redacted>"))
+            .field(
+                "description",
+                &self.description.as_ref().map(|_| "<redacted>"),
+            )
             .field("required", &self.required)
             .field("allowed_environments", &self.allowed_environments)
             .field("rotation", &self.rotation)

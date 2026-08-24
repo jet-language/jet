@@ -76,10 +76,12 @@ pub struct FileSyncReport {
 
 impl FilePlan {
     pub fn has_changes(&self) -> bool {
-        self.actions
-            .iter()
-            .any(|action| matches!(action.kind, FileActionKind::Create | FileActionKind::ReplaceOwned))
-            || self.state_before != self.state_after
+        self.actions.iter().any(|action| {
+            matches!(
+                action.kind,
+                FileActionKind::Create | FileActionKind::ReplaceOwned
+            )
+        }) || self.state_before != self.state_after
     }
 
     /// Hash the exact source bytes captured by plan(). apply() consumes this
@@ -104,9 +106,12 @@ impl FilePlan {
 /// Resolve every managed file, including source bytes and all destination
 /// conflicts, without changing the project.
 pub fn plan(project_dir: &Path, declarations: &[ManagedFile]) -> Result<FilePlan, String> {
-    let project_root = project_dir
-        .canonicalize()
-        .map_err(|error| format!("couldn't resolve project root `{}`: {error}", project_dir.display()))?;
+    let project_root = project_dir.canonicalize().map_err(|error| {
+        format!(
+            "couldn't resolve project root `{}`: {error}",
+            project_dir.display()
+        )
+    })?;
     let files_root = project_root.join(".jet").join(FILES_DIR);
     let objects_dir = files_root.join(OBJECTS_DIR);
     let state_path = files_root.join(STATE_FILE);
@@ -118,7 +123,8 @@ pub fn plan(project_dir: &Path, declarations: &[ManagedFile]) -> Result<FilePlan
     let mut actions = Vec::with_capacity(sorted.len());
     let mut state_after = state_before.clone();
     for declaration in sorted {
-        let destination = safe_project_path(&project_root, &declaration.destination, "destination")?;
+        let destination =
+            safe_project_path(&project_root, &declaration.destination, "destination")?;
         let bytes = resolve_bytes(&project_root, &declaration)?;
         let digest = crate::SHA256::sha256_hex(&bytes);
         let kind = classify_action(
@@ -136,8 +142,10 @@ pub fn plan(project_dir: &Path, declarations: &[ManagedFile]) -> Result<FilePlan
             sensitive: declaration.sensitive,
             kind,
         };
-        if matches!(kind, FileActionKind::Create | FileActionKind::ReplaceOwned | FileActionKind::Unchanged)
-            && !matches!(declaration.mode, FileMode::Seed)
+        if matches!(
+            kind,
+            FileActionKind::Create | FileActionKind::ReplaceOwned | FileActionKind::Unchanged
+        ) && !matches!(declaration.mode, FileMode::Seed)
         {
             state_after.entries.insert(
                 declaration.destination.clone(),
@@ -149,7 +157,9 @@ pub fn plan(project_dir: &Path, declarations: &[ManagedFile]) -> Result<FilePlan
                     generation: declaration.generation.clone(),
                 },
             );
-        } else if matches!(kind, FileActionKind::Preserve) || matches!(declaration.mode, FileMode::Seed) {
+        } else if matches!(kind, FileActionKind::Preserve)
+            || matches!(declaration.mode, FileMode::Seed)
+        {
             state_after.entries.remove(&declaration.destination);
         }
         files.push(PlannedFile {
@@ -201,7 +211,12 @@ fn classify_action(
     let existing = match fs::symlink_metadata(destination) {
         Ok(metadata) => Some(metadata),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-        Err(error) => return Err(format!("couldn't inspect `{}`: {error}", destination.display())),
+        Err(error) => {
+            return Err(format!(
+                "couldn't inspect `{}`: {error}",
+                destination.display()
+            ))
+        }
     };
     let owned = state.get(&declaration.destination);
     let Some(existing) = existing else {
@@ -224,8 +239,12 @@ fn classify_action(
         )),
         (Some(owner), true, FileMode::Symlink) if owner.mode == FileMode::Symlink => {
             let object = object_path(objects_dir, declaration, digest);
-            let current = fs::read_link(destination)
-                .map_err(|error| format!("couldn't inspect managed link `{}`: {error}", declaration.destination))?;
+            let current = fs::read_link(destination).map_err(|error| {
+                format!(
+                    "couldn't inspect managed link `{}`: {error}",
+                    declaration.destination
+                )
+            })?;
             if same_link_target(destination, &current, &object)
                 && object_permissions_match(&object, declaration)?
                 && owner.permissions == declaration.permissions
@@ -264,8 +283,12 @@ fn classify_action(
 }
 
 fn file_digest(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path)
-        .map_err(|error| format!("couldn't read managed destination `{}`: {error}", path.display()))?;
+    let bytes = fs::read(path).map_err(|error| {
+        format!(
+            "couldn't read managed destination `{}`: {error}",
+            path.display()
+        )
+    })?;
     Ok(crate::SHA256::sha256_hex(&bytes))
 }
 
@@ -273,9 +296,12 @@ fn same_link_target(link: &Path, current: &Path, desired: &Path) -> bool {
     let current = if current.is_absolute() {
         current.to_path_buf()
     } else {
-        link.parent().unwrap_or_else(|| Path::new(".")).join(current)
+        link.parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(current)
     };
-    current == desired || current.canonicalize().ok().as_deref() == desired.canonicalize().ok().as_deref()
+    current == desired
+        || current.canonicalize().ok().as_deref() == desired.canonicalize().ok().as_deref()
 }
 
 fn object_path(objects_dir: &Path, declaration: &ManagedFile, digest: &str) -> PathBuf {
@@ -289,20 +315,21 @@ fn object_path(objects_dir: &Path, declaration: &ManagedFile, digest: &str) -> P
 }
 
 fn object_permissions(declaration: &ManagedFile) -> u32 {
-    declaration.permissions.unwrap_or_else(|| {
-        if declaration.sensitive {
-            0o400
-        } else {
-            0o444
-        }
-    })
+    declaration
+        .permissions
+        .unwrap_or_else(|| if declaration.sensitive { 0o400 } else { 0o444 })
 }
 
 fn object_permissions_match(path: &Path, declaration: &ManagedFile) -> Result<bool, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!("couldn't inspect managed object `{}`: {error}", path.display())),
+        Err(error) => {
+            return Err(format!(
+                "couldn't inspect managed object `{}`: {error}",
+                path.display()
+            ))
+        }
     };
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Ok(false);
@@ -321,7 +348,10 @@ fn object_permissions_match(path: &Path, declaration: &ManagedFile) -> Result<bo
 fn apply_plan(plan: &FilePlan) -> Result<FileSyncReport, String> {
     let mut report = FileSyncReport::default();
     let has_mutations = plan.files.iter().any(|file| {
-        matches!(file.action, FileActionKind::Create | FileActionKind::ReplaceOwned)
+        matches!(
+            file.action,
+            FileActionKind::Create | FileActionKind::ReplaceOwned
+        )
     });
     if !has_mutations && plan.state_before == plan.state_after {
         report.preserved = plan
@@ -362,15 +392,24 @@ fn apply_plan(plan: &FilePlan) -> Result<FileSyncReport, String> {
                     let destination = &file.destination;
                     if let Ok(metadata) = fs::symlink_metadata(destination) {
                         if metadata.is_dir() {
-                            return Err(format!("managed destination `{}` became a directory", file.declaration.destination));
+                            return Err(format!(
+                                "managed destination `{}` became a directory",
+                                file.declaration.destination
+                            ));
                         }
                         let backup = backup_dir.join(format!("{index}.old"));
                         fs::rename(destination, &backup).map_err(|error| {
-                            format!("couldn't stage `{}` for atomic replacement: {error}", file.declaration.destination)
+                            format!(
+                                "couldn't stage `{}` for atomic replacement: {error}",
+                                file.declaration.destination
+                            )
                         })?;
                         backups.push((destination.clone(), backup));
                     } else if !matches!(file.action, FileActionKind::Create) {
-                        return Err(format!("managed destination `{}` disappeared during sync", file.declaration.destination));
+                        return Err(format!(
+                            "managed destination `{}` disappeared during sync",
+                            file.declaration.destination
+                        ));
                     }
                     install_file(file, &object)?;
                     created.push(destination.clone());
@@ -411,11 +450,17 @@ fn ensure_object(
     match open_existing_object(&object)? {
         Some(mut object_file) => {
             let mut existing = Vec::new();
-            object_file
-                .read_to_end(&mut existing)
-                .map_err(|error| format!("couldn't read managed object `{}`: {error}", object.display()))?;
+            object_file.read_to_end(&mut existing).map_err(|error| {
+                format!(
+                    "couldn't read managed object `{}`: {error}",
+                    object.display()
+                )
+            })?;
             if crate::SHA256::sha256_hex(&existing) != file.digest {
-                return Err(format!("managed object `{}` failed its content hash", object.display()));
+                return Err(format!(
+                    "managed object `{}` failed its content hash",
+                    object.display()
+                ));
             }
             set_file_permissions(
                 &object_file,
@@ -424,29 +469,41 @@ fn ensure_object(
             )?;
         }
         None => {
-            let temp = plan
-                .objects_dir
-                .join(format!(".{}.tmp-{}", file.digest, std::process::id()));
+            let temp =
+                plan.objects_dir
+                    .join(format!(".{}.tmp-{}", file.digest, std::process::id()));
             let mut output = OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&temp)
-                .map_err(|error| format!("couldn't create managed object `{}`: {error}", object.display()))?;
+                .map_err(|error| {
+                    format!(
+                        "couldn't create managed object `{}`: {error}",
+                        object.display()
+                    )
+                })?;
             output
                 .write_all(&file.bytes)
                 .and_then(|_| output.sync_all())
-                .map_err(|error| format!("couldn't write managed object `{}`: {error}", object.display()))?;
-            set_file_permissions(
-                &output,
-                &temp,
-                Some(object_permissions(&file.declaration)),
-            )?;
-            output
-                .sync_all()
-                .map_err(|error| format!("couldn't sync managed object `{}`: {error}", object.display()))?;
+                .map_err(|error| {
+                    format!(
+                        "couldn't write managed object `{}`: {error}",
+                        object.display()
+                    )
+                })?;
+            set_file_permissions(&output, &temp, Some(object_permissions(&file.declaration)))?;
+            output.sync_all().map_err(|error| {
+                format!(
+                    "couldn't sync managed object `{}`: {error}",
+                    object.display()
+                )
+            })?;
             fs::rename(&temp, &object).map_err(|error| {
                 let _ = fs::remove_file(&temp);
-                format!("couldn't publish managed object `{}`: {error}", object.display())
+                format!(
+                    "couldn't publish managed object `{}`: {error}",
+                    object.display()
+                )
             })?;
             new_objects.push(object.clone());
         }
@@ -459,14 +516,20 @@ fn open_existing_object(path: &Path) -> Result<Option<fs::File>, String> {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(format!("couldn't inspect managed object `{}`: {error}", path.display()))
+            return Err(format!(
+                "couldn't inspect managed object `{}`: {error}",
+                path.display()
+            ))
         }
     };
     if metadata.file_type().is_symlink() {
         return Err(format!("managed object `{}` is a symlink", path.display()));
     }
     if !metadata.is_file() {
-        return Err(format!("managed object `{}` is not a regular file", path.display()));
+        return Err(format!(
+            "managed object `{}` is not a regular file",
+            path.display()
+        ));
     }
 
     #[cfg(unix)]
@@ -493,14 +556,21 @@ fn open_existing_object(path: &Path) -> Result<Option<fs::File>, String> {
     match result {
         Ok(file) => Ok(Some(file)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("couldn't open managed object `{}`: {error}", path.display())),
+        Err(error) => Err(format!(
+            "couldn't open managed object `{}`: {error}",
+            path.display()
+        )),
     }
 }
 
 fn install_file(file: &PlannedFile, object: &Path) -> Result<(), String> {
     let parent = file.destination.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("couldn't create parent for `{}`: {error}", file.declaration.destination))?;
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "couldn't create parent for `{}`: {error}",
+            file.declaration.destination
+        )
+    })?;
     let name = file
         .destination
         .file_name()
@@ -514,14 +584,24 @@ fn install_file(file: &PlannedFile, object: &Path) -> Result<(), String> {
                 .write(true)
                 .create_new(true)
                 .open(&temp)
-                .map_err(|error| format!("couldn't create `{}`: {error}", file.declaration.destination))?;
+                .map_err(|error| {
+                    format!(
+                        "couldn't create `{}`: {error}",
+                        file.declaration.destination
+                    )
+                })?;
             output
                 .write_all(&file.bytes)
                 .and_then(|_| output.sync_all())
-                .map_err(|error| format!("couldn't write `{}`: {error}", file.declaration.destination))?;
-            set_permissions(&temp, file.declaration.permissions.or_else(|| {
-                file.declaration.sensitive.then_some(0o600)
-            }))?;
+                .map_err(|error| {
+                    format!("couldn't write `{}`: {error}", file.declaration.destination)
+                })?;
+            set_permissions(
+                &temp,
+                file.declaration
+                    .permissions
+                    .or_else(|| file.declaration.sensitive.then_some(0o600)),
+            )?;
             Ok(())
         }
     };
@@ -531,7 +611,10 @@ fn install_file(file: &PlannedFile, object: &Path) -> Result<(), String> {
     }
     fs::rename(&temp, &file.destination).map_err(|error| {
         let _ = fs::remove_file(&temp);
-        format!("couldn't install `{}` atomically: {error}", file.declaration.destination)
+        format!(
+            "couldn't install `{}` atomically: {error}",
+            file.declaration.destination
+        )
     })
 }
 
@@ -549,10 +632,15 @@ fn safe_project_path(project_root: &Path, raw: &str, label: &str) -> Result<Path
     if raw.is_empty()
         || path.is_absolute()
         || path.components().any(|component| {
-            matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
         })
     {
-        return Err(format!("managed file {label} `{raw}` must stay inside the project"));
+        return Err(format!(
+            "managed file {label} `{raw}` must stay inside the project"
+        ));
     }
     let candidate = project_root.join(path);
     let mut probe = candidate.clone();
@@ -574,7 +662,12 @@ fn load_state(path: &Path) -> Result<State, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(State::default()),
-        Err(error) => return Err(format!("couldn't read managed file state `{}`: {error}", path.display())),
+        Err(error) => {
+            return Err(format!(
+                "couldn't read managed file state `{}`: {error}",
+                path.display()
+            ))
+        }
     };
     let mut state = State::default();
     for (line_number, line) in text.lines().enumerate() {
@@ -583,7 +676,11 @@ fn load_state(path: &Path) -> Result<State, String> {
         }
         let fields = line.split('\t').collect::<Vec<_>>();
         if fields.len() != 7 || fields[0] != "file" {
-            return Err(format!("managed file state `{}` has invalid line {}", path.display(), line_number + 1));
+            return Err(format!(
+                "managed file state `{}` has invalid line {}",
+                path.display(),
+                line_number + 1
+            ));
         }
         let destination = unescape(fields[1])?;
         let digest = unescape(fields[2])?;
@@ -595,7 +692,10 @@ fn load_state(path: &Path) -> Result<State, String> {
         };
         let permissions = match fields[4] {
             "" => None,
-            raw => Some(raw.parse::<u32>().map_err(|_| "managed file state has invalid permissions".to_string())?),
+            raw => Some(
+                raw.parse::<u32>()
+                    .map_err(|_| "managed file state has invalid permissions".to_string())?,
+            ),
         };
         let sensitive = match fields[5] {
             "0" => false,
@@ -608,7 +708,13 @@ fn load_state(path: &Path) -> Result<State, String> {
         };
         state.entries.insert(
             destination,
-            StateEntry { digest, mode, permissions, sensitive, generation },
+            StateEntry {
+                digest,
+                mode,
+                permissions,
+                sensitive,
+                generation,
+            },
         );
     }
     Ok(state)
@@ -626,13 +732,18 @@ fn write_state_atomic(path: &Path, state: &State) -> Result<(), String> {
             escape(destination),
             escape(&entry.digest),
             entry.mode.as_str(),
-            entry.permissions.map_or_else(String::new, |value| value.to_string()),
+            entry
+                .permissions
+                .map_or_else(String::new, |value| value.to_string()),
             if entry.sensitive { "1" } else { "0" },
             entry.generation.as_deref().map_or_else(String::new, escape),
         ));
     }
     let result = (|| -> io::Result<()> {
-        let mut output = OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
         output.write_all(text.as_bytes())?;
         output.sync_all()?;
         fs::rename(&temp, path)?;
@@ -640,7 +751,10 @@ fn write_state_atomic(path: &Path, state: &State) -> Result<(), String> {
     })();
     if let Err(error) = result {
         let _ = fs::remove_file(&temp);
-        return Err(format!("couldn't write managed file state `{}`: {error}", path.display()));
+        return Err(format!(
+            "couldn't write managed file state `{}`: {error}",
+            path.display()
+        ));
     }
     Ok(())
 }
@@ -676,12 +790,15 @@ fn unescape(value: &str) -> Result<String, String> {
 }
 
 fn set_permissions(path: &Path, permissions: Option<u32>) -> Result<(), String> {
-    let Some(permissions) = permissions else { return Ok(()) };
+    let Some(permissions) = permissions else {
+        return Ok(());
+    };
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        fs::set_permissions(path, fs::Permissions::from_mode(permissions))
-            .map_err(|error| format!("couldn't set permissions on `{}`: {error}", path.display()))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(permissions)).map_err(|error| {
+            format!("couldn't set permissions on `{}`: {error}", path.display())
+        })?;
     }
     #[cfg(not(unix))]
     {
@@ -689,8 +806,9 @@ fn set_permissions(path: &Path, permissions: Option<u32>) -> Result<(), String> 
             .map_err(|error| format!("couldn't inspect `{}`: {error}", path.display()))?
             .permissions();
         mode.set_readonly(permissions & 0o222 == 0);
-        fs::set_permissions(path, mode)
-            .map_err(|error| format!("couldn't set permissions on `{}`: {error}", path.display()))?;
+        fs::set_permissions(path, mode).map_err(|error| {
+            format!("couldn't set permissions on `{}`: {error}", path.display())
+        })?;
     }
     Ok(())
 }
@@ -700,12 +818,16 @@ fn set_file_permissions(
     path: &Path,
     permissions: Option<u32>,
 ) -> Result<(), String> {
-    let Some(permissions) = permissions else { return Ok(()) };
+    let Some(permissions) = permissions else {
+        return Ok(());
+    };
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         file.set_permissions(fs::Permissions::from_mode(permissions))
-            .map_err(|error| format!("couldn't set permissions on `{}`: {error}", path.display()))?;
+            .map_err(|error| {
+                format!("couldn't set permissions on `{}`: {error}", path.display())
+            })?;
     }
     #[cfg(not(unix))]
     {
@@ -714,8 +836,9 @@ fn set_file_permissions(
             .map_err(|error| format!("couldn't inspect `{}`: {error}", path.display()))?
             .permissions();
         mode.set_readonly(permissions & 0o222 == 0);
-        file.set_permissions(mode)
-            .map_err(|error| format!("couldn't set permissions on `{}`: {error}", path.display()))?;
+        file.set_permissions(mode).map_err(|error| {
+            format!("couldn't set permissions on `{}`: {error}", path.display())
+        })?;
     }
     Ok(())
 }
@@ -723,13 +846,21 @@ fn set_file_permissions(
 fn make_symlink(target: &Path, link: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(target, link)
-            .map_err(|error| format!("couldn't create managed symlink `{}`: {error}", link.display()))?;
+        std::os::unix::fs::symlink(target, link).map_err(|error| {
+            format!(
+                "couldn't create managed symlink `{}`: {error}",
+                link.display()
+            )
+        })?;
     }
     #[cfg(windows)]
     {
-        std::os::windows::fs::symlink_file(target, link)
-            .map_err(|error| format!("couldn't create managed symlink `{}`: {error}", link.display()))?;
+        std::os::windows::fs::symlink_file(target, link).map_err(|error| {
+            format!(
+                "couldn't create managed symlink `{}`: {error}",
+                link.display()
+            )
+        })?;
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -781,8 +912,14 @@ mod tests {
         let public_target = fs::read_link(root.join("public")).unwrap();
         let private_target = fs::read_link(root.join("private")).unwrap();
         assert_ne!(public_target, private_target);
-        assert_eq!(fs::metadata(&public_target).unwrap().permissions().mode() & 0o7777, 0o444);
-        assert_eq!(fs::metadata(&private_target).unwrap().permissions().mode() & 0o7777, 0o400);
+        assert_eq!(
+            fs::metadata(&public_target).unwrap().permissions().mode() & 0o7777,
+            0o444
+        );
+        assert_eq!(
+            fs::metadata(&private_target).unwrap().permissions().mode() & 0o7777,
+            0o400
+        );
 
         fs::set_permissions(&private_target, fs::Permissions::from_mode(0o644)).unwrap();
         let repaired = plan(&root, &declarations).unwrap();
@@ -796,7 +933,10 @@ mod tests {
             FileActionKind::ReplaceOwned
         );
         repaired.apply().unwrap();
-        assert_eq!(fs::metadata(&private_target).unwrap().permissions().mode() & 0o7777, 0o400);
+        assert_eq!(
+            fs::metadata(&private_target).unwrap().permissions().mode() & 0o7777,
+            0o400
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -814,7 +954,10 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &object).unwrap();
 
         let error = plan(&root, &[file]).unwrap().apply().unwrap_err();
-        assert!(error.contains("object") && error.contains("symlink"), "{error}");
+        assert!(
+            error.contains("object") && error.contains("symlink"),
+            "{error}"
+        );
         assert_eq!(fs::read(&outside).unwrap(), b"same bytes");
 
         let _ = fs::remove_dir_all(root);

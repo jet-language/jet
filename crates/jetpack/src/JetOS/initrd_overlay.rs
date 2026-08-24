@@ -554,19 +554,16 @@ pub(super) fn ldd_dependency_paths(path: &Path) -> std::io::Result<Vec<PathBuf>>
 }
 
 pub(super) fn first_zstd_frame_offset(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .windows(4)
-        .enumerate()
-        .find_map(|(offset, window)| {
-            if window != [0x28, 0xb5, 0x2f, 0xfd] || offset % 4 != 0 {
-                return None;
-            }
-            if offset == 0 || cpio_trailer_header_offset(&bytes[..offset]).is_some() {
-                Some(offset)
-            } else {
-                None
-            }
-        })
+    bytes.windows(4).enumerate().find_map(|(offset, window)| {
+        if window != [0x28, 0xb5, 0x2f, 0xfd] || offset % 4 != 0 {
+            return None;
+        }
+        if offset == 0 || cpio_trailer_header_offset(&bytes[..offset]).is_some() {
+            Some(offset)
+        } else {
+            None
+        }
+    })
 }
 
 pub(super) fn zstd_decode_file(zstd: &Path, input: &Path) -> std::io::Result<Vec<u8>> {
@@ -665,7 +662,6 @@ impl OwnedCpioEntry {
             data,
         }
     }
-
 }
 
 fn cpio_newc_owned(entries: &[OwnedCpioEntry]) -> Vec<u8> {

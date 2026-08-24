@@ -22,6 +22,10 @@ pub(crate) struct LineMap {
     /// Jet line -> the FIRST rust line that begins it (used to place a
     /// `breakpoint set -f <file> -l <rust_line>` for a user's `break <jet_line>`).
     jet_to_rust: HashMap<usize, usize>,
+    /// The generated entry wrapper begins after the Jet body. Lines there are
+    /// Rust plumbing, not Jet source, even though the final Jet marker would
+    /// otherwise remain the nearest preceding marker.
+    jet_body_end: Option<usize>,
 }
 
 impl LineMap {
@@ -44,9 +48,25 @@ impl LineMap {
                 pending = rest.trim().parse::<usize>().ok();
             }
         }
+        let jet_body_end = if rust_src
+            .lines()
+            .any(|line| line.trim_start().starts_with("pub fn __jet_run("))
+        {
+            let mut in_jet_entry = false;
+            rust_src.lines().enumerate().find_map(|(index, line)| {
+                if line.trim_start().starts_with("pub fn __jet_run(") {
+                    in_jet_entry = true;
+                    return None;
+                }
+                (in_jet_entry && line.starts_with("fn main(")).then_some(index + 1)
+            })
+        } else {
+            None
+        };
         LineMap {
             rust_to_jet,
             jet_to_rust,
+            jet_body_end,
         }
     }
 
@@ -55,6 +75,12 @@ impl LineMap {
     /// span, not just the marker's own next line). `None` means the frame has no
     /// Jet line at all (prelude/generated glue) — the caller steps over it (I2).
     pub(crate) fn jet_line_for(&self, rust_line: usize) -> Option<usize> {
+        if self
+            .jet_body_end
+            .is_some_and(|jet_body_end| rust_line >= jet_body_end)
+        {
+            return None;
+        }
         self.rust_to_jet
             .range(..=rust_line)
             .next_back()
@@ -244,6 +270,7 @@ impl LineMap {
         Ok(LineMap {
             rust_to_jet,
             jet_to_rust,
+            jet_body_end: expected.jet_body_end,
         })
     }
 }
@@ -293,6 +320,14 @@ mod tests {
         let rust = "fn main() {\n    let x = 1;\n}\n";
         let map = LineMap::build(rust);
         assert_eq!(map.jet_line_for(2), None);
+    }
+
+    #[test]
+    fn generated_entry_wrapper_is_not_projected_as_jet() {
+        let rust = "pub fn __jet_run() {\n    // jet:line 2\n    let x = 1;\n}\nfn main() {\n    __jet_run();\n}\n";
+        let map = LineMap::build(rust);
+        assert_eq!(map.jet_line_for(3), Some(2));
+        assert_eq!(map.jet_line_for(5), None);
     }
 
     #[test]

@@ -236,7 +236,11 @@ fn append_line(path: &Path, line: &str) {
 /// realized ref (sorted), every declared named source (sorted, via
 /// `SourceTable::trust_lines`), and every typed secret declaration (sorted).
 /// A change in any of those re-prompts. Secret values never enter this hash.
-pub fn env_definition_hash(refs: &[RefSpec], table: &SourceTable, secrets: &[SecretSpec]) -> String {
+pub fn env_definition_hash(
+    refs: &[RefSpec],
+    table: &SourceTable,
+    secrets: &[SecretSpec],
+) -> String {
     let mut ref_lines: Vec<String> = refs.iter().map(|r| r.raw.clone()).collect();
     ref_lines.sort();
     let mut source_lines = table.trust_lines();
@@ -544,11 +548,7 @@ pub fn is_typed_environment(facts: &jet_env_model::ModuleEval::EnvironmentFacts)
         || !facts.integration_facts.losses.is_empty()
 }
 
-fn is_typed_environment_trusted(
-    store: &Path,
-    project_dir: &Path,
-    hash: &str,
-) -> bool {
+fn is_typed_environment_trusted(store: &Path, project_dir: &Path, hash: &str) -> bool {
     if is_trusted(store, project_dir, hash) {
         return true;
     }
@@ -888,13 +888,8 @@ pub fn gate_with_environment_and_snapshot(
         );
         return Err(2);
     }
-    let hash = environment_definition_hash_with_snapshot(
-        refs,
-        table,
-        secrets,
-        facts,
-        source_snapshot,
-    );
+    let hash =
+        environment_definition_hash_with_snapshot(refs, table, secrets, facts, source_snapshot);
     let typed = is_typed_environment(facts);
     let lifecycle_hooks = !facts.lifecycle.on_enter.is_empty()
         || !facts.lifecycle.checks.is_empty()
@@ -1211,11 +1206,8 @@ mod tests {
 
     #[test]
     fn canonical_build_identity_selector_uses_build_authority() {
-        let grant = parse_grant_selector(
-            "build-sha256:0123456789abcdef",
-            Syntax::TRUST_SCOPE_REPO,
-        )
-        .unwrap();
+        let grant = parse_grant_selector("build-sha256:0123456789abcdef", Syntax::TRUST_SCOPE_REPO)
+            .unwrap();
         assert_eq!(grant.authority, AUTH_BUILD);
         assert_eq!(grant.subject, "build-sha256:0123456789abcdef");
     }
@@ -1341,11 +1333,8 @@ mod tests {
     #[test]
     fn vault_write_grant_keeps_its_exact_authority_and_repository_uuid() {
         let uuid = "00112233445566778899aabbccddeeff";
-        let grant = parse_grant_selector(
-            &format!("vault.write:{uuid}"),
-            Syntax::TRUST_SCOPE_USER,
-        )
-        .unwrap();
+        let grant =
+            parse_grant_selector(&format!("vault.write:{uuid}"), Syntax::TRUST_SCOPE_USER).unwrap();
         assert_eq!(grant.authority, AUTH_VAULT_WRITE);
         assert_eq!(grant.subject, uuid);
         assert_eq!(grant.line(), format!("grant:user:vault.write:{uuid}"));

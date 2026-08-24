@@ -4,10 +4,10 @@
 //! re-exported here for call sites that use `jetpack::WorkspaceLock::load`.
 //! The write path stays here because it needs `RuntimePolicy` for file locking.
 
+use jet_pkg_model::Authority::AuthorityResolver;
 pub use jet_pkg_model::WorkspaceLock::{
     load, load_checked_file, load_with_resolver, WORKSPACE_LOCK,
 };
-use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspacePlan, WorkspaceSourceRole};
 
 use crate::{
@@ -70,14 +70,12 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
             None => empty_lock(),
         };
         lock.version = Lock::LOCK_VERSION;
-        let source = resolver
-            .resolve_workspace_source()
-            .map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("workspace authority cannot be resolved: {error}"),
-                )
-            })?;
+        let source = resolver.resolve_workspace_source().map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("workspace authority cannot be resolved: {error}"),
+            )
+        })?;
         if let Some(source) = &source {
             if source.role != WorkspaceSourceRole::Index {
                 return Err(std::io::Error::new(
@@ -129,21 +127,32 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                 let checked = resolver.checked_package(relative).map_err(|error| {
                     std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("workspace member `{}` is not a checked Package: {error}", m.name),
+                        format!(
+                            "workspace member `{}` is not a checked Package: {error}",
+                            m.name
+                        ),
                     )
                 })?;
-                resolver.revalidate_member(&checked.member).map_err(|error| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("workspace member `{}` changed before lock write: {error}", m.name),
-                    )
-                })?;
+                resolver
+                    .revalidate_member(&checked.member)
+                    .map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "workspace member `{}` changed before lock write: {error}",
+                                m.name
+                            ),
+                        )
+                    })?;
                 let canonical_relative = resolver
                     .relative_identity(&checked.member.directory)
                     .map_err(|error| {
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("workspace member {} has no relative identity: {error}", m.name),
+                            format!(
+                                "workspace member {} has no relative identity: {error}",
+                                m.name
+                            ),
                         )
                     })?;
                 let member_manifest_path = checked.member.manifest.file.path.display().to_string();
@@ -196,7 +205,10 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
                 Ok(file) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("workspace lock appeared during write: {}", file.path.display()),
+                        format!(
+                            "workspace lock appeared during write: {}",
+                            file.path.display()
+                        ),
                     ));
                 }
                 Err(error) if error.is_missing() => {}
@@ -209,8 +221,7 @@ pub fn write(workspace_root: &Path, plan: &WorkspacePlan) -> Result<(), String> 
             }
         }
         Lock::ensure_build_stamp(workspace_root, &mut lock);
-        write_lock_atomically(&lock_path, &Lock::write(&lock))
-            .map_err(std::io::Error::other)
+        write_lock_atomically(&lock_path, &Lock::write(&lock)).map_err(std::io::Error::other)
     })
     .map_err(|error| format!("could not write workspace lock: {error}"))
 }
@@ -287,8 +298,8 @@ const _: &str = Syntax::WORKSPACE_FILE;
 
 #[cfg(test)]
 mod tests {
-    use jet_pkg_model::WorkspacePlan::{WorkspaceMember, WorkspacePlan};
     use super::*;
+    use jet_pkg_model::WorkspacePlan::{WorkspaceMember, WorkspacePlan};
 
     fn member(name: &str, path: &str) -> WorkspaceMember {
         WorkspaceMember {

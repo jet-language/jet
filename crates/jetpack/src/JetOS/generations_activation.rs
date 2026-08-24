@@ -1,10 +1,10 @@
 use super::generation_files::{generations_log, systems_dir};
 use super::options_rendering::risk_classes;
 use super::types::Generation;
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Store;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -180,7 +180,9 @@ pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Res
             let file = fs::OpenOptions::new().read(true).open(&log)?;
             file.sync_all()?;
             if generation_failpoint("after-ledger-durable") {
-                return Err(std::io::Error::other("generation ledger durability failpoint"));
+                return Err(std::io::Error::other(
+                    "generation ledger durability failpoint",
+                ));
             }
             Store::sync_store_node(parent, true)?;
             return Ok(created_at);
@@ -201,7 +203,9 @@ pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Res
         if generation_failpoint("after-ledger-partial") {
             file.write_all(&line.as_bytes()[..line.len() / 2])?;
             file.sync_all()?;
-            return Err(std::io::Error::other("generation ledger partial-write failpoint"));
+            return Err(std::io::Error::other(
+                "generation ledger partial-write failpoint",
+            ));
         }
         file.write_all(line.as_bytes())?;
         if generation_failpoint("after-ledger-append") {
@@ -209,7 +213,9 @@ pub(super) fn append_generation(gen: &Generation, witness: &str) -> std::io::Res
         }
         file.sync_all()?;
         if generation_failpoint("after-ledger-durable") {
-            return Err(std::io::Error::other("generation ledger durability failpoint"));
+            return Err(std::io::Error::other(
+                "generation ledger durability failpoint",
+            ));
         }
         Store::sync_store_node(parent, true)?;
         Ok(gen.created_at)
@@ -264,8 +270,7 @@ fn ledger_timestamp_in(
 }
 
 fn generation_failpoint(name: &str) -> bool {
-    cfg!(debug_assertions)
-        && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
+    cfg!(debug_assertions) && std::env::var("JET_TEST_GENERATION_FAILPOINT").as_deref() == Ok(name)
 }
 
 pub(super) fn read_generations() -> Vec<Generation> {
@@ -306,11 +311,9 @@ pub(super) fn latest_generation_for(host: &str) -> Option<Generation> {
 }
 
 pub(super) fn generation_named(host: &str, name: &str) -> Option<Generation> {
-    read_generations()
-        .into_iter()
-        .find(|generation| {
-            generation.host == host && generation.name == name && generation.path.is_dir()
-        })
+    read_generations().into_iter().find(|generation| {
+        generation.host == host && generation.name == name && generation.path.is_dir()
+    })
 }
 
 pub(super) fn render_generation_proof_json(gen: &Generation) -> std::io::Result<String> {

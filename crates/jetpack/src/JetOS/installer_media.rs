@@ -9,8 +9,8 @@ use super::iso_vm_commands::build_hybrid_iso;
 use super::root_projection::copy_dir_recursive_deref;
 use super::types::Generation;
 use super::vm_proof::vm_tools_json;
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,16 +30,18 @@ pub(super) fn write_installer_media(
     fs::create_dir_all(staging.join("boot"))?;
     fs::create_dir_all(staging.join("install"))?;
     fs::create_dir_all(staging.join("jetos"))?;
-    copy_generation_payload_deref(&gen.path, &staging.join("jetos/current-system")).map_err(|e| {
-        std::io::Error::new(
-            e.kind(),
-            format!(
-                "copying generation `{}` into installer staging `{}` failed: {e}",
-                gen.path.display(),
-                staging.join("jetos/current-system").display()
-            ),
-        )
-    })?;
+    copy_generation_payload_deref(&gen.path, &staging.join("jetos/current-system")).map_err(
+        |e| {
+            std::io::Error::new(
+                e.kind(),
+                format!(
+                    "copying generation `{}` into installer staging `{}` failed: {e}",
+                    gen.path.display(),
+                    staging.join("jetos/current-system").display()
+                ),
+            )
+        },
+    )?;
     let installer_limine = render_installer_limine_conf(system, gen, disk);
     fs::write(staging.join("limine.conf"), &installer_limine)?;
     fs::write(staging.join("boot/limine.conf"), installer_limine)?;
@@ -49,17 +51,11 @@ pub(super) fn write_installer_media(
     )?;
     copy_runtime_file_filtered(&gen.path.join("boot/kernel"), &staging.join("boot/kernel"))
         .map_err(|e| {
-            std::io::Error::new(
-                e.kind(),
-                format!("copying installer kernel failed: {e}"),
-            )
+            std::io::Error::new(e.kind(), format!("copying installer kernel failed: {e}"))
         })?;
     copy_initrd_runtime_filtered(&gen.path.join("boot/initrd"), &staging.join("boot/initrd"))
         .map_err(|e| {
-            std::io::Error::new(
-                e.kind(),
-                format!("copying installer initrd failed: {e}"),
-            )
+            std::io::Error::new(e.kind(), format!("copying installer initrd failed: {e}"))
         })?;
     append_installer_initrd_overlay(&staging.join("boot/initrd"), system, gen).map_err(|e| {
         std::io::Error::new(
@@ -491,7 +487,11 @@ pub(super) fn render_installed_limine_conf(system: &SystemPlan, gen: &Generation
     )
 }
 
-pub(super) fn render_installer_limine_conf(system: &SystemPlan, gen: &Generation, disk: &str) -> String {
+pub(super) fn render_installer_limine_conf(
+    system: &SystemPlan,
+    gen: &Generation,
+    disk: &str,
+) -> String {
     let disk = if disk.starts_with("/dev/") {
         disk.to_string()
     } else {

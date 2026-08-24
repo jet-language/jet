@@ -53,6 +53,10 @@ mod Archive;
 pub use Archive::*;
 mod Nar;
 pub use Nar::*;
+// Card #2156 landed the signed Nix binary-cache admission path. Its consumer
+// is card #2158, which wires it into NixProvider; until that lands parts of
+// the surface are unreachable and deny(warnings) treats them as dead. Remove
+// this allow with #2158 -- it must not outlive that card.
 #[allow(dead_code)]
 pub(crate) mod NixCache;
 #[allow(unused_imports)]
@@ -2387,6 +2391,12 @@ pub fn realize_verified(
     // but malformed or unreadable binding is trust state, not a cache miss;
     // fail before any local, remote, or newly built result becomes usable.
     let cache_bindings = list_cache_bindings(roots).map_err(RealizeError::Store)?;
+    let indexed_nix_repair = match &request {
+        RealizeRequest::Package { spec, table } => {
+            super::Provider::can_repair_indexed_nix(spec, table, ctx)
+        }
+        RealizeRequest::Adapter { .. } => false,
+    };
 
     if let (Some(candidate), Some(expectation)) =
         (find_by_reference(roots, &reference), expectation.as_ref())
@@ -2433,7 +2443,7 @@ pub fn realize_verified(
                     }
                 }
 
-                if cache_bindings.is_empty() {
+                if cache_bindings.is_empty() && !indexed_nix_repair {
                     let mut failure = integrity_failure(roots, &candidate, expectation, proof);
                     if let Err(error) = quarantine_invalid_entry(roots, &candidate, expectation) {
                         failure.actual = format!("{}; quarantine failed: {error}", failure.actual);

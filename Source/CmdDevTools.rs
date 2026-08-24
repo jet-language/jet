@@ -174,6 +174,37 @@ pub(crate) fn run_dev(
     program_args: &[&String],
     record_name: Option<&str>,
 ) {
+    let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
+    runtime_args.push(file.to_string());
+    runtime_args.extend(program_args.iter().map(|arg| (*arg).clone()));
+    jet_jit::with_program_args(&runtime_args, || {
+        run_dev_inner(
+            file,
+            try_anyway,
+            policy,
+            gates,
+            mode,
+            use_interpreter,
+            profile,
+            setting_overrides,
+            program_args,
+            record_name,
+        );
+    });
+}
+
+fn run_dev_inner(
+    file: &str,
+    try_anyway: bool,
+    policy: WatchPolicy,
+    gates: jet::Policy::GateSet,
+    mode: OutputMode,
+    use_interpreter: bool,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    program_args: &[&String],
+    record_name: Option<&str>,
+) {
     let path = Path::new(file);
     if !path.exists() {
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));

@@ -633,7 +633,10 @@ pub fn write_init(dir: &Path, name: &str, running_version: &str) -> Result<Strin
             format!("a `{}` already exists here", Syntax::PAYLOAD_FILE),
             "`jet init` will not create a second manifest root beside migration-era input."
                 .to_string(),
-            format!("migrate or remove `{}` before running `jet init`", Syntax::PAYLOAD_FILE),
+            format!(
+                "migrate or remove `{}` before running `jet init`",
+                Syntax::PAYLOAD_FILE
+            ),
             None,
         ));
     }
@@ -668,9 +671,7 @@ pub fn write_init(dir: &Path, name: &str, running_version: &str) -> Result<Strin
 /// The canonical `package.jet` body `jet init` writes: bare Package identity
 /// fields with a `jet:` channel pin (the running toolchain's channel).
 pub fn init_manifest(name: &str, channel: &str) -> String {
-    format!(
-        "name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: .{{}}\n"
-    )
+    format!("name: \"{name}\"\nversion: \"0.1.0\"\njet: {channel}\n\ndeps: .{{}}\n")
 }
 
 // ──────────────────────────────────────────────

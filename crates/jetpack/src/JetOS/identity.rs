@@ -66,7 +66,10 @@ mod identity_tests {
             render_jetos_os_release(true),
             "NAME=jetos\nID=jetos\nVERSION=\"26.10-pre (Apex)\"\nVERSION_ID=26.10-pre\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10-pre (Apex)\"\nHOME_URL=\"https://jet.dev/jetos\"\n"
         );
-        for surface in [render_jetos_os_release(false), render_jetos_os_release(true)] {
+        for surface in [
+            render_jetos_os_release(false),
+            render_jetos_os_release(true),
+        ] {
             assert!(!surface.contains("NixOS") && !surface.contains("Yarara"));
         }
     }
@@ -102,19 +105,15 @@ mod identity_tests {
         copy_generation_payload_deref(&generation, &installer).unwrap();
 
         let os_release = fs::read_to_string(generation.join("etc/os-release")).unwrap();
-        let usr_os_release =
-            fs::read_to_string(generation.join("usr/lib/os-release")).unwrap();
-        let specialisation = fs::read_to_string(
-            generation.join("boot/specialisations/plasmaBeta.conf"),
-        )
-        .unwrap();
+        let usr_os_release = fs::read_to_string(generation.join("usr/lib/os-release")).unwrap();
+        let specialisation =
+            fs::read_to_string(generation.join("boot/specialisations/plasmaBeta.conf")).unwrap();
         let wallpaper =
             fs::read_to_string(generation.join("share/backgrounds/jetos/apex.svg")).unwrap();
         assert_eq!(os_release, render_jetos_os_release(false));
         assert_eq!(usr_os_release, os_release);
         assert_eq!(wallpaper, JETOS_WALLPAPER_SVG);
-        assert!(specialisation
-            .contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"));
+        assert!(specialisation.contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"));
         assert!(installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"));
         assert!(installer_limine.contains("/Install jetos 26.10 (Apex) — halcyon"));
         assert_eq!(

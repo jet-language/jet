@@ -6,10 +6,9 @@
 //! `SemanticLock` / filesystem write access.
 
 pub use jet_pkg_model::Overlay::{
-    balanced_with_len, find_workspace_body_start, top_level_commas, unquote,
-    OverrideProvenance, OverlayError, OverlayPolicy, OverlaySet, PackageOverride,
-    PatchApplication, ProviderOverride, ResolvedPackageOverride, parse_workspace_policy,
-    strip_overlay_policy,
+    balanced_with_len, find_workspace_body_start, parse_workspace_policy, strip_overlay_policy,
+    top_level_commas, unquote, OverlayError, OverlayPolicy, OverlaySet, OverrideProvenance,
+    PackageOverride, PatchApplication, ProviderOverride, ResolvedPackageOverride,
 };
 
 use super::SemanticLock::{LockIdentity, LockRationale, LockRecordKind, SemanticRecord};
@@ -129,9 +128,7 @@ fn apply_unified_patch_staged(
         let original = entry.output.clone();
         let mut file_lines: Vec<String> = String::from_utf8(original.clone())
             .map_err(|_| {
-                OverlayError::Patch(format!(
-                    "patched file `{target}` is not valid UTF-8"
-                ))
+                OverlayError::Patch(format!("patched file `{target}` is not valid UTF-8"))
             })?
             .lines()
             .map(|s| s.to_string())
@@ -231,7 +228,10 @@ fn apply_unified_patch_staged(
 
 fn canonical_directory(path: &Path, label: &str) -> Result<std::path::PathBuf, OverlayError> {
     let metadata = std::fs::symlink_metadata(path).map_err(|error| {
-        OverlayError::IO(format!("could not inspect {label} `{}`: {error}", path.display()))
+        OverlayError::IO(format!(
+            "could not inspect {label} `{}`: {error}",
+            path.display()
+        ))
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(OverlayError::IO(format!(
@@ -240,7 +240,10 @@ fn canonical_directory(path: &Path, label: &str) -> Result<std::path::PathBuf, O
         )));
     }
     path.canonicalize().map_err(|error| {
-        OverlayError::IO(format!("could not resolve {label} `{}`: {error}", path.display()))
+        OverlayError::IO(format!(
+            "could not resolve {label} `{}`: {error}",
+            path.display()
+        ))
     })
 }
 
@@ -281,7 +284,10 @@ fn safe_existing_path(
         }
     }
     let metadata = std::fs::symlink_metadata(&candidate).map_err(|error| {
-        OverlayError::IO(format!("could not inspect {label} `{}`: {error}", candidate.display()))
+        OverlayError::IO(format!(
+            "could not inspect {label} `{}`: {error}",
+            candidate.display()
+        ))
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(OverlayError::Patch(format!(
@@ -290,7 +296,10 @@ fn safe_existing_path(
         )));
     }
     let canonical = candidate.canonicalize().map_err(|error| {
-        OverlayError::IO(format!("could not resolve {label} `{}`: {error}", candidate.display()))
+        OverlayError::IO(format!(
+            "could not resolve {label} `{}`: {error}",
+            candidate.display()
+        ))
     })?;
     if !canonical.starts_with(root) {
         return Err(OverlayError::Patch(format!(
@@ -336,9 +345,15 @@ fn write_bytes_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("patched file has no parent"))?;
-    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("file");
     let serial = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-    let temporary = parent.join(format!(".{name}.jet-overlay-{}-{serial}", std::process::id()));
+    let temporary = parent.join(format!(
+        ".{name}.jet-overlay-{}-{serial}",
+        std::process::id()
+    ));
     let result = (|| {
         use std::io::Write as _;
         let mut options = std::fs::OpenOptions::new();
@@ -505,10 +520,7 @@ pub fn semantic_records(
     Ok(records)
 }
 
-fn resolved_policy_fingerprint(
-    resolved: &ResolvedPackageOverride,
-    overlay: &OverlaySet,
-) -> String {
+fn resolved_policy_fingerprint(resolved: &ResolvedPackageOverride, overlay: &OverlaySet) -> String {
     let provider = overlay
         .provider
         .as_ref()
@@ -670,14 +682,10 @@ fn draft_block(
     out.push_str("        overrides: {\n");
     out.push_str(&format!("            \"{package}\": .{{\n"));
     if let Some(patch) = patch {
-        out.push_str(&format!(
-            "                patches: [patch(\"{patch}\")],\n"
-        ));
+        out.push_str(&format!("                patches: [patch(\"{patch}\")],\n"));
     }
     if allow_unfree {
-        out.push_str(&format!(
-            "                allowUnfree: true,\n"
-        ));
+        out.push_str(&format!("                allowUnfree: true,\n"));
     }
     out.push_str("            },\n        }\n");
     out.push_str("    }\n");
@@ -810,15 +818,12 @@ mod tests {
 
     #[test]
     fn removal_content_starting_with_file_header_marker_is_not_a_boundary() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-overlay-removal-marker-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-removal-marker-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/file.txt"), "-- text\n").unwrap();
-        let patch =
-            "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n--- text\n+replacement\n";
+        let patch = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1 +1 @@\n--- text\n+replacement\n";
 
         let applied = apply_unified_patch(&root, patch).unwrap();
         assert_eq!(applied[0].removed, 1);
@@ -839,8 +844,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
-        let patch =
-            "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -999,0 +999,1 @@\n+replacement\n";
+        let patch = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -999,0 +999,1 @@\n+replacement\n";
 
         let err = apply_unified_patch(&root, patch).unwrap_err();
         assert_eq!(err.message(), "patch insertion is outside `src/file.txt`");
@@ -853,10 +857,8 @@ mod tests {
 
     #[test]
     fn patch_paths_cannot_escape_and_leave_source_unchanged() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-overlay-traversal-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-traversal-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/file.txt"), "one\n").unwrap();
@@ -874,10 +876,8 @@ mod tests {
 
     #[test]
     fn multi_file_patch_failure_is_transactional() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-overlay-transaction-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-overlay-transaction-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/one.txt"), "one\n").unwrap();
@@ -898,10 +898,7 @@ mod tests {
 
     #[test]
     fn repeated_file_patches_compose_in_staging_order() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-overlay-repeat-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("jet-overlay-repeat-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/file.txt"), "one\ntwo\n").unwrap();

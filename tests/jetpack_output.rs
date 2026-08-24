@@ -45,6 +45,21 @@ fn unsupported_nix_projection_uses_registered_report_snapshot() {
 }
 
 #[test]
+fn pinned_channel_update_uses_registered_report_snapshot() {
+    let theme = jetpack::Output::Theme { color: false };
+    let actual = theme.render_error_coded(
+        "E1352",
+        "Source `stable` is pinned and cannot be updated.",
+        "a pinned source has no moving channel policy, so Jetpack must never change its lock or manifest",
+        "declare `stable` with `#latest` for manual movement or `#auto` for automatic movement",
+    );
+    assert_eq!(
+        actual,
+        include_str!("fixtures/jetpack-diagnostics/E1352.stderr")
+    );
+}
+
+#[test]
 fn retired_off_compiler_report_renderers_do_not_return() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut sources = Vec::new();

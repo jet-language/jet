@@ -9,9 +9,9 @@ use super::vm_proof::{
     prove_vm_guest, qemu_has_local_display, qemu_interactive_run_command, qemu_vnc_endpoint,
     require_vm_run_proof, run_interactive_vm_command, run_vmtest, write_vm_install_plan,
 };
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Syntax;
+use jet_env_model::ModuleEval::SystemPlan;
 
 pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {

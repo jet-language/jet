@@ -151,7 +151,11 @@ fn handle_studio_request(
         "/studio/data.json" => match context {
             Some(context) => match studio_live_projection(context, data) {
                 Ok(body) => ("200 OK", "application/json", body.into_bytes()),
-                Err(body) => ("500 Internal Server Error", "application/json", body.into_bytes()),
+                Err(body) => (
+                    "500 Internal Server Error",
+                    "application/json",
+                    body.into_bytes(),
+                ),
             },
             None => ("200 OK", "application/json", fs_read_for_http(data)),
         },

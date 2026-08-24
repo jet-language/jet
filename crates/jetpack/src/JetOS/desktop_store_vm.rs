@@ -7,8 +7,8 @@ use super::root_projection::enable_unit;
 use super::store_realize::RealizedPackage;
 use super::studio_projection::make_executable;
 use super::types::VM_TOOLS;
-use jet_env_model::ModuleEval::SystemPlan;
 use crate::JSON;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -400,7 +400,10 @@ fn write_desktop_breadth(dir: &Path, system: &SystemPlan) -> std::io::Result<()>
     )
 }
 
-pub(super) fn write_store_cache_facts(dir: &Path, realized: &[RealizedPackage]) -> std::io::Result<()> {
+pub(super) fn write_store_cache_facts(
+    dir: &Path,
+    realized: &[RealizedPackage],
+) -> std::io::Result<()> {
     let store_dir = dir.join("store");
     fs::create_dir_all(&store_dir)?;
     let entries = realized
@@ -433,7 +436,11 @@ pub(super) fn write_compat_escape_hatches(dir: &Path, system: &SystemPlan) -> st
     )
 }
 
-pub(super) fn write_vm_proof(dir: &Path, system: &SystemPlan, plan_text: &str) -> std::io::Result<()> {
+pub(super) fn write_vm_proof(
+    dir: &Path,
+    system: &SystemPlan,
+    plan_text: &str,
+) -> std::io::Result<()> {
     let risks = risk_classes(system);
     if risks.is_empty() {
         let _ = fs::remove_file(dir.join("vm-proof.txt"));

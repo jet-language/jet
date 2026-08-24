@@ -25,7 +25,11 @@ pub enum NixDrvError {
     Parse(String),
     Path(String),
     Unsupported(String),
-    Divergence { what: String, expected: String, actual: String },
+    Divergence {
+        what: String,
+        expected: String,
+        actual: String,
+    },
     IO(String),
 }
 
@@ -35,8 +39,15 @@ impl fmt::Display for NixDrvError {
             NixDrvError::Parse(m) => write!(f, "nix drv parse: {m}"),
             NixDrvError::Path(m) => write!(f, "nix path calculus: {m}"),
             NixDrvError::Unsupported(m) => write!(f, "nix drv unsupported: {m}"),
-            NixDrvError::Divergence { what, expected, actual } => {
-                write!(f, "nix compat divergence ({what}): expected `{expected}`, got `{actual}`")
+            NixDrvError::Divergence {
+                what,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "nix compat divergence ({what}): expected `{expected}`, got `{actual}`"
+                )
             }
             NixDrvError::IO(m) => write!(f, "nix drv io: {m}"),
         }
@@ -111,11 +122,13 @@ pub fn compress_hash(hash: &[u8], new_size: usize) -> Vec<u8> {
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
-        use std::fmt::Write;
-        let _ = write!(s, "{b:02x}");
-        s
-    })
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut s, b| {
+            use std::fmt::Write;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
 }
 
 fn sha256_bytes(data: &[u8]) -> [u8; 32] {
@@ -123,7 +136,12 @@ fn sha256_bytes(data: &[u8]) -> [u8; 32] {
 }
 
 /// `makeStorePath(type, "sha256:"+hex, name)` → `{store}/{nix32(compress(sha256(fp),20))}-{name}`.
-pub fn make_store_path(store_dir: &str, type_str: &str, hash_with_algo: &str, name: &str) -> String {
+pub fn make_store_path(
+    store_dir: &str,
+    type_str: &str,
+    hash_with_algo: &str,
+    name: &str,
+) -> String {
     let fingerprint = format!("{type_str}:{hash_with_algo}:{store_dir}:{name}");
     let digest = compress_hash(&sha256_bytes(fingerprint.as_bytes()), 20);
     format!("{store_dir}/{}-{name}", nix32_encode(&digest))
@@ -139,7 +157,12 @@ pub fn output_path_name(drv_name: &str, output_name: &str) -> String {
 }
 
 /// Input-addressed output path from a `hashDerivationModulo` digest.
-pub fn make_output_path(store_dir: &str, output_id: &str, modulo_hash: &[u8; 32], drv_name: &str) -> String {
+pub fn make_output_path(
+    store_dir: &str,
+    output_id: &str,
+    modulo_hash: &[u8; 32],
+    drv_name: &str,
+) -> String {
     let name = output_path_name(drv_name, output_id);
     make_store_path(
         store_dir,
@@ -152,14 +175,14 @@ pub fn make_output_path(store_dir: &str, output_id: &str, modulo_hash: &[u8; 32]
 /// Fixed-output / content-addressed path (`makeFixedOutputPath`).
 ///
 /// `method_algo` is ATerm form: `sha256`, `r:sha256`, `sha512`, `r:sha512`, …
-pub fn make_fixed_output_path(store_dir: &str, name: &str, method_algo: &str, hash_hex: &str) -> String {
+pub fn make_fixed_output_path(
+    store_dir: &str,
+    name: &str,
+    method_algo: &str,
+    hash_hex: &str,
+) -> String {
     if method_algo == "r:sha256" {
-        return make_store_path(
-            store_dir,
-            "source",
-            &format!("sha256:{hash_hex}"),
-            name,
-        );
+        return make_store_path(store_dir, "source", &format!("sha256:{hash_hex}"), name);
     }
     // flat / non-sha256-nar / git: digest = sha256("fixed:out:" + methodAlgo + ":" + hex + ":")
     let payload = format!("fixed:out:{method_algo}:{hash_hex}:");
@@ -173,7 +196,12 @@ pub fn make_fixed_output_path(store_dir: &str, name: &str, method_algo: &str, ha
 }
 
 /// Text-method CA path (derivations): `type = text{:ref}*`.
-pub fn make_text_path(store_dir: &str, name: &str, contents: &[u8], references: &[String]) -> String {
+pub fn make_text_path(
+    store_dir: &str,
+    name: &str,
+    contents: &[u8],
+    references: &[String],
+) -> String {
     let mut type_str = String::from("text");
     let mut refs: Vec<&String> = references.iter().collect();
     refs.sort();
@@ -443,7 +471,10 @@ pub fn parse_derive(aterm: &str) -> Result<Derivation> {
     })?;
     c.consume(',')?;
 
-    let input_srcs: BTreeSet<String> = c.parse_list(|c| c.parse_raw_string())?.into_iter().collect();
+    let input_srcs: BTreeSet<String> = c
+        .parse_list(|c| c.parse_raw_string())?
+        .into_iter()
+        .collect();
     c.consume(',')?;
     let platform = c.parse_raw_string()?;
     c.consume(',')?;
@@ -624,7 +655,8 @@ impl DrvStore for FSDrvStore {
         if let Some(d) = self.cache.get(drv_path) {
             return Ok(d.clone());
         }
-        let text = fs::read_to_string(drv_path).map_err(|e| NixDrvError::IO(format!("{drv_path}: {e}")))?;
+        let text = fs::read_to_string(drv_path)
+            .map_err(|e| NixDrvError::IO(format!("{drv_path}: {e}")))?;
         let drv = parse_derive(&text)?;
         self.cache.insert(drv_path.to_string(), drv.clone());
         Ok(drv)
@@ -667,7 +699,11 @@ pub fn hash_derivation_modulo(
         return Ok(h.clone());
     }
 
-    if drv.outputs.values().any(|o| o.is_floating() || o.is_impure()) {
+    if drv
+        .outputs
+        .values()
+        .any(|o| o.is_floating() || o.is_impure())
+    {
         return Err(NixDrvError::Unsupported(
             "floating/impure derivation outputs (staged / trust-gated)".into(),
         ));
@@ -694,10 +730,7 @@ pub fn hash_derivation_modulo(
                 hash_derivation_modulo(store, store_dir, &inp.path, &child, false, memo)?;
             for out_name in &inp.outputs {
                 let h = child_hashes.get(out_name).ok_or_else(|| {
-                    NixDrvError::Path(format!(
-                        "no hash for output `{out_name}` of `{}`",
-                        inp.path
-                    ))
+                    NixDrvError::Path(format!("no hash for output `{out_name}` of `{}`", inp.path))
                 })?;
                 inputs2
                     .entry(hex_encode(h))
@@ -748,9 +781,9 @@ pub fn verify_output_paths(
     let mut memo = BTreeMap::new();
     let hashes = hash_derivation_modulo(store, store_dir, drv_path, drv, true, &mut memo)?;
     for (name, o) in &drv.outputs {
-        let h = hashes.get(name).ok_or_else(|| {
-            NixDrvError::Path(format!("missing modulo hash for output `{name}`"))
-        })?;
+        let h = hashes
+            .get(name)
+            .ok_or_else(|| NixDrvError::Path(format!("missing modulo hash for output `{name}`")))?;
         let expected = make_output_path(store_dir, name, h, &drv_name);
         if expected != o.path {
             return Err(NixDrvError::Divergence {
@@ -764,7 +797,12 @@ pub fn verify_output_paths(
 }
 
 /// Recompute drv store path via text CA; fail closed on mismatch.
-pub fn verify_drv_path(store_dir: &str, drv_path: &str, aterm: &[u8], drv: &Derivation) -> Result<()> {
+pub fn verify_drv_path(
+    store_dir: &str,
+    drv_path: &str,
+    aterm: &[u8],
+    drv: &Derivation,
+) -> Result<()> {
     let name = store_path_name(drv_path)?;
     let refs = drv.references_for_drv_path();
     let expected = make_text_path(store_dir, &name, aterm, &refs);
@@ -981,10 +1019,7 @@ mod tests {
         assert_eq!(digest.len(), 32);
         let blob = format!("hello {}/{digest}-foo/bin/x and done", DEFAULT_STORE_DIR);
         let found = scan_store_path_digests(DEFAULT_STORE_DIR, blob.as_bytes());
-        assert!(
-            found.iter().any(|p| p.contains("-foo")),
-            "found={found:?}"
-        );
+        assert!(found.iter().any(|p| p.contains("-foo")), "found={found:?}");
     }
 
     #[test]

@@ -29,6 +29,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} profile switch <name>           atomically activate the newest matching generation
   {bin} profile rollback <name> [gen]   activate an older retained generation
   {bin} profile generations <name>      list package generation history
+  {bin} profile plan|build|switch|rollback|generations tools
+                                      manage the standalone ~/.jet user-tools profile
   {bin} browser lock <engine> --binary <path>  lock a browser binary into .jet/lock
   {bin} browser provision <engine>@src realize and lock a browser package
   {bin} browser resolve <engine>       verify and print the locked browser
@@ -38,6 +40,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} add    <package>@<source>      add a package to ./{pack}
   {bin} add    <Component>             copy a starter component into ./components
   {bin} remove <package>@<source>      remove a package from ./{pack}
+  {bin} update [<source>|tools]        refresh project or user-tools channel pins
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
 
 {store}
@@ -264,10 +267,16 @@ mod tests {
     fn parses_flags() {
         let fixtures = std::env::temp_dir().join("fx");
         let fixtures_arg = fixtures.to_string_lossy().to_string();
-        let args: Vec<String> = ["--no-color", "--fixtures", &fixtures_arg, "-y", "jq@nixpkgs"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let args: Vec<String> = [
+            "--no-color",
+            "--fixtures",
+            &fixtures_arg,
+            "-y",
+            "jq@nixpkgs",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let p = parse_args(&args);
         assert_eq!(p.flags.color, ColorChoice::Never);
         assert!(p.flags.assume_yes);
@@ -292,8 +301,7 @@ mod tests {
 
     #[test]
     fn explicit_color_is_retained_and_last_choice_wins() {
-        let args = ["--no-color", "--color=always", "--color=auto"]
-            .map(str::to_string);
+        let args = ["--no-color", "--color=always", "--color=auto"].map(str::to_string);
         assert_eq!(parse_args(&args).flags.color, ColorChoice::Auto);
         let args = ["--color=auto", "--color=always"].map(str::to_string);
         assert_eq!(parse_args(&args).flags.color, ColorChoice::Always);
@@ -392,10 +400,7 @@ mod tests {
             .collect();
         let equals = parse_args(&equals_args);
         assert!(equals.flags.environment.is_none());
-        assert_eq!(
-            equals.positional,
-            vec![String::from("--env-profile=full")]
-        );
+        assert_eq!(equals.positional, vec![String::from("--env-profile=full")]);
     }
 
     #[test]

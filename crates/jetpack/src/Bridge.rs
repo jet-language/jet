@@ -60,8 +60,8 @@ fn read_devshell_output_facts(
     match fixtures {
         Some(dir) if output == "default" => {
             let path = dir.join(FIXTURE_FILE);
-            let stdout = std::fs::read_to_string(&path)
-                .map_err(|_| ProviderError::FixtureMissing(path))?;
+            let stdout =
+                std::fs::read_to_string(&path).map_err(|_| ProviderError::FixtureMissing(path))?;
             parse_facts_json(&stdout)
         }
         Some(_) => Err(ProviderError::Unsupported(
@@ -99,21 +99,21 @@ fn read_devshell_output_facts(
                 output,
                 Some(import_authority),
             )
-                .map_err(|error| {
-                    let reason = error.to_string();
-                    // Project-root authority failures are boundary violations,
-                    // not unsupported foreign semantics. Keep them on the
-                    // existing safety diagnostic; semantic and budget limits
-                    // are the E1256 projection surface.
-                    if reason.contains("project-root authority")
-                        || reason.contains("project-root")
-                        || reason.contains("symlink")
-                    {
-                        ProviderError::Unsupported(reason)
-                    } else {
-                        ProviderError::ForeignProjection(reason)
-                    }
-                })?;
+            .map_err(|error| {
+                let reason = error.to_string();
+                // Project-root authority failures are boundary violations,
+                // not unsupported foreign semantics. Keep them on the
+                // existing safety diagnostic; semantic and budget limits
+                // are the E1256 projection surface.
+                if reason.contains("project-root authority")
+                    || reason.contains("project-root")
+                    || reason.contains("symlink")
+                {
+                    ProviderError::Unsupported(reason)
+                } else {
+                    ProviderError::ForeignProjection(reason)
+                }
+            })?;
             Ok(DevShellFacts {
                 packages: evaluation.packages().to_vec(),
                 unmapped: evaluation
@@ -235,7 +235,10 @@ fn fetch_source(
     authority: &crate::NixEval::ProjectImportAuthority,
     request: &str,
 ) -> Result<String, String> {
-    let mut fields = request.strip_prefix("@fetch:").unwrap_or_default().split('\n');
+    let mut fields = request
+        .strip_prefix("@fetch:")
+        .unwrap_or_default()
+        .split('\n');
     let kind = fields.next().unwrap_or_default();
     let url = fields
         .next()
@@ -339,11 +342,14 @@ fn decode_base64(value: &str) -> Result<Vec<u8>, String> {
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut output, byte| {
-        use std::fmt::Write;
-        let _ = write!(output, "{byte:02x}");
-        output
-    })
+    bytes.iter().fold(
+        String::with_capacity(bytes.len() * 2),
+        |mut output, byte| {
+            use std::fmt::Write;
+            let _ = write!(output, "{byte:02x}");
+            output
+        },
+    )
 }
 
 fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
@@ -385,8 +391,10 @@ fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
         unmapped.push("shellHook".to_string());
     }
     for field in obj.keys() {
-        if !matches!(field.as_str(), "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook")
-            && !unmapped.iter().any(|existing| existing == field)
+        if !matches!(
+            field.as_str(),
+            "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook"
+        ) && !unmapped.iter().any(|existing| existing == field)
         {
             unmapped.push(field.clone());
         }
@@ -496,10 +504,7 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                 }
             };
             for output in graph.outputs.iter().filter(|output| {
-                matches!(
-                    &output.kind,
-                    super::SemanticLock::FlakeOutputKind::Package
-                )
+                matches!(&output.kind, super::SemanticLock::FlakeOutputKind::Package)
             }) {
                 if output.system.is_empty() {
                     theme.error(
@@ -524,10 +529,7 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     }
                     Err(error) => {
                         if output.system != system {
-                            let loss = format!(
-                                "packages:{}:{}",
-                                output.system, output.attribute
-                            );
+                            let loss = format!("packages:{}:{}", output.system, output.attribute);
                             if !facts.unmapped.iter().any(|item| item == &loss) {
                                 facts.unmapped.push(loss);
                             }
@@ -569,11 +571,17 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                 let label = if output.system.is_empty() {
                     format!("{}:{}", output.kind.as_str(), output.attribute)
                 } else {
-                    format!("{}:{}:{}", output.kind.as_str(), output.system, output.attribute)
+                    format!(
+                        "{}:{}:{}",
+                        output.kind.as_str(),
+                        output.system,
+                        output.attribute
+                    )
                 };
                 match &output.kind {
-                    super::SemanticLock::FlakeOutputKind::Package =>
-                        record_package_output_fact(&mut facts, output, &system),
+                    super::SemanticLock::FlakeOutputKind::Package => {
+                        record_package_output_fact(&mut facts, output, &system)
+                    }
                     super::SemanticLock::FlakeOutputKind::DevShell => {
                         if (output.system != system || output.attribute != "default")
                             && !facts.unmapped.iter().any(|item| item == &label)
@@ -633,7 +641,8 @@ pub fn cmd_flake(theme: &Theme, dir: &Path, fixtures: Option<&Path>) -> i32 {
                     source_ref: flake_path.display().to_string(),
                     provider: "native-nix-evaluator".to_string(),
                     exact_output: evaluator,
-                    reason: "bounded native devShell and derivation evaluation identity".to_string(),
+                    reason: "bounded native devShell and derivation evaluation identity"
+                        .to_string(),
                     ..super::SemanticLock::LockRationale::default()
                 },
             ));
@@ -754,7 +763,10 @@ fn record_package_output_fact(
     if output.system == system {
         if output.attribute != "default"
             && !output.attribute.is_empty()
-            && !facts.packages.iter().any(|package| package == &output.attribute)
+            && !facts
+                .packages
+                .iter()
+                .any(|package| package == &output.attribute)
         {
             facts.packages.push(output.attribute.clone());
         }
@@ -869,8 +881,7 @@ mod tests {
     #[test]
     fn fact_schema_error_retains_filtered_provider_noise() {
         let noise = "warning: ignoring untrusted substituter";
-        let error = parse_facts_json(&format!("{noise}\n{{\"shellHook\":\"\"}}\n"))
-            .unwrap_err();
+        let error = parse_facts_json(&format!("{noise}\n{{\"shellHook\":\"\"}}\n")).unwrap_err();
         let ProviderError::BadOutput(reason) = error else {
             panic!("expected BadOutput, got {error:?}");
         };
@@ -982,9 +993,7 @@ mod tests {
     fn cmd_flake_rejects_a_stale_semantic_lock() {
         let dir = scratch("stale_graph");
         let system = host_system();
-        let source = format!(
-            "{{ devShells.{system}.default = {{ packages = [ ]; }}; }}"
-        );
+        let source = format!("{{ devShells.{system}.default = {{ packages = [ ]; }}; }}");
         std::fs::write(dir.join("flake.nix"), &source).unwrap();
         let fixtures = scratch("stale_graph_fx");
         std::fs::write(
@@ -1149,7 +1158,10 @@ mod tests {
             );
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(stderr.contains("E1256"), "stderr: {stderr}");
-            assert!(stderr.contains("overlay list exceeds 64"), "stderr: {stderr}");
+            assert!(
+                stderr.contains("overlay list exceeds 64"),
+                "stderr: {stderr}"
+            );
             return;
         }
         let dir = scratch("named_devshell_budget");
@@ -1284,7 +1296,9 @@ mod tests {
         std::fs::write(dir.join("flake.nix"), source).unwrap();
         let error = read_devshell_facts(&dir, None).expect_err("oversized foreign input must fail");
         assert_eq!(error.code(), Some("E1256"));
-        assert!(matches!(error, ProviderError::ForeignProjection(reason) if reason.contains("evaluator limit")));
+        assert!(
+            matches!(error, ProviderError::ForeignProjection(reason) if reason.contains("evaluator limit"))
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

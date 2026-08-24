@@ -6,7 +6,7 @@
 //! copied executable, then replaces itself with that executable. No shell or
 //! batch parser participates in argv forwarding.
 
-use crate::{JSON, SHA256, Store, Syntax};
+use crate::{Store, Syntax, JSON, SHA256};
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(any(windows, test))]
 use std::ffi::OsString;
@@ -107,7 +107,10 @@ pub(crate) fn format_generation_metadata(metadata: &GenerationMetadata) -> io::R
     validate_generation(metadata)?;
     let mut out = String::new();
     out.push_str("{\n");
-    out.push_str(&format!("  \"schema\": {},\n", json_string(GENERATION_SCHEMA)));
+    out.push_str(&format!(
+        "  \"schema\": {},\n",
+        json_string(GENERATION_SCHEMA)
+    ));
     out.push_str(&format!("  \"generation\": {},\n", metadata.generation));
     out.push_str(&format!("  \"owner\": {},\n", json_string(PROFILE_OWNER)));
     out.push_str(&format!(
@@ -157,7 +160,14 @@ pub(crate) fn parse_generation_metadata(
     };
     expect_exact_keys(
         &root,
-        &["created_at", "generation", "owner", "profile", "schema", "tools"],
+        &[
+            "created_at",
+            "generation",
+            "owner",
+            "profile",
+            "schema",
+            "tools",
+        ],
         "profile metadata",
     )?;
     if string_field(&root, "schema")? != GENERATION_SCHEMA
@@ -250,7 +260,11 @@ pub(crate) fn install_dispatcher(bin_dir: &Path, bin: &str) -> io::Result<PathBu
     let destination = bin_dir.join(&physical);
     match fs::symlink_metadata(&destination) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
-        Ok(_) => return Err(invalid("dispatcher destination is not an owned regular file")),
+        Ok(_) => {
+            return Err(invalid(
+                "dispatcher destination is not an owned regular file",
+            ))
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
@@ -406,7 +420,9 @@ fn resolve_dispatch_target(bin_dir: &Path, bin: &str) -> io::Result<DispatchTarg
     ensure_directory_chain(&tools)?;
     let pointer_text = read_bounded_regular(&tools.join(CURRENT_FILE))?;
     let pointer = parse_current_pointer(&pointer_text)?;
-    let generation_dir = tools.join("generations").join(pointer.generation.to_string());
+    let generation_dir = tools
+        .join("generations")
+        .join(pointer.generation.to_string());
     ensure_directory_chain(&generation_dir)?;
     let metadata_text = read_bounded_regular(&generation_dir.join("meta.json"))?;
     let metadata = parse_generation_metadata(&metadata_text, pointer.generation)?;
@@ -442,11 +458,12 @@ fn find_bin<'a>(
     metadata: &'a GenerationMetadata,
     bin: &str,
 ) -> io::Result<(&'a GenerationTool, usize)> {
-    if let Some(found) = metadata
-        .tools
-        .iter()
-        .find_map(|tool| tool.bins.iter().position(|candidate| candidate == bin).map(|i| (tool, i)))
-    {
+    if let Some(found) = metadata.tools.iter().find_map(|tool| {
+        tool.bins
+            .iter()
+            .position(|candidate| candidate == bin)
+            .map(|i| (tool, i))
+    }) {
         return Ok(found);
     }
     #[cfg(windows)]
@@ -474,7 +491,9 @@ fn validate_original_authority(tool: &GenerationTool, slot: usize, digest: &str)
     ensure_directory_chain(&roots.root)?;
     let entry = Store::list_checked(&roots)?
         .into_iter()
-        .find(|entry| entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash)
+        .find(|entry| {
+            entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash
+        })
         .ok_or_else(|| invalid("profile Store authority is unavailable"))?;
     let member = Path::new(&entry.bin).join(&tool.members[slot]);
     let mut member_file = open_pinned_regular(&member)?;
@@ -610,9 +629,11 @@ fn validate_generation(metadata: &GenerationMetadata) -> io::Result<()> {
             }
         }
     }
-    if metadata.tools.windows(2).any(|pair| {
-        (&pair[0].name, &pair[0].reference) >= (&pair[1].name, &pair[1].reference)
-    }) {
+    if metadata
+        .tools
+        .windows(2)
+        .any(|pair| (&pair[0].name, &pair[0].reference) >= (&pair[1].name, &pair[1].reference))
+    {
         return Err(invalid("profile tools are not in canonical order"));
     }
     Ok(())
@@ -631,7 +652,11 @@ pub(crate) fn validate_bin_name(value: &str) -> io::Result<()> {
     {
         return Err(invalid("profile bin name is not one normal component"));
     }
-    let stem = value.split('.').next().unwrap_or(value).to_ascii_uppercase();
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_uppercase();
     let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
         || stem
             .strip_prefix("COM")
@@ -654,9 +679,13 @@ fn validate_store_root(value: &str) -> io::Result<()> {
     validate_string(value)?;
     let path = Path::new(value);
     if !path.is_absolute()
-        || path.components().any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
     {
-        return Err(invalid("profile Store authority is not absolute and normalized"));
+        return Err(invalid(
+            "profile Store authority is not absolute and normalized",
+        ));
     }
     Ok(())
 }
@@ -680,7 +709,11 @@ fn validate_hex64(value: &str, label: &str) -> io::Result<()> {
 }
 
 fn validate_string(value: &str) -> io::Result<()> {
-    if value.len() > MAX_STRING || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control()) {
+    if value.len() > MAX_STRING
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
+    {
         return Err(invalid("profile string exceeds bounds"));
     }
     Ok(())
@@ -717,7 +750,9 @@ fn ensure_directory_chain(path: &Path) -> io::Result<()> {
         }
         let metadata = fs::symlink_metadata(&cursor)?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err(invalid("profile authority crosses non-directory or symlink"));
+            return Err(invalid(
+                "profile authority crosses non-directory or symlink",
+            ));
         }
         #[cfg(windows)]
         if is_windows_reparse(&metadata) {
@@ -728,7 +763,9 @@ fn ensure_directory_chain(path: &Path) -> io::Result<()> {
 }
 
 fn validate_regular_file(path: &Path) -> io::Result<()> {
-    let parent = path.parent().ok_or_else(|| invalid("profile file has no parent"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("profile file has no parent"))?;
     ensure_directory_chain(parent)?;
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
@@ -796,7 +833,8 @@ fn freeze_unix_projection(source: &mut fs::File, expected: &str) -> io::Result<f
     const F_SEAL_WRITE: std::os::raw::c_int = 0x0008;
     const EINVAL: i32 = 22;
     unsafe extern "C" {
-        fn fcntl(fd: std::os::raw::c_int, command: std::os::raw::c_int, ...) -> std::os::raw::c_int;
+        fn fcntl(fd: std::os::raw::c_int, command: std::os::raw::c_int, ...)
+            -> std::os::raw::c_int;
     }
     let name = b"jet-profile-exec\0";
     let mut descriptor = create_memfd(
@@ -871,10 +909,7 @@ fn android_memfd_syscall_number(architecture: &str) -> Option<std::os::raw::c_lo
     }
 }
 
-#[cfg(all(
-    unix,
-    not(any(target_os = "linux", target_os = "android"))
-))]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 fn freeze_unix_projection(_source: &mut fs::File, _expected: &str) -> io::Result<fs::File> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -956,7 +991,9 @@ fn sync_and_match(source: &Path, destination: &Path) -> io::Result<()> {
 
 fn remove_regular_partial(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => fs::remove_file(path),
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            fs::remove_file(path)
+        }
         Ok(_) => Err(invalid("dispatcher partial is not a regular file")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
@@ -1048,7 +1085,10 @@ fn expect_exact_keys(
     Ok(())
 }
 
-fn string_field<'a>(object: &'a BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<&'a str> {
+fn string_field<'a>(
+    object: &'a BTreeMap<String, JSON::JSONValue>,
+    key: &str,
+) -> io::Result<&'a str> {
     object
         .get(key)
         .ok_or_else(|| invalid(format!("missing key `{key}`")))?
@@ -1069,8 +1109,13 @@ fn integer_field(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::R
             if value.is_finite()
                 && *value >= 0.0
                 && value.fract() == 0.0
-                && *value <= 9_007_199_254_740_991.0 => Ok(*value as u64),
-        Some(_) => Err(invalid(format!("profile field `{key}` is not an exact integer"))),
+                && *value <= 9_007_199_254_740_991.0 =>
+        {
+            Ok(*value as u64)
+        }
+        Some(_) => Err(invalid(format!(
+            "profile field `{key}` is not an exact integer"
+        ))),
         None => Err(invalid(format!("profile field `{key}` is not a number"))),
     }
 }
@@ -1109,7 +1154,11 @@ mod tests {
                 source: "path".into(),
                 reference: "path:echo-args".into(),
                 output_hash: digest('a'),
-                store_root: if cfg!(windows) { "C:\\store".into() } else { "/store".into() },
+                store_root: if cfg!(windows) {
+                    "C:\\store".into()
+                } else {
+                    "/store".into()
+                },
                 bins: vec!["echo-args".into()],
                 members: vec!["echo-args".into()],
                 projection_hashes: vec![digest('b')],
@@ -1119,7 +1168,10 @@ mod tests {
 
     #[test]
     fn current_pointer_rejects_bitflip_truncation_and_traversal() {
-        let pointer = CurrentPointer { generation: 7, witness: digest('a') };
+        let pointer = CurrentPointer {
+            generation: 7,
+            witness: digest('a'),
+        };
         let wire = format_current_pointer(&pointer).unwrap();
         assert_eq!(parse_current_pointer(&wire).unwrap(), pointer);
         assert!(parse_current_pointer(&wire.replace("generation\t7", "generation\t8")).is_err());
@@ -1140,7 +1192,9 @@ mod tests {
 
     #[test]
     fn names_reject_traversal_windows_reserved_and_case_collisions() {
-        for invalid in ["", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt", "jetpack"] {
+        for invalid in [
+            "", "../x", "a/b", "a\\b", "CON", "com1.exe", "nul.txt", "jetpack",
+        ] {
             assert!(validate_bin_name(invalid).is_err(), "accepted {invalid:?}");
         }
         let mut case_collision = metadata();
@@ -1182,7 +1236,10 @@ mod tests {
         assert_eq!(physical_bin_name_for("foo", false), "foo");
         assert_eq!(
             path_entries(Path::new("C:\\bin"), Path::new("foo"), true),
-            vec![PathBuf::from("C:\\bin/foo"), PathBuf::from("C:\\bin/foo.exe")]
+            vec![
+                PathBuf::from("C:\\bin/foo"),
+                PathBuf::from("C:\\bin/foo.exe")
+            ]
         );
         assert_eq!(
             path_entries(Path::new("/bin"), Path::new("foo"), false),
@@ -1222,7 +1279,13 @@ mod tests {
             OsString::from("space value"),
         ];
         let command = target_command(Path::new("tool"), arguments.clone());
-        assert_eq!(command.get_args().collect::<Vec<_>>(), arguments.iter().map(OsString::as_os_str).collect::<Vec<_>>());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            arguments
+                .iter()
+                .map(OsString::as_os_str)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1351,11 +1414,15 @@ mod tests {
         let writer_running = Arc::clone(&running);
         let writer_path = projection.clone();
         let writer = std::thread::spawn(move || {
-            let mut file = fs::OpenOptions::new().write(true).open(writer_path).unwrap();
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .open(writer_path)
+                .unwrap();
             writer_start.wait();
             let changed = [b'b'; 64 * 1024];
             while writer_running.load(Ordering::Relaxed) {
-                file.seek(std::io::SeekFrom::Start(2 * 1024 * 1024)).unwrap();
+                file.seek(std::io::SeekFrom::Start(2 * 1024 * 1024))
+                    .unwrap();
                 file.write_all(&changed).unwrap();
                 file.flush().unwrap();
             }
@@ -1378,16 +1445,11 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(all(
-        unix,
-        not(any(target_os = "linux", target_os = "android"))
-    ))]
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
     #[test]
     fn unsupported_unix_dispatch_fails_closed_without_named_fallback() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-profile-unsupported-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-profile-unsupported-{}", std::process::id()));
         fs::write(&root, b"executable").unwrap();
         let mut source = fs::File::open(&root).unwrap();
         let error = freeze_unix_projection(&mut source, &digest('a')).unwrap_err();

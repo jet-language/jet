@@ -99,7 +99,7 @@ pub(super) fn cmd_fmt(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(plan) => plan,
         Err(code) => return code,
     };
-    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &project_dir, &mut plan.table, &parsed.flags) {
         return code;
     }
     let Some(formatter) = plan.environment.lifecycle.formatter.as_ref() else {

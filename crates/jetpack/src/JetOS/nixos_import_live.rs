@@ -79,7 +79,11 @@ pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImp
         return Ok(None);
     }
     let flake_text = fs::read_to_string(args.source.join("flake.nix")).unwrap_or_default();
-    let Some(host) = args.host.clone().or_else(|| scan_first_nixos_host(&flake_text)) else {
+    let Some(host) = args
+        .host
+        .clone()
+        .or_else(|| scan_first_nixos_host(&flake_text))
+    else {
         return Err(
             "the flake declares no discoverable nixosConfigurations host; pass `--host <name>`."
                 .to_string(),
@@ -93,11 +97,7 @@ pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImp
 }
 
 fn run_live_extractor(source: &Path, host: &str) -> Result<JSON::JSONValue, String> {
-    let attr = format!(
-        "{}#nixosConfigurations.{}.config",
-        source.display(),
-        host
-    );
+    let attr = format!("{}#nixosConfigurations.{}.config", source.display(), host);
     let output = Command::new("nix")
         .args(["eval", "--json", &attr, "--apply", NIXOS_LIVE_EXTRACTOR])
         .output()
@@ -135,7 +135,10 @@ fn live_num(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &st
     }
 }
 
-fn live_num_list(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> Vec<i64> {
+fn live_num_list(
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
+    key: &str,
+) -> Vec<i64> {
     root.get(key)
         .and_then(|v| v.as_array().ok())
         .map(|values| {
@@ -164,10 +167,7 @@ fn dedup_preserving_order(values: Vec<String>) -> Vec<String> {
 /// direct, underscored, kdePackages, gnomeExtensions). Packages from other
 /// flake inputs land here — they become explicit audit omissions instead of
 /// entries that break the build.
-fn probe_unresolvable_packages(
-    nixpkgs_ref: &str,
-    names: &[String],
-) -> Result<Vec<String>, String> {
+fn probe_unresolvable_packages(nixpkgs_ref: &str, names: &[String]) -> Result<Vec<String>, String> {
     if names.is_empty() {
         return Ok(Vec::new());
     }
@@ -257,7 +257,13 @@ fn render_live_int_list(values: &[i64]) -> String {
 fn live_nixpkgs_ref(source: &Path) -> Option<String> {
     let text = fs::read_to_string(source.join("flake.lock")).ok()?;
     let lock = JSON::parse(&text).ok()?;
-    let locked = lock.get("nodes").ok()?.get("nixpkgs").ok()?.get("locked").ok()?;
+    let locked = lock
+        .get("nodes")
+        .ok()?
+        .get("nixpkgs")
+        .ok()?
+        .get("locked")
+        .ok()?;
     let locked = locked.as_object().ok()?;
     let rev = import_json_string(locked, "rev")?;
     let owner = import_json_string(locked, "owner").unwrap_or_else(|| "NixOS".to_string());
@@ -413,9 +419,15 @@ fn plan_from_live_facts(
     let mut omissions: Vec<String> = Vec::new();
 
     let host_fact = import_json_string(root, "host").unwrap_or_else(|| host.to_string());
-    options.push(("network.hostName".to_string(), import_render_string(&host_fact)));
+    options.push((
+        "network.hostName".to_string(),
+        import_render_string(&host_fact),
+    ));
     if live_bool(root, "networkmanager") {
-        options.push(("network.networkmanager.enable".to_string(), "true".to_string()));
+        options.push((
+            "network.networkmanager.enable".to_string(),
+            "true".to_string(),
+        ));
     }
     let tcp = live_num_list(root, "firewallTcp");
     if !tcp.is_empty() {
@@ -513,17 +525,32 @@ fn plan_from_live_facts(
     let gnome = live_bool(root, "desktopGnome") || live_bool(root, "dmGdm");
     let plasma = live_bool(root, "desktopPlasma") || live_bool(root, "dmSddm");
     if gnome {
-        options.push(("services.desktop.profile".to_string(), ".Default".to_string()));
+        options.push((
+            "services.desktop.profile".to_string(),
+            ".Default".to_string(),
+        ));
         options.push(("services.displayManager".to_string(), "\"gdm\"".to_string()));
     } else if plasma {
-        options.push(("services.desktop.plasma.enable".to_string(), "true".to_string()));
-        options.push(("services.displayManager".to_string(), "\"sddm\"".to_string()));
+        options.push((
+            "services.desktop.plasma.enable".to_string(),
+            "true".to_string(),
+        ));
+        options.push((
+            "services.displayManager".to_string(),
+            "\"sddm\"".to_string(),
+        ));
     }
     if live_bool(root, "svcPipewire") {
-        options.push(("services.audio.pipewire.enable".to_string(), "true".to_string()));
+        options.push((
+            "services.audio.pipewire.enable".to_string(),
+            "true".to_string(),
+        ));
     }
     if live_bool(root, "svcRtkit") {
-        options.push(("services.audio.rtkit.enable".to_string(), "true".to_string()));
+        options.push((
+            "services.audio.rtkit.enable".to_string(),
+            "true".to_string(),
+        ));
     }
     if live_bool(root, "svcLibvirtd") {
         options.push((
@@ -532,13 +559,22 @@ fn plan_from_live_facts(
         ));
     }
     if live_bool(root, "svcSteam") {
-        options.push(("services.gaming.steam.enable".to_string(), "true".to_string()));
+        options.push((
+            "services.gaming.steam.enable".to_string(),
+            "true".to_string(),
+        ));
     }
     if live_bool(root, "svcGamemode") {
-        options.push(("services.gaming.gamemode.enable".to_string(), "true".to_string()));
+        options.push((
+            "services.gaming.gamemode.enable".to_string(),
+            "true".to_string(),
+        ));
     }
     if live_bool(root, "svcPcscd") {
-        options.push(("services.smartcard.pcscd.enable".to_string(), "true".to_string()));
+        options.push((
+            "services.smartcard.pcscd.enable".to_string(),
+            "true".to_string(),
+        ));
     }
     for (fact, service) in [("svcOpenssh", "openssh"), ("svcTailscale", "tailscale")] {
         if live_bool(root, fact) {
@@ -560,11 +596,16 @@ fn plan_from_live_facts(
 
     let (packages, omitted_packages) = {
         let (kept, omitted) = import_package_list(root, "packages");
-        (dedup_preserving_order(kept), dedup_preserving_order(omitted))
+        (
+            dedup_preserving_order(kept),
+            dedup_preserving_order(omitted),
+        )
     };
 
-    let mut hm_by_user: std::collections::BTreeMap<String, (Vec<String>, Vec<String>, Vec<String>)> =
-        std::collections::BTreeMap::new();
+    let mut hm_by_user: std::collections::BTreeMap<
+        String,
+        (Vec<String>, Vec<String>, Vec<String>),
+    > = std::collections::BTreeMap::new();
     if let Some(hm_json) = root.get("hm") {
         for entry in hm_json.as_array().map_err(|e| format!("hm: {e}"))? {
             let entry = entry.as_object().map_err(|e| format!("hm entry: {e}"))?;
@@ -580,7 +621,9 @@ fn plan_from_live_facts(
     let mut users = Vec::new();
     if let Some(users_json) = root.get("users") {
         for user_json in users_json.as_array().map_err(|e| format!("users: {e}"))? {
-            let user = user_json.as_object().map_err(|e| format!("user entry: {e}"))?;
+            let user = user_json
+                .as_object()
+                .map_err(|e| format!("user entry: {e}"))?;
             let Some(name) = import_json_string(user, "name") else {
                 continue;
             };
@@ -639,8 +682,8 @@ fn plan_from_live_facts(
         }));
     }
 
-    let nixpkgs_ref = live_nixpkgs_ref(&args.source)
-        .unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
+    let nixpkgs_ref =
+        live_nixpkgs_ref(&args.source).unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
 
     // Snapshot ownership before the nixpkgs probe strips external packages.
     let system_before: BTreeSet<String> = packages.iter().cloned().collect();
@@ -685,8 +728,7 @@ fn plan_from_live_facts(
                             }
                             for (uname, upkgs) in &user_before {
                                 if upkgs.contains(pkg) {
-                                    if let Some(user) =
-                                        users.iter_mut().find(|u| u.name == *uname)
+                                    if let Some(user) = users.iter_mut().find(|u| u.name == *uname)
                                     {
                                         merge_sourced_packages(
                                             &mut user.sourced_packages,

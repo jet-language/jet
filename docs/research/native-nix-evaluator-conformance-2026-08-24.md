@@ -40,6 +40,12 @@ This is the derived plan because `docs/plans/jetpack-dogfood/` has plans for
 cards #2155–#2160 and #2164, but no plan for #2162. The plan follows step 7 of
 `docs/audits/jetpack-native-nixpkgs-2026-08-24.md`.
 
+The existing dogfood plan remains the authority for the index path. It requires
+an independent Nix invocation, fresh evaluator state, exact `drvPath` and
+output-map comparison, and publication stop on any mismatch
+(`docs/plans/jetpack-dogfood/plan-2157-2158.md:103-112`). This evaluator plan
+does not replace that producer contract.
+
 ## Snix and Tvix reuse posture
 
 ### Proposed decision
@@ -62,6 +68,13 @@ MIT exception to protocol-buffer definitions for independent implementations.
 [Snix licence structure](https://git.snix.dev/snix/snix) records this split.
 Tvix records the same split in its repository README.
 [Tvix licence structure](https://github.com/tvlfyi/tvix/)
+
+The pinned source review is recorded in
+[`docs/audits/snix-tvix-license-research-2026-08-24.md`](../audits/snix-tvix-license-research-2026-08-24.md).
+It checked Snix commit `6e990352dd1fe25248a9b47ca61e5b90cc829faf` and the Tvix
+mirror commit `92e60f242b880f641e3346d42d3f4f4334ac3ee2`. Jet's existing
+`D-JPK-NIXENGINE1=D` already says to ship no Tvix code and use Nix/Tvix only as
+development and CI differential oracles (`docs/spec/syntax-decisions.md:5439-5444`).
 
 The owner/legal gate is still open. This report records a recommendation, not
 owner ratification. A direct-reuse option needs a separate GPL package boundary,
@@ -97,7 +110,7 @@ Source: `tests/fixtures/nix-compat/oracle.json:1-35`.
 | `stage-a.json` | 9 | 9 | Pinned values, one error, and one lock projection |
 | `stage-a-authority.json` | 1 | 1 | One explicit project-import authority case |
 | `stage-a-derivation.json` | 4 | 4 | Pure derivation requests and rejection |
-| `breadth.json` | 14 | 14 × 7 = 98 seeded variants | Bounded projection stability against committed expected values |
+| `breadth.json` | 13 | 85 seeded/projection invocations | Bounded projection stability against committed expected values |
 | inventory | 17 semantic rows | 15 covered, 2 skipped | Evaluator feature inventory, not nixpkgs attr coverage |
 
 The inventory classifies 10 rows as `evaluable`, 5 as `buildable`, and 2 as
@@ -108,6 +121,21 @@ The 44 passing `jet-nix-eval` unit tests validate this fixture contract. They
 do not run a whole-nixpkgs source graph. `breadth.json` stores Nix expressions
 and expected values; the Rust test compares Jet with those committed values.
 It is not a fresh Nix run and must not be reported as nixpkgs coverage.
+
+The measured fixture baseline is:
+
+| `breadth.json` slice | Rows | Native invocations | Fixture result |
+|---|---:|---:|---|
+| `values` | 6 | 42 (`6 × 7`) | 42 package projections equal the committed Nix value fields |
+| `errors` | 3 | 21 (`3 × 7`) | 21 bounded cases fail closed; the committed Nix values still evaluate |
+| `authority_values` | 2 | 14 (`2 × 7`) | 14 package/cross-package projections equal the committed Nix value fields |
+| `authority_derivations` | 1 | 7 (`1 × 7`) | 7 fixed-output input-source projections equal the committed Nix fields |
+| `derivations` | 1 | 1 | 1 multi-output request shape matches; no Nix drv/output identity is returned by Jet |
+| **total** | **13** | **85** | **fixture oracle only** |
+
+The counts come from `breadth.json` and the loops in
+`crates/jet-nix-eval/src/tests.rs:651-742,1188-1317`. They measure the current
+bounded contract. They do not satisfy the whole-nixpkgs differential criterion.
 
 ### Per-revision differential ledger
 

@@ -1,10 +1,10 @@
 use super::options_rendering::{clean_symbol, option_value};
-use super::types::{GNOME_DESKTOP_PACKAGES, OSFlags};
-use jet_env_model::ModuleEval::SystemPlan;
+use super::types::{OSFlags, GNOME_DESKTOP_PACKAGES};
 use crate::Output::Theme;
 use crate::Provider;
 use crate::RefSpec;
 use crate::Store;
+use jet_env_model::ModuleEval::SystemPlan;
 use std::path::{Path, PathBuf};
 
 pub(super) struct RealizedPackage {
@@ -39,9 +39,9 @@ impl RealizedPackage {
 
     pub(super) fn consumption_path(&self, path: &str) -> std::io::Result<PathBuf> {
         if let Some(root) = &self.consumption_override {
-            let relative = Path::new(path).strip_prefix(&self.entry.out).map_err(|_| {
-                std::io::Error::other("package member escapes realized output")
-            })?;
+            let relative = Path::new(path)
+                .strip_prefix(&self.entry.out)
+                .map_err(|_| std::io::Error::other("package member escapes realized output"))?;
             return Ok(root.join(relative));
         }
         self.lease.stable_path(path)
@@ -91,7 +91,10 @@ fn canonical_hangar_digest(digest: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
-pub(super) fn first_party_package_ref(table: &RefSpec::SourceTable, package: &str) -> Option<String> {
+pub(super) fn first_party_package_ref(
+    table: &RefSpec::SourceTable,
+    package: &str,
+) -> Option<String> {
     table
         .declarations()
         .into_iter()
@@ -170,11 +173,7 @@ pub(super) fn realize_ref(
         nix_index: None,
         nix_roots: None,
     };
-    match Store::realize_verified(
-        roots,
-        &ctx,
-        Store::RealizeRequest::Package { spec, table },
-    ) {
+    match Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }) {
         Ok(realized) => {
             if let Some((live, _, _)) = progress.as_mut() {
                 live.clear();
@@ -246,17 +245,14 @@ pub(super) fn try_realize_ref(
         nix_index: None,
         nix_roots: None,
     };
-    let realized = Store::realize_verified(
-        roots,
-        &ctx,
-        Store::RealizeRequest::Package { spec, table },
-    )
-    .map_err(|e| {
-        if let Some((live, _, _)) = progress.as_mut() {
-            live.clear();
-        }
-        format!("verified realization failed for `{}`: {e:?}", spec.raw)
-    })?;
+    let realized =
+        Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
+            .map_err(|e| {
+                if let Some((live, _, _)) = progress.as_mut() {
+                    live.clear();
+                }
+                format!("verified realization failed for `{}`: {e:?}", spec.raw)
+            })?;
     if let Some((live, _, _)) = progress.as_mut() {
         live.clear();
     }

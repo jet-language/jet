@@ -5,16 +5,16 @@ use super::workspace_sources::{
 };
 use crate::EnvFile;
 use crate::Lock;
-use jet_env_model::ModuleEval;
-use crate::Output::{self, Theme};
 use crate::NixIndex::NixIndexClient;
+use crate::Output::{self, Theme};
 use crate::Provider::{self, ProviderError};
 use crate::RefSpec::{self, RefError};
+use crate::RuntimePolicy;
 use crate::Services;
 use crate::Store::{self, Roots};
 use crate::Syntax;
 use crate::Trust;
-use crate::RuntimePolicy;
+use jet_env_model::ModuleEval;
 use std::path::{Path, PathBuf};
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
@@ -61,7 +61,16 @@ pub(super) fn realize_ref(
     spec: &RefSpec::RefSpec,
     name_w: usize,
 ) -> Option<(Store::StoreEntry, Provider::SourceState)> {
-    match realize_ref_outcome(theme, roots, flags, table, spec, name_w, RowStyle::Ledger, None) {
+    match realize_ref_outcome(
+        theme,
+        roots,
+        flags,
+        table,
+        spec,
+        name_w,
+        RowStyle::Ledger,
+        None,
+    ) {
         RefOutcome::Realized(entry, state, _line, _lease) => Some((entry, state)),
         RefOutcome::NeedsNix(need) => {
             report_nix_bridge_required(theme, flags, &[need], &[]);
@@ -137,27 +146,45 @@ pub(super) fn realize_ref_outcome(
     let store_dir = roots.hangar_dir();
     let project_dir = current_project_dir();
     let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
-    // D-JPK-OFFLINE2=B: an offline Nix ref with no fixtures may still reuse a
-    // hangar copy when the project lock records a matching realization whose
-    // closure re-verifies. `cache_expectation` reads only the committed `.jet/lock`
-    // (a plain file read — no Nix, no network), so `Some` here means a verified
-    // reuse is possible; `realize_verified` then serves it or refuses loudly
-    // (integrity) if the on-disk closure fails to re-hash — never a stale copy.
-    let offline_reuse_ok = flags.offline
+    // D-JPK-OFFLINE2=B: an offline Nix ref may reuse a Hangar copy only when
+    // the committed lock identity and the complete closure both verify. A
+    // missing transitive object must reach the indexed provider so it can
+    // report the exact missing logical path instead of becoming a vague
+    // integrity failure.
+    let offline_reuse_ok = flags.offline && uses_nix && fixtures_for(flags).is_none() && {
+        let probe = Provider::Ctx {
+            fixtures: None,
+            store_dir: &store_dir,
+            offline: flags.offline,
+            project_dir: project_dir.as_deref(),
+            nix_index: None,
+            nix_roots: None,
+        };
+        Provider::cache_expectation(spec, table, &probe)
+            .and_then(|expectation| {
+                Store::find_verified_by_reference(roots, &spec.raw, &expectation)
+                    .ok()
+                    .flatten()
+            })
+            .is_some()
+    };
+    let indexed_nix = flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
-        && {
-            let probe = Provider::Ctx {
-                fixtures: None,
-                store_dir: &store_dir,
-                offline: flags.offline,
-                project_dir: project_dir.as_deref(),
-                nix_index: None,
-                nix_roots: None,
-            };
-            Provider::cache_expectation(spec, table, &probe).is_some()
-        };
-    if flags.offline && uses_nix && fixtures_for(flags).is_none() && !offline_reuse_ok {
+        && Provider::needs_nix_bridge(
+            spec,
+            table,
+            flags.offline,
+            &store_dir,
+            project_dir.as_deref(),
+        )
+        .is_none();
+    if flags.offline
+        && uses_nix
+        && fixtures_for(flags).is_none()
+        && !offline_reuse_ok
+        && !indexed_nix
+    {
         drop(spinner);
         report_provider_error(
             theme,
@@ -207,7 +234,7 @@ pub(super) fn realize_ref_outcome(
     };
     let nix_index_client = if uses_nix && fixtures.is_none() && !offline_reuse_ok {
         Some(
-            NixIndexClient::from_roots(roots)
+            NixIndexClient::from_roots_with_mode(roots, flags.offline)
                 .map_err(ProviderError::NixIndex),
         )
     } else {
@@ -257,11 +284,8 @@ pub(super) fn realize_ref_outcome(
         }
     }
     let started = std::time::Instant::now();
-    let result = Store::realize_verified(
-        roots,
-        &ctx,
-        Store::RealizeRequest::Package { spec, table },
-    );
+    let result =
+        Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table });
     drop(spinner);
     match result {
         Ok(realized) => {
@@ -293,8 +317,7 @@ pub(super) fn realize_ref_outcome(
             // T4 (D-JPK-CACHE1): one ledger row per package — how it was
             // satisfied, and how long a from-source build took.
             let elapsed = started.elapsed();
-            let state = if source_state == Provider::SourceState::Built
-                && elapsed.as_secs() >= 1 {
+            let state = if source_state == Provider::SourceState::Built && elapsed.as_secs() >= 1 {
                 format!("built {}", Output::human_duration(elapsed))
             } else {
                 source_state.label().to_string()
@@ -315,12 +338,7 @@ pub(super) fn realize_ref_outcome(
                 RowStyle::Ready => theme.ready_row(&entry.name, name_w, &version),
                 RowStyle::Silent => {}
             }
-            RefOutcome::Realized(
-                entry,
-                source_state,
-                line,
-                lease,
-            )
+            RefOutcome::Realized(entry, source_state, line, lease)
         }
         Err(Store::RealizeError::Provider(e)) => {
             report_provider_error(theme, &e);
@@ -400,11 +418,7 @@ pub(super) fn realize_adapter(
     plan: &ModuleEval::AdapterPlan,
     table: &RefSpec::SourceTable,
     consume: bool,
-) -> Option<(
-    Store::StoreEntry,
-    Provider::SourceState,
-    Store::CacheLease,
-)> {
+) -> Option<(Store::StoreEntry, Provider::SourceState, Store::CacheLease)> {
     theme.status(&format!("adapting {} …", theme.bold(&plan.name)));
     let store_dir = roots.hangar_dir();
     let project_dir = current_project_dir();
@@ -437,8 +451,7 @@ pub(super) fn realize_adapter(
             &expectation.identity.platform,
             table,
         );
-        if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
-            .is_err()
+        if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust).is_err()
         {
             return None;
         }
@@ -751,19 +764,15 @@ fn typed_plan(
     requested_preset: Option<&str>,
     requested_environment: Option<&str>,
 ) -> Result<RunPlan, i32> {
-    let plan = ModuleEval::evaluate_env_with_selections(
-        src,
-        dir,
-        requested_preset,
-        requested_environment,
-    )
-    .map_err(|d| {
-        eprint!(
-            "{}",
-            crate::Diagnostics::render_all(Syntax::ENV_FILE, src, std::slice::from_ref(&d))
-        );
-        2
-    })?;
+    let plan =
+        ModuleEval::evaluate_env_with_selections(src, dir, requested_preset, requested_environment)
+            .map_err(|d| {
+                eprint!(
+                    "{}",
+                    crate::Diagnostics::render_all(Syntax::ENV_FILE, src, std::slice::from_ref(&d))
+                );
+                2
+            })?;
     let table = plan.table;
     // U12: a dev service with no explicit `run:` that matches the built-in
     // catalog implicitly depends on that catalog's package (e.g. `redis: {
@@ -772,7 +781,10 @@ fn typed_plan(
     let mut package_refs = plan.package_refs;
     let selected_preset = plan.selected_preset;
     if let Some(formatter) = &plan.lifecycle.formatter {
-        if !package_refs.iter().any(|existing| existing == &formatter.package) {
+        if !package_refs
+            .iter()
+            .any(|existing| existing == &formatter.package)
+        {
             package_refs.push(formatter.package.clone());
         }
     }
@@ -867,6 +879,8 @@ pub(super) struct ChannelSource {
     pub(super) name: String,
     base: String,
     pub(super) channel: RefSpec::ChannelRef,
+    pub(super) policy: RefSpec::ChannelPolicy,
+    pub(super) raw: String,
 }
 
 pub(super) fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource> {
@@ -875,23 +889,72 @@ pub(super) fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource
         .into_iter()
         .filter_map(|(name, upstream, _)| {
             let (base, channel) = RefSpec::split_channel_ref(&upstream);
+            let policy = table.channel_policy(&name);
+            let base = if channel.is_none() && policy.moves() {
+                base.split_once(Syntax::REF_CHANNEL_MARKER)
+                    .map(|(base, _)| base)
+                    .unwrap_or(base)
+            } else {
+                base
+            };
+            let raw = table.source_ref(&name).unwrap_or(base).to_string();
             Some(ChannelSource {
                 name,
                 base: base.to_string(),
-                channel: channel?,
+                channel: channel
+                    .or_else(|| policy.moves().then_some(RefSpec::ChannelRef::Latest))?,
+                policy,
+                raw,
             })
         })
         .collect()
 }
 
-/// D-JPK-CHANNEL1=A: realize-class commands use only exact lock entries.
-/// Update-class commands are the only place a channel may move.
+/// D-CHANNEL-AUTO1=A: refresh automatic channels before applying the exact
+/// lock. Manual channels still move only in `jetpack update`; pinned sources
+/// never enter this loop.
 pub(super) fn apply_locked_channels(
     theme: &Theme,
     project_dir: &Path,
     table: &mut RefSpec::SourceTable,
+    flags: &Flags,
 ) -> Result<(), i32> {
     for source in channel_sources(table) {
+        if source.policy == RefSpec::ChannelPolicy::Automatic && !flags.offline {
+            match resolve_source_channel(&source, flags) {
+                Ok(exact) => {
+                    let changed = Lock::locked_source_channel(project_dir, &source.name)
+                        .is_none_or(|lock| lock.exact != exact);
+                    if changed {
+                        if let Err(error) = rewrite_channel_manifest(project_dir, &source, &exact) {
+                            theme.error_coded(
+                                "E1340",
+                                &format!(
+                                    "automatic channel `{}` could not update the manifest",
+                                    source.name
+                                ),
+                                &error,
+                                "fix the manifest permissions and run the command again",
+                            );
+                            return Err(2);
+                        }
+                        Lock::record_source_channel(
+                            project_dir,
+                            Lock::LockedSourceChannel {
+                                name: source.name.clone(),
+                                channel: source.channel.as_str().to_string(),
+                                exact: exact.clone(),
+                            },
+                        );
+                    }
+                }
+                Err(error) if Lock::locked_source_channel(project_dir, &source.name).is_none() => {
+                    report_provider_error(theme, &error);
+                    return Err(2);
+                }
+                Err(_) => {}
+            }
+        }
         let Some(lock) = Lock::locked_source_channel(project_dir, &source.name) else {
             report_unlocked_channel(theme, &source.name, source.channel.as_str());
             return Err(2);
@@ -903,6 +966,47 @@ pub(super) fn apply_locked_channels(
         table.set_upstream(&source.name, lock.exact);
     }
     Ok(())
+}
+
+/// Write a resolved moving source back to the same declarative reference. The
+/// policy marker remains visible, while the exact selector becomes explicit.
+pub(super) fn rewrite_channel_manifest(
+    project_dir: &Path,
+    source: &ChannelSource,
+    exact: &str,
+) -> Result<(), String> {
+    let path = EnvFile::path_in(project_dir);
+    let current = std::fs::read_to_string(&path)
+        .map_err(|error| format!("could not read `{}`: {error}", path.display()))?;
+    let Some(old) = (!source.raw.is_empty()).then_some(source.raw.as_str()) else {
+        return Err(format!("source `{}` has no manifest spelling", source.name));
+    };
+    let resolved = manifest_channel_ref(exact, source.policy);
+    if old == resolved {
+        return Ok(());
+    }
+    let next = current.replace(old, &resolved);
+    if next == current {
+        return Err(format!(
+            "source `{}` was not found in `{}`",
+            source.name,
+            path.display()
+        ));
+    }
+    std::fs::write(&path, next)
+        .map_err(|error| format!("could not write `{}`: {error}", path.display()))
+}
+
+fn manifest_channel_ref(exact: &str, policy: RefSpec::ChannelPolicy) -> String {
+    let exact = exact
+        .split_once(Syntax::REF_SEPARATOR)
+        .map(|(provider, target)| format!("{target}@{provider}"))
+        .unwrap_or_else(|| exact.to_string());
+    match policy {
+        RefSpec::ChannelPolicy::Pinned => exact,
+        RefSpec::ChannelPolicy::Manual => format!("#{} {exact}", Syntax::REF_CHANNEL_LATEST),
+        RefSpec::ChannelPolicy::Automatic => format!("#{} {exact}", Syntax::REF_CHANNEL_AUTO),
+    }
 }
 
 fn report_unlocked_channel(theme: &Theme, name: &str, channel: &str) {
@@ -920,7 +1024,10 @@ fn report_unlocked_channel(theme: &Theme, name: &str, channel: &str) {
     );
 }
 
-pub(super) fn resolve_source_channel(source: &ChannelSource, flags: &Flags) -> Result<String, ProviderError> {
+pub(super) fn resolve_source_channel(
+    source: &ChannelSource,
+    flags: &Flags,
+) -> Result<String, ProviderError> {
     if let Some(exact) = resolve_channel_from_fixture(source, flags) {
         return Ok(exact);
     }
@@ -950,7 +1057,10 @@ fn resolve_channel_from_fixture(source: &ChannelSource, flags: &Flags) -> Option
     None
 }
 
-pub(super) fn channel_download_size_from_fixture(source: &ChannelSource, flags: &Flags) -> Option<u64> {
+pub(super) fn channel_download_size_from_fixture(
+    source: &ChannelSource,
+    flags: &Flags,
+) -> Option<u64> {
     let dir = fixtures_for(flags)?;
     let raw = std::fs::read_to_string(dir.join("channels.txt")).ok()?;
     raw.lines().find_map(|line| {

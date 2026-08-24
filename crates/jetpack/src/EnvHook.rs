@@ -44,9 +44,7 @@ pub(crate) fn git_hooks_environment(
     let root = std::fs::canonicalize(root)
         .map_err(|error| format!("could not resolve project root for git hooks: {error}"))?;
     let hooks = std::fs::canonicalize(root.join(relative_path)).map_err(|error| {
-        format!(
-            "git hook path `{relative}` does not name an existing directory: {error}"
-        )
+        format!("git hook path `{relative}` does not name an existing directory: {error}")
     })?;
     if !hooks.is_dir() {
         return Err(format!(
@@ -122,7 +120,10 @@ pub fn definition_fingerprint_with_selections(
         {
             add_input(
                 root,
-                &format!("{}/profiles/{profile_name}/current", Syntax::SOURCE_ROOT_DIR),
+                &format!(
+                    "{}/profiles/{profile_name}/current",
+                    Syntax::SOURCE_ROOT_DIR
+                ),
                 "package-profile-current",
                 &mut entries,
             );
@@ -208,8 +209,8 @@ pub fn reload_policy_with_environment(
         None,
         requested_environment,
     )
-        .map(|plan| plan.lifecycle.reload)
-        .unwrap_or_default()
+    .map(|plan| plan.lifecycle.reload)
+    .unwrap_or_default()
 }
 
 /// Coalesce a watched definition change until its debounce window expires.
@@ -245,7 +246,10 @@ pub fn watch_reload_ready(root: &Path, hash: &str, debounce_ms: u64) -> Result<b
 
 /// Remove the debounce marker after a watched definition has activated.
 pub fn clear_watch_reload(root: &Path) {
-    let _ = std::fs::remove_file(root.join(Syntax::CONFIG_DEFAULT_DIR).join("env-hook-reload"));
+    let _ = std::fs::remove_file(
+        root.join(Syntax::CONFIG_DEFAULT_DIR)
+            .join("env-hook-reload"),
+    );
 }
 
 fn add_input(root: &Path, relative: &str, kind: &str, entries: &mut Vec<(String, Vec<u8>)>) {
@@ -261,14 +265,7 @@ fn add_input(root: &Path, relative: &str, kind: &str, entries: &mut Vec<(String,
     let path = root.join(path);
     let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut visited = BTreeSet::new();
-    add_input_path(
-        &root_real,
-        &path,
-        relative,
-        kind,
-        entries,
-        &mut visited,
-    );
+    add_input_path(&root_real, &path, relative, kind, entries, &mut visited);
 }
 
 fn add_input_path(
@@ -341,7 +338,14 @@ fn add_input_path(
             } else {
                 format!("{relative}/{name}")
             };
-            add_input_path(root, &path.join(&name), &child_relative, kind, entries, visited);
+            add_input_path(
+                root,
+                &path.join(&name),
+                &child_relative,
+                kind,
+                entries,
+                visited,
+            );
         }
     } else if metadata.is_file() {
         match std::fs::read(path) {
@@ -360,7 +364,10 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
     let Ok(read_dir) = std::fs::read_dir(current) else {
         return;
     };
-    let mut paths = read_dir.filter_map(Result::ok).map(|entry| entry.path()).collect::<Vec<_>>();
+    let mut paths = read_dir
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
     paths.sort();
     for path in paths {
         if path.file_name().is_some_and(|name| name == ".jet") {
@@ -370,7 +377,10 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
             continue;
         };
         if metadata.file_type().is_symlink() {
-            if path.extension().is_some_and(|extension| extension == Syntax::FILE_EXT) {
+            if path
+                .extension()
+                .is_some_and(|extension| extension == Syntax::FILE_EXT)
+            {
                 let relative = path
                     .strip_prefix(root)
                     .unwrap_or(&path)
@@ -381,7 +391,9 @@ fn collect_definition_files(root: &Path, current: &Path, entries: &mut Vec<(Stri
         } else if metadata.is_dir() {
             collect_definition_files(root, &path, entries);
         } else if metadata.is_file()
-            && path.extension().is_some_and(|extension| extension == Syntax::FILE_EXT)
+            && path
+                .extension()
+                .is_some_and(|extension| extension == Syntax::FILE_EXT)
         {
             let relative = path
                 .strip_prefix(root)
@@ -589,7 +601,9 @@ fn render_unset(kind: ShellKind, names: &[String]) -> String {
 fn validate_activation(act: &Activation) -> Result<(), String> {
     for name in act.vars.keys().chain(act.unset.iter()) {
         if !jet_env_model::ModuleEval::valid_env_name(name) {
-            return Err(format!("activation variable '{name}' is not a valid environment name"));
+            return Err(format!(
+                "activation variable '{name}' is not a valid environment name"
+            ));
         }
     }
     Ok(())

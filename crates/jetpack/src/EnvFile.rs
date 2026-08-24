@@ -71,24 +71,23 @@ impl EnvFile {
 
     /// The named-source resolution table for this env (D-JPK17).
     pub fn source_table(&self) -> SourceTable {
-        SourceTable::from_decls(self.named.iter().map(|s| {
+        let mut table = SourceTable::from_decls(self.named.iter().map(|s| {
             let via = s
                 .via
                 .as_deref()
                 .map(ProviderKind::parse)
                 .unwrap_or_default();
             let upstream = super::RefSpec::classify_provider_ref(&s.upstream)
-                .map(|source| {
-                    format!(
-                        "{}{}{}",
-                        source.provider.label(),
-                        Syntax::REF_SEPARATOR,
-                        source.target
-                    )
-                })
+                .map(|source| source.upstream())
                 .unwrap_or_else(|_| s.upstream.clone());
             (s.name.clone(), upstream, via)
-        }))
+        }));
+        for source in &self.named {
+            if let Ok(pref) = super::RefSpec::classify_provider_ref(&source.upstream) {
+                table.set_channel_metadata(&source.name, pref.policy, pref.raw);
+            }
+        }
+        table
     }
 
     /// Resolve one package entry to a full `package@source` ref: entries
@@ -206,12 +205,7 @@ fn entry_for(ef: &EnvFile, spec: &RefSpec) -> String {
     if is_default {
         spec.package.clone()
     } else {
-        format!(
-            "{}{}{}",
-            spec.package,
-            Syntax::REF_PROVIDER_AT,
-            source
-        )
+        format!("{}{}{}", spec.package, Syntax::REF_PROVIDER_AT, source)
     }
 }
 

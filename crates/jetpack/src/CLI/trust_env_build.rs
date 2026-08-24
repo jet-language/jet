@@ -24,6 +24,64 @@ use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 
+/// Native projection for the repository's dev-shell contract. These values
+/// are derived from the selected project root and realized package outputs;
+/// no shellHook, store-path literal, or external shell is involved.
+fn native_environment_projection(
+    project_root: &std::path::Path,
+    realized: &[(String, String)],
+    inherited_loader_path: Option<&str>,
+) -> (Vec<String>, std::collections::BTreeMap<String, String>) {
+    let bin_dirs = vec![project_root
+        .join("target/debug")
+        .to_string_lossy()
+        .into_owned()];
+    let mut vars = std::collections::BTreeMap::from([
+        (
+            "JET_ROOT".to_string(),
+            project_root.to_string_lossy().into_owned(),
+        ),
+        ("JET_ENV_DISABLE".to_string(), "1".to_string()),
+        // Jetpack does not create Nix shell scratch trees. The marker records
+        // the one-time cleanup boundary without executing the old hook.
+        ("JET_NIX_TMP_CLEANED".to_string(), "1".to_string()),
+    ]);
+    let mut tzdir = None;
+    let mut vulkan = None;
+    let mut raylib = None;
+    for (name, output) in realized {
+        match name.as_str() {
+            "tzdata" => tzdir = Some(format!("{output}/share/zoneinfo")),
+            "vulkan-loader" => vulkan = Some(format!("{output}/lib")),
+            "raylib" => raylib = Some(format!("{output}/lib")),
+            _ => {}
+        }
+    }
+    if let Some(tzdir) = tzdir {
+        vars.insert("TZDIR".to_string(), tzdir);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut library_paths = Vec::new();
+        if let Some(path) = vulkan {
+            library_paths.push(path);
+        }
+        if let Some(path) = raylib {
+            library_paths.push(path);
+        }
+        if let Some(existing) = inherited_loader_path.filter(|value| !value.is_empty()) {
+            library_paths.push(existing.to_string());
+        }
+        if !library_paths.is_empty() {
+            vars.insert(
+                "LD_LIBRARY_PATH".to_string(),
+                library_paths.join(&crate::Platform::path_separator().to_string()),
+            );
+        }
+    }
+    (bin_dirs, vars)
+}
+
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
 /// store; top-level `jet trust` dispatches here.
 pub(super) fn cmd_trust(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -212,6 +270,7 @@ pub(super) fn compose_env(
         std::collections::BTreeMap::new();
     let mut nix_vars = std::collections::BTreeMap::new();
     let mut realized_refs = Vec::new();
+    let mut realized_outputs = Vec::new();
     let mut holes = Vec::new();
     let mut failed = false;
     let mut cache_leases = Vec::new();
@@ -277,6 +336,7 @@ pub(super) fn compose_env(
                 if let Ok(producer) = Store::ProducerRecord::decode(&entry.producer_record) {
                     nix_vars.extend(Provider::nix_runtime_environment(&producer));
                 }
+                realized_outputs.push((entry.name.clone(), entry.out.clone()));
                 realized_refs.push(entry.reference);
                 cache_leases.push(lease);
             }
@@ -335,6 +395,13 @@ pub(super) fn compose_env(
         );
         return Err(2);
     }
+    let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
+    let (native_bin_dirs, native_vars) = native_environment_projection(
+        &plan.project_root,
+        &realized_outputs,
+        inherited_loader_path.as_deref(),
+    );
+    bin_dirs.extend(native_bin_dirs);
     let mut composed_vars: std::collections::BTreeMap<String, String> = provider_vars
         .into_iter()
         .map(|(name, values)| {
@@ -420,6 +487,9 @@ pub(super) fn compose_env(
             }
         }
     }
+    // Native projection is applied last so the Jet-owned root, markers, and
+    // generated output paths cannot be shadowed by dotenv or preset values.
+    composed_vars.extend(native_vars);
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above are the whole
     // report — `jet env`/`run`/`dev` hand off straight to the shell
     // threshold rule (`Shell::enter`) instead of a redundant summary line.
@@ -1070,7 +1140,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             Err(code) => return code,
         },
     };
-    if let Err(code) = apply_locked_channels(theme, &dir, &mut plan.table) {
+    if let Err(code) = apply_locked_channels(theme, &dir, &mut plan.table, &parsed.flags) {
         return code;
     }
 
@@ -1298,5 +1368,43 @@ fn enforce_required_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32>
         RuntimePolicy::enforce_sandbox_policy(theme, json)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod native_projection_tests {
+    use super::native_environment_projection;
+    use std::path::Path;
+
+    #[test]
+    fn native_projection_derives_root_timezone_and_loader_paths() {
+        let (bin_dirs, vars) = native_environment_projection(
+            Path::new("/workspace/jet"),
+            &[
+                ("tzdata".into(), "/hangar/tzdata-1".into()),
+                ("raylib".into(), "/hangar/raylib-1".into()),
+                ("vulkan-loader".into(), "/hangar/vulkan-1".into()),
+            ],
+            Some("/host/lib"),
+        );
+        assert_eq!(bin_dirs, vec!["/workspace/jet/target/debug"]);
+        assert_eq!(
+            vars.get("JET_ROOT").map(String::as_str),
+            Some("/workspace/jet")
+        );
+        assert_eq!(vars.get("JET_ENV_DISABLE").map(String::as_str), Some("1"));
+        assert_eq!(
+            vars.get("JET_NIX_TMP_CLEANED").map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            vars.get("TZDIR").map(String::as_str),
+            Some("/hangar/tzdata-1/share/zoneinfo")
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            vars.get("LD_LIBRARY_PATH").map(String::as_str),
+            Some("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib")
+        );
     }
 }

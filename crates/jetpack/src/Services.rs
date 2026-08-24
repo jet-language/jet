@@ -25,9 +25,9 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
 
-use jet_env_model::ModuleEval::{DevServicePlan, ReadyProbe, RestartPolicy, ShutdownPolicy};
 use super::Shell::Env as ShellEnv;
 use crate::Syntax;
+use jet_env_model::ModuleEval::{DevServicePlan, ReadyProbe, RestartPolicy, ShutdownPolicy};
 
 const MAX_SERVICE_NAME_BYTES: usize = 256;
 const MAX_SERVICE_RESTARTS: u32 = 100;
@@ -115,7 +115,10 @@ fn run_catalog_tool(
     }
     let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
     Err(if detail.is_empty() {
-        format!("service preset initializer `{tool}` exited with {}", output.status)
+        format!(
+            "service preset initializer `{tool}` exited with {}",
+            output.status
+        )
     } else {
         format!("service preset initializer `{tool}` failed: {detail}")
     })
@@ -241,8 +244,8 @@ fn prepare_kafka_connect(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<
         &data_dir.join("connect-standalone.properties"),
         worker.as_bytes(),
     )
-        .and_then(|_| write_atomic(&data_dir.join("connector.properties"), connector.as_bytes()))
-        .map_err(|error| format!("couldn't write Kafka Connect preset config: {error}"))
+    .and_then(|_| write_atomic(&data_dir.join("connector.properties"), connector.as_bytes()))
+    .map_err(|error| format!("couldn't write Kafka Connect preset config: {error}"))
 }
 
 fn prepare_mosquitto(port: i64, data_dir: &Path, _env: &ShellEnv) -> Result<(), String> {
@@ -388,7 +391,9 @@ const CATALOG: &[Catalog] = &[
             ]
         },
         readiness: |port| {
-            ReadyProbe::Exec(format!("curl -fsS http://127.0.0.1:{port}/minio/health/live"))
+            ReadyProbe::Exec(format!(
+                "curl -fsS http://127.0.0.1:{port}/minio/health/live"
+            ))
         },
         prepare: prepare_none,
     },
@@ -615,7 +620,10 @@ const CATALOG: &[Catalog] = &[
         run: |_, data_dir| {
             vec![
                 "connect-standalone.sh".to_string(),
-                data_dir.join("connect-standalone.properties").display().to_string(),
+                data_dir
+                    .join("connect-standalone.properties")
+                    .display()
+                    .to_string(),
                 data_dir.join("connector.properties").display().to_string(),
             ]
         },
@@ -815,7 +823,10 @@ const CATALOG: &[Catalog] = &[
         run: |port, data_dir| {
             vec![
                 "prometheus".to_string(),
-                format!("--config.file={}", data_dir.join("prometheus.yml").display()),
+                format!(
+                    "--config.file={}",
+                    data_dir.join("prometheus.yml").display()
+                ),
                 format!("--storage.tsdb.path={}", data_dir.display()),
                 format!("--web.listen-address=127.0.0.1:{port}"),
             ]
@@ -1026,7 +1037,10 @@ pub fn image_run_command(plan: &DevServicePlan) -> Result<Vec<String>, String> {
     }
     if let Some(run) = &plan.run {
         if run.is_empty() || run.iter().any(|arg| arg.contains('\0')) {
-            return Err(format!("service {} has an invalid empty run command", plan.name));
+            return Err(format!(
+                "service {} has an invalid empty run command",
+                plan.name
+            ));
         }
         return Ok(run.clone());
     }
@@ -1116,7 +1130,10 @@ fn ports_path(dir: &Path) -> PathBuf {
 fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
-    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("state");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("state");
     let temporary = parent.join(format!(".{name}.tmp-{}", std::process::id()));
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -1224,10 +1241,19 @@ fn authority_for(
         let safe_name = plan
             .name
             .chars()
-            .map(|ch| if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' { ch } else { '-' })
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                    ch
+                } else {
+                    '-'
+                }
+            })
             .collect::<String>();
         return Ok(ServiceAuthority::LinuxSystemdUser {
-            unit: format!("jetpack-{:016x}-{safe_name}-g{generation}.scope", hash.finish()),
+            unit: format!(
+                "jetpack-{:016x}-{safe_name}-g{generation}.scope",
+                hash.finish()
+            ),
         });
     }
     #[cfg(all(not(test), windows))]
@@ -1237,9 +1263,7 @@ fn authority_for(
         let _ = generation;
         let guardian = windows_job::new_endpoint()
             .map_err(|error| format!("couldn't create service guardian endpoint: {error}"))?;
-        return Ok(ServiceAuthority::WindowsGuardianJobObject {
-            guardian,
-        });
+        return Ok(ServiceAuthority::WindowsGuardianJobObject { guardian });
     }
     #[cfg(all(not(test), target_os = "macos"))]
     {
@@ -1248,10 +1272,7 @@ fn authority_for(
             plan.name
         ));
     }
-    #[cfg(all(
-        not(test),
-        not(any(target_os = "linux", target_os = "macos", windows))
-    ))]
+    #[cfg(all(not(test), not(any(target_os = "linux", target_os = "macos", windows))))]
     {
         let _ = (project_dir, plan, generation);
         return Err("E1332: Safe service authority is unavailable.".to_string());
@@ -1274,7 +1295,9 @@ fn authority_from_lifecycle(facts: &LifecycleFacts) -> Result<ServiceAuthority, 
             })
             .ok_or_else(|| "service lifecycle state is missing its guardian".to_string()),
         "unsupported" => Ok(ServiceAuthority::Unsupported),
-        other => Err(format!("service lifecycle state has unknown authority `{other}`")),
+        other => Err(format!(
+            "service lifecycle state has unknown authority `{other}`"
+        )),
     }
 }
 
@@ -1309,8 +1332,9 @@ fn attach_authority(
         ServiceAuthority::WindowsGuardianJobObject { guardian } => {
             #[cfg(windows)]
             {
-                let job = windows_job::Job::new(guardian)
-                    .map_err(|error| format!("couldn't create service guardian job object: {error}"))?;
+                let job = windows_job::Job::new(guardian).map_err(|error| {
+                    format!("couldn't create service guardian job object: {error}")
+                })?;
                 job.assign(child).map_err(|error| {
                     let _ = child.kill();
                     format!("couldn't assign service to its guardian job object: {error}")
@@ -1376,10 +1400,16 @@ fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
     let mut seen = BTreeSet::new();
     for line in text.lines() {
         let Some((key, value)) = line.split_once('=') else {
-            return Err(format!("service lifecycle state `{}` is invalid", path.display()));
+            return Err(format!(
+                "service lifecycle state `{}` is invalid",
+                path.display()
+            ));
         };
         if value.contains('\n') || (!matches!(key, "dependency") && !seen.insert(key)) {
-            return Err(format!("service lifecycle state `{}` is invalid", path.display()));
+            return Err(format!(
+                "service lifecycle state `{}` is invalid",
+                path.display()
+            ));
         }
         match key {
             "version" if value == "1" => version = Some(()),
@@ -1392,13 +1422,21 @@ fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
             "unit" if !value.is_empty() => unit = Some(value.to_string()),
             "guardian" if !value.is_empty() => guardian = Some(value.to_string()),
             "dependency" if !value.is_empty() => dependencies.push(value.to_string()),
-            _ => return Err(format!("service lifecycle state `{}` is invalid", path.display())),
+            _ => {
+                return Err(format!(
+                    "service lifecycle state `{}` is invalid",
+                    path.display()
+                ))
+            }
         }
     }
     let (Some(()), Some(backend), Some(generation), Some(phase), Some(containment), Some(recovery)) =
         (version, backend, generation, phase, containment, recovery)
     else {
-        return Err(format!("service lifecycle state `{}` is invalid", path.display()));
+        return Err(format!(
+            "service lifecycle state `{}` is invalid",
+            path.display()
+        ));
     };
     let facts = LifecycleFacts {
         backend,
@@ -1415,12 +1453,13 @@ fn read_lifecycle(dir: &Path) -> Result<Option<LifecycleFacts>, String> {
     Ok(Some(facts))
 }
 
-fn validate_lifecycle_authority(
-    facts: &LifecycleFacts,
-    path: &Path,
-) -> Result<(), String> {
-    let authority = authority_from_lifecycle(facts)
-        .map_err(|error| format!("service lifecycle state `{}` is invalid: {error}", path.display()))?;
+fn validate_lifecycle_authority(facts: &LifecycleFacts, path: &Path) -> Result<(), String> {
+    let authority = authority_from_lifecycle(facts).map_err(|error| {
+        format!(
+            "service lifecycle state `{}` is invalid: {error}",
+            path.display()
+        )
+    })?;
     if facts.backend != authority.backend()
         || facts.containment != authority.containment()
         || facts.unit != authority.unit().map(str::to_string)
@@ -1565,7 +1604,9 @@ fn validate_project_relative(field: &str, value: Option<&str>) -> Result<(), Str
             .components()
             .any(|component| component == std::path::Component::ParentDir)
     {
-        return Err(format!("service {field} path `{value}` must stay inside the project"));
+        return Err(format!(
+            "service {field} path `{value}` must stay inside the project"
+        ));
     }
     Ok(())
 }
@@ -1659,7 +1700,9 @@ fn validate_service_name(name: &str) -> Result<(), String> {
         || name.contains('/')
         || name.contains('\\')
     {
-        return Err(format!("service name `{name}` is not a safe state-directory name"));
+        return Err(format!(
+            "service name `{name}` is not a safe state-directory name"
+        ));
     }
     Ok(())
 }
@@ -1720,7 +1763,9 @@ fn validate_socket_names(sockets: &[String]) -> Result<(), String> {
             ));
         }
         if !seen.insert(socket) {
-            return Err(format!("service socket `{socket}` is declared more than once"));
+            return Err(format!(
+                "service socket `{socket}` is declared more than once"
+            ));
         }
     }
     Ok(())
@@ -1736,22 +1781,21 @@ fn allocate_ports(ports: &[i64]) -> Result<PortReservations, String> {
     let mut allocated = Vec::with_capacity(ports.len());
     let mut listeners = Vec::with_capacity(ports.len());
     for raw in ports {
-            let requested = u16::try_from(*raw).map_err(|_| {
-                format!("service port `{raw}` is outside the supported range")
-            })?;
-            let listener = TcpListener::bind(("127.0.0.1", requested)).map_err(|error| {
-                if requested == 0 {
-                    format!("couldn't allocate an ephemeral service port: {error}")
-                } else {
-                    format!("service port {requested} is unavailable: {error}")
-                }
-            })?;
-            let port = listener
-                .local_addr()
-                .map_err(|error| format!("couldn't read allocated service port: {error}"))?
-                .port();
-            allocated.push(port);
-            listeners.push(listener);
+        let requested = u16::try_from(*raw)
+            .map_err(|_| format!("service port `{raw}` is outside the supported range"))?;
+        let listener = TcpListener::bind(("127.0.0.1", requested)).map_err(|error| {
+            if requested == 0 {
+                format!("couldn't allocate an ephemeral service port: {error}")
+            } else {
+                format!("service port {requested} is unavailable: {error}")
+            }
+        })?;
+        let port = listener
+            .local_addr()
+            .map_err(|error| format!("couldn't read allocated service port: {error}"))?
+            .port();
+        allocated.push(port);
+        listeners.push(listener);
     }
     Ok(PortReservations {
         ports: allocated,
@@ -1812,7 +1856,10 @@ fn prepare_sockets(project_dir: &Path, sockets: &[String]) -> Result<PreparedSoc
             ensure_project_path(project_dir, &path, "socket")?;
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|error| {
-                    format!("couldn't prepare service socket directory `{}`: {error}", parent.display())
+                    format!(
+                        "couldn't prepare service socket directory `{}`: {error}",
+                        parent.display()
+                    )
                 })?;
             }
             #[cfg(unix)]
@@ -1821,7 +1868,10 @@ fn prepare_sockets(project_dir: &Path, sockets: &[String]) -> Result<PreparedSoc
                 use std::os::unix::net::UnixStream;
                 if path.exists() {
                     let metadata = fs::symlink_metadata(&path).map_err(|error| {
-                        format!("couldn't inspect service socket `{}`: {error}", path.display())
+                        format!(
+                            "couldn't inspect service socket `{}`: {error}",
+                            path.display()
+                        )
                     })?;
                     if !metadata.file_type().is_socket() {
                         return Err(format!(
@@ -1830,14 +1880,23 @@ fn prepare_sockets(project_dir: &Path, sockets: &[String]) -> Result<PreparedSoc
                         ));
                     }
                     if UnixStream::connect(&path).is_ok() {
-                        return Err(format!("service socket `{}` is already in use", path.display()));
+                        return Err(format!(
+                            "service socket `{}` is already in use",
+                            path.display()
+                        ));
                     }
                     fs::remove_file(&path).map_err(|error| {
-                        format!("couldn't remove stale service socket `{}`: {error}", path.display())
+                        format!(
+                            "couldn't remove stale service socket `{}`: {error}",
+                            path.display()
+                        )
                     })?;
                 }
                 let listener = UnixListener::bind(&path).map_err(|error| {
-                    format!("couldn't reserve service socket `{}`: {error}", path.display())
+                    format!(
+                        "couldn't reserve service socket `{}`: {error}",
+                        path.display()
+                    )
                 })?;
                 listeners.push(listener);
             }
@@ -1881,12 +1940,18 @@ fn read_process_state(dir: &Path) -> Result<Option<PersistedProcessState>, Strin
     let trimmed = text.trim();
     if let Ok(pid) = trimmed.parse::<u32>() {
         if pid == 0 {
-            return Err(format!("service process state `{}` is invalid", path.display()));
+            return Err(format!(
+                "service process state `{}` is invalid",
+                path.display()
+            ));
         }
         return Ok(Some(PersistedProcessState::LegacyPid(pid)));
     }
     if trimmed.is_empty() {
-        return Err(format!("service process state `{}` is invalid", path.display()));
+        return Err(format!(
+            "service process state `{}` is invalid",
+            path.display()
+        ));
     }
     let mut version = None;
     let mut pid = None;
@@ -1895,31 +1960,51 @@ fn read_process_state(dir: &Path) -> Result<Option<PersistedProcessState>, Strin
     for line in trimmed.lines() {
         let line = line.trim();
         let Some((key, value)) = line.split_once('=') else {
-            return Err(format!("service process state `{}` is invalid", path.display()));
+            return Err(format!(
+                "service process state `{}` is invalid",
+                path.display()
+            ));
         };
         if !seen.insert(key) {
-            return Err(format!("service process state `{}` is invalid", path.display()));
+            return Err(format!(
+                "service process state `{}` is invalid",
+                path.display()
+            ));
         }
         match key {
             "version" if value == "1" => version = Some(value),
             "pid" => {
                 let parsed = value.parse::<u32>().ok().filter(|pid| *pid != 0);
                 if parsed.is_none() {
-                    return Err(format!("service process state `{}` is invalid", path.display()));
+                    return Err(format!(
+                        "service process state `{}` is invalid",
+                        path.display()
+                    ));
                 }
                 pid = parsed;
             }
             "start" if !value.is_empty() && !value.contains('\n') => {
                 start_identity = Some(value.to_string())
             }
-            _ => return Err(format!("service process state `{}` is invalid", path.display())),
+            _ => {
+                return Err(format!(
+                    "service process state `{}` is invalid",
+                    path.display()
+                ))
+            }
         }
     }
     if version != Some("1") {
-        return Err(format!("service process state `{}` is invalid", path.display()));
+        return Err(format!(
+            "service process state `{}` is invalid",
+            path.display()
+        ));
     }
     let (Some(pid), Some(start_identity)) = (pid, start_identity) else {
-        return Err(format!("service process state `{}` is invalid", path.display()));
+        return Err(format!(
+            "service process state `{}` is invalid",
+            path.display()
+        ));
     };
     Ok(Some(PersistedProcessState::Verified(ProcessState {
         pid,
@@ -2182,21 +2267,16 @@ mod windows_process {
     }
 
     pub(super) fn start_identity(pid: u32) -> io::Result<Option<String>> {
-        let Some(handle) = open(pid)? else { return Ok(None) };
+        let Some(handle) = open(pid)? else {
+            return Ok(None);
+        };
         let mut creation = FileTime { low: 0, high: 0 };
         let mut exit = FileTime { low: 0, high: 0 };
         let mut kernel = FileTime { low: 0, high: 0 };
         let mut user = FileTime { low: 0, high: 0 };
         // SAFETY: live process handle and initialized writable outputs.
-        if unsafe {
-            GetProcessTimes(
-                handle.0,
-                &mut creation,
-                &mut exit,
-                &mut kernel,
-                &mut user,
-            )
-        } == 0
+        if unsafe { GetProcessTimes(handle.0, &mut creation, &mut exit, &mut kernel, &mut user) }
+            == 0
         {
             return Err(io::Error::last_os_error());
         }
@@ -2205,7 +2285,9 @@ mod windows_process {
     }
 
     pub(super) fn is_alive(pid: u32) -> io::Result<bool> {
-        let Some(handle) = open(pid)? else { return Ok(false) };
+        let Some(handle) = open(pid)? else {
+            return Ok(false);
+        };
         let mut exit_code = 0;
         // SAFETY: live process handle and writable scalar output.
         if unsafe { GetExitCodeProcess(handle.0, &mut exit_code) } == 0 {
@@ -2279,11 +2361,7 @@ mod windows_job {
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> Handle;
-        fn OpenJobObjectW(
-            desired_access: u32,
-            inherit_handle: i32,
-            name: *const u16,
-        ) -> Handle;
+        fn OpenJobObjectW(desired_access: u32, inherit_handle: i32, name: *const u16) -> Handle;
         fn SetInformationJobObject(
             job: Handle,
             class: u32,
@@ -2305,12 +2383,7 @@ mod windows_job {
 
     #[link(name = "bcrypt")]
     unsafe extern "system" {
-        fn BCryptGenRandom(
-            algorithm: Handle,
-            buffer: *mut u8,
-            length: u32,
-            flags: u32,
-        ) -> i32;
+        fn BCryptGenRandom(algorithm: Handle, buffer: *mut u8, length: u32, flags: u32) -> i32;
     }
 
     fn wide(value: &str) -> Vec<u16> {
@@ -2478,7 +2551,9 @@ fn process_matches_start_with(
     mut identity: impl FnMut() -> Result<Option<String>, String>,
     mut alive: impl FnMut() -> Result<bool, String>,
 ) -> Result<bool, String> {
-    let Some(actual) = identity()? else { return Ok(false) };
+    let Some(actual) = identity()? else {
+        return Ok(false);
+    };
     if actual != expected {
         return Ok(false);
     }
@@ -2583,7 +2658,9 @@ fn run_bounded_probe(mut command: Command, timeout: Duration) -> bool {
     let timeout = timeout.min(MAX_READY_PROBE_TIME);
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let Ok(mut child) = command.spawn() else { return false };
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -2659,7 +2736,12 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
         let Some(started) = start_one(project_dir, env, plan)? else {
             return Ok(());
         };
-        monitor_service(started, project_dir.to_path_buf(), restart_env(env), plan.clone());
+        monitor_service(
+            started,
+            project_dir.to_path_buf(),
+            restart_env(env),
+            plan.clone(),
+        );
         return Ok(());
     }
     #[cfg(not(test))]
@@ -2668,23 +2750,23 @@ pub fn up_one(project_dir: &Path, env: &ShellEnv, plan: &DevServicePlan) -> Resu
     }
     #[cfg(test)]
     {
-    if plan.restart.is_some() || !plan.watch.is_empty() {
-        return spawn_service_supervisor(project_dir, env, plan);
-    }
-    let Some(started) = start_one(project_dir, env, plan)? else {
-        return Ok(());
-    };
-    if plan.restart.is_some() || !plan.watch.is_empty() {
-        let project_dir = project_dir.to_path_buf();
-        let plan = plan.clone();
-        let env = restart_env(env);
-        std::thread::spawn(move || monitor_service(started, project_dir, env, plan));
-    } else {
-        // `services up` is a supervisor hand-off. Keep the child reaped
-        // without making the CLI wait for a long-lived service to exit.
-        std::thread::spawn(move || reap_child(started.child));
-    }
-    Ok(())
+        if plan.restart.is_some() || !plan.watch.is_empty() {
+            return spawn_service_supervisor(project_dir, env, plan);
+        }
+        let Some(started) = start_one(project_dir, env, plan)? else {
+            return Ok(());
+        };
+        if plan.restart.is_some() || !plan.watch.is_empty() {
+            let project_dir = project_dir.to_path_buf();
+            let plan = plan.clone();
+            let env = restart_env(env);
+            std::thread::spawn(move || monitor_service(started, project_dir, env, plan));
+        } else {
+            // `services up` is a supervisor hand-off. Keep the child reaped
+            // without making the CLI wait for a long-lived service to exit.
+            std::thread::spawn(move || reap_child(started.child));
+        }
+        Ok(())
     }
 }
 
@@ -2711,9 +2793,12 @@ fn spawn_service_supervisor(
         .stderr(Stdio::null());
     env.apply_to(&mut command);
     command.env(SERVICE_SUPERVISOR_ENV, "1");
-    command
-        .spawn()
-        .map_err(|error| format!("couldn't hand service `{}` to its supervisor: {error}", plan.name))?;
+    command.spawn().map_err(|error| {
+        format!(
+            "couldn't hand service `{}` to its supervisor: {error}",
+            plan.name
+        )
+    })?;
     let dir = service_dir(project_dir, &plan.name);
     let deadline = Instant::now() + Duration::from_secs(5);
     while !pid_path(&dir).is_file() && !supervisor_error_path(&dir).is_file() {
@@ -2817,12 +2902,26 @@ fn start_one_with_recovery(
     let result = (|| {
         let allocated_ports = allocate_ports(&resolved.ports)?;
         let prepared_sockets = prepare_sockets(project_dir, &plan.sockets)?;
-        if allocated_ports.ports != resolved.ports.iter().map(|port| *port as u16).collect::<Vec<_>>() {
-            resolved.ports = allocated_ports.ports.iter().map(|port| i64::from(*port)).collect();
+        if allocated_ports.ports
+            != resolved
+                .ports
+                .iter()
+                .map(|port| *port as u16)
+                .collect::<Vec<_>>()
+        {
+            resolved.ports = allocated_ports
+                .ports
+                .iter()
+                .map(|port| i64::from(*port))
+                .collect();
             if plan.run.is_none() {
                 if let Some(catalog) = catalog(&plan.name) {
                     resolved.run = (catalog.run)(
-                        resolved.ports.first().copied().unwrap_or(catalog.port as i64),
+                        resolved
+                            .ports
+                            .first()
+                            .copied()
+                            .unwrap_or(catalog.port as i64),
                         &resolved.data_dir,
                     );
                 }
@@ -2830,7 +2929,11 @@ fn start_one_with_recovery(
             if plan.ready.is_none() && plan.ready_probe.is_none() {
                 if let Some(catalog) = catalog(&plan.name) {
                     resolved.ready_probe = Some((catalog.readiness)(
-                        resolved.ports.first().copied().unwrap_or(catalog.port as i64),
+                        resolved
+                            .ports
+                            .first()
+                            .copied()
+                            .unwrap_or(catalog.port as i64),
                     ));
                 }
             }
@@ -2848,7 +2951,10 @@ fn start_one_with_recovery(
         let stdout = File::create(stdout_path(&resolved.dir)).map_err(|e| e.to_string())?;
         let stderr = File::create(stderr_path(&resolved.dir)).map_err(|e| e.to_string())?;
         if resolved.run.is_empty() {
-            return Err(format!("service `{}` has an empty `run:` command", plan.name));
+            return Err(format!(
+                "service `{}` has an empty `run:` command",
+                plan.name
+            ));
         }
         let base_path = std::env::var("PATH").unwrap_or_default();
         let mut service_env = env.vars.clone();
@@ -2899,7 +3005,10 @@ fn start_one_with_recovery(
                     "--property=KillMode=control-group",
                 ]);
                 command.arg(format!("--unit={unit}"));
-                command.arg(format!("--working-directory={}", resolved.data_dir.display()));
+                command.arg(format!(
+                    "--working-directory={}",
+                    resolved.data_dir.display()
+                ));
                 for (name, value) in &service_env {
                     command.arg(format!("--setenv={name}={value}"));
                 }
@@ -2962,8 +3071,7 @@ fn start_one_with_recovery(
                 return Err(format!("couldn't publish service ports: {error}{cleanup}"));
             }
         }
-        let state = match publish_process_state(&mut child, &pid_path(&resolved.dir), &authority)
-        {
+        let state = match publish_process_state(&mut child, &pid_path(&resolved.dir), &authority) {
             Ok(state) => state,
             Err(error) => {
                 let _ = fs::remove_file(ports_path(&resolved.dir));
@@ -2976,7 +3084,9 @@ fn start_one_with_recovery(
             let cleanup = cleanup_child_with_authority(&mut child, &authority);
             let _ = fs::remove_file(pid_path(&resolved.dir));
             let _ = fs::remove_file(ports_path(&resolved.dir));
-            return Err(format!("couldn't publish service lifecycle state: {error}{cleanup}"));
+            return Err(format!(
+                "couldn't publish service lifecycle state: {error}{cleanup}"
+            ));
         }
         Ok(Some(StartedService {
             child,
@@ -3077,12 +3187,7 @@ fn monitor_service(
                         stamps = match watch_stamps(&project_dir, &watched) {
                             Ok(stamps) => stamps,
                             Err(error) => {
-                                finish_supervisor(
-                                    &project_dir,
-                                    &plan,
-                                    &started,
-                                    Some(&error),
-                                );
+                                finish_supervisor(&project_dir, &plan, &started, Some(&error));
                                 return;
                             }
                         };
@@ -3143,18 +3248,13 @@ fn monitor_service(
             let _ = started.child.wait();
             restarts += 1;
             std::thread::sleep(restart_delay(backoff_ms, exponential, restarts));
-                match start_one_with_recovery(&project_dir, &env, &plan, "watch-restart") {
+            match start_one_with_recovery(&project_dir, &env, &plan, "watch-restart") {
                 Ok(Some(next)) => {
                     started = next;
                     stamps = match watch_stamps(&project_dir, &watched) {
                         Ok(stamps) => stamps,
                         Err(error) => {
-                            finish_supervisor(
-                                &project_dir,
-                                &plan,
-                                &started,
-                                Some(&error),
-                            );
+                            finish_supervisor(&project_dir, &plan, &started, Some(&error));
                             return;
                         }
                     };
@@ -3169,7 +3269,7 @@ fn monitor_service(
                     return;
                 }
                 Err(error) => {
-                        finish_supervisor(&project_dir, &plan, &started, Some(&error));
+                    finish_supervisor(&project_dir, &plan, &started, Some(&error));
                     return;
                 }
             }
@@ -3215,7 +3315,9 @@ fn restart_delay(backoff_ms: u64, exponential: bool, attempt: u32) -> Duration {
 }
 
 fn stopping_requested(project_dir: &Path, plan: &DevServicePlan) -> bool {
-    service_dir(project_dir, &plan.name).join(".stopping").is_file()
+    service_dir(project_dir, &plan.name)
+        .join(".stopping")
+        .is_file()
 }
 
 fn stop_started_process(
@@ -3270,7 +3372,10 @@ fn finish_supervisor(
     }
     let preserve_terminal_state = existing_lifecycle.as_ref().is_some_and(|facts| {
         (facts.phase == "failed"
-            && matches!(facts.recovery.as_str(), "dependency-failed" | "startup-failed"))
+            && matches!(
+                facts.recovery.as_str(),
+                "dependency-failed" | "startup-failed"
+            ))
             || (facts.phase == "stopped" && facts.recovery == "down")
     });
 
@@ -3325,11 +3430,15 @@ fn stop_dependents(project_dir: &Path, dependency: &str, visited: &mut BTreeSet<
         return;
     }
     let root = service_dir(project_dir, "");
-    let Ok(entries) = fs::read_dir(&root) else { return };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
     let mut dependents = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        let Ok(Some(facts)) = read_lifecycle(&path) else { continue };
+        let Ok(Some(facts)) = read_lifecycle(&path) else {
+            continue;
+        };
         if facts.dependencies.iter().any(|name| name == dependency) {
             dependents.push((
                 path.file_name()
@@ -3347,23 +3456,21 @@ fn stop_dependents(project_dir: &Path, dependency: &str, visited: &mut BTreeSet<
             continue;
         }
         let dir = service_dir(project_dir, &name);
-        let Some(PersistedProcessState::Verified(state)) = read_process_state(&dir).ok().flatten() else {
+        let Some(PersistedProcessState::Verified(state)) = read_process_state(&dir).ok().flatten()
+        else {
             continue;
         };
-        let Ok(authority) = authority_from_lifecycle(&facts) else { continue };
+        let Ok(authority) = authority_from_lifecycle(&facts) else {
+            continue;
+        };
         let _ = fs::write(stopping_path(&dir), b"dependency-failed\n");
         let stopped = if matches!(authority, ServiceAuthority::WindowsGuardianJobObject { .. }) {
             // The dependent's project-local guardian owns the Job Object and
             // will observe this marker without another process signaling it.
             true
         } else {
-            stop_process_with_authority(
-                &state,
-                Some(&ShutdownPolicy::Kill),
-                Some(&authority),
-                None,
-            )
-            .is_ok()
+            stop_process_with_authority(&state, Some(&ShutdownPolicy::Kill), Some(&authority), None)
+                .is_ok()
         };
         if stopped {
             let _ = fs::remove_file(pid_path(&dir));
@@ -3459,9 +3566,12 @@ fn collect_watch_stamps(
         return Ok(());
     }
     let mut children = Vec::new();
-    for entry in fs::read_dir(path)
-        .map_err(|error| format!("couldn't read watched directory `{}`: {error}", path.display()))?
-    {
+    for entry in fs::read_dir(path).map_err(|error| {
+        format!(
+            "couldn't read watched directory `{}`: {error}",
+            path.display()
+        )
+    })? {
         if children.len() >= limit {
             return Err(format!(
                 "watched directory `{}` exceeds the bounded limit of {limit} entries",
@@ -3538,7 +3648,7 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         let _ = fs::remove_file(ports_path(&dir));
         let _ = fs::remove_file(stopping_path(&dir));
         let _ = fs::remove_file(supervisor_error_path(&dir));
-        return Ok(())
+        return Ok(());
     };
     let PersistedProcessState::Verified(state) = state else {
         // Legacy PID-only state cannot prove which process owns the PID.
@@ -3590,8 +3700,12 @@ pub fn down_one(project_dir: &Path, plan: &DevServicePlan) -> Result<(), String>
         }
         return Ok(());
     }
-    fs::write(stopping_path(&dir), b"down\n")
-        .map_err(|error| format!("couldn't mark service `{}` for shutdown: {error}", plan.name))?;
+    fs::write(stopping_path(&dir), b"down\n").map_err(|error| {
+        format!(
+            "couldn't mark service `{}` for shutdown: {error}",
+            plan.name
+        )
+    })?;
     if matches!(authority, ServiceAuthority::WindowsGuardianJobObject { .. }) {
         drop(guard);
         stop_process_with_authority(&state, plan.shutdown.as_ref(), Some(&authority), None)?;
@@ -3642,14 +3756,16 @@ fn stop_supervisor_authority(
     };
     let dir = service_dir(project_dir, &plan.name);
     let Some(facts) = read_lifecycle(&dir)? else {
-        return live_result
-            .unwrap_or_else(|| Err("service lifecycle state is missing its authority facts".to_string()));
+        return live_result.unwrap_or_else(|| {
+            Err("service lifecycle state is missing its authority facts".to_string())
+        });
     };
     if !lifecycle_needs_authority_cleanup(&facts) {
         return live_result.unwrap_or(Ok(()));
     }
     verify_persisted_authority_identity(project_dir, plan, &facts, &started.authority)?;
-    if let Err(error) = stop_persisted_authority_after_leader_exit(&started.state, &started.authority)
+    if let Err(error) =
+        stop_persisted_authority_after_leader_exit(&started.state, &started.authority)
     {
         return Err(match live_result {
             Some(Err(live_error)) => format!("{live_error}; {error}"),
@@ -3674,14 +3790,18 @@ fn verify_persisted_authority_identity(
     {
         let _ = (project_dir, plan, facts);
         if !matches!(authority, ServiceAuthority::TestProcessGroup) {
-            return Err("service lifecycle authority does not match the test process group".to_string());
+            return Err(
+                "service lifecycle authority does not match the test process group".to_string(),
+            );
         }
     }
     #[cfg(all(not(test), target_os = "linux"))]
     {
         let expected = authority_for(project_dir, plan, facts.generation)?;
         if &expected != authority {
-            return Err("service lifecycle authority does not match this service generation".to_string());
+            return Err(
+                "service lifecycle authority does not match this service generation".to_string(),
+            );
         }
     }
     #[cfg(all(not(test), windows))]
@@ -3696,10 +3816,7 @@ fn verify_persisted_authority_identity(
         let _ = (project_dir, plan, facts, authority);
         return Err("service lifecycle authority is unavailable on macOS".to_string());
     }
-    #[cfg(all(
-        not(test),
-        not(any(target_os = "linux", target_os = "macos", windows))
-    ))]
+    #[cfg(all(not(test), not(any(target_os = "linux", target_os = "macos", windows))))]
     {
         let _ = (project_dir, plan, facts, authority);
         return Err("service lifecycle authority is unavailable on this platform".to_string());
@@ -3711,7 +3828,8 @@ fn stop_persisted_authority_after_leader_exit(
     state: &ProcessState,
     authority: &ServiceAuthority,
 ) -> Result<(), String> {
-    if let Err(error) = run_authority_stop_action(state.pid, StopAction::Kill, Some(authority), None)
+    if let Err(error) =
+        run_authority_stop_action(state.pid, StopAction::Kill, Some(authority), None)
     {
         if persisted_authority_is_active(state.pid, authority)? {
             return Err(error);
@@ -3747,7 +3865,9 @@ fn persisted_authority_is_active(pid: u32, authority: &ServiceAuthority) -> Resu
                 Some(code) => Err(format!(
                     "service authority activity probe exited with status {code}"
                 )),
-                None => Err("service authority activity probe was terminated by a signal".to_string()),
+                None => {
+                    Err("service authority activity probe was terminated by a signal".to_string())
+                }
             }
         }
         ServiceAuthority::TestProcessGroup => {
@@ -3793,7 +3913,9 @@ fn persisted_authority_is_active(pid: u32, authority: &ServiceAuthority) -> Resu
 
 #[cfg(target_os = "linux")]
 fn linux_process_group_is_active(pgid: u32) -> Result<bool, String> {
-    for entry in fs::read_dir("/proc").map_err(|error| format!("couldn't inspect /proc: {error}"))? {
+    for entry in
+        fs::read_dir("/proc").map_err(|error| format!("couldn't inspect /proc: {error}"))?
+    {
         let Ok(entry) = entry else { continue };
         let name = entry.file_name();
         let Some(pid) = name.to_str().and_then(|name| name.parse::<u32>().ok()) else {
@@ -3903,7 +4025,9 @@ fn stop_process_with(
         }
     }
     if alive()? {
-        return Err(format!("service process {pid} is still alive after shutdown"));
+        return Err(format!(
+            "service process {pid} is still alive after shutdown"
+        ));
     }
     Ok(())
 }
@@ -4002,9 +4126,7 @@ fn run_authority_stop_action(
             }
         }
         Some(ServiceAuthority::TestProcessGroup) | None => run_stop_action(pid, action),
-        Some(ServiceAuthority::Unsupported) => {
-            Err("service authority is unavailable".to_string())
-        }
+        Some(ServiceAuthority::Unsupported) => Err("service authority is unavailable".to_string()),
     }
 }
 
@@ -4066,10 +4188,7 @@ fn probe_ready(resolved: &Resolved, env: Option<&ShellEnv>) -> bool {
                 if let Some(env) = env {
                     env.apply_to(&mut command);
                 }
-                command
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    ;
+                command.stdout(Stdio::null()).stderr(Stdio::null());
                 run_bounded_probe(command, MAX_READY_PROBE_TIME)
             }
             ReadyProbe::Http { url, status } => probe_http(url, *status),
@@ -4150,7 +4269,9 @@ fn probe_http(url: &str, expected_status: Option<u16>) -> bool {
         return false;
     }
     let mut bytes = [0_u8; 1024];
-    let Ok(size) = stream.read(&mut bytes) else { return false };
+    let Ok(size) = stream.read(&mut bytes) else {
+        return false;
+    };
     let response = String::from_utf8_lossy(&bytes[..size]);
     let Some(status) = response
         .strip_prefix("HTTP/")
@@ -4183,9 +4304,7 @@ pub fn wait_healthy_with_env(
     // process-liveness check would report false green.
     let needs_stability = resolve(project_dir, plan)
         .map(|resolved| {
-            resolved.ready.is_none()
-                && resolved.ready_probe.is_none()
-                && resolved.ports.is_empty()
+            resolved.ready.is_none() && resolved.ready_probe.is_none() && resolved.ports.is_empty()
         })
         .unwrap_or(false);
     const NO_PROBE_STABILITY: Duration = Duration::from_millis(300);
@@ -4221,7 +4340,10 @@ pub fn dependency_order(plans: &[DevServicePlan]) -> Result<Vec<usize>, String> 
     for (index, plan) in plans.iter().enumerate() {
         validate_service_name(&plan.name)?;
         if indexes.insert(plan.name.clone(), index).is_some() {
-            return Err(format!("service `{}` is declared more than once", plan.name));
+            return Err(format!(
+                "service `{}` is declared more than once",
+                plan.name
+            ));
         }
     }
     let mut states = vec![0_u8; plans.len()];
@@ -4405,7 +4527,9 @@ pub fn down_ordered(
     let mut errors = Vec::new();
     for &index in dependency_first.iter().rev() {
         let Some(plan) = plans.get(index) else {
-            errors.push(format!("service dependency order contains unknown index {index}"));
+            errors.push(format!(
+                "service dependency order contains unknown index {index}"
+            ));
             continue;
         };
         if let Err(error) = down_one(project_dir, plan) {
@@ -4468,7 +4592,9 @@ fn selected_dependency_order(
     let selected = selected.iter().copied().collect::<BTreeSet<_>>();
     for &index in &selected {
         let Some(plan) = plans.get(index) else {
-            return Err(format!("service dependency order contains unknown index {index}"));
+            return Err(format!(
+                "service dependency order contains unknown index {index}"
+            ));
         };
         if !plan.enable {
             return Err(format!("service `{}` is disabled", plan.name));
@@ -4576,14 +4702,7 @@ where
         }
         return Ok(changed);
     }
-    restart_ordered_with(
-        project_dir,
-        env,
-        plans,
-        &selected,
-        timeout,
-        before_start,
-    )?;
+    restart_ordered_with(project_dir, env, plans, &selected, timeout, before_start)?;
     for index in &changed {
         if let Some((state_path, current)) = current_by_index.get(index) {
             write_atomic(state_path, current.as_bytes()).map_err(|error| error.to_string())?;
@@ -4662,8 +4781,7 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
         ("supervisor", supervisor_error_path(&dir)),
     ] {
         let buf = read_text_bounded(&path, 1024 * 1024).unwrap_or_default();
-        if !buf.is_empty()
-        {
+        if !buf.is_empty() {
             out.push_str(&format!("── {label} ──\n"));
             out.push_str(&buf);
             if !buf.ends_with('\n') {
@@ -4677,7 +4795,9 @@ pub fn logs(project_dir: &Path, name: &str) -> String {
 /// Structured lifecycle facts for `services health --json`. The file remains
 /// the source of truth; this is only a stable presentation of that record.
 pub fn lifecycle_json(project_dir: &Path, name: &str) -> Option<String> {
-    let facts = read_lifecycle(&service_dir(project_dir, name)).ok().flatten()?;
+    let facts = read_lifecycle(&service_dir(project_dir, name))
+        .ok()
+        .flatten()?;
     let authority = authority_from_lifecycle(&facts).ok()?;
     let dependencies = facts
         .dependencies
@@ -4724,7 +4844,10 @@ fn read_text_bounded(path: &Path, limit: usize) -> std::io::Result<String> {
         ));
     }
     String::from_utf8(bytes).map_err(|_| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, "service state is not UTF-8")
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "service state is not UTF-8",
+        )
     })
 }
 
@@ -4857,7 +4980,10 @@ mod tests {
         let cyclic = vec![cycle, database];
         let error = dependency_order(&cyclic).unwrap_err();
         assert!(error.contains("service dependency cycle"), "{error}");
-        assert!(error.contains("api") && error.contains("database"), "{error}");
+        assert!(
+            error.contains("api") && error.contains("database"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -4887,7 +5013,10 @@ mod tests {
             Ok(_) => panic!("a data directory symlink escape must be rejected"),
             Err(error) => error,
         };
-        assert!(error.contains("data_dir") && error.contains("escapes"), "{error}");
+        assert!(
+            error.contains("data_dir") && error.contains("escapes"),
+            "{error}"
+        );
         fs::remove_dir_all(&dir).ok();
         fs::remove_dir_all(&outside).ok();
     }
@@ -4906,13 +5035,19 @@ mod tests {
             Ok(_) => panic!("watch escape must be rejected"),
             Err(error) => error,
         };
-        assert!(watch_error.contains("watch") && watch_error.contains("escapes"), "{watch_error}");
+        assert!(
+            watch_error.contains("watch") && watch_error.contains("escapes"),
+            "{watch_error}"
+        );
 
         let socket_error = match prepare_sockets(&dir, &["socket-root/service.sock".to_string()]) {
             Ok(_) => panic!("socket escape must be rejected"),
             Err(error) => error,
         };
-        assert!(socket_error.contains("socket") && socket_error.contains("escapes"), "{socket_error}");
+        assert!(
+            socket_error.contains("socket") && socket_error.contains("escapes"),
+            "{socket_error}"
+        );
         assert!(!outside.join("service.sock").exists());
 
         fs::remove_dir_all(&dir).ok();
@@ -4932,7 +5067,10 @@ mod tests {
 
         fs::write(dir.join("src/nested/lib.jet"), "fn lib() -> Int { 42 }\n").unwrap();
         let second = watch_stamps(&dir, &[dir.join("src")]).unwrap();
-        assert_ne!(first, second, "nested file changes must change the watch fact");
+        assert_ne!(
+            first, second,
+            "nested file changes must change the watch fact"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -4947,7 +5085,9 @@ mod tests {
         });
         let started = start_one(&dir, &env(), &service).unwrap().unwrap();
         monitor_service(started, dir.clone(), env(), service.clone());
-        assert!(read_process_state(&service_dir(&dir, "fixture")).unwrap().is_none());
+        assert!(read_process_state(&service_dir(&dir, "fixture"))
+            .unwrap()
+            .is_none());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -5019,7 +5159,10 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(lines.len(), 2);
         assert!(lines[0].parse::<u16>().unwrap_or(0) > 0);
-        assert_eq!(lines[1], dir.join("runtime/service.sock").display().to_string());
+        assert_eq!(
+            lines[1],
+            dir.join("runtime/service.sock").display().to_string()
+        );
         assert!(
             fs::read_to_string(ports_path(&service_dir(&dir, "fixture")))
                 .unwrap()
@@ -5037,14 +5180,8 @@ mod tests {
     fn service_probe_requires_and_waits_for_declared_ready() {
         let dir = scratch("probe-ready");
         let p = plan("fixture", "sleep 30");
-        let error = measure_readiness_with_timeout(
-            &dir,
-            &env(),
-            &p,
-            1,
-            Duration::from_millis(100),
-        )
-        .unwrap_err();
+        let error = measure_readiness_with_timeout(&dir, &env(), &p, 1, Duration::from_millis(100))
+            .unwrap_err();
         assert!(error.contains("no declared `ready:` event"), "{error}");
         assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
 
@@ -5061,17 +5198,15 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             fs::write(signal_ready, "ready").unwrap();
         });
-        let samples = measure_readiness_with_timeout(
-            &dir,
-            &env(),
-            &declared,
-            1,
-            Duration::from_secs(1),
-        )
-        .unwrap();
+        let samples =
+            measure_readiness_with_timeout(&dir, &env(), &declared, 1, Duration::from_secs(1))
+                .unwrap();
         signal.join().unwrap();
         assert_eq!(samples.len(), 1);
-        assert!(observed.exists(), "ServiceProbe must execute the declared ready event");
+        assert!(
+            observed.exists(),
+            "ServiceProbe must execute the declared ready event"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -5080,14 +5215,8 @@ mod tests {
         let dir = scratch("probe-timeout");
         let mut p = plan("fixture", "sleep 30");
         p.ready = Some("false".to_string());
-        let error = measure_readiness_with_timeout(
-            &dir,
-            &env(),
-            &p,
-            1,
-            Duration::from_millis(100),
-        )
-        .unwrap_err();
+        let error = measure_readiness_with_timeout(&dir, &env(), &p, 1, Duration::from_millis(100))
+            .unwrap_err();
         assert!(error.contains("did not become ready"), "{error}");
         assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
         fs::remove_dir_all(&dir).ok();
@@ -5111,7 +5240,10 @@ mod tests {
         assert!(error.contains("couldn't lock"), "{error}");
         assert_eq!(read_pid(&state_dir), Some(pid));
         assert!(state_path.exists());
-        assert!(is_alive(pid), "service must not be signaled without the lock");
+        assert!(
+            is_alive(pid),
+            "service must not be signaled without the lock"
+        );
 
         fs::remove_file(&locks).unwrap();
         fs::rename(displaced, locks).unwrap();
@@ -5137,17 +5269,17 @@ mod tests {
     #[test]
     fn down_stops_persisted_authority_after_leader_exit() {
         let dir = scratch("leader-exit-authority");
-        let p = plan(
-            "fixture",
-            "sleep 30 & child=$!; echo $child > child.pid",
-        );
+        let p = plan("fixture", "sleep 30 & child=$!; echo $child > child.pid");
         let mut started = start_one(&dir, &env(), &p)
             .unwrap()
             .expect("fixture must start");
         let child_path = service_dir(&dir, "fixture").join("data/child.pid");
         let deadline = Instant::now() + Duration::from_secs(2);
         while !child_path.is_file() {
-            assert!(Instant::now() < deadline, "descendant pid was not published");
+            assert!(
+                Instant::now() < deadline,
+                "descendant pid was not published"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
         let child_pid = fs::read_to_string(&child_path)
@@ -5156,11 +5288,20 @@ mod tests {
             .parse::<u32>()
             .unwrap();
         started.child.wait().unwrap();
-        assert!(!is_alive(started.state.pid), "the recorded leader must exit");
-        assert!(is_alive(child_pid), "the descendant must outlive its leader");
+        assert!(
+            !is_alive(started.state.pid),
+            "the recorded leader must exit"
+        );
+        assert!(
+            is_alive(child_pid),
+            "the descendant must outlive its leader"
+        );
 
         down_one(&dir, &p).expect("down must stop the persisted authority");
-        assert!(!is_alive(child_pid), "the persisted process group must be gone");
+        assert!(
+            !is_alive(child_pid),
+            "the persisted process group must be gone"
+        );
         let facts = read_lifecycle(&service_dir(&dir, "fixture"))
             .unwrap()
             .expect("stopped lifecycle facts must remain explainable");
@@ -5173,10 +5314,7 @@ mod tests {
     #[test]
     fn down_retries_cleanup_failed_authority_after_leader_exit() {
         let dir = scratch("cleanup-failed-authority");
-        let p = plan(
-            "fixture",
-            "sleep 30 & child=$!; echo $child > child.pid",
-        );
+        let p = plan("fixture", "sleep 30 & child=$!; echo $child > child.pid");
         let mut started = start_one(&dir, &env(), &p)
             .unwrap()
             .expect("fixture must start");
@@ -5184,7 +5322,10 @@ mod tests {
         let child_path = service_dir.join("data/child.pid");
         let deadline = Instant::now() + Duration::from_secs(2);
         while !child_path.is_file() {
-            assert!(Instant::now() < deadline, "descendant pid was not published");
+            assert!(
+                Instant::now() < deadline,
+                "descendant pid was not published"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
         let child_pid = fs::read_to_string(&child_path)
@@ -5193,7 +5334,10 @@ mod tests {
             .parse::<u32>()
             .unwrap();
         started.child.wait().unwrap();
-        assert!(is_alive(child_pid), "the descendant must outlive its leader");
+        assert!(
+            is_alive(child_pid),
+            "the descendant must outlive its leader"
+        );
 
         let mut facts = read_lifecycle(&service_dir)
             .unwrap()
@@ -5203,7 +5347,10 @@ mod tests {
         write_lifecycle(&service_dir, &facts).unwrap();
 
         down_one(&dir, &p).expect("down must retry pending authority cleanup");
-        assert!(!is_alive(child_pid), "cleanup-failed state must not orphan descendants");
+        assert!(
+            !is_alive(child_pid),
+            "cleanup-failed state must not orphan descendants"
+        );
         let facts = read_lifecycle(&service_dir)
             .unwrap()
             .expect("stopped lifecycle facts must remain explainable");
@@ -5216,17 +5363,17 @@ mod tests {
     #[test]
     fn supervisor_cleanup_stops_persisted_authority_after_leader_exit() {
         let dir = scratch("supervisor-leader-exit-authority");
-        let p = plan(
-            "fixture",
-            "sleep 30 & child=$!; echo $child > child.pid",
-        );
+        let p = plan("fixture", "sleep 30 & child=$!; echo $child > child.pid");
         let mut started = start_one(&dir, &env(), &p)
             .unwrap()
             .expect("fixture must start");
         let child_path = service_dir(&dir, "fixture").join("data/child.pid");
         let deadline = Instant::now() + Duration::from_secs(2);
         while !child_path.is_file() {
-            assert!(Instant::now() < deadline, "descendant pid was not published");
+            assert!(
+                Instant::now() < deadline,
+                "descendant pid was not published"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
         let child_pid = fs::read_to_string(&child_path)
@@ -5234,7 +5381,10 @@ mod tests {
             .trim()
             .parse::<u32>()
             .unwrap();
-        assert!(is_alive(child_pid), "the descendant must outlive its leader");
+        assert!(
+            is_alive(child_pid),
+            "the descendant must outlive its leader"
+        );
 
         // A leader can lose the live identity race between the supervisor's
         // check and its stop request. Model that outcome while the group is
@@ -5242,7 +5392,10 @@ mod tests {
         started.state.start_identity = "linux-proc-start:race-after-identity-check".to_string();
         finish_supervisor(&dir, &p, &started, Some("service exited unexpectedly"));
         started.child.wait().unwrap();
-        assert!(!is_alive(child_pid), "supervisor cleanup must stop the authority");
+        assert!(
+            !is_alive(child_pid),
+            "supervisor cleanup must stop the authority"
+        );
         assert!(read_process_state(&service_dir(&dir, "fixture"))
             .unwrap()
             .is_none());
@@ -5282,14 +5435,8 @@ mod tests {
         .unwrap_err();
         assert_eq!(kill, "KILL failed");
 
-        let alive = stop_process_with(
-            42,
-            None,
-            Duration::ZERO,
-            |_| Ok(()),
-            || Ok(true),
-        )
-        .unwrap_err();
+        let alive =
+            stop_process_with(42, None, Duration::ZERO, |_| Ok(()), || Ok(true)).unwrap_err();
         assert!(alive.contains("still alive"), "{alive}");
     }
 
@@ -5370,7 +5517,10 @@ mod tests {
             "\n",
         ] {
             fs::write(&state_path, raw).unwrap();
-            assert!(read_process_state(&dir).unwrap_err().contains("is invalid"), "{raw:?}");
+            assert!(
+                read_process_state(&dir).unwrap_err().contains("is invalid"),
+                "{raw:?}"
+            );
         }
         fs::remove_dir_all(dir).ok();
     }
@@ -5386,10 +5536,8 @@ mod tests {
         let blocked = dir.join("blocked");
         fs::create_dir_all(&dir).unwrap();
         fs::write(&blocked, "not a socket").unwrap();
-        let error = match prepare_sockets(
-            &dir,
-            &["first.sock".to_string(), "blocked".to_string()],
-        ) {
+        let error = match prepare_sockets(&dir, &["first.sock".to_string(), "blocked".to_string()])
+        {
             Ok(_) => panic!("socket preparation should fail on a regular file"),
             Err(error) => error,
         };
@@ -5455,13 +5603,11 @@ mod tests {
         let first = process_start_identity(pid).unwrap().unwrap();
         let second = process_start_identity(pid).unwrap().unwrap();
         assert_eq!(first, second);
-        assert!(
-            process_matches_start(&ProcessState {
-                pid,
-                start_identity: first,
-            })
-            .unwrap()
-        );
+        assert!(process_matches_start(&ProcessState {
+            pid,
+            start_identity: first,
+        })
+        .unwrap());
     }
 
     #[test]
@@ -5495,7 +5641,10 @@ mod tests {
             "CREATE_NEW_PROCESS_GROUP",
             "E1332: Safe service authority is unavailable",
         ] {
-            assert!(source.contains(required), "missing process identity law: {required}");
+            assert!(
+                source.contains(required),
+                "missing process identity law: {required}"
+            );
         }
     }
 
@@ -5507,12 +5656,9 @@ mod tests {
         let mut child = super::super::Platform::shell_command("sleep 30")
             .spawn()
             .unwrap();
-        let error = publish_process_state(
-            &mut child,
-            &bad_path,
-            &ServiceAuthority::TestProcessGroup,
-        )
-        .unwrap_err();
+        let error =
+            publish_process_state(&mut child, &bad_path, &ServiceAuthority::TestProcessGroup)
+                .unwrap_err();
         assert!(
             error.contains("couldn't publish service process state"),
             "{error}"
@@ -5562,17 +5708,47 @@ mod tests {
             ("blackfire", "blackfire@nixpkgs", 8307, "blackfire"),
             ("caddy", "caddy@nixpkgs", 8080, "caddy"),
             ("cassandra", "cassandra_4@nixpkgs", 9042, "cassandra"),
-            ("clickhouse", "clickhouse@nixpkgs", 9000, "clickhouse-server"),
+            (
+                "clickhouse",
+                "clickhouse@nixpkgs",
+                9000,
+                "clickhouse-server",
+            ),
             ("cockroachdb", "cockroachdb@nixpkgs", 26257, "cockroachdb"),
             ("couchdb", "couchdb3@nixpkgs", 5984, "couchdb"),
-            ("dynamodb-local", "dynamodb-local@nixpkgs", 8000, "dynamodb-local"),
-            ("elasticmq", "elasticmq-server-bin@nixpkgs", 9324, "elasticmq-server"),
-            ("elasticsearch", "elasticsearch7@nixpkgs", 9200, "elasticsearch"),
+            (
+                "dynamodb-local",
+                "dynamodb-local@nixpkgs",
+                8000,
+                "dynamodb-local",
+            ),
+            (
+                "elasticmq",
+                "elasticmq-server-bin@nixpkgs",
+                9324,
+                "elasticmq-server",
+            ),
+            (
+                "elasticsearch",
+                "elasticsearch7@nixpkgs",
+                9200,
+                "elasticsearch",
+            ),
             ("garage", "garage_2@nixpkgs", 3900, "garage"),
             ("httpbin", "httpbin@nixpkgs", 8080, "gunicorn"),
             ("influxdb", "influxdb2-server@nixpkgs", 8086, "influxd"),
-            ("kafka-connect", "apacheKafka@nixpkgs", 8083, "connect-standalone.sh"),
-            ("kafka", "apacheKafka@nixpkgs", 9092, "kafka-server-start.sh"),
+            (
+                "kafka-connect",
+                "apacheKafka@nixpkgs",
+                8083,
+                "connect-standalone.sh",
+            ),
+            (
+                "kafka",
+                "apacheKafka@nixpkgs",
+                9092,
+                "kafka-server-start.sh",
+            ),
             ("keycloak", "keycloak@nixpkgs", 8080, "kc.sh"),
             ("mailhog", "mailhog@nixpkgs", 8025, "MailHog"),
             ("meilisearch", "meilisearch@nixpkgs", 7700, "meilisearch"),
@@ -5594,12 +5770,22 @@ mod tests {
                 "otelcol-contrib",
             ),
             ("prometheus", "prometheus@nixpkgs", 9090, "prometheus"),
-            ("rabbitmq", "rabbitmq-server@nixpkgs", 5672, "rabbitmq-server"),
+            (
+                "rabbitmq",
+                "rabbitmq-server@nixpkgs",
+                5672,
+                "rabbitmq-server",
+            ),
             ("rustfs", "rustfs@nixpkgs", 9000, "rustfs"),
             ("sqld", "sqld@nixpkgs", 8080, "sqld"),
             ("tailscale", "tailscale@nixpkgs", 41641, "tailscale"),
             ("temporal", "temporal-cli@nixpkgs", 7233, "temporal"),
-            ("tideways", "tideways-daemon@nixpkgs", 9135, "tideways-daemon"),
+            (
+                "tideways",
+                "tideways-daemon@nixpkgs",
+                9135,
+                "tideways-daemon",
+            ),
             ("typesense", "typesense@nixpkgs", 8108, "typesense-server"),
             ("varnish", "varnish@nixpkgs", 6081, "varnishd"),
             ("vault", "vault-bin@nixpkgs", 8200, "vault"),
@@ -5631,26 +5817,28 @@ mod tests {
                 continue;
             }
             assert_eq!(catalog_executable(name), Some(*executable));
-            let command = image_run_command(&plan).expect("every preset must have an image command");
+            let command =
+                image_run_command(&plan).expect("every preset must have an image command");
             assert_eq!(command.first().map(String::as_str), Some(*executable));
-            let resolved = resolve(&dir, &plan).expect("every preset must resolve for host services");
+            let resolved =
+                resolve(&dir, &plan).expect("every preset must resolve for host services");
             assert_eq!(resolved.run.first().map(String::as_str), Some(*executable));
             assert_eq!(resolved.ports, vec![*port]);
             assert!(resolved.ready.is_none(), "preset readiness must stay typed");
             match *name {
                 "redis" => {
-                    assert!(command.windows(2).any(|args| {
-                        args[0] == "--bind" && args[1] == "127.0.0.1"
-                    }));
+                    assert!(command
+                        .windows(2)
+                        .any(|args| { args[0] == "--bind" && args[1] == "127.0.0.1" }));
                     assert_eq!(
                         resolved.ready_probe,
                         Some(ReadyProbe::Exec("redis-cli -p 6379 ping".to_string()))
                     );
                 }
                 "postgres" => {
-                    assert!(command.windows(2).any(|args| {
-                        args[0] == "-h" && args[1] == "127.0.0.1"
-                    }));
+                    assert!(command
+                        .windows(2)
+                        .any(|args| { args[0] == "-h" && args[1] == "127.0.0.1" }));
                     assert_eq!(
                         resolved.ready_probe,
                         Some(ReadyProbe::Exec(
@@ -5672,12 +5860,14 @@ mod tests {
                 ),
                 "nginx" => assert_eq!(
                     resolved.ready_probe,
-                    Some(ReadyProbe::Exec("curl -fsS http://127.0.0.1:8080/".to_string()))
+                    Some(ReadyProbe::Exec(
+                        "curl -fsS http://127.0.0.1:8080/".to_string()
+                    ))
                 ),
                 "minio" => {
-                    assert!(command.windows(2).any(|args| {
-                        args[0] == "--address" && args[1] == "127.0.0.1:9000"
-                    }));
+                    assert!(command
+                        .windows(2)
+                        .any(|args| { args[0] == "--address" && args[1] == "127.0.0.1:9000" }));
                     assert_eq!(
                         resolved.ready_probe,
                         Some(ReadyProbe::Exec(
@@ -5686,12 +5876,12 @@ mod tests {
                     );
                 }
                 "mailpit" => {
-                    assert!(command.windows(2).any(|args| {
-                        args[0] == "--listen" && args[1] == "127.0.0.1:8025"
-                    }));
-                    assert!(command.windows(2).any(|args| {
-                        args[0] == "--smtp" && args[1] == "127.0.0.1:1025"
-                    }));
+                    assert!(command
+                        .windows(2)
+                        .any(|args| { args[0] == "--listen" && args[1] == "127.0.0.1:8025" }));
+                    assert!(command
+                        .windows(2)
+                        .any(|args| { args[0] == "--smtp" && args[1] == "127.0.0.1:1025" }));
                     assert_eq!(
                         resolved.ready_probe,
                         Some(ReadyProbe::Exec(
@@ -5700,9 +5890,9 @@ mod tests {
                     );
                 }
                 "mailhog" => {
-                    assert!(command.windows(2).any(|args| {
-                        args[0] == "-ui-bind-addr" && args[1] == "127.0.0.1:8025"
-                    }));
+                    assert!(command
+                        .windows(2)
+                        .any(|args| { args[0] == "-ui-bind-addr" && args[1] == "127.0.0.1:8025" }));
                     assert!(command.windows(2).any(|args| {
                         args[0] == "-api-bind-addr" && args[1] == "127.0.0.1:8025"
                     }));

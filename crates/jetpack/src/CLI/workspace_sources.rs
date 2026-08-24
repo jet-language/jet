@@ -1,11 +1,11 @@
 use super::parse::Flags;
+use crate::Diagnostics::Diagnostic;
 use crate::EnvFile::EnvFile;
 use crate::Provider;
 use crate::RefSpec;
 use crate::Syntax;
 use crate::WorkspaceFile;
 use crate::WorkspaceLock;
-use crate::Diagnostics::Diagnostic;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 use std::path::{Path, PathBuf};
@@ -126,8 +126,8 @@ fn package_manifest_present(dir: &Path) -> Result<bool, Diagnostic> {
 }
 
 fn nearest_project_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-    let mut dir = AuthorityResolver::authority_walk_root(start)
-        .map_err(|error| error.diagnostic())?;
+    let mut dir =
+        AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
     loop {
         if package_manifest_present(&dir)?
             || env_file_present(&dir)?
@@ -186,8 +186,8 @@ fn nearest_workspace_root(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
 fn nearest_workspace_source(
     start: &Path,
 ) -> Result<Option<(PathBuf, AuthorityResolver, WorkspaceSource)>, Diagnostic> {
-    let mut dir = AuthorityResolver::authority_walk_root(start)
-        .map_err(|error| error.diagnostic())?;
+    let mut dir =
+        AuthorityResolver::authority_walk_root(start).map_err(|error| error.diagnostic())?;
     loop {
         if let Some((resolver, source)) = checked_workspace_source(&dir)? {
             return Ok(Some((dir, resolver, source)));
@@ -263,10 +263,7 @@ pub(super) fn load_workspace_for_source(
         return finish_workspace_load(dir, Err(error.diagnostic()));
     }
     if source.role != WorkspaceSourceRole::Index {
-        return finish_workspace_load(
-            dir,
-            Err(workspace_index_required_diagnostic()),
-        );
+        return finish_workspace_load(dir, Err(workspace_index_required_diagnostic()));
     }
     finish_workspace_load(
         dir,
@@ -284,27 +281,23 @@ fn finish_workspace_load(
         Err(diagnostic) => Err(diagnostic),
     };
     match result {
-        Ok(plan) => {
-            match WorkspaceLock::write(dir, &plan) {
-                Ok(()) => Some(Ok(plan)),
-                Err(error) => {
-                    let lock_path = dir.join(Syntax::UNIFIED_LOCK_FILE);
-                    let diagnostic = crate::Lock::e1202_workspace_write(
-                        &lock_path.display().to_string(),
-                        &error,
-                    );
-                    eprint!(
-                        "{}",
-                        crate::Diagnostics::render_all(
-                            Syntax::WORKSPACE_FILE,
-                            "",
-                            std::slice::from_ref(&diagnostic),
-                        )
-                    );
-                    Some(Err(2))
-                }
+        Ok(plan) => match WorkspaceLock::write(dir, &plan) {
+            Ok(()) => Some(Ok(plan)),
+            Err(error) => {
+                let lock_path = dir.join(Syntax::UNIFIED_LOCK_FILE);
+                let diagnostic =
+                    crate::Lock::e1202_workspace_write(&lock_path.display().to_string(), &error);
+                eprint!(
+                    "{}",
+                    crate::Diagnostics::render_all(
+                        Syntax::WORKSPACE_FILE,
+                        "",
+                        std::slice::from_ref(&diagnostic),
+                    )
+                );
+                Some(Err(2))
             }
-        }
+        },
         Err(d) => {
             eprint!(
                 "{}",
@@ -354,9 +347,8 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
         None => (None, true),
     };
     let plan = if allow_lock {
-        let resolver = AuthorityResolver::open(&dir).unwrap_or_else(|error| {
-            report_authority_error(error.diagnostic())
-        });
+        let resolver = AuthorityResolver::open(&dir)
+            .unwrap_or_else(|error| report_authority_error(error.diagnostic()));
         let lock_file = match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
             Ok(file) => Some(file),
             Err(error) if error.is_missing() => None,
@@ -403,16 +395,14 @@ pub(super) fn cwd_workspace_index() -> RefSpec::WorkspaceIndex {
 #[cfg(test)]
 mod tests {
     use super::{load_workspace, project_root, workspace_root};
-    use crate::WorkspaceFile;
     use crate::Syntax;
+    use crate::WorkspaceFile;
     use std::fs;
 
     #[test]
     fn project_root_walks_from_nested_command_directory() {
-        let root = std::env::temp_dir().join(format!(
-            "jetpack-project-root-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jetpack-project-root-{}", std::process::id()));
         let nested = root.join("packages/app/src");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&nested).unwrap();
@@ -423,10 +413,8 @@ mod tests {
 
     #[test]
     fn project_root_walks_to_the_nearest_package_file() {
-        let root = std::env::temp_dir().join(format!(
-            "jetpack-package-root-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jetpack-package-root-{}", std::process::id()));
         let nested = root.join("packages/app/src");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&nested).unwrap();
@@ -437,10 +425,8 @@ mod tests {
 
     #[test]
     fn workspace_root_survives_a_nested_package_boundary() {
-        let root = std::env::temp_dir().join(format!(
-            "jetpack-workspace-root-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jetpack-workspace-root-{}", std::process::id()));
         let package = root.join("packages/app");
         let nested = package.join("src");
         let _ = fs::remove_dir_all(&root);

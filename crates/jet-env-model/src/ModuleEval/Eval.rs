@@ -19,23 +19,23 @@ use super::super::Merge::{
     self, ContributionLayer, EntryContribution, FactContribution, FactValue, MergeError,
     MergedEntry, SourceScope,
 };
+use super::Computed::evaluate_named_fields;
 use super::DevService::evaluate_dev_service;
-use super::Environment::{
-    files_from_value, lifecycle_from_field, languages_from_value, presets_from_value,
-    qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind,
-    valid_env_name, LanguageSpec, PackageProfileSpec, PresetSpec,
-};
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
     wrong_namespace_type,
 };
-use super::Computed::evaluate_named_fields;
+use super::Environment::{
+    files_from_value, languages_from_value, lifecycle_from_field, presets_from_value,
+    qualified_call_name, valid_env_name, EnvironmentIntegration, EnvironmentLifecycle,
+    IntegrationKind, LanguageSpec, PackageProfileSpec, PresetSpec,
+};
 use super::System::{evaluate_fleet, evaluate_image, evaluate_system, evaluate_vmtest};
+use super::Types::EnvironmentRead;
 use super::Types::{
     AdapterPlan, AdapterRecipe, DevServicePlan, EnvironmentContribution, EvaluatedModule,
     SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy, SecretSpec,
 };
-use super::Types::EnvironmentRead;
 
 /// Parse `src` and evaluate every enabled module it declares. `base_dir`
 /// resolves `embed_file` inside contribution expressions, same as ordinary
@@ -134,12 +134,7 @@ pub fn evaluate_modules(
     jet_codegen::Codegen::TIR::install_comptime_bridge();
     let funcs = collect_funcs(items);
     let reads = environment_reads(src)?;
-    let globals = collect_comptime_globals(
-        items,
-        &funcs,
-        base_dir,
-        &environment_globals(&reads),
-    )?;
+    let globals = collect_comptime_globals(items, &funcs, base_dir, &environment_globals(&reads))?;
     let mut out = Vec::new();
     for item in items {
         let Item::Module(m) = item else { continue };
@@ -213,14 +208,7 @@ fn evaluate_module<'a>(
         match (&c.namespace, &c.value) {
             (Namespace::Env, ContribValue::Expr(_)) => {
                 let source = format!("{}.{}", m.name, c.path);
-                let capture = evaluate_env_contribution(
-                    c,
-                    src,
-                    base_dir,
-                    funcs,
-                    globals,
-                    &source,
-                )?;
+                let capture = evaluate_env_contribution(c, src, base_dir, funcs, globals, &source)?;
                 let EnvCapture {
                     entry,
                     secrets: names,
@@ -246,14 +234,8 @@ fn evaluate_module<'a>(
             }
             (Namespace::Env, ContribValue::Env(lit)) => {
                 let source = format!("{}.{}", m.name, c.path);
-                let (capture, services) = evaluate_env_role(
-                    lit,
-                    src,
-                    base_dir,
-                    funcs,
-                    globals,
-                    &source,
-                )?;
+                let (capture, services) =
+                    evaluate_env_role(lit, src, base_dir, funcs, globals, &source)?;
                 let EnvCapture {
                     entry,
                     secrets: names,
@@ -278,7 +260,9 @@ fn evaluate_module<'a>(
                 entries.push(((c.namespace, c.path.clone()), entry));
             }
             (Namespace::System, ContribValue::System(lit)) => {
-                systems.push(evaluate_system(&c.path, lit, src, base_dir, funcs, globals)?);
+                systems.push(evaluate_system(
+                    &c.path, lit, src, base_dir, funcs, globals,
+                )?);
             }
             (Namespace::Image, ContribValue::Image(lit)) => {
                 images.push(evaluate_image(&c.path, lit, src, base_dir, funcs, globals)?);
@@ -287,7 +271,9 @@ fn evaluate_module<'a>(
                 fleets.push(evaluate_fleet(&c.path, lit, src, base_dir, funcs, globals)?);
             }
             (Namespace::VmTest, ContribValue::VmTest(lit)) => {
-                vmtests.push(evaluate_vmtest(&c.path, lit, src, base_dir, funcs, globals)?);
+                vmtests.push(evaluate_vmtest(
+                    &c.path, lit, src, base_dir, funcs, globals,
+                )?);
             }
             (Namespace::Profile, ContribValue::Profile(lit)) => {
                 package_profiles.push(evaluate_package_profile_fields(
@@ -302,13 +288,7 @@ fn evaluate_module<'a>(
             }
             (Namespace::Profile, ContribValue::Expr(value)) => {
                 package_profiles.push(evaluate_package_profile_expr(
-                    &c.path,
-                    value,
-                    src,
-                    base_dir,
-                    funcs,
-                    globals,
-                    &m.name,
+                    &c.path, value, src, base_dir, funcs, globals, &m.name,
                 )?);
             }
             // Namespace/value-shape mismatches can't occur: the parser pairs each
@@ -416,21 +396,32 @@ fn evaluate_integration_call(
     match kind {
         IntegrationKind::Android => {
             integration.options.insert("api".into(), "34".into());
-            integration.options.insert("build_tools".into(), "34.0.0".into());
+            integration
+                .options
+                .insert("build_tools".into(), "34.0.0".into());
             integration.options.insert("ndk".into(), "26.3".into());
-            integration.options.insert("license".into(), "policy-required".into());
-            integration.packages = vec!["android-tools@nixpkgs".into(), "android-sdk@nixpkgs".into()];
+            integration
+                .options
+                .insert("license".into(), "policy-required".into());
+            integration.packages =
+                vec!["android-tools@nixpkgs".into(), "android-sdk@nixpkgs".into()];
             integration.tasks.push("android-sdk-check".into());
             integration.providers.push("nixpkgs".into());
-            integration.host_checks.push("target:linux-or-android".into());
+            integration
+                .host_checks
+                .push("target:linux-or-android".into());
         }
         IntegrationKind::Apple => {
             integration.options.insert("targets".into(), "IOS".into());
-            integration.options.insert("license".into(), "policy-required".into());
+            integration
+                .options
+                .insert("license".into(), "policy-required".into());
             integration.packages.push("apple-sdk@nixpkgs".into());
             integration.tasks.push("apple-sdk-check".into());
             integration.providers.push("nixpkgs".into());
-            integration.host_checks.push("target:darwin-or-macos".into());
+            integration
+                .host_checks
+                .push("target:darwin-or-macos".into());
         }
         IntegrationKind::Certificates => {
             integration.preset = "certificate-store".into();
@@ -500,9 +491,11 @@ fn integration_arg_value(
 ) -> Result<CtValue, Diagnostic> {
     match expr {
         Expr::Ident(name, _) => Ok(CtValue::Str(name.clone())),
-        Expr::Field(base, member, _) => {
-            Ok(CtValue::Str(format!("{}.{}", expression_name(base), member)))
-        }
+        Expr::Field(base, member, _) => Ok(CtValue::Str(format!(
+            "{}.{}",
+            expression_name(base),
+            member
+        ))),
         Expr::ListLit(values, _) => values
             .iter()
             .map(|value| integration_arg_value(value, base_dir, funcs, globals))
@@ -588,10 +581,9 @@ fn lower_integration_arg(
             if let CtValue::Map(entries) = value {
                 for (map_key, map_value) in entries {
                     let CtKey::Str(host) = map_key else { continue };
-                    integration.options.insert(
-                        format!("host.{host}"),
-                        integration_value_text(map_value),
-                    );
+                    integration
+                        .options
+                        .insert(format!("host.{host}"), integration_value_text(map_value));
                 }
             } else {
                 integration.options.insert(key.to_string(), display);
@@ -646,7 +638,13 @@ fn integration_value_text(value: &CtValue) -> String {
             .join(","),
         CtValue::Map(values) => values
             .iter()
-            .map(|(key, value)| format!("{}={}", integration_key_text(key), integration_value_text(value)))
+            .map(|(key, value)| {
+                format!(
+                    "{}={}",
+                    integration_key_text(key),
+                    integration_value_text(value)
+                )
+            })
             .collect::<Vec<_>>()
             .join(","),
         CtValue::Struct { fields, .. } => fields
@@ -668,9 +666,7 @@ fn integration_key_text(key: &CtKey) -> String {
         // rendering of the value it holds. An integration key is a display
         // string, not an identity, so deferring to jet_show keeps one
         // rendering rule rather than a second one written here.
-        CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
-            key.to_value().jet_show()
-        }
+        CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => key.to_value().jet_show(),
     }
 }
 
@@ -769,17 +765,13 @@ fn evaluate_package_profile_expr(
         return Err(not_a_namespace_literal(Syntax::TYPE_PROFILE, value.span()));
     };
     if !type_name.is_empty() && type_name != Syntax::TYPE_PROFILE {
-        return Err(wrong_namespace_type(Syntax::TYPE_PROFILE, type_name, value.span()));
+        return Err(wrong_namespace_type(
+            Syntax::TYPE_PROFILE,
+            type_name,
+            value.span(),
+        ));
     }
-    evaluate_package_profile_fields(
-        name,
-        fields,
-        src,
-        base_dir,
-        funcs,
-        globals,
-        module_name,
-    )
+    evaluate_package_profile_fields(name, fields, src, base_dir, funcs, globals, module_name)
 }
 
 fn evaluate_package_profile_fields(
@@ -820,8 +812,7 @@ fn evaluate_package_profile_fields(
     let field_map = fields
         .iter()
         .filter(|(field, _, _)| {
-            field != Syntax::PROFILE_FIELD_PACKAGES
-                && field != Syntax::PROFILE_FIELD_COLLISIONS
+            field != Syntax::PROFILE_FIELD_PACKAGES && field != Syntax::PROFILE_FIELD_COLLISIONS
         })
         .map(|(field, span, value)| (field.clone(), (*span, value)))
         .collect::<HashMap<_, _>>();
@@ -928,7 +919,8 @@ fn package_profile_collisions_source(
             return Err(Diagnostic::error(
                 "E1333",
                 format!("package generation `{name}` has an invalid collision entry"),
-                "exact collision paths and provider identities cannot be empty or contain NUL".to_string(),
+                "exact collision paths and provider identities cannot be empty or contain NUL"
+                    .to_string(),
                 "name the path and the exact package provider".to_string(),
                 Some(span),
             ));
@@ -1104,21 +1096,9 @@ fn evaluate_env_fields(
         if name == Syntax::SYSTEM_FIELD_PACKAGES {
             continue;
         } else if name == Syntax::ENV_FIELD_PROMPT {
-            capture_prompt_setting(
-                &mut entry,
-                value,
-                base_dir,
-                funcs,
-                &resolved,
-                source,
-            )?;
+            capture_prompt_setting(&mut entry, value, base_dir, funcs, &resolved, source)?;
         } else if name == Syntax::ENV_FIELD_SECRETS {
-            secrets.extend(parse_secret_specs(
-                value,
-                base_dir,
-                funcs,
-                globals,
-            )?);
+            secrets.extend(parse_secret_specs(value, base_dir, funcs, globals)?);
         } else if name == Syntax::ENV_FIELD_PRESETS {
             if let Some(value) = resolved.get(name) {
                 presets.extend(presets_from_value(value).map_err(|error| {
@@ -1261,7 +1241,8 @@ fn field_missing_value(name: &str, span: crate::Diagnostics::Span) -> Diagnostic
     Diagnostic::error(
         "E3403",
         format!("computed module field `{name}` did not produce a value"),
-        "a pure module field must evaluate to one deterministic value before the module is merged".to_string(),
+        "a pure module field must evaluate to one deterministic value before the module is merged"
+            .to_string(),
         "return a value from the field expression".to_string(),
         Some(span),
     )
@@ -1289,13 +1270,7 @@ fn capture_prompt_setting(
                         let Some(label) = string_value(&v) else {
                             return Err(prompt_bad_value(field, "a quoted label", *span));
                         };
-                        record_setting(
-                            entry,
-                            Syntax::ENV_FIELD_PROMPT,
-                            label,
-                            *span,
-                            source,
-                        );
+                        record_setting(entry, Syntax::ENV_FIELD_PROMPT, label, *span, source);
                     }
                     Syntax::PROMPT_FIELD_PATH => {
                         let Some(word) = prompt_word(&v) else {
@@ -1304,13 +1279,7 @@ fn capture_prompt_setting(
                         if word != Syntax::PROMPT_PATH_SHORT && word != Syntax::PROMPT_PATH_FULL {
                             return Err(prompt_bad_value(field, ".Short or .Full", *span));
                         }
-                        record_setting(
-                            entry,
-                            Syntax::PROMPT_SETTING_PATH,
-                            word,
-                            *span,
-                            source,
-                        );
+                        record_setting(entry, Syntax::PROMPT_SETTING_PATH, word, *span, source);
                     }
                     Syntax::PROMPT_FIELD_STRIP => {
                         let Some(word) = prompt_word(&v) else {
@@ -1319,13 +1288,7 @@ fn capture_prompt_setting(
                         if word != Syntax::PROMPT_STRIP_ON && word != Syntax::PROMPT_STRIP_OFF {
                             return Err(prompt_bad_value(field, ".On or .Off", *span));
                         }
-                        record_setting(
-                            entry,
-                            Syntax::PROMPT_SETTING_STRIP,
-                            word,
-                            *span,
-                            source,
-                        );
+                        record_setting(entry, Syntax::PROMPT_SETTING_STRIP, word, *span, source);
                     }
                     _ => return Err(prompt_bad_field(field, *span)),
                 }
@@ -1354,20 +1317,16 @@ fn record_setting(
     span: crate::Diagnostics::Span,
     source: &str,
 ) {
-    entry
-        .settings
-        .entry(key.to_string())
-        .or_default()
-        .push(
-            FactContribution::new(
-                key,
-                FactValue::Text(value),
-                SourceScope::Item,
-                ContributionLayer::Environment,
-                format!("{source}.{key}"),
-            )
-            .at(span),
-        );
+    entry.settings.entry(key.to_string()).or_default().push(
+        FactContribution::new(
+            key,
+            FactValue::Text(value),
+            SourceScope::Item,
+            ContributionLayer::Environment,
+            format!("{source}.{key}"),
+        )
+        .at(span),
+    );
 }
 
 fn string_value(v: &crate::Comptime::CtValue) -> Option<String> {
@@ -1435,7 +1394,11 @@ fn parse_secret_specs(
                     value.span(),
                 ));
             }
-            entries.extend(fields.iter().map(|(name, span, value)| (name.clone(), *span, value)));
+            entries.extend(
+                fields
+                    .iter()
+                    .map(|(name, span, value)| (name.clone(), *span, value)),
+            );
         }
         Expr::MapLit(fields, _) => {
             for (key, value) in fields {
@@ -1643,7 +1606,10 @@ fn validate_secret_policies(
     if !allowed_environments.is_empty() {
         if let SecretDefault::PerProfile(values) = default {
             for profile in values.keys() {
-                if !allowed_environments.iter().any(|allowed| allowed == profile) {
+                if !allowed_environments
+                    .iter()
+                    .any(|allowed| allowed == profile)
+                {
                     return Err(secret_decl_error(
                         format!(
                             "secret `{name}` default profile `{profile}` is outside `{}`",
@@ -1693,12 +1659,13 @@ fn parse_secret_compose(
                 template = Some((value, argument.expr.span()));
             }
             Syntax::SECRET_COMPOSE_FIELD_FROM => {
-                let value = secret_eval_value(&argument.expr, base_dir, funcs, globals).map_err(|_| {
-                    secret_decl_error(
-                        format!("secret `{name}` compose `from` must be a list of names"),
-                        argument.expr.span(),
-                    )
-                })?;
+                let value =
+                    secret_eval_value(&argument.expr, base_dir, funcs, globals).map_err(|_| {
+                        secret_decl_error(
+                            format!("secret `{name}` compose `from` must be a list of names"),
+                            argument.expr.span(),
+                        )
+                    })?;
                 from = Some((value, argument.expr.span()));
             }
             _ => {
@@ -1721,7 +1688,8 @@ fn parse_secret_compose(
             call.name_span,
         )
     })?;
-    let mut from = secret_string_list(&from, &format!("secret `{name}` compose `from`"), from_span)?;
+    let mut from =
+        secret_string_list(&from, &format!("secret `{name}` compose `from`"), from_span)?;
     if from.is_empty() {
         return Err(secret_decl_error(
             format!("secret `{name}` compose `from` must not be empty"),
@@ -1924,13 +1892,19 @@ fn secret_string_list(
     span: crate::Diagnostics::Span,
 ) -> Result<Vec<String>, Diagnostic> {
     let CtValue::List(values) = value else {
-        return Err(secret_decl_error(format!("{scope} must be a list of strings"), span));
+        return Err(secret_decl_error(
+            format!("{scope} must be a list of strings"),
+            span,
+        ));
     };
     values
         .iter()
         .map(|value| match value {
             CtValue::Str(value) => Ok(value.clone()),
-            _ => Err(secret_decl_error(format!("{scope} must contain only strings"), span)),
+            _ => Err(secret_decl_error(
+                format!("{scope} must contain only strings"),
+                span,
+            )),
         })
         .collect()
 }
@@ -2110,7 +2084,9 @@ fn secret_eval_value(
             let mut lowered = BTreeMap::new();
             for (key, value_expr) in values {
                 let key = CtKey::from_value(secret_eval_value(key, base_dir, funcs, globals)?)
-                    .ok_or_else(|| secret_decl_error("secret map keys must be scalar values", key.span()))?;
+                    .ok_or_else(|| {
+                        secret_decl_error("secret map keys must be scalar values", key.span())
+                    })?;
                 let lowered_value = secret_eval_value(value_expr, base_dir, funcs, globals)?;
                 if lowered.insert(key, lowered_value).is_some() {
                     return Err(secret_decl_error(
@@ -2136,7 +2112,9 @@ fn secret_eval_value(
                 fields,
             })
         }
-        Expr::UnitLit { raw, int, suffix, .. } => {
+        Expr::UnitLit {
+            raw, int, suffix, ..
+        } => {
             let Some(amount) = int else {
                 return Err(secret_decl_error(
                     "secret duration policies need an integer unit literal",
@@ -2158,7 +2136,10 @@ fn secret_eval_value(
             }
             let duration = secret_eval_value(&call.args[0].expr, base_dir, funcs, globals)?;
             let seconds = secret_duration_seconds(&duration).ok_or_else(|| {
-                secret_decl_error("`max_age` needs a positive duration", call.args[0].expr.span())
+                secret_decl_error(
+                    "`max_age` needs a positive duration",
+                    call.args[0].expr.span(),
+                )
             })?;
             Ok(CtValue::Struct {
                 type_name: "SecretMaxAge".to_string(),
@@ -2215,10 +2196,12 @@ fn secret_duration_seconds(value: &CtValue) -> Option<i64> {
         return None;
     };
     let amount = fields.iter().find_map(|(field, value)| {
-        (field == "value").then_some(value).and_then(|value| match value {
-            CtValue::Int(value) if *value > 0 => Some(*value),
-            _ => None,
-        })
+        (field == "value")
+            .then_some(value)
+            .and_then(|value| match value {
+                CtValue::Int(value) if *value > 0 => Some(*value),
+                _ => None,
+            })
     })?;
     let unit = type_name.rsplit('.').next().unwrap_or(type_name);
     Some(match unit {
@@ -2241,13 +2224,7 @@ fn evaluate_env_role(
     funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, crate::Comptime::CtValue>,
     source: &str,
-) -> Result<
-    (
-        EnvCapture,
-        Vec<DevServicePlan>,
-    ),
-    Diagnostic,
-> {
+) -> Result<(EnvCapture, Vec<DevServicePlan>), Diagnostic> {
     let capture = evaluate_env_fields(&lit.fields, src, base_dir, funcs, globals, source)?;
     let mut services = Vec::new();
     for s in &lit.services {
@@ -2334,10 +2311,9 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
             Syntax::ADAPTER_FIELD_RECIPE,
         ],
     )?;
-    let name = named_string(args, Syntax::ADAPTER_FIELD_NAME)
-        .ok_or_else(|| adapter_shape(item))?;
-    let source = named_raw(args, Syntax::ADAPTER_FIELD_SOURCE)
-        .ok_or_else(|| adapter_shape(item))?;
+    let name = named_string(args, Syntax::ADAPTER_FIELD_NAME).ok_or_else(|| adapter_shape(item))?;
+    let source =
+        named_raw(args, Syntax::ADAPTER_FIELD_SOURCE).ok_or_else(|| adapter_shape(item))?;
     let source = unquote(source.trim()).unwrap_or(source);
     super::super::RefSpec::classify_provider_ref(&source).map_err(|_| adapter_shape(item))?;
     let deps = named_raw(args, Syntax::ADAPTER_FIELD_DEPS)
@@ -2351,8 +2327,7 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
         })
         .unwrap_or_default();
     let recipe = parse_recipe(
-        &named_raw(args, Syntax::ADAPTER_FIELD_RECIPE)
-            .ok_or_else(|| adapter_shape(item))?,
+        &named_raw(args, Syntax::ADAPTER_FIELD_RECIPE).ok_or_else(|| adapter_shape(item))?,
     )?;
     Ok(AdapterPlan {
         name,
@@ -2367,7 +2342,9 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
     if let Some(args) = call_args(raw, Syntax::RECIPE_BUILD) {
         validate_fields(args, &[Syntax::RECIPE_FIELD_STEPS])?;
         let steps = parse_build_steps(args)?;
-        return Ok(AdapterRecipe::Build(super::super::Recipe::BuildRecipe { steps }));
+        return Ok(AdapterRecipe::Build(super::super::Recipe::BuildRecipe {
+            steps,
+        }));
     }
     if let Some(args) = call_args(raw, Syntax::RECIPE_COPY) {
         if args.trim().is_empty() {
@@ -2387,8 +2364,7 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
                 Syntax::RECIPE_FIELD_AS_NAME,
             ],
         )?;
-        let bin = named_string(args, Syntax::RECIPE_FIELD_BIN)
-            .ok_or_else(|| adapter_shape(raw))?;
+        let bin = named_string(args, Syntax::RECIPE_FIELD_BIN).ok_or_else(|| adapter_shape(raw))?;
         let as_name = named_string(args, Syntax::RECIPE_FIELD_AS)
             .or_else(|| named_string(args, Syntax::RECIPE_FIELD_AS_NAME))
             .unwrap_or_else(|| {
@@ -2404,8 +2380,7 @@ fn parse_recipe(raw: &str) -> Result<AdapterRecipe, Diagnostic> {
 }
 
 fn parse_build_steps(args: &str) -> Result<Vec<super::super::Recipe::BuildStep>, Diagnostic> {
-    let raw = named_field(args, Syntax::RECIPE_FIELD_STEPS)
-        .ok_or_else(|| adapter_shape(args))?;
+    let raw = named_field(args, Syntax::RECIPE_FIELD_STEPS).ok_or_else(|| adapter_shape(args))?;
     let body = raw
         .trim()
         .strip_prefix('[')
@@ -2431,7 +2406,10 @@ fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagno
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_FETCH) {
         validate_fields(
             args,
-            &[Syntax::RECIPE_STEP_FIELD_URL, Syntax::RECIPE_STEP_FIELD_SHA256],
+            &[
+                Syntax::RECIPE_STEP_FIELD_URL,
+                Syntax::RECIPE_STEP_FIELD_SHA256,
+            ],
         )?;
         return Ok(BuildStep::Fetch {
             url: required_field_string(args, Syntax::RECIPE_STEP_FIELD_URL)?,
@@ -2441,7 +2419,10 @@ fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagno
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_EXEC) {
         validate_fields(
             args,
-            &[Syntax::RECIPE_STEP_FIELD_TOOL, Syntax::RECIPE_STEP_FIELD_ARGS],
+            &[
+                Syntax::RECIPE_STEP_FIELD_TOOL,
+                Syntax::RECIPE_STEP_FIELD_ARGS,
+            ],
         )?;
         return Ok(BuildStep::Exec {
             tool: required_field_string(args, Syntax::RECIPE_STEP_FIELD_TOOL)?,
@@ -2451,7 +2432,10 @@ fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagno
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL) {
         validate_fields(
             args,
-            &[Syntax::RECIPE_STEP_FIELD_SRC, Syntax::RECIPE_STEP_FIELD_DEST],
+            &[
+                Syntax::RECIPE_STEP_FIELD_SRC,
+                Syntax::RECIPE_STEP_FIELD_DEST,
+            ],
         )?;
         return Ok(BuildStep::Install {
             src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
@@ -2461,7 +2445,10 @@ fn parse_build_step(raw: &str) -> Result<super::super::Recipe::BuildStep, Diagno
     if let Some(args) = call_args(raw, Syntax::RECIPE_STEP_INSTALL_TREE) {
         validate_fields(
             args,
-            &[Syntax::RECIPE_STEP_FIELD_SRC, Syntax::RECIPE_STEP_FIELD_DEST],
+            &[
+                Syntax::RECIPE_STEP_FIELD_SRC,
+                Syntax::RECIPE_STEP_FIELD_DEST,
+            ],
         )?;
         return Ok(BuildStep::InstallTree {
             src: required_field_string(args, Syntax::RECIPE_STEP_FIELD_SRC)?,
@@ -2501,9 +2488,10 @@ fn named_fields<'a>(args: &'a str) -> Option<Vec<(&'a str, &'a str)>> {
 fn validate_fields(args: &str, allowed: &[&str]) -> Result<(), Diagnostic> {
     let fields = named_fields(args).ok_or_else(|| adapter_shape(args))?;
     let mut seen = HashSet::new();
-    if fields.iter().any(|(name, _)| {
-        !allowed.contains(name) || !seen.insert(*name)
-    }) {
+    if fields
+        .iter()
+        .any(|(name, _)| !allowed.contains(name) || !seen.insert(*name))
+    {
         return Err(adapter_shape(args));
     }
     Ok(())

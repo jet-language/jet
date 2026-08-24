@@ -1720,4 +1720,52 @@ module system.box {
         check_diagnostic_snapshot("E0971", &rendered);
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn repository_shell_modules_evaluate_without_nix_runtime() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let source = std::fs::read_to_string(root.join("env.jet")).unwrap();
+        let dev = evaluate_env_with_environment(&source, &root, Some("dev")).unwrap();
+        assert_eq!(dev.package_refs.len(), 28);
+        assert!(dev.package_refs.iter().any(|r| r == "rustfmt@default"));
+        assert!(dev
+            .package_refs
+            .iter()
+            .any(|r| r == "rPackages.jsonlite@default"));
+
+        let full = evaluate_env_with_environment(&source, &root, Some("full")).unwrap();
+        assert_eq!(full.package_refs.len(), 51);
+        for name in [
+            "rustup",
+            "gnat",
+            "fpc",
+            "dart",
+            "powershell",
+            "gfortran",
+            "gnucobol",
+            "go",
+            "jdk",
+            "dotnet-sdk_8",
+            "tcl",
+            "lua5_4",
+            "octave",
+            "qemu",
+            "wasmtime",
+            "emscripten",
+            "lldb",
+            "raylib",
+            "chromium",
+            "firefox",
+            "geckodriver",
+            "gtk4",
+            "bubblewrap",
+        ] {
+            assert!(
+                full.package_refs
+                    .iter()
+                    .any(|r| r == &format!("{name}@default")),
+                "full environment misses {name}"
+            );
+        }
+    }
 }
