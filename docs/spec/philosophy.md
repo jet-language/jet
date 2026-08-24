@@ -54,7 +54,7 @@ against them, not treated as an aspiration.
 | **Verdict fidelity** | The compiler catches a defect, not production. | Invariant I3 puts all checking in sema. |
 | **Verdict latency** | An edit gets a verdict fast enough for a loop. | Per-file checkability uses `crates/jet-queries` demand caching and checked-item reuse in the [Incremental Compiler Service](architecture.md#incremental-compiler-service). |
 | **Verdict actionability** | An error names the change to make. | Invariant I4 makes diagnostics products with registered What/Why/Fix text and a UI snapshot. |
-| **Context economy** | Common source and diagnostics use few tokens. | Unowned gap. Card #1880 measures tokens per unit of progress. |
+| **Context economy** | Common source and diagnostics use few tokens. | Measured by card #1876: an executed 29-row Jet/Node comparison recording model tokens per task and per repair round. |
 | **Repair determinism** | One error leads to one obvious repair. | Invariant I8: one mechanism produces one obvious repair, so an agent does not choose among equivalent fixes. |
 
 ## The one law on compiler-held facts

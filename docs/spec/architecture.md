@@ -813,7 +813,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
 - **R13 — An abort is never an outcome; no unwind may reach a JIT frame.**
-  (D-JITUNWIND1, #1995 / #1997.) `cranelift-jit` registers no unwind
+  (D-JITUNWIND1, #1997.) `cranelift-jit` registers no unwind
   information for the code it emits, so a JIT frame carries no FDE. A Rust
   panic raised above one makes libgcc's phase-1 walk run off the top of the
   stack and the process rtaborts with `fatal runtime error: failed to initiate
