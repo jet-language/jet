@@ -3523,7 +3523,10 @@ module env.dev {
 
     let spec = jetpack::RefSpec::classify_in(&plan.package_refs[0], &plan.table).unwrap();
     assert_eq!(spec.package, "cargo");
-    assert_eq!(spec.source, jetpack::RefSpec::Source::Named("default".into()));
+    assert_eq!(
+        spec.source,
+        jetpack::RefSpec::Source::Named("default".into())
+    );
 }
 
 #[test]

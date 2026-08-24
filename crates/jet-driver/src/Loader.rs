@@ -84,15 +84,17 @@ pub(crate) fn prepare_frontend_sources(sources: Vec<(PathBuf, String)>) -> Prepa
         let next_ref = &next;
         for _ in 0..workers {
             let sender = sender.clone();
-            scope.spawn(move || loop {
-                let index = next_ref.fetch_add(1, Ordering::Relaxed);
-                let Some((_, source)) = jobs_ref.get(index) else {
-                    break;
-                };
-                let prepared = prepare_frontend_module(source);
-                sender
-                    .send((index, prepared))
-                    .expect("frontend result receiver remains in scope");
+            scope.spawn(move || {
+                crate::run_compiler_work(|| loop {
+                    let index = next_ref.fetch_add(1, Ordering::Relaxed);
+                    let Some((_, source)) = jobs_ref.get(index) else {
+                        break;
+                    };
+                    let prepared = prepare_frontend_module(source);
+                    sender
+                        .send((index, prepared))
+                        .expect("frontend result receiver remains in scope");
+                });
             });
         }
         drop(sender);

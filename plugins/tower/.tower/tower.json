@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2156,
-    "rev": 43366,
+    "rev": 43371,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -143541,21 +143541,32 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A real Chromium client loads /canvas, the graph projection arrives, and the devserver stays alive",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Root cause: prepare_frontend_sources spawned raw scope threads for the parallel frontend path, so deep parser/frontend recursion ran on a default-size thread stack instead of the dedicated compiler stack. Every other compiler entry routes through jet_driver::run_compiler_work (crates/jet-driver/src/lib.rs:37), which calls CompilerStack::run_on_compiler_stack; the parallel workers bypassed it. Fix at crates/jet-driver/src/Loader.rs:87 wraps the worker loop in crate::run_compiler_work, so the parallel path uses the same one mechanism as the serial path (I8) rather than raising a stack size. This also explains why plain HTTP probes never crashed: GET /canvas, /canvas/app.js and /canvas/project do not take the multi-module parallel prepare path a real browser client triggers. Verified by reproduction: jet dev examples/features/web/ui_showcase.jet --target=web --port=7411 under jet-env full now survives a real Chromium 151 client driven through scripts/canvas-test/driver.mjs; the devserver stays ready, document.title is Jet Canvas (was 127.0.0.1), the graph projects with typed nodes and wires, and the full toolbar is live (Fit graph, Code/Split/Graph/Review, Undo, Redo, Align, Distribute, Tidy graph, Check, Run, Start debug, Search, Developer). Before the fix the same command aborted with thread has overflowed its stack / fatal runtime error, exit 134.",
+          "at": "2026-08-24T12:05:50.357Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T11:40:14.161Z",
-      "updated": "2026-08-24T11:40:14.163Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-24T12:05:50.847Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-24T12:05:50.847Z"
     },
     {
       "id": "c04385w6",
@@ -191908,6 +191919,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-24T12:05:50.847Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ky3ijf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T12:05:50.357Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ky3ijf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T12:05:49.988Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ky3ijf",
+      "note": "#1 A real Chromium client loads /canvas, the graph projection a"
+    },
+    {
       "at": "2026-08-24T11:47:29.457Z",
       "by": "owner",
       "action": "done.clear",
@@ -195385,27 +195417,6 @@
       "action": "card.criteria-meet",
       "ref": "c0vjriuo",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-23T07:52:36.883Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mh8cme",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:52:35.789Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mh8cme",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:52:34.422Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mh8cme",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
