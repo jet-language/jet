@@ -620,13 +620,22 @@
         { title: "Edit pattern", detail: pin.pattern_source || "pattern", group: "Patterns", run: () => editPatternArm(pin) },
         { title: "Remove arm", detail: "delete source body", group: "Patterns", run: () => removePatternArm(pin) }
       ], { pin, context: "Pattern arm" });
-      return;
+      return true;
     }
     if (pin && pin.append_op === "remove_multi_input_element") {
       openActionPalette(x, y, "Input element", [
         { title: "Remove element", detail: pin.name || "item", group: "Pins", run: () => removeMultiInputElement(pin) }
       ], { pin, context: "Input element" });
-      return;
+      return true;
+    }
+    if (latestDoc && actionEntriesRevision !== latestDoc.revision) {
+      const requestedRevision = latestDoc.revision;
+      loadCanvasActions({ skipRedraw: true }).then(() => {
+        if (latestDoc
+          && latestDoc.revision === requestedRevision
+          && actionEntriesRevision === requestedRevision) openPinMenu(pin, x, y, graphPoint);
+      });
+      return true;
     }
     const entries = functionsForPin(pin).concat(variableActionsForGraph(currentGraphOrNull())
       .filter((action) => actionCompatibleWithPin(action, pin)));
@@ -682,4 +691,5 @@
       });
     }
     openActionPalette(x, y, "Add connected node", actions.filter(actionInsertsNode), { pin, context: "Insert node", graphPoint });
+    return true;
   }

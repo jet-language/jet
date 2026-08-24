@@ -458,21 +458,36 @@
     const descriptor = nodeDescriptor(node);
     if (!descriptor || !descriptor.palette || !descriptor.palette.insertable) return null;
     const sourceAction = node.action || {};
-    const sourceCallee = descriptor.transaction === "insert_call" && node.title
+    const candidates = actionEntries.filter((action) => {
+      const candidateDescriptor = nodeDescriptorForAction(action);
+      const candidateCallee = action && action.insert_callee;
+      return candidateDescriptor
+        && candidateDescriptor.id === descriptor.id
+        && typeof candidateCallee === "string"
+        && candidateCallee.trim()
+        && shortCalleeName(candidateCallee) === shortCalleeName(node.title);
+    });
+    const descriptorAction = candidates.length === 1 ? candidates[0] : null;
+    const resolvedAction = sourceAction.insert_callee ? sourceAction : descriptorAction;
+    const checkedFallbackCallee = candidates.length === 0
+      && descriptor.transaction === "insert_call"
+      && node.title
       ? node.title
       : "";
     if (descriptor.transaction === "insert_call"
-      && !(typeof sourceAction.insert_callee === "string" && sourceAction.insert_callee.trim())
-      && !sourceCallee.trim()) return null;
+      && !(resolvedAction
+        && typeof resolvedAction.insert_callee === "string"
+        && resolvedAction.insert_callee.trim())
+      && !checkedFallbackCallee.trim()) return null;
     const pins = (node.pins || []).map((pin) => Object.assign({}, pin));
     const output = pins.find((pin) => pin.direction === "output" && !isExecPin(pin));
-    return Object.assign({}, sourceAction, {
+    return Object.assign({}, resolvedAction || sourceAction, {
       title: node.title || "node",
       kind: node.kind || descriptor.kind,
       node_descriptor_id: descriptor.id,
       op: node.action && node.action.op || descriptor.transaction || "",
-      callee: sourceAction.callee || sourceCallee,
-      insert_callee: sourceAction.insert_callee || sourceCallee,
+      callee: resolvedAction && resolvedAction.callee || checkedFallbackCallee,
+      insert_callee: resolvedAction && resolvedAction.insert_callee || checkedFallbackCallee,
       ret: node.action && node.action.ret || output && output.type || "Void",
       pins
     });
@@ -502,7 +517,7 @@
   function selectedClipboardPayload() {
     const graph = graphWithViewState(currentGraphOrNull());
     if (!graph) return null;
-    const nodes = selectedGraphNodes(graph);
+    const nodes = selectedGraphNodes(graph).filter((node) => node.kind !== "entry" && node.kind !== "return");
     const comments = selectedGraphComments(currentGraphOrNull());
     if (!nodes.length && !comments.length) return null;
     const real = nodes.filter((node) => !node.staged);
@@ -529,7 +544,7 @@
   function copySelection() {
     const payload = selectedClipboardPayload();
     if (!payload) {
-      showToast("Select nodes to copy");
+      showToast("Select source-backed nodes or comments to copy");
       return false;
     }
     clipboardState = payload;
@@ -596,6 +611,15 @@
     });
   }
 
+  function pasteCommentPayload(payload, point) {
+    const commentIds = [];
+    for (const box of payload.comments || []) {
+      const comment = createCommentBox({ x: point.x + 24, y: point.y + 24, w: box.w || 260, h: box.h || 160 }, box.title || "Comment", box.color || COMMENT_TINTS[0], false);
+      if (comment) commentIds.push(comment.comment_id);
+    }
+    return commentIds;
+  }
+
   function clipboardIsFresh() {
     if (!clipboardState || !latestDoc) return false;
     const currentSource = currentCanvasSourceId();
@@ -637,6 +661,11 @@
         if (sourcePasteHasUnresolvedInput(result) && (payload.fallback_nodes || []).length) {
           pasteStagedPayload(payload, graph, point);
         }
+        return;
+      }
+      if ((payload.comments || []).length) {
+        pasteCommentPayload(payload, point);
+        if (latestDoc) drawGraph(latestDoc);
       }
     });
     return true;
@@ -645,7 +674,9 @@
   function pasteStagedPayload(payload, graph, point) {
     const pasted = [];
     const commentIds = [];
-    const baseNodes = payload.staged.length ? payload.staged : payload.fallback_nodes;
+    const fallbackNodes = Array.isArray(payload.fallback_nodes) ? payload.fallback_nodes : [];
+    const stagedNodes = Array.isArray(payload.staged) ? payload.staged : [];
+    const baseNodes = fallbackNodes.length ? fallbackNodes : stagedNodes;
     if (baseNodes.some((item) => !item.action || !nodeDescriptorForAction(item.action)?.palette?.insertable)) {
       showToast("Selection cannot be pasted as staged; choose a stageable node", { isError: true });
       return false;
@@ -655,10 +686,7 @@
       const node = createStagedNodeFromAction(action, { x: point.x + 24 + pasted.length * 24, y: point.y + 24 + pasted.length * 18 });
       if (node) pasted.push(node.node_id);
     }
-    for (const box of payload.comments || []) {
-      const comment = createCommentBox({ x: point.x + 24, y: point.y + 24, w: box.w || 260, h: box.h || 160 }, box.title || "Comment", box.color || COMMENT_TINTS[0], false);
-      if (comment) commentIds.push(comment.comment_id);
-    }
+    commentIds.push(...pasteCommentPayload(payload, point));
     selectedNodeIds = new Set(pasted.concat(commentIds));
     selectionExplicitlyCleared = selectedNodeIds.size === 0;
     selectedNodeId = pasted[0] || commentIds[0] || null;

@@ -475,6 +475,10 @@ fn apply_project_transaction_json_inner(path: &Path, request: &str) -> Result<St
 
 /// Query Canvas graph/source facts through the same semindex data LSP consumes.
 pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| query_json_for_file_inner(path, request))
+}
+
+fn query_json_for_file_inner(path: &Path, request: &str) -> Result<String, String> {
     let src = fs::read_to_string(path).map_err(|e| query_error("io", &e.to_string()))?;
     let revision = required_query_string(request, "revision")?;
     if revision != source_revision(&src) {
@@ -519,6 +523,10 @@ pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String>
 
 /// Query graph/source facts for a selected file inside the entry project.
 pub fn query_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
+    jet_driver::run_compiler_work(|| query_json_for_entry_inner(entry, request))
+}
+
+fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, String> {
     let source_id = json_string_field(request, "source_id");
     let path = resolve_entry_source_path(entry, source_id.as_deref())?;
     let schema = json_usize_field(request, "schema_version").unwrap_or(0);
@@ -636,6 +644,10 @@ pub fn source_control_json_for_file(path: &Path) -> String {
 
 /// Report Git text truth for the whole projected package/workspace.
 pub fn source_control_json_for_entry(path: &Path) -> String {
+    jet_driver::run_compiler_work(|| source_control_json_for_entry_inner(path))
+}
+
+fn source_control_json_for_entry_inner(path: &Path) -> String {
     let ctx = project_context_for_entry(path);
     let git_root = git_root(path);
     let mut dirty_files = 0;
@@ -1241,6 +1253,8 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
             let bind = json_string_field(request, "bind");
             let wire_inline_expr_id = json_string_field(request, "wire_inline_expr_id");
             let wire_expr = json_string_field(request, "wire_expr");
+            let wire_origin_pin_id = json_string_field(request, "wire_origin_pin_id");
+            let wire_target_pin = json_string_field(request, "wire_target_pin");
             if let Some(name) = &bind {
                 validate_ident(name)?;
             }
@@ -1256,6 +1270,8 @@ fn apply_transaction_json_on_compiler_stack(path: &Path, request: &str) -> Resul
                 bind.as_deref(),
                 wire_inline_expr_id.as_deref(),
                 wire_expr.as_deref(),
+                wire_origin_pin_id.as_deref(),
+                wire_target_pin.as_deref(),
             )
         }
         "create_trait_impl" => {

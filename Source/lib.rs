@@ -1678,32 +1678,34 @@ pub fn compile_web_with_gates_and_settings(
     gates: Policy::GateSet,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    if file_selects_programmable_build(file) {
-        compile_programmable_build_opts_with_builder_and_profile_and_settings(
-            file,
-            &[],
-            false,
-            gates,
-            false,
-            true,
-            false,
-            None,
-            None,
-            "dev",
-            setting_overrides,
-            None,
-        )
-    } else {
-        compile_bundle_path_opts_with_settings(
-            file,
-            Sema::CompileMode::Run,
-            false,
-            gates,
-            true,
-            None,
-            setting_overrides,
-        )
-    }
+    with_compiler_stack(|| {
+        if file_selects_programmable_build(file) {
+            compile_programmable_build_opts_with_builder_and_profile_and_settings(
+                file,
+                &[],
+                false,
+                gates,
+                false,
+                true,
+                false,
+                None,
+                None,
+                "dev",
+                setting_overrides,
+                None,
+            )
+        } else {
+            compile_bundle_path_opts_with_settings(
+                file,
+                Sema::CompileMode::Run,
+                false,
+                gates,
+                true,
+                None,
+                setting_overrides,
+            )
+        }
+    })
 }
 
 pub fn compile_plugin_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {

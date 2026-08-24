@@ -2482,6 +2482,16 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         src,
         "Canvas action preview must not write source"
     );
+    let wrong_callee_preview =
+        preview.replace("\"callee\":\"square\"", "\"callee\":\"print\"");
+    let wrong_callee =
+        jet::Canvas::apply_transaction_json(&path, &wrong_callee_preview)
+            .expect_err("preview must reject a callee that disagrees with its descriptor");
+    assert!(
+        wrong_callee.contains("does not match its checked descriptor"),
+        "{wrong_callee}"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), src);
 
     let dir = temp_dir("actions_package");
     fs::write(
@@ -2544,6 +2554,25 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "project function insert_call should write source"
     );
 
+    let wired_path = write_fixture(
+        "actions_wired_insert",
+        "fn square(n: Int) Int -> {\n    return n * n\n}\n\nfn run() {\n    limit :: 4\n    print(limit)\n}\n",
+    );
+    let wired_src = fs::read_to_string(&wired_path).unwrap();
+    let wired_graph = jet::Canvas::graph_json_for_file(&wired_path).expect("wired insert graph");
+    let wired_run_graph_id = field_before(&wired_graph, "\"title\":\"run\"", "graph_id");
+    let wired_insert = format!(
+        "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"square\",\"args\":[\"limit\"],\"wire_origin_pin_id\":\"{}:stmt:1:binding:output:limit\",\"wire_target_pin\":\"n\",\"wire_expr\":\"limit\"}}",
+        jet::Canvas::source_revision(&wired_src),
+        wired_run_graph_id,
+        wired_run_graph_id,
+    );
+    jet::Canvas::apply_transaction_json(&wired_path, &wired_insert)
+        .expect("wired project function insert_call");
+    let wired_after = fs::read_to_string(&wired_path).unwrap();
+    assert!(wired_after.find("limit :: 4").unwrap() < wired_after.find("square(limit)").unwrap(), "{wired_after}");
+    assert_eq!(jet::Formatter::format_source(&wired_after).unwrap(), wired_after);
+
     let core_path = write_fixture(
         "actions_core_insert",
         "use core.math as math\n\nfn run() {\n    print(1)\n}\n",
@@ -2559,6 +2588,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
     assert!(core_actions.contains("\"action_id\":\"canvas.core_catalog:core.math:abs\""), "{core_actions}");
     assert!(core_actions.contains("\"title\":\"abs "), "{core_actions}");
     assert!(core_actions.contains("\"insert_callee\":\"math.abs\""), "{core_actions}");
+    assert!(core_actions.contains("\"ret\":\"Int\""), "Core catalog action must expose its checked return type: {core_actions}");
     let core_graph = jet::Canvas::graph_json_for_file(&core_path).expect("core graph");
     let core_run_graph_id = field_before(&core_graph, "\"title\":\"run\"", "graph_id");
     let core_insert = format!(
@@ -3017,6 +3047,32 @@ fn canvas_preserves_via_effect_row_for_signature_edits() {
         "{graph}"
     );
     assert!(graph.contains("\"effect_via\":\"act\""), "{graph}");
+}
+
+#[test]
+fn canvas_preserves_pure_effect_row_for_signature_edits() {
+    let path = write_fixture(
+        "function_pure_effect",
+        "fn adjust(value: Int) Int -[]> { return value }\nfn run() { print(adjust(1)) }\n",
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    let adjust = graph_object_for_title(&graph, "adjust");
+    assert!(adjust.contains("\"pure\":true"), "{adjust}");
+    assert!(
+        adjust.contains("\"signature\":\"fn adjust(value: Int) Int -[]>\""),
+        "{adjust}"
+    );
+
+    let before = fs::read_to_string(&path).unwrap();
+    let edit = format!(
+        "{{\"schema_version\":1,\"op\":\"edit_function_signature\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"signature\":\"fn adjust(next: Int) Int -[]>\"}}",
+        jet::Canvas::source_revision(&before),
+        graph_id_for_title(&graph, "adjust")
+    );
+    jet::Canvas::apply_transaction_json(&path, &edit).expect("edit pure signature");
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("fn adjust(next: Int) Int -[]>"), "{after}");
+    assert!(!after.contains("fn adjust(next: Int) Int ->"), "{after}");
 }
 
 #[test]
@@ -4636,10 +4692,10 @@ fn canvas_editor_shell_matches_round3_contract() {
 
     assert!(js.contains("function syncVariablesList"), "{js}");
     assert!(js.contains("function renderVariableDetails"), "{js}");
-    assert!(js.contains("originalSignature.includes(\"-[\")"), "{js}");
+    assert!(js.contains("function functionEffectSuffix"), "{js}");
     assert!(!js.contains("originalSignature.includes(\"=[\")"), "retired effect signature spelling leaked into Canvas: {js}");
-    assert!(js.contains("fnMeta.effect_via ? \"via \" + fnMeta.effect_via"), "{js}");
-    assert!(js.contains("\" -[\" + effects + \"]>\""), "{js}");
+    assert!(js.contains("fnMeta && fnMeta.effect_via"), "{js}");
+    assert!(js.contains("\" -[\" + fnMeta.effects.join(\", \") + \"]>\""), "{js}");
     assert!(!js.contains("\" =[\" + effects + \"]=>\""), "retired effect signature arrow leaked into Canvas: {js}");
     assert!(!js.contains("fnMeta.pure ? \"#Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
@@ -4666,7 +4722,20 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("function nodeDescriptorForAction"), "{js}");
     assert!(js.contains("function insertCalleeForAction"), "{js}");
     assert!(js.contains("insert_callee: action.insert_callee"), "{js}");
-    assert!(!js.contains("window.prompt(\"Call function\""), "Canvas must not invent a callee for an incomplete action: {js}");
+    assert!(
+        !js.contains("window.prompt(\"Call function\""),
+        "Canvas must not invent a callee for an incomplete action: {js}"
+    );
+    assert!(js.contains("const candidates = actionEntries.filter"), "{js}");
+    assert!(
+        !js.contains("const sourceCallee = descriptor.transaction"),
+        "Canvas must not derive a callee from a node title: {js}"
+    );
+    assert!(
+        js.contains("actionEntriesRevision !== latestDoc.revision")
+            && js.contains("loadCanvasActions({ skipRedraw: true }).then"),
+        "pin menus must wait for the checked descriptor catalog: {js}"
+    );
     assert!(js.contains("descriptor.palette.insertable"), "{js}");
     assert!(js.contains("descriptor.palette.rank"), "{js}");
     assert!(js.contains("descriptor.presentation.hover"), "{js}");
@@ -5189,9 +5258,8 @@ fn canvas_projects_event_dispatchers_without_masquerading_runtime_facts() {
     ] {
         assert!(graph.contains(field), "event dispatcher graph missing {field}: {graph}");
     }
-    assert_eq!(
-        count_occurrences(&graph, "\"kind\":\"event_subscribe\""),
-        2,
+    assert!(
+        !graph.contains("\"receiver\":\"resource\""),
         "unrelated Resource.on must not become an event fact: {graph}"
     );
     assert_eq!(

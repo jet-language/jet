@@ -49,6 +49,110 @@
     return `shared_${title}`;
   }
 
+  function matchingSourceBrace(source, open) {
+    let depth = 0;
+    let quote = null;
+    let escaped = false;
+    let lineComment = false;
+    for (let i = open; i < source.length; i++) {
+      const ch = source[i];
+      const next = source[i + 1];
+      if (lineComment) {
+        if (ch === "\n") lineComment = false;
+        continue;
+      }
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+      } else if (ch === "/" && next === "/") {
+        lineComment = true;
+        i += 1;
+      } else if (ch === "{") {
+        depth += 1;
+      } else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  function convergenceBranchBody(source, node, pinName) {
+    const span = node && node.source_span;
+    if (!span) return null;
+    const start = Number(span.start);
+    const end = Number(span.end);
+    const open = source.indexOf("{", start);
+    if (open < start || open >= end) return null;
+    const close = matchingSourceBrace(source, open);
+    if (close < 0 || close > end) return null;
+    if (pinName === "then" || /^arm1$/.test(pinName)) return { start: open + 1, end: close };
+    const tail = source.slice(close + 1, end);
+    const elseMatch = /\belse\b/.exec(tail);
+    if (!elseMatch) {
+      return pinName === "else"
+        ? { reason: "Convergence refused: this execution pin has no source-backed path; source unchanged." }
+        : null;
+    }
+    const elseOpen = close + 1 + elseMatch.index + elseMatch[0].length;
+    const bodyOpen = source.indexOf("{", elseOpen);
+    if (bodyOpen < 0 || bodyOpen >= end) return null;
+    const bodyClose = matchingSourceBrace(source, bodyOpen);
+    return bodyClose < 0 || bodyClose > end ? null : { start: bodyOpen + 1, end: bodyClose };
+  }
+
+  function convergenceScopeRefusal(graph, preview) {
+    if (!graph || !latestDoc || !preview) return null;
+    const fromPin = (graph.pins || []).find((pin) => pin.pin_id === preview.from_pin_id);
+    const targetPin = (graph.pins || []).find((pin) => pin.pin_id === preview.to_pin_id);
+    const branch = nodeForPin(graph, fromPin);
+    const target = nodeForPin(graph, targetPin);
+    if (!fromPin || !targetPin || !branch || !target || !["branch", "dispatch"].includes(branch.kind)) return null;
+    const body = convergenceBranchBody(latestDoc.source_text || "", branch, preview.from_pin_name);
+    if (!body) return null;
+    if (body.reason) return body.reason;
+    const inBody = (span) => span && Number(span.start) >= body.start && Number(span.end) <= body.end;
+    const branchStart = Number(branch.source_span && branch.source_span.start);
+    const targetInputs = new Set((graph.pins || [])
+      .filter((pin) => pin.node_id === target.node_id && pin.direction === "input" && pin.type !== "exec")
+      .map((pin) => pin.pin_id));
+    for (const wire of graph.wires || []) {
+      if (wire.wire_kind !== "data" || !targetInputs.has(wire.to_pin)) continue;
+      const sourcePin = (graph.pins || []).find((pin) => pin.pin_id === wire.from_pin);
+      const sourceNode = nodeForPin(graph, sourcePin);
+      if (!sourceNode || sourceNode.kind !== "variable_get") continue;
+      const bindings = (graph.nodes || [])
+        .filter((node) => node.kind === "binding" && node.title === sourceNode.title && node.source_span)
+        .filter((node) => Number(node.source_span.start) < Number(sourceNode.source_span && sourceNode.source_span.start))
+        .sort((a, b) => Number(a.source_span.start) - Number(b.source_span.start));
+      const definition = bindings[bindings.length - 1];
+      const isEntryParam = (graph.pins || []).some((pin) => {
+        return pin.node_id === graph.entry_node && pin.direction === "output" && pin.name === sourceNode.title;
+      });
+      if (inBody(sourceNode.source_span) || isEntryParam || (definition && Number(definition.source_span.end) < branchStart)) continue;
+      if (definition && inBody(definition.source_span)) continue;
+      return `Convergence refused: ${sourceNode.title} is only available on another execution path; source unchanged.`;
+    }
+    return null;
+  }
+
+  function refuseExecConvergence(reason) {
+    const refusal = { ok: false, changed: false, code: "client_scope_gate", message: reason };
+    window.__jetCanvasLastTx = null;
+    window.__jetCanvasLastTxResult = refusal;
+    setCanvasState("error", "Convergence refused", reason, [
+      { label: "Show source", run: openSourceRecovery },
+      { label: "Close", primary: true, run: clearCanvasState }
+    ]);
+    showToast(reason, { isError: true });
+    return refusal;
+  }
+
   function closeExecConvergencePreview() {
     window.__jetCanvasExecConvergencePreview = null;
     window.__jetCanvasLastConnectionPlan = null;
@@ -106,6 +210,11 @@
         return;
       }
       preview.function_name = name;
+      const scopeRefusal = convergenceScopeRefusal(currentGraphOrNull(), preview);
+      if (scopeRefusal) {
+        refuseExecConvergence(scopeRefusal);
+        return;
+      }
       postTransaction({
         schema_version: 1,
         op: "replace_source",

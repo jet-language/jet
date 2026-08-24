@@ -229,6 +229,11 @@ current source, inserts the clone after the selected source span, and shows the
 rename pairs in Details. The clipboard carries the source revision; a changed
 revision rejects paste without writing source. “Paste as staged” always keeps
 the result local until a compatible source-backed connection materializes it.
+Entry and return anchors are not copyable. A mixed or source-incompatible
+selection uses staged fallback only when every selected node has an insertable
+descriptor; otherwise the UI explains the refusal before any source
+transaction. Undo and redo restore the exact checked source through the same
+revision-guarded transaction path.
 
 Collapsed graph views also persist as ordinary comments:
 
@@ -498,7 +503,7 @@ Terms:
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) Int","callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","available":true,"stageable":false,"stage_reason_code":"","stage_reason":"","authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.core_catalog:core.args:help","kind":"canvas.core_catalog","title":"help · core.args","module_path":"core.args","available":false,"stageable":true,"stage_reason_code":"method_only","stage_reason":"Use this as a method on an ArgsSpec value.","unavailable_reason_code":"method_only","denied_reason":"Use this as a method on an ArgsSpec value.","writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) Int","callee":"square","insert_callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","insert_callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","available":true,"stageable":false,"stage_reason_code":"","stage_reason":"","authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.core_catalog:core.args:help","kind":"canvas.core_catalog","title":"help · core.args","module_path":"core.args","available":false,"stageable":true,"stage_reason_code":"method_only","stage_reason":"Use this as a method on an ArgsSpec value.","unavailable_reason_code":"method_only","denied_reason":"Use this as a method on an ArgsSpec value.","writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
 ```
 
 Preview an action:
@@ -506,6 +511,10 @@ Preview an action:
 ```json
 {"schema_version":1,"op":"preview_canvas_action","revision":"sha256-...","graph_id":"fn:main.jet::run@0-3","action_id":"canvas.action:main.jet:square","callee":"square","args":["1"]}
 ```
+
+The preview server checks that `callee` exactly matches the descriptor callee
+encoded by `action_id`; a mismatch is rejected before source validation and
+leaves source unchanged.
 
 Successful response:
 

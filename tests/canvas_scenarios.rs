@@ -483,6 +483,36 @@ fn selection_marquee_modifiers_local_move() {
 }
 
 #[test]
+fn clipboard_copy_paste() {
+    run_canvas_scenario("clipboard-copy-paste");
+}
+
+#[test]
+fn clipboard_paste_as_staged() {
+    run_canvas_scenario("clipboard-paste-as-staged");
+}
+
+#[test]
+fn clipboard_mixed_selection_staged_fallback() {
+    run_canvas_scenario("clipboard-mixed-selection-staged-fallback");
+}
+
+#[test]
+fn clipboard_duplicate_undo_redo() {
+    run_canvas_scenario("clipboard-duplicate-undo-redo");
+}
+
+#[test]
+fn clipboard_stale_selection_refusal() {
+    run_canvas_scenario("clipboard-stale-selection-refusal");
+}
+
+#[test]
+fn clipboard_refuses_entry_selection() {
+    run_canvas_scenario("clipboard-refuses-entry-selection");
+}
+
+#[test]
 fn read_graph_overview() {
     run_canvas_scenario("read-graph-overview");
 }
@@ -1019,6 +1049,13 @@ impl CanvasCase {
             .expect("copy Canvas onboarding example source");
             None
         } else {
+            if name == "library-panel" {
+                fs::write(
+                    dir.join("package.jet"),
+                    "name: \"canvas_library\"\nversion: \"0.1.0\"\n",
+                )
+                .expect("write Canvas library package fixture");
+            }
             let source = if name == "debug-breakpoints-run-control-gestures" {
                 DEBUG_DEMO
             } else {

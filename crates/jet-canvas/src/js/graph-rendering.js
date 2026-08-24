@@ -1187,37 +1187,10 @@
         if (!pin) return false;
         const point = pinPoints.get(pin.pin_id);
         const r = canvas.getBoundingClientRect();
-        const actions = functionsForPin(pin).concat(variableActionsForGraph(g)
-          .filter((entry) => actionCompatibleWithPin(entry, pin))).map((entry) => ({
-          title: entry.title,
-          detail: entry.detail,
-          group: paletteCategoryForAction(entry),
-          kind: entry.kind,
-          node_descriptor_id: entry.node_descriptor_id,
-          module_path: entry.module_path,
-          signature: entry.signature,
-          summary: entry.summary,
-          pure: entry.pure,
-          pins: entry.pins,
-          ret: entry.ret,
-          action_id: entry.action_id,
-          callee: entry.callee,
-          insert_callee: entry.insert_callee,
-          args: entry.args,
-          available: entry.available,
-          stageable: !!entry.stageable,
-          stage_reason_code: entry.stage_reason_code || "",
-          stage_reason: entry.stage_reason || "",
-          receiver_type: entry.receiver_type || "",
-          denied_reason: entry.denied_reason,
-          unavailable_reason_code: entry.unavailable_reason_code,
-          run: entry.run ? () => entry.run() : () => runPalette(entry, pin)
-        }));
-        openActionPalette(
+        openPinMenu(
+          pin,
           point ? r.left + point.x : r.left + 120,
           point ? r.top + point.y : r.top + 120,
-          "Pin actions",
-          actions,
           { pin }
         );
         return true;

@@ -5652,7 +5652,15 @@ fn wasm_emit_direct_call(
             return Err(());
         }
         let value = match (&init.kind, &init.ty) {
-            (TIR::TExprKind::Local(local), Type::Int) if !local.deref => local.rust_place(),
+            // The inline temporary normally carries the clone needed by the
+            // call argument. If lowering did not mark the argument, the local
+            // initializer still represents a read of non-Copy `JetWasmInt`.
+            // Preserve that read here instead of moving the function parameter.
+            (TIR::TExprKind::Local(local), Type::Int)
+                if !local.deref && args[0].clone => local.rust_place(),
+            (TIR::TExprKind::Local(local), Type::Int) if !local.deref => {
+                format!("({}).clone()", local.rust_place())
+            }
             _ => wasm_emit_expr(init, funcs, file_prefix, reconstructions)?,
         };
         let value = wasm_emit_call_arg_value(&args[0], value)?;

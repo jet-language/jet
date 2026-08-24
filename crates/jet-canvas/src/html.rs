@@ -250,7 +250,6 @@ body.is-dev-mode #review-dev-facts { display: block; }
 .review-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .review-legend i { width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
 body:not(.is-dev-mode) .review-dev { display: none !important; }
-body:not(.is-dev-mode) #wire-status { display: none; }
 #stage.is-code #source-view { display: block; }
 #stage.is-source-edit #source-view { display: none; }
 #stage.is-source-edit #source-editor { display: block; }

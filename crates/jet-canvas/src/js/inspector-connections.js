@@ -396,7 +396,7 @@
 
   function signatureFromVisibleFunctionPins(fnMeta, nodeTitle, retOverride) {
     const retType = retOverride !== undefined ? retOverride : (document.getElementById("function-return-type") && document.getElementById("function-return-type").value.trim()) || "Void";
-    const ret = retType && retType !== "Void" ? " -> " + retType : "";
+    const ret = retType && retType !== "Void" ? " " + retType : "";
     const rows = [...details.querySelectorAll("[data-fn-param]")];
     const params = rows.map((row) => {
       const name = (row.querySelector("[data-param-name]") || {}).value || "";
@@ -405,8 +405,8 @@
       const defaultExpr = fallback.trim() ? "{" + fallback.trim() + "}" : "";
       return name.trim() + ": " + type.trim() + defaultExpr;
     }).filter((p) => !p.startsWith(":"));
-    const visibility = fnMeta && fnMeta.visibility === "public" ? "pub " : "";
-    return visibility + "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret;
+    const visibility = fnMeta && fnMeta.visibility === "public" ? "pub " : fnMeta && fnMeta.visibility === "package" ? "pub(package) " : "";
+    return visibility + "fn " + ((fnMeta && fnMeta.name) || nodeTitle || "function") + "(" + params.join(", ") + ")" + ret + functionEffectSuffix(fnMeta, fnMeta && fnMeta.signature);
   }
 
   function applyFunctionPins(graph, fnMeta, nodeTitle, retOverride) {
@@ -541,12 +541,38 @@
       return name + ": " + type + (String(fallback).trim() ? "{" + String(fallback).trim() + "}" : "");
     }).join(", ");
     const originalSignature = String(fnMeta.signature || "");
-    const hasEffectArrow = originalSignature.includes("-[");
-    const effects = fnMeta.effect_via ? "via " + fnMeta.effect_via : (fnMeta.effects || []).join(", ");
-    const arrow = hasEffectArrow ? " -[" + effects + "]>" : " ->";
-    const ret = fnMeta.returns && fnMeta.returns !== "Void" ? arrow + " " + fnMeta.returns : (hasEffectArrow ? arrow : "");
+    const effect = functionEffectSuffix(fnMeta, originalSignature);
+    const ret = fnMeta.returns && fnMeta.returns !== "Void" ? " " + fnMeta.returns : "";
     const visibility = fnMeta.visibility === "public" ? "pub " : fnMeta.visibility === "package" ? "pub(package) " : "";
-    return visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret;
+    return visibility + "fn " + (fnMeta.name || graph.title || "function") + "(" + params + ")" + ret + effect;
+  }
+
+  function functionEffectSuffix(fnMeta, signature) {
+    if (fnMeta && fnMeta.effect_via) return " -[via " + fnMeta.effect_via + "]>";
+    if (fnMeta && Array.isArray(fnMeta.effects) && fnMeta.effects.length) return " -[" + fnMeta.effects.join(", ") + "]>";
+    if (fnMeta && fnMeta.pure) return " -[]>";
+    const match = String(signature || "").match(/\s-\[[^\]]*\]>\s*$/);
+    return match ? match[0].trimEnd() : "";
+  }
+
+  function signatureWithFunctionFacts(fnMeta, values) {
+    let signature = String(values.signature || fnMeta.signature || "").trim();
+    const visibility = values.visibility === "public"
+      ? "pub "
+      : values.visibility === "package"
+        ? "pub(package) "
+        : "";
+    signature = signature.replace(/^(?:(?:pub(?:\(package\))?)\s+)?fn\b/, visibility + "fn");
+    const pure = String(values.pure || "").trim() === "true";
+    const effect = /\s-\[[^\]]*\]>\s*$/.exec(signature);
+    if (pure) {
+      signature = effect
+        ? signature.slice(0, effect.index) + " -[]>"
+        : signature + " -[]>";
+    } else if (effect && effect[0].trim() === "-[]>") {
+      signature = signature.slice(0, effect.index).trimEnd();
+    }
+    return signature;
   }
 
   function detailFieldValue(field) {
@@ -1045,7 +1071,7 @@
         op: "edit_function_signature",
         revision: context.revision,
         graph_id: graph.graph_id,
-        signature: String(values.signature || "").trim()
+        signature: signatureWithFunctionFacts(fnMeta, values)
       })
     };
     const renameOp = {
@@ -1060,17 +1086,36 @@
         to: String(values.name || "").trim()
       })
     };
-    return [
+    const fields = [
       { key: "signature", id: "function-signature", label: "Signature", kind: "expression", type: "Signature", value: fnMeta.signature || "", source: fnMeta.signature || "", editable: true, apply_op: signatureOp, multiline: true },
-      { key: "name", id: "function-rename-to", label: "Name", kind: "expression", type: "Identifier", value: fnMeta.name || node.title, source: fnMeta.name || node.title, editable: true, apply_op: renameOp }
+      { key: "name", id: "function-rename-to", label: "Name", kind: "expression", type: "Identifier", value: fnMeta.name || node.title, source: fnMeta.name || node.title, editable: true, apply_op: renameOp },
+      {
+        key: "visibility",
+        id: "function-visibility",
+        label: "Visibility",
+        kind: "enum",
+        type: "Visibility",
+        value: fnMeta.visibility || "private",
+        source: fnMeta.visibility || "private",
+        options: [
+          { name: "Private", source: "private" },
+          { name: "Package", source: "package" },
+          { name: "Public", source: "public" }
+        ],
+        editable: true,
+        apply_op: signatureOp
+      },
+      { key: "pure", id: "function-pure", label: "Pure", kind: "scalar", type: "Bool", value: fnMeta.pure ? "true" : "false", source: fnMeta.pure ? "true" : "false", editable: true, apply_op: signatureOp }
     ];
+    if (fnMeta.docs) fields.push({ key: "docs", label: "Documentation", kind: "expression", type: "String", value: fnMeta.docs, source: fnMeta.docs, editable: false, multiline: true });
+    return fields;
   }
 
   function nodeDetailDescriptors(node, graph, pins) {
     const span = node.source_span || { start: 0, end: 0 };
     return [
       { key: "title", label: "Title", value: node.title || "", editable: false },
-      { key: "kind", label: "Kind", value: node.kind || "Node", editable: false },
+      { key: "kind", label: "Type", value: nodeKindLabel(node, graph), editable: false },
       { key: "description", label: "Description", value: nodeDescription(node, graph), editable: false, multiline: true },
       { key: "pins", label: "Pins", value: String(pins.length), editable: false },
       { key: "span", label: "Source span", value: String(span.start) + ".." + String(span.end), editable: false }
@@ -1152,7 +1197,7 @@
     title.className = "pin-card-title";
     appendText(title, "b", "", p.name);
     const small = appendText(title, "small", "", flags);
-    appendText(small, "span", "type-detail", " - " + type);
+    appendText(small, "span", "", " - " + type);
     card.appendChild(title);
     appendButton(card, "", "Actions", "", { "data-pin-menu": p.pin_id });
     return card;
@@ -1181,7 +1226,7 @@
   }
 
   function typeWithoutFallibility(type) {
-    return String(type || "").trim().replace(/\?$/, "");
+    return String(type || "").trim().replace(/[?!]$/, "");
   }
 
   function isFunctionType(type) {
@@ -1206,8 +1251,8 @@
     const inputType = String(input && input.type || "Value");
     const outBase = typeWithoutFallibility(outType);
     const inputBase = typeWithoutFallibility(inputType);
-    const outFallible = !!(out && out.fallible) || outType.endsWith("?");
-    const inputFallible = !!(input && input.fallible) || inputType.endsWith("?");
+    const outFallible = !!(out && out.fallible) || /[?!]$/.test(outType);
+    const inputFallible = !!(input && input.fallible) || /[?!]$/.test(inputType);
     const outAbility = String(out && out.ability || "");
     const inputAbility = String(input && input.ability || "");
 
@@ -1490,7 +1535,7 @@
     appendText(hero, "span", "", nodeDescription(node, graph));
     const chips = document.createElement("div");
     chips.className = "details-chips dev-only";
-    appendText(chips, "span", "details-chip", node.kind);
+    appendText(chips, "span", "details-chip", nodeKindLabel(node, graph));
     appendText(chips, "span", "details-chip type-detail", pins.length + " pins");
     for (const affordance of (node.edit_affordances || []).slice(0, 4)) appendText(chips, "span", "details-chip", affordance);
     hero.appendChild(chips);
@@ -1589,7 +1634,7 @@
     if (!regions.length) appendText(commentList, "div", "tag", "none");
     comments.appendChild(commentList);
 
-    const types = appendDetailsSection(details, "Pins", "type-detail");
+    const types = appendDetailsSection(details, "Pins");
     const pinList = document.createElement("div");
     pinList.className = "pin-list";
     for (const pin of pins) pinList.appendChild(pinCardHtml(pin));
@@ -1810,7 +1855,9 @@
     const input = fromPin.direction === "input" ? fromPin : toPin;
     if (isExecPin(out) !== isExecPin(input)) return { ok: false, label: "Control and data pins cannot connect", color: "#fb7185" };
     if (isExecPin(out)) return { ok: true, label: "Reorder steps", color: "#f8fafc" };
-    const compatibility = dataCompatibilityPlan(out, input);
+    const compatibility = isFunctionValuePin(graph, out) && !isFunctionType(input.type)
+      ? { ok: false, label: "Function value cannot connect to " + typeWithoutFallibility(input.type) + " input", color: "#fb7185" }
+      : dataCompatibilityPlan(out, input);
     if (!compatibility.ok) return compatibility;
     if (!compatibility.exact) return compatibility;
     const wire = wireIntoPin(graph, input);
@@ -1943,6 +1990,15 @@
       if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return name;
     }
     return sourceExpressionFromNode(node);
+  }
+
+  function isFunctionValuePin(graph, pin) {
+    if (!graph || !pin || !isUnknownType(pin.type)) return false;
+    const node = nodeForPin(graph, pin);
+    if (!node || node.kind !== "variable_get") return false;
+    return (latestDoc && latestDoc.graphs || []).some((candidate) =>
+      candidate.title === node.title || candidate.function && candidate.function.name === node.title
+    );
   }
 
   function wireIntoPin(graph, pin) {

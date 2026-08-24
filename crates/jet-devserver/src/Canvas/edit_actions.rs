@@ -467,6 +467,8 @@ pub(super) fn apply_insert_call(
     bind: Option<&str>,
     wire_inline_expr_id: Option<&str>,
     wire_expr: Option<&str>,
+    wire_origin_pin_id: Option<&str>,
+    wire_target_pin: Option<&str>,
 ) -> Result<String, String> {
     let projection = project_file(path).map_err(|diags| diagnostics_error(path, src, &diags))?;
     let final_args = if args.is_empty() {
@@ -508,14 +510,22 @@ pub(super) fn apply_insert_call(
     else {
         return Err(edit_error("not_found", "Canvas graph no longer exists"));
     };
+    let (insert_offset, indent) = call_insert_target(
+        src,
+        graph_id,
+        &projection,
+        anchor,
+        wire_origin_pin_id,
+        wire_target_pin,
+    )?;
     let stmt = match bind {
-        Some(name) => format!("    {name} :: {call}\n"),
-        None => format!("    {call}\n"),
+        Some(name) => format!("{indent}{name} :: {call}\n"),
+        None => format!("{indent}{call}\n"),
     };
     let mut edits = vec![edit(
         SourceSpan {
-            start: anchor.insert_offset,
-            end: anchor.insert_offset,
+            start: insert_offset,
+            end: insert_offset,
         },
         &stmt,
     )];
@@ -525,6 +535,52 @@ pub(super) fn apply_insert_call(
     let changed = FixEngine::apply_edits(src, &edits)
         .map_err(|_| edit_error("overlap", "Canvas insert edit overlapped"))?;
     write_checked_formatted(path, src, &changed)
+}
+
+fn call_insert_target(
+    src: &str,
+    graph_id: &str,
+    projection: &super::schema_api::Projection,
+    anchor: &super::schema_api::GraphEditAnchor,
+    wire_origin_pin_id: Option<&str>,
+    _wire_target_pin: Option<&str>,
+) -> Result<(usize, String), String> {
+    let Some(pin_id) = wire_origin_pin_id else {
+        return Ok((anchor.insert_offset, "    ".to_string()));
+    };
+    let (node_id, direction) = pin_id
+        .rsplit_once(":input:")
+        .map(|(node, _)| (node, "input"))
+        .or_else(|| {
+            pin_id
+                .rsplit_once(":output:")
+                .map(|(node, _)| (node, "output"))
+        })
+        .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+    let node = projection
+        .node_refs
+        .iter()
+        .filter(|node| node.graph_id == graph_id)
+        .filter(|node| node.node_id == node_id || node.node_id.ends_with(&format!(":{node_id}")))
+        .max_by_key(|node| node.span.end.saturating_sub(node.span.start))
+        .ok_or_else(|| edit_error("not_found", "Canvas insertion pin no longer exists"))?;
+    if node.node_id.ends_with(":entry") {
+        return Ok((anchor.insert_offset, "    ".to_string()));
+    }
+    let insert = if direction == "input" {
+        line_start(src, node.span.start)
+    } else {
+        line_after(src, node.span.end)
+    };
+    let indent = indentation_at(src, node.span.start);
+    Ok((
+        insert,
+        if indent.is_empty() {
+            "    ".to_string()
+        } else {
+            indent
+        },
+    ))
 }
 
 struct InsertCallPlan {
@@ -748,6 +804,18 @@ pub(super) fn canvas_action_candidate(
         return Err(edit_error(
             "bad_request",
             "Canvas action id must be a package Canvas action",
+        ));
+    }
+    let Some((_, descriptor_callee)) = action_id.rsplit_once(':') else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas action id has no checked source callee",
+        ));
+    };
+    if descriptor_callee != callee {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas action callee does not match its checked descriptor",
         ));
     }
     let stmt = format!("    {callee}({})\n", args.join(", "));
@@ -1417,15 +1485,7 @@ pub(super) fn apply_exec_convergence(
         ));
     }
 
-    let projection = project_file(path)
-        .map_err(|diags| diagnostics_error(path, src, &diags))?;
-    let params = extract_params(&projection.json, &target_text);
-    if params.iter().any(|(name, ty)| name.is_empty() || ty.is_empty()) {
-        return Err(edit_error(
-            "ambiguous",
-            "Canvas could not preserve a convergence capture type",
-        ));
-    }
+    let params = convergence_params(path, target.expr)?;
     let args = params
         .iter()
         .map(|(name, _)| name.as_str())
@@ -1510,6 +1570,45 @@ pub(super) fn apply_exec_convergence(
     let changed = FixEngine::apply_edits(src, &edits)
         .map_err(|_| edit_error("overlap", "Canvas convergence source edits overlapped"))?;
     write_checked_formatted(path, src, &changed)
+}
+
+fn convergence_params(path: &Path, target: SourceSpan) -> Result<Vec<(String, String)>, String> {
+    let index = jet_semindex::open(path)
+        .map_err(|error| edit_error("check", &format!("Canvas could not resolve convergence captures: {error}")))?;
+    let mut references = index
+        .references()
+        .iter()
+        .filter(|reference| reference.span.start >= target.start && reference.span.end <= target.end)
+        .collect::<Vec<_>>();
+    references.sort_by_key(|reference| (reference.span.start, reference.span.end));
+
+    let mut params = Vec::new();
+    for reference in references {
+        let Some(target_def) = reference.target.as_ref() else {
+            continue;
+        };
+        let Some(definition) = index.definitions().iter().find(|definition| {
+            definition.module_path == target_def.module_path
+                && definition.def_span == target_def.def_span
+        }) else {
+            continue;
+        };
+        let ty = match &definition.kind {
+            jet_semindex::SymbolKind::Local { ty: Some(ty), .. }
+            | jet_semindex::SymbolKind::Param { ty } => ty.clone(),
+            jet_semindex::SymbolKind::Local { ty: None, .. } => {
+                return Err(edit_error(
+                    "ambiguous",
+                    "Canvas could not preserve a convergence capture type",
+                ));
+            }
+            _ => continue,
+        };
+        if !params.iter().any(|(name, _)| name == &reference.name) {
+            params.push((reference.name.clone(), ty));
+        }
+    }
+    Ok(params)
 }
 
 #[derive(Clone, Copy)]
@@ -1649,6 +1748,7 @@ fn exec_branch_node_matches(stmt: &Stmt, node_span: SourceSpan) -> bool {
                     .iter()
                     .any(|arm| same_span(arm.cond.span().into(), node_span))
         }
+        Stmt::ComptimeIf { span, .. } => same_span((*span).into(), node_span),
         _ => false,
     }
 }
@@ -1763,6 +1863,22 @@ fn matching_exec_branch<'a>(
     node_span: SourceSpan,
     pin_name: &str,
 ) -> Option<&'a [Stmt]> {
+    if let Stmt::ComptimeIf {
+        then_body,
+        else_body,
+        span,
+        ..
+    } = stmt
+    {
+        if !same_span((*span).into(), node_span) {
+            return None;
+        }
+        return match pin_name {
+            "then" => Some(then_body.as_slice()),
+            "else" => else_body.as_deref(),
+            _ => None,
+        };
+    }
     let (arms, else_body, span) = match stmt {
         Stmt::Switch {
             arms,

@@ -301,7 +301,7 @@ everything shares one closure scope):
 - `crates/jet-canvas/src/js/project-navigation.js` (650) — tabs, graph switch, project rail.
 - `crates/jet-canvas/src/js/graph-rendering.js` (1196) — canvas 2D immediate-mode draw + node style +
   hit map + node-size measurement.
-- `crates/jet-canvas/src/js/inspector-connections.js` (674) — Details panel (`innerHTML` templates).
+- `crates/jet-canvas/src/js/inspector-connections.js` — Details field descriptors, source-backed editors, and connection actions.
 - `crates/jet-canvas/src/js/input-events.js` (457) — pointer/keyboard.
 - `crates/jet-canvas/src/js/transactions-catalog.js` (402),
   `crates/jet-canvas/src/js/bootstrap.js` (41).
@@ -322,13 +322,13 @@ Blueprint earned maintainability by separating four layers plus an editor shell.
 | `SGraphEditor` / `SGraphNode` / `SGraphPin` (Slate widgets) | Rendering + interaction as per-node widget objects | `graph-rendering.js` immediate-mode 2D + `input-events.js`. No per-node widget; hit-testing rebuilt each frame into a hit map | Works for render; interaction logic is a flat event handler, hard to extend to marquee/drag/rewire uniformly |
 | `FKismetCompilerContext` | Compiles graph → bytecode | **The Jet front end itself** | Clean advantage — no separate compiler, no stale-compile class of bugs |
 | `BlueprintActionDatabase` + `UBlueprintNodeSpawner` | Palette/context-menu action registry with ranking | `query_actions.rs` `actions` op | Checked callable exports only; foreign-symbol phantoms are filtered and ranking comes from the node descriptor palette facts |
-| `FBlueprintEditor` shell (tabs: My Blueprint, Details, Palette, Compiler Results, Debug) | Editor window | `html.rs` static shell + the JS panels | Shell exists; panels are `innerHTML` string builders with per-panel logic, no shared component model |
-| Details = property system reflecting `UPROPERTY` | Generic property editor | `inspector-connections.js` hand-written `innerHTML` per selection type | No reflection; every editable field is bespoke. This is why Details has "dead controls" (#377) |
+| `FBlueprintEditor` shell (tabs: My Blueprint, Details, Palette, Compiler Results, Debug) | Editor window | `html.rs` static shell + the JS panels | Shell exists; panels use safe DOM construction and shared field descriptors |
+| Details = property system reflecting `UPROPERTY` | Generic property editor | `inspector-connections.js` descriptor projection + checked source transactions | Variable, function, nested-value, and node fields render only when backed by a live source operation |
 | `FKismetDebugUtilities` (breakpoints, watches, exec pulse) | Debugger | Projection facts only; UI buttons in html.rs | Largest unbuilt layer |
 
 The two genuine Jet advantages to keep: source-as-model (no EdGraph asset, no
-merge pain, no stale compile) and front-end-as-compiler. The debt is the
-**missing semantic-node registry** and the **hand-rolled Details/shell**.
+merge pain, no stale compile) and front-end-as-compiler. The remaining debt is
+the **semantic-node registry's projection coverage**, not a second Details model.
 
 ### Target architecture
 
@@ -409,9 +409,9 @@ transaction, and preserves the original source on refusal or stale revision.
 4. Extract `interaction.js` FSM from `input-events.js` + `graph-rendering.js`;
    add gesture scenarios for node-drag reposition, marquee, and **data-pin
    drag-to-wire** (the missing Blueprint gesture).
-5. **Implemented; browser proof pending (#493).** Convert Details to the
-   field-descriptor renderer; #377 fills and verifies the product field set
-   and dead-control bar.
+5. **Implemented.** Details uses the field-descriptor renderer; the property
+   editor scenarios verify source-backed fields, refusal, stale protection,
+   Escape, blur, undo, redo, and reload through Chromium.
 
 Each step is guarded by the M0 harness — the anti-regression proof the last four
 attempts lacked.

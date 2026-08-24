@@ -420,6 +420,27 @@
     return graphUrl + (graphUrl.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId);
   }
 
+  function emptyCanvasGraphPayload(payload) {
+    const message = String(payload && payload.message || "");
+    const source = String(latestDoc && latestDoc.source_text || "");
+    return payload && payload.kind === "diagnostic"
+      && message.includes("E0101")
+      && message.includes("no `run` function")
+      && !/(?:^|\n)\s*(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*/m.test(source);
+  }
+
+  function showEmptyCanvasGraph() {
+    if (!latestDoc) return false;
+    drawGraph(Object.assign({}, latestDoc, { graphs: [] }));
+    setCanvasState("empty", "No functions yet", "Add fn run() in Jet source. Canvas will project the source here; no graph file is created.", [
+      { label: "Open source", run: openSourceRecovery },
+      { label: "Reload", primary: true, run: () => loadGraph(currentCanvasSourceId()) }
+    ]);
+    setSaveState("source saved");
+    setViewMode(viewMode);
+    return true;
+  }
+
   function loadGraph(sourceId) {
     const loadToken = (window.__jetCanvasGraphLoadGeneration || 0) + 1;
     window.__jetCanvasGraphLoadGeneration = loadToken;
@@ -433,10 +454,19 @@
     ]);
     setSaveState("loading", "draft");
     return fetch(graphRequestUrl(requestedSourceId), { cache: "no-store" })
-      .then((r) => r.json().then((doc) => ({ ok: r.ok, doc })))
+      .then((r) => r.text().then((body) => {
+        let doc;
+        try {
+          doc = JSON.parse(body);
+        } catch (_) {
+          doc = { protocol: "jet.canvas.query", ok: false, kind: "diagnostic", message: body };
+        }
+        return { ok: r.ok, doc };
+      }))
       .then((result) => {
         if (loadToken !== window.__jetCanvasGraphLoadGeneration) return;
         if (!result.ok) {
+          if (emptyCanvasGraphPayload(result.doc) && showEmptyCanvasGraph()) return;
           const hasDiagnostics = acceptDiagnosticsPayload(result.doc, "Graph");
           jump.textContent = "Canvas graph has problems";
           details.textContent = result.doc && result.doc.message || "Graph check failed";
@@ -659,7 +689,7 @@
               unavailable_reason_code: member.unavailable_reason_code || "",
               pure: !!member.pure,
               pins: member.pins || [],
-              ret: actionReturnType(member) || "Value",
+              ret: member.ret || actionReturnType(member) || "Value",
               args: member.default_args || ["1"],
               default_args: member.default_args || ["1"]
             }));

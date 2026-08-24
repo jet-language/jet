@@ -167,6 +167,25 @@ pub(super) fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> Stri
             .local_types
             .get(name)
             .cloned()
+            .or_else(|| {
+                index.definitions().iter().find_map(|definition| {
+                    if definition.name != *name {
+                        return None;
+                    }
+                    let SymbolKind::Function { params, ret, .. } = &definition.kind else {
+                        return None;
+                    };
+                    let params = params
+                        .iter()
+                        .map(|(_, ty)| ty.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    Some(format!(
+                        "fn({params}){}",
+                        ret.as_deref().map(|ty| format!(" {ty}")).unwrap_or_default()
+                    ))
+                })
+            })
             .unwrap_or_else(|| "unknown".to_string()),
         Expr::Binary(op, left, _, _) => {
             if op_is_bool(*op) {

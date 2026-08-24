@@ -927,6 +927,8 @@
   function syncProjectRail(project) {
     if (!projectRail || !project) return;
     latestProject = project;
+    libraryPanelKey = null;
+    if (latestDoc) syncLibraryPanel(latestDoc);
     const sourceFiles = (project.files || []).filter((f) => f.kind === "source");
     projectMode.textContent = `${project.mode || "file"} · ${sourceFiles.length} source files`;
     const cards = [];
@@ -1550,6 +1552,17 @@
     };
   }
 
+  function debugResponseSnapshot(json) {
+    const session = json && json.session;
+    if (!session || session.state !== "running" || !session.id || !session.revision) return null;
+    return {
+      id: session.id,
+      revision: session.revision,
+      sourceId: session.source_id || json.source_id,
+      tier: session.tier
+    };
+  }
+
   function releaseDebugSession(snapshot, report = false) {
     if (!snapshot || !snapshot.id || !snapshot.revision) return Promise.resolve();
     const debugUrl = window.__JET_CANVAS_DEBUG__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/debug");
@@ -1633,7 +1646,10 @@
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
       .then((result) => {
-        if (requestGeneration !== debugRequestGeneration) return;
+        if (requestGeneration !== debugRequestGeneration) {
+          releaseDebugSession(debugResponseSnapshot(result.json));
+          return;
+        }
         const responseSourceId = result.json && (result.json.source_id || (result.json.session && result.json.session.source_id));
         const responseRevision = result.json && (result.json.revision || (result.json.session && result.json.session.revision));
         if (latestDoc && (
@@ -1644,7 +1660,7 @@
             || (responseSourceId && responseSourceId !== currentCanvasSourceId())
           ))
         )) {
-          releaseDebugSession(requestedSession);
+          releaseDebugSession(debugResponseSnapshot(result.json) || requestedSession);
           clearDebugClientState("stale");
           showToast("Debug result is stale; current source was kept", { isError: true });
           drawGraph(latestDoc);

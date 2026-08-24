@@ -171,7 +171,10 @@ fn canvas_callable_callee(
         })
         .map(|alias| alias.name.as_str())
         .unwrap_or(module_alias);
-    format!("{prefix}.{leaf}")
+    // `declaration.name` is the checked relative path inside the imported
+    // module. Keep it intact: reducing it to `leaf` changes
+    // `h.tools.square` into the different callee `h.square`.
+    format!("{prefix}.{}", declaration.name)
 }
 
 fn enum_catalog_json(bundle: &AST::ProgramBundle) -> String {
@@ -1172,7 +1175,7 @@ fn project_func(
     }
     project_stmt_block(&mut g, index, module_src, &f.body, 0, 220, 170);
     add_source_comment_regions(&mut g, module_src, f);
-    add_execution_overlay(&mut g);
+    add_execution_overlay(&mut g, module_src, &f.body);
     g
 }
 
@@ -2095,25 +2098,44 @@ fn project_value_node(
     x: i32,
     y: i32,
 ) -> Option<String> {
+    if let Expr::Place(inner, _, _) = expr {
+        if let Expr::Ident(name, _) = inner.as_ref() {
+            if let Some(pin) = g.local_pins.get(name).cloned() {
+                return Some(pin);
+            }
+        }
+        return project_value_node(g, index, src, inner, ordinal, role, x, y);
+    }
     if let Expr::Ident(name, span) = expr {
-        if let Some(pin) = g.getter_pins.get(name).cloned() {
+        let source_span: SourceSpan = (*span).into();
+        let key = getter_key(index, name, source_span);
+        if let Some(pin) = g.getter_pins.get(&key).cloned() {
             return Some(pin);
         }
         let ty = expr_type(g, index, expr);
-        let node_id = format!("{}:value:get:{}", g.graph_id, canvas_ident_fragment(name));
+        let base_node_id = format!("{}:value:get:{}", g.graph_id, canvas_ident_fragment(name));
+        let node_id = if g
+            .nodes
+            .iter()
+            .any(|node| node.id == base_node_id && node.span != source_span)
+        {
+            format!("{base_node_id}:{}-{}", span.start, span.end)
+        } else {
+            base_node_id
+        };
         add_node(
             g,
             &node_id,
             "variable_get",
             name,
-            (*span).into(),
+            source_span,
             x,
             y,
             vec!["read"],
             vec!["edit_inline_expr", "source_jump"],
         );
         let pin = add_pin(g, &node_id, name, "output", &ty, "", false);
-        g.getter_pins.insert(name.clone(), pin.clone());
+        g.getter_pins.insert(key, pin.clone());
         return Some(pin);
     }
     let (title, badges) = match expr {
@@ -2151,6 +2173,23 @@ fn project_value_node(
         "",
         false,
     ))
+}
+
+fn getter_key(index: &SemIndex, name: &str, span: SourceSpan) -> String {
+    let Some(reference) = index
+        .references()
+        .iter()
+        .find(|reference| reference.span == span && reference.name == name)
+    else {
+        return format!("{name}@{}:{}", span.start, span.end);
+    };
+    let Some(target) = reference.target.as_ref() else {
+        return format!("{name}@{}:{}", span.start, span.end);
+    };
+    format!(
+        "{name}@{}:{}:{}",
+        target.module_path, target.def_span.start, target.def_span.end
+    )
 }
 
 fn canvas_ident_fragment(name: &str) -> String {

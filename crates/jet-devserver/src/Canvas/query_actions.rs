@@ -915,7 +915,7 @@ fn core_catalog_action_json(
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     format!(
-        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"action_id\":{},\"node_descriptor_id\":{}{},\"kind\":\"canvas.core_catalog\",\"title\":{},\"module_path\":{},\"callee\":{},\"insert_callee\":{},\"insert_op\":\"insert_call\",\"engine\":\"checked-tir+jit\",\"execution\":\"source_transaction\",{}\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"audit\":[\"source\",\"module_path\",\"signature\",\"diff\",\"diagnostics\"],\"signature\":{},\"ret\":{},\"pure\":{},\"summary\":{},\"source\":{},\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&action_id),
         json_str(descriptor_id),
         rank_fields,
@@ -929,6 +929,7 @@ fn core_catalog_action_json(
         json_str(&authority.version),
         json_str(&authority.touched_file),
         json_str(&member.signature),
+        json_str(core_member_return_type(module_path, &member.name)),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source),
@@ -1662,13 +1663,14 @@ fn core_member_json(src: &str, module_path: &str, member: &CoreCatalogMember) ->
     let descriptor_id = node_catalog::insert_descriptor_id("insert_call", member.pure);
     let rank_fields = node_catalog::palette_rank_fields(descriptor_id);
     format!(
-        "{{\"name\":{},\"callee\":{},\"insert_callee\":{},\"node_descriptor_id\":{}{},\"signature\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
+        "{{\"name\":{},\"callee\":{},\"insert_callee\":{},\"node_descriptor_id\":{}{},\"signature\":{},\"ret\":{},\"pure\":{},\"summary\":{},\"source\":{},\"writes\":\"none\",{}\"pins\":[{}],\"default_args\":[{}]}}",
         json_str(&member.name),
         json_str(&callee),
         json_str(&callee),
         json_str(descriptor_id),
         rank_fields,
         json_str(&member.signature),
+        json_str(core_member_return_type(module_path, &member.name)),
         if member.pure { "true" } else { "false" },
         json_str(&member.summary),
         json_str(&member.source),
@@ -1867,6 +1869,22 @@ pub(super) fn core_member_params(module_path: &str, member_name: &str, signature
             vec![("text".to_string(), "String".to_string())]
         }
         _ => Vec::new(),
+    }
+}
+
+fn core_member_return_type(module_path: &str, member_name: &str) -> &'static str {
+    match (module_path, member_name) {
+        ("core.math", "abs" | "int_pow" | "gcd" | "lcm" | "min" | "max" | "clamp") => "Int",
+        ("core.math", "round") => "Int",
+        (
+            "core.math",
+            "sqrt" | "pow" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan"
+            | "atan2" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "hypot"
+            | "trunc" | "fract" | "sign" | "degrees" | "radians" | "lerp" | "pi" | "e",
+        ) => "Float",
+        ("core.math", "is_nan" | "is_inf" | "is_finite" | "is_even" | "is_odd") => "Bool",
+        ("core.event", "scope") => "EventScope",
+        _ => "Void",
     }
 }
 

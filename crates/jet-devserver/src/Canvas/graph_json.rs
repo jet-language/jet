@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use jet_driver::Diagnostics::Span;
 use jet_driver::AST;
 use jet_foundation::Names::{NameLedger, NameVisibility};
@@ -245,8 +243,13 @@ fn next_function_start(src: &str, offset: usize) -> usize {
     src.len()
 }
 
-pub(super) fn add_execution_overlay(g: &mut GraphBuilder) {
-    let exec_nodes = execution_nodes_in_order(g);
+pub(super) fn add_execution_overlay(g: &mut GraphBuilder, src: &str, body: &[AST::Stmt]) {
+    let exec_nodes = g
+        .nodes
+        .iter()
+        .filter(|node| node_wants_exec(node))
+        .cloned()
+        .collect::<Vec<_>>();
 
     for node in &exec_nodes {
         if node.kind != "entry" {
@@ -276,19 +279,20 @@ pub(super) fn add_execution_overlay(g: &mut GraphBuilder) {
         }
     }
 
-    let mut previous_out: Option<(String, SourceSpan)> = None;
-    for node in &exec_nodes {
-        let input = format!("{}:input:exec", node.id);
-        if let Some((from, from_span)) = previous_out.take() {
-            if node.kind != "entry" {
-                add_control_wire(g, &from, &input, from_span, node.span);
-            }
-        }
-        previous_out = if node.kind == "return" {
-            None
-        } else {
-            Some((primary_exec_output(g, &node.id), node.span))
-        };
+    let Some(entry) = g.nodes.iter().find(|node| node.kind == "entry") else {
+        return;
+    };
+    let entry_id = entry.id.clone();
+    let entry_span = entry.span;
+    let flow = execution_block(g, src, body);
+    if let Some(input) = flow.entry {
+        add_control_wire_once(
+            g,
+            &format!("{entry_id}:output:then"),
+            &input.pin,
+            entry_span,
+            input.span,
+        );
     }
 }
 
@@ -300,113 +304,324 @@ fn node_has_arm_pins(g: &GraphBuilder, node_id: &str) -> bool {
     })
 }
 
-fn primary_exec_output(g: &GraphBuilder, node_id: &str) -> String {
-    g.pins
-        .iter()
-        .find(|pin| {
-            pin.node_id == node_id
-                && pin.direction == "output"
-                && pin.ty == "exec"
-                && (pin.role.as_deref() == Some("arm")
-                    || pin.role.as_deref() == Some("loop_body")
-                    || pin.name == "then")
-        })
-        .map(|pin| pin.id.clone())
-        .unwrap_or_else(|| format!("{node_id}:output:then"))
+#[derive(Clone)]
+struct ExecutionEndpoint {
+    pin: String,
+    span: SourceSpan,
 }
 
-fn execution_nodes_in_order(g: &GraphBuilder) -> Vec<NodeRec> {
-    let mut nodes = g
-        .nodes
-        .iter()
-        .filter(|node| node_wants_exec(node))
-        .cloned()
-        .collect::<Vec<_>>();
-    nodes.sort_by_key(|node| {
-        (
-            if node.kind == "entry" { 0 } else { 1 },
-            node.span.start,
-            node.y,
-            node.x,
-        )
-    });
+#[derive(Default)]
+struct ExecutionFlow {
+    entry: Option<ExecutionEndpoint>,
+    exits: Vec<ExecutionEndpoint>,
+}
 
-    let source_rank = nodes
-        .iter()
-        .enumerate()
-        .map(|(rank, node)| (node.id.clone(), rank))
-        .collect::<HashMap<_, _>>();
-    let exec_ids = source_rank.keys().cloned().collect::<HashSet<_>>();
-    let pin_nodes = g
-        .pins
-        .iter()
-        .map(|pin| (pin.id.clone(), pin.node_id.clone()))
-        .collect::<HashMap<_, _>>();
-    let mut edges: HashMap<String, Vec<String>> = HashMap::new();
-    let mut indegree = nodes
-        .iter()
-        .map(|node| (node.id.clone(), 0usize))
-        .collect::<HashMap<_, _>>();
+fn execution_block(g: &mut GraphBuilder, src: &str, stmts: &[AST::Stmt]) -> ExecutionFlow {
+    let mut flow = ExecutionFlow::default();
+    let mut exits = Vec::new();
+    let mut reachable = true;
 
-    for wire in g.wires.iter().filter(|wire| wire.kind == "data") {
-        let Some(from_node) = pin_nodes.get(&wire.from_pin) else {
+    for stmt in stmts {
+        if !reachable {
+            break;
+        }
+        let current = execution_stmt(g, src, stmt);
+        let Some(entry) = current.entry.clone() else {
+            if !current.exits.is_empty() {
+                exits = current.exits;
+                reachable = true;
+            }
             continue;
         };
-        let Some(to_node) = pin_nodes.get(&wire.to_pin) else {
-            continue;
-        };
-        if from_node == to_node || !exec_ids.contains(from_node) || !exec_ids.contains(to_node) {
-            continue;
+        if flow.entry.is_none() {
+            flow.entry = Some(entry.clone());
         }
-        let slot = edges.entry(from_node.clone()).or_default();
-        if !slot.contains(to_node) {
-            slot.push(to_node.clone());
-            *indegree.entry(to_node.clone()).or_default() += 1;
+        for previous in &exits {
+            add_control_wire_once(g, &previous.pin, &entry.pin, previous.span, entry.span);
         }
+        exits = current.exits;
+        reachable = !exits.is_empty();
     }
 
-    let by_id = nodes
-        .iter()
-        .cloned()
-        .map(|node| (node.id.clone(), node))
-        .collect::<HashMap<_, _>>();
-    let mut ready = nodes
-        .iter()
-        .filter(|node| indegree.get(&node.id).copied().unwrap_or(0) == 0)
-        .map(|node| node.id.clone())
-        .collect::<Vec<_>>();
-    ready.sort_by_key(|id| source_rank.get(id).copied().unwrap_or(usize::MAX));
+    flow.exits = exits;
+    flow
+}
 
-    let mut ordered = Vec::new();
-    let mut emitted = HashSet::new();
-    while let Some(id) = ready.first().cloned() {
-        ready.remove(0);
-        if !emitted.insert(id.clone()) {
-            continue;
+fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> ExecutionFlow {
+    match stmt {
+        AST::Stmt::Switch {
+            arms,
+            else_body,
+            ..
         }
-        if let Some(node) = by_id.get(&id) {
-            ordered.push(node.clone());
-        }
-        for next in edges.get(&id).cloned().unwrap_or_default() {
-            let Some(degree) = indegree.get_mut(&next) else {
-                continue;
+        | AST::Stmt::ComptimeSwitch {
+            arms,
+            else_body,
+            ..
+        } => {
+            let Some(node) = direct_execution_node(g, stmt) else {
+                return ExecutionFlow::default();
             };
-            *degree = degree.saturating_sub(1);
-            if *degree == 0 {
-                ready.push(next);
-                ready.sort_by_key(|id| source_rank.get(id).copied().unwrap_or(usize::MAX));
+            let mut exits = Vec::new();
+            for (index, arm) in arms.iter().enumerate() {
+                let output_name = if node_has_arm_pins(g, &node.id) {
+                    format!("arm{}", index + 1)
+                } else if index == 0 {
+                    "then".to_string()
+                } else {
+                    String::new()
+                };
+                let output = (!output_name.is_empty())
+                    .then(|| exec_output(g, &node.id, &output_name))
+                    .flatten();
+                append_branch_path(g, src, output, &arm.body, node.span, &mut exits);
+            }
+            let else_output = exec_output(g, &node.id, "else");
+            if let Some(body) = else_body.as_deref() {
+                append_branch_path(g, src, else_output, body, node.span, &mut exits);
+            } else if let Some(output) = else_output {
+                exits.push(ExecutionEndpoint {
+                    pin: output,
+                    span: node.span,
+                });
+            }
+            ExecutionFlow {
+                entry: exec_input(&node),
+                exits,
+            }
+        }
+        AST::Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            let Some(node) = direct_execution_node(g, stmt) else {
+                return ExecutionFlow::default();
+            };
+            let mut exits = Vec::new();
+            let then_output = exec_output(g, &node.id, "then");
+            append_branch_path(
+                g,
+                src,
+                then_output,
+                then_body,
+                node.span,
+                &mut exits,
+            );
+            if let Some(body) = else_body.as_deref() {
+                let else_output = exec_output(g, &node.id, "else");
+                append_branch_path(
+                    g,
+                    src,
+                    else_output,
+                    body,
+                    node.span,
+                    &mut exits,
+                );
+            } else if let Some(output) = exec_output(g, &node.id, "else") {
+                exits.push(ExecutionEndpoint {
+                    pin: output,
+                    span: node.span,
+                });
+            }
+            ExecutionFlow {
+                entry: exec_input(&node),
+                exits,
+            }
+        }
+        AST::Stmt::While { body, .. }
+        | AST::Stmt::For { body, .. }
+        | AST::Stmt::Loop { body, .. }
+        | AST::Stmt::CountedLoop { body, .. } => {
+            let Some(node) = direct_execution_node(g, stmt) else {
+                return ExecutionFlow::default();
+            };
+            let body_output = exec_output(g, &node.id, "body");
+            let body_flow = execution_block(g, src, body);
+            if let Some(body_output) = body_output {
+                if let Some(body_entry) = body_flow.entry {
+                    add_control_wire_once(
+                        g,
+                        &body_output,
+                        &body_entry.pin,
+                        node.span,
+                        body_entry.span,
+                    );
+                }
+                for exit in body_flow.exits {
+                    add_control_wire_once(g, &exit.pin, &format!("{}:input:exec", node.id), exit.span, node.span);
+                }
+            }
+            ExecutionFlow {
+                entry: exec_input(&node),
+                exits: exec_output(g, &node.id, "done")
+                    .into_iter()
+                    .map(|pin| ExecutionEndpoint {
+                        pin,
+                        span: node.span,
+                    })
+                    .collect(),
+            }
+        }
+        AST::Stmt::Unsafe { body, .. }
+        | AST::Stmt::Impure { body, .. }
+        | AST::Stmt::Reactive { body, .. }
+        | AST::Stmt::Shield { body, .. }
+        | AST::Stmt::Region { body, .. }
+        | AST::Stmt::Policy { body, .. }
+        | AST::Stmt::TaskGroup { body, .. }
+        | AST::Stmt::Layout { body, .. }
+        | AST::Stmt::Caps { body, .. }
+        | AST::Stmt::ComptimeBlock { body, .. }
+        | AST::Stmt::ContextBlock { body, .. }
+        | AST::Stmt::Live { body, .. }
+        | AST::Stmt::AssumeDet { body, .. }
+        | AST::Stmt::Transact { body, .. }
+        | AST::Stmt::ScopeMember { body, .. } => execution_block(g, src, body),
+        _ => {
+            let Some(node) = direct_execution_node(g, stmt) else {
+                return ExecutionFlow::default();
+            };
+            let exits = if matches!(
+                stmt,
+                AST::Stmt::Return(..)
+                    | AST::Stmt::Break(..)
+                    | AST::Stmt::BreakValue(..)
+                    | AST::Stmt::BreakLabel(..)
+                    | AST::Stmt::BreakLabelValue(..)
+                    | AST::Stmt::Continue(..)
+                    | AST::Stmt::ContinueLabel(..)
+            ) {
+                Vec::new()
+            } else {
+                exec_output(g, &node.id, "then")
+                    .into_iter()
+                    .map(|pin| ExecutionEndpoint {
+                        pin,
+                        span: node.span,
+                    })
+                    .collect()
+            };
+            ExecutionFlow {
+                entry: exec_input(&node),
+                exits,
             }
         }
     }
+}
 
-    if ordered.len() != nodes.len() {
-        for node in nodes {
-            if !emitted.contains(&node.id) {
-                ordered.push(node);
-            }
-        }
+fn append_branch_path(
+    g: &mut GraphBuilder,
+    src: &str,
+    output: Option<String>,
+    body: &[AST::Stmt],
+    owner_span: SourceSpan,
+    exits: &mut Vec<ExecutionEndpoint>,
+) {
+    let Some(output) = output else {
+        return;
+    };
+    let body_flow = execution_block(g, src, body);
+    if let Some(entry) = body_flow.entry {
+        add_control_wire_once(g, &output, &entry.pin, owner_span, entry.span);
+        exits.extend(body_flow.exits);
+    } else {
+        exits.push(ExecutionEndpoint {
+            pin: output,
+            span: owner_span,
+        });
     }
-    ordered
+}
+
+fn direct_execution_node(g: &GraphBuilder, stmt: &AST::Stmt) -> Option<NodeRec> {
+    let anchor = stmt_execution_anchor(stmt)?;
+    g.nodes
+        .iter()
+        .filter(|node| node_wants_exec(node) && node.kind != "entry")
+        .find(|node| node.span.start == anchor.start && node.span.end == anchor.end)
+        .cloned()
+}
+
+fn stmt_execution_anchor(stmt: &AST::Stmt) -> Option<SourceSpan> {
+    Some(match stmt {
+        AST::Stmt::Val(binding) => binding.name_span.into(),
+        AST::Stmt::Assign { target, .. } => target.span().into(),
+        AST::Stmt::Expr(expr) => expr_execution_anchor(expr),
+        AST::Stmt::Return(_, span)
+        | AST::Stmt::Break(span)
+        | AST::Stmt::Continue(span)
+        | AST::Stmt::BreakLabel(_, span)
+        | AST::Stmt::ContinueLabel(_, span)
+        | AST::Stmt::BreakValue(_, span)
+        | AST::Stmt::BreakLabelValue(_, _, _, span)
+        | AST::Stmt::DeferClose { span, .. }
+        | AST::Stmt::Yield(_, span)
+        | AST::Stmt::Unsafe { span, .. }
+        | AST::Stmt::Impure { span, .. }
+        | AST::Stmt::Reactive { span, .. }
+        | AST::Stmt::Shield { span, .. }
+        | AST::Stmt::Region { span, .. }
+        | AST::Stmt::Policy { span, .. }
+        | AST::Stmt::TaskGroup { span, .. }
+        | AST::Stmt::Layout { span, .. }
+        | AST::Stmt::Caps { span, .. }
+        | AST::Stmt::ComptimeBlock { span, .. }
+        | AST::Stmt::ContextBlock { span, .. }
+        | AST::Stmt::Live { span, .. }
+        | AST::Stmt::AssumeDet { span, .. }
+        | AST::Stmt::Transact { span, .. }
+        | AST::Stmt::ScopeMember { span, .. }
+        | AST::Stmt::Switch { span, .. }
+        | AST::Stmt::ComptimeSwitch { span, .. }
+        | AST::Stmt::ComptimeIf { span, .. }
+        | AST::Stmt::While { span, .. }
+        | AST::Stmt::For { span, .. }
+        | AST::Stmt::Loop { span, .. }
+        | AST::Stmt::CountedLoop { span, .. }
+        | AST::Stmt::Switched { span, .. } => (*span).into(),
+    })
+}
+
+fn expr_execution_anchor(expr: &AST::Expr) -> SourceSpan {
+    match expr {
+        AST::Expr::Call(call) => call.name_span.into(),
+        AST::Expr::MethodCall { method_span, .. } => (*method_span).into(),
+        AST::Expr::Try(inner, span, ..) => {
+            let _ = inner;
+            (*span).into()
+        }
+        AST::Expr::OrFallback { value, .. } => expr_execution_anchor(value),
+        _ => expr.span().into(),
+    }
+}
+
+fn exec_input(node: &NodeRec) -> Option<ExecutionEndpoint> {
+    (node.kind != "entry").then(|| ExecutionEndpoint {
+        pin: format!("{}:input:exec", node.id),
+        span: node.span,
+    })
+}
+
+fn exec_output(g: &GraphBuilder, node_id: &str, name: &str) -> Option<String> {
+    g.pins
+        .iter()
+        .find(|pin| pin.node_id == node_id && pin.direction == "output" && pin.name == name)
+        .map(|pin| pin.id.clone())
+}
+
+fn add_control_wire_once(
+    g: &mut GraphBuilder,
+    from_pin: &str,
+    to_pin: &str,
+    from_span: SourceSpan,
+    to_span: SourceSpan,
+) {
+    if g.wires.iter().any(|wire| {
+        wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin
+    }) {
+        return;
+    }
+    add_control_wire(g, from_pin, to_pin, from_span, to_span);
 }
 
 fn node_wants_exec(node: &NodeRec) -> bool {
@@ -682,6 +897,8 @@ fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -
         out.push_str(" -[");
         out.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
         out.push_str("]>");
+    } else if f.is_pure {
+        out.push_str(" -[]>");
     }
     out
 }
