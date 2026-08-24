@@ -67,22 +67,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # These suites need the devshell toolchain, exactly as they do locally.
+      # Nix has no Windows runner, so the Windows rows use native tooling.
+      - name: Install Nix
+        if: matrix.os != 'windows-latest'
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
       - name: Windows core.path normalization runtime proof
-        if: matrix.os == 'windows-latest'
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test path_durability -- --nocapture
 
-      - name: Platform audit
+      - name: Platform audit (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c cargo test --test jetpack_platform
+
+      - name: Platform audit (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test jetpack_platform
 
-      - name: Native core.os facts and interrupt lifecycle
+      - name: Native core.os facts and interrupt lifecycle (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c cargo test --test os_native -- --nocapture
+
+      - name: Native core.os facts and interrupt lifecycle (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test os_native -- --nocapture
 
       - name: Windows core.os Ctrl-C runtime proof
-        if: matrix.os == 'windows-latest'
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test os_interrupt_windows -- --nocapture
 
       - name: Windows native IOCP scheduler proof
-        if: matrix.os == 'windows-latest'
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: |
           cargo test -p jet-codegen iocp_wake_cancel_deadline_stale_scale_and_cleanup -- --nocapture
           cargo test --test scheduler_native -- --nocapture
