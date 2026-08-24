@@ -6,8 +6,8 @@ use super::*;
 /// because the ratified policy makes it inherently expensive: `one fixed warmup,
 /// twenty samples` per workload (docs/spec/performance-budget-decisions.md:37),
 /// three cache scenarios, and two commands (`budget update --bootstrap` for the
-/// baseline, `budget check` for the candidate) is 128 real child `jet build`
-/// invocations. The `cli` target measured 307 s of *other* work
+/// baseline, `budget check` for the candidate) is 128 real child production
+/// lens invocations. The `cli` target measured 307 s of *other* work
 /// (docs/plans/epoch-3/suite-timing-inventory.md:75); hosting this proof there
 /// spent the whole 900 s suite guard and aborted the binary, taking every
 /// unrelated `cli` case down with it. Splitting the target is the same remedy
@@ -60,9 +60,14 @@ fn budget_check_measures_typed_compile_workloads_and_records_provenance() {
         assert_eq!(cache_state == "Edit", edit_bytes != "0");
         assert_eq!(compile["warmups"], CanonicalJson::Integer("1".into()));
         assert_eq!(compile["samples"], CanonicalJson::Integer("20".into()));
+        if cache_state == "Clean" || cache_state == "NoChange" || cache_state == "Edit" {
+            assert_eq!(compile["backend"], CanonicalJson::String("cranelift-jit".into()));
+            assert_eq!(compile["profile"], CanonicalJson::String("dev".into()));
+        }
         for key in ["source_tree_sha256", "compiler_digest", "core_digest", "target", "profile", "backend", "linker", "host", "cache_state", "warmups", "samples", "variance", "phase_totals", "sample_records", "edit_bytes", "edit_sha256", "workload_bytes"] {
             assert!(compile.contains_key(key), "missing compile metadata field {key}");
         }
+        assert!(compile.contains_key("peak_rss_bytes"), "missing compile metadata field peak_rss_bytes");
     }
     assert_eq!(cache_states, ["Clean", "NoChange", "Edit"].into_iter().map(String::from).collect());
     let report_path = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path();

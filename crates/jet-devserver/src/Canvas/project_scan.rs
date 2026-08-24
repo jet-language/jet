@@ -70,7 +70,7 @@ fn project_file_with_runtime_on_compiler_stack(
     resolver
         .revalidate_file(&checked)
         .map_err(|error| vec![error.diagnostic()])?;
-    let source_id = rel_path(&project_context_for_entry(path).project_root, path);
+    let source_id = rel_path(&project_context_for_entry(path).project_root, &checked.path);
     Ok(project_checked(
         path,
         &source_id,

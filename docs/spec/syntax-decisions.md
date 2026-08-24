@@ -5960,6 +5960,30 @@ filter; the value exposes `run()`, `iteration`, and `result`. A zero-parameter
 The retired benchmark override is deleted with its command. The rule adds no
 token: it extends the existing named-function entry convention.
 
+**D-ROLEFILE1=A — command homes use the `@` mark** *(ratified 2026-08-10,
+card #1866)*: the four commands have optional, package-root-only home files:
+`@run.jet`, `@build.jet`, `@dev.jet`, and `@test.jet`. `package.jet` and
+`module.jet` remain plain names. The marked namespace is closed to this command
+set; there is no command directory and no second mark or unmarked role-file
+form. A home file with no matching function is inert and leaves the stock
+command behavior selected.
+
+**D-CMDOVERRIDE1=A — command override or stock default** *(ratified
+2026-08-10, card #1866)*: a package-scoped invocation may select one ordinary
+top-level `fn run`, `fn build`, `fn dev`, or `fn test` as its command function.
+When a file argument is present, that file is the scope; when the command has
+package scope, the package source tree is the scope and the `@…jet` home sorts
+first. No matching function selects the command's stock default. More than one
+matching command function in one scope is an error. `jet <cmd> --show-default`
+reports the stock default and ignores command overrides. The ruling adds no
+token or command directory.
+
+**D-VERDICT-678-1 amendment — `run.jet` is ordinary source** *(ratified
+2026-08-10, card #1866)*: `run.jet` is no longer reserved as a command-role
+file. It remains the conventional stock entry fallback for `jet run`; the
+optional command home is `@run.jet`, and ordinary source discovery treats
+`run.jet` like every other source file.
+
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
 #505)*: `#Every(…)` is a directive marker on a `#Job fn`
 (D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1); the
@@ -6447,6 +6471,12 @@ reference cycle are rejected at sema (E0221). Expert intentional cycles use
 `.strong_count()` — and free when strong roots drop. One Shared mechanism (I8);
 full I9; no follow-on card. Flagship: `examples/features/memory/shared_weak_cycle.jet`.
 Card #1372.
+
+**2026-08-04 — D-SCRIPT-ENTRY1=A:** A lone Jet file may start with the exact
+OS launch line `#!/usr/bin/env jet`. The lexer skips the byte-zero line as
+opaque operating-system metadata, so it adds no Jet token, CLI flag, project
+file, or second script language. A `#!` anywhere else is rejected with E0042.
+Card #1412.
 
 **2026-08-04 — D-ZIPPAD1:** `zip`, `zip_short`, and `zip_pad` share one
 variadic lazy sequence family with strict, shortest, and longest-length

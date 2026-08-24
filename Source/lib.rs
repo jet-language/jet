@@ -248,7 +248,7 @@ pub fn check_with_path_and_settings(
             .0;
         }
         let mut queries = jet_driver::QueryService::CompilerQueries::new();
-        queries.check_disk(file, true).diagnostics.as_ref().clone()
+        queries.check_disk(file, false).diagnostics.as_ref().clone()
     })
 }
 

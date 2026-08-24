@@ -228,6 +228,7 @@ reports, not compiler warnings.
 | E0039 | sema  | teaching: `os.environ`/`getenv` → `env.get` |
 | E0040 | sema  | teaching: `async`/`await` → blocking tasks/channels |
 | E0041 | sema  | teaching: `Mutex`/`lock` → channels; `Semaphore` → bounded channels |
+| E0042 | lex   | a shebang line is only recognized at the start of a Jet file |
 | E0043 | jet   | teaching: `jet install` -> `jet fetch` |
 | E0044 | parse | *retired by D-S14-PAUSE* (was: `switch` teaching) |
 | E0045 | parse | *retired by D-S14-PAUSE* (was: `or` fallback teaching) |
@@ -1451,6 +1452,12 @@ become one implicit fallible `fn run`; imported files remain declaration-only.
 | E0620 | imported script `{file}` has executable top-level statements | Only the entry file owns the implicit `run`; importing a script would execute a dependency as a hidden side effect. | Move the statements into the entry file's `fn run`, or import a declaration-only file. |
 | E0621 | a script cannot have loose statements and an explicit `fn run` | The loose statements already define the script's one entry body, so a second entry would make execution order ambiguous. | Run `jet fix` to move the loose statements into `fn run`, or remove the explicit function. |
 
+## Script launch metadata diagnostics (D-SCRIPT-ENTRY1=A)
+
+| Code | What | Why | Fix |
+|------|------|-----|-----|
+| E0042 | a shebang line is only recognized at the very start of the file | the operating system reads launch metadata only from byte 0; Jet does not treat another `#!` as a launch line | move `#!...` to line 1, or delete it |
+
 ## Accessibility diagnostics (D-A11YGATE1=B, c134 Phase 6)
 
 `jet lint --a11y <file>` is the opt-in surface for accessibility issues.
@@ -1920,7 +1927,7 @@ command/flag is within edit distance 2. Their golden transcripts live in
 | E2102 | `{flag}` isn't a flag jet understands. | jet ignores no flags silently, so a typo can't quietly change a build. | Did you mean `{closest}`? Run `jet help` to see the flags. |
 | E2103 | Couldn't read command metadata from `{program}`. | The path has no safe command basename, contains a control character, could not be opened once as a regular file, exceeded the 512 MiB bounded read, is not ELF/PE/Mach-O/Wasm, or its JetCommandSchema record is missing, malformed, duplicated, unsupported, nested inside another universal Mach-O container, or inconsistent across universal Mach-O slices. Completion discovery never executes the program and never accepts unverified metadata. | Rebuild the program with this Jet toolchain, then try again. Exits 1 (user error), not 2. |
 | E2104 | `{problem}` | Jet needs valid command input before it can run this command. | Correct the named argument or input, then run the command again. |
-| E2105 | `{problem}` | Jet could not complete the named file, tool, or operating-system operation. | Correct the named problem, then run the command again. |
+| E2105 | `{problem}` | Jet could not complete the named file, tool, or operating-system operation. | Correct the named problem, then run the command again. When a package's canonical `run.jet` is missing, create it in the project or pass an explicit `.jet` file. |
 | E2110 | Automatic memory management failed, or its trace cannot be reported. | The private collector rejected an unsafe or impossible operation, or the trace is missing, unsafe to read, larger than 4 MiB, malformed, incompatible, stale, or incomplete. Reports never estimate promotions omitted by a bounded trace. | Check the trace path and retry with a smaller workload; for reports, run `jet run --gc-trace <file.jet>` before `jet gc report`. Exits 1 (user error). |
 | E2111 | A collector-owned graph cannot leave its scoped GC policy here. | The callee returns hidden traced storage, but the receiving function is governed by ordinary ownership. | Add `#Policy(gc)` to the receiving function or convert the graph to ordinary ownership before the boundary. |
 

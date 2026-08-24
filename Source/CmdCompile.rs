@@ -331,7 +331,29 @@ pub(crate) fn run_compile_cmd(
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
-            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
+            let path = Path::new(file);
+            let default_entry_fix = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some(jet::Syntax::DEFAULT_ENTRY_FILE)
+                && path
+                    .parent()
+                    .is_some_and(|parent| jet::Loader::find_manifest_root(parent).is_some());
+            let fix = if default_entry_fix {
+                format!(
+                    "create `{}` in the project, or run `{} {} <file.{}>`",
+                    jet::Syntax::DEFAULT_ENTRY_FILE,
+                    jet::Syntax::BINARY_NAME,
+                    cmd,
+                    jet::Syntax::FILE_EXT
+                )
+            } else {
+                format!(
+                    "check the spelling, or run {} from the folder that contains it",
+                    jet::Syntax::BINARY_NAME
+                )
+            };
+            crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), fix);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -1871,7 +1893,9 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         crate::cli_error!("E2104", "`{}` already exists", name);
         exit(ExitCodes::USER_ERROR);
     }
-    // Create: <name>/package.jet, <name>/run.jet, <name>/.gitignore
+    // Create: <name>/package.jet, <name>/run.jet, the four optional command
+    // homes, and <name>/.gitignore. The homes contain comments only, so a new
+    // project keeps the stock command behavior until the owner opts in.
     let jet_dir = dir.join(".jet");
     fs::create_dir_all(&jet_dir).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't create `{}`/.jet: {}", name, e);
@@ -1882,11 +1906,35 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         crate::cli_error!("E2105", "couldn't write {}: {}", jet::Syntax::PACKAGE_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
-    let run_src = "fn run() {\n    print(\"hello, world\");\n}\n";
+    let run_src = "fn greeting() String -> \"hello, world\"\n\nfn run() {\n    print(greeting())\n}\n\n#Test(\"the greeting stays stable\") {\n    assert_eq(greeting(), \"hello, world\")\n}\n";
     fs::write(dir.join(jet::Syntax::DEFAULT_ENTRY_FILE), run_src).unwrap_or_else(|e| {
         crate::cli_error!("E2105", "couldn't write {}: {}", jet::Syntax::DEFAULT_ENTRY_FILE, e);
         exit(ExitCodes::USER_ERROR);
     });
+    let command_files = [
+        (
+            jet::Syntax::COMMAND_FILE_RUN,
+            "// Optional `jet run` override. Uncomment one `fn run` to replace the stock default.\n// fn run() {\n//     print(\"run override\");\n// }\n// Inspect the stock behavior with: `jet run --show-default`\n",
+        ),
+        (
+            jet::Syntax::COMMAND_FILE_BUILD,
+            "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: BuildContext) BuildPlan ! -> { return b.plan() }\n// Inspect the stock behavior with: `jet build --show-default`\n",
+        ),
+        (
+            jet::Syntax::COMMAND_FILE_DEV,
+            "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev() {\n//     print(\"dev override\");\n// }\n// Inspect the stock behavior with: `jet dev --show-default`\n",
+        ),
+        (
+            jet::Syntax::COMMAND_FILE_TEST,
+            "// Optional `jet test` override. Uncomment one `fn test` to replace the stock default.\n// fn test(suite: TestSuite) { suite.run() }\n// Inspect the stock behavior with: `jet test --show-default`\n",
+        ),
+    ];
+    for &(file, source) in &command_files {
+        fs::write(dir.join(file), source).unwrap_or_else(|e| {
+            crate::cli_error!("E2105", "couldn't write {}: {}", file, e);
+            exit(ExitCodes::USER_ERROR);
+        });
+    }
     fs::write(
         dir.join(".gitignore"),
         "build/\n.jet-build/\n.jet/lock\n.jet/cache/\n",
@@ -1901,6 +1949,9 @@ pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
         println!("created {}/", name);
         println!("  {}", jet::Syntax::PACKAGE_FILE);
         println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
+        for &(file, _) in &command_files {
+            println!("  {file}");
+        }
         println!("  .gitignore");
         println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
     }
@@ -1944,6 +1995,20 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
         exit(ExitCodes::USER_ERROR);
     }
     if p.is_dir() {
+        let root = jet::Loader::find_manifest_root(p).unwrap_or_else(|| p.to_path_buf());
+        if !opts.show_default {
+            if let Some(override_file) = crate::resolve_package_command_override(&root, "test", mode) {
+                let ok = matches!(
+                    run_test_target(&override_file, &opts, mode, false),
+                    TestTargetOutcome::Ran(true) | TestTargetOutcome::Override(true)
+                );
+                exit(if ok {
+                    ExitCodes::OK
+                } else {
+                    ExitCodes::USER_ERROR
+                });
+            }
+        }
         let ext = jet::Syntax::FILE_EXT;
         let mut files: Vec<PathBuf> = Vec::new();
         collect_source_files_recursive(p, ext, &mut files);
@@ -1985,9 +2050,22 @@ pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode)
     let entry = crate::find_project_entry(root);
     let mut ran = 0usize;
     let mut any_fail = false;
-    // D-CMD-OVERRIDE1=C: an entry-file `fn test` is the package's test command
-    // and owns the whole run, so the entry goes first and an override there
-    // ends the run before any member harness is discovered behind it.
+    // D-CMDOVERRIDE1=A: one package-scoped `fn test` owns the whole command.
+    // The package authority reports duplicate command functions before this
+    // branch, and the selected file runs in its own file scope.
+    if !opts.show_default {
+        if let Some(override_file) = crate::resolve_package_command_override(root, "test", mode) {
+            let ok = matches!(
+                run_test_target(&override_file, &opts, mode, false),
+                TestTargetOutcome::Ran(true) | TestTargetOutcome::Override(true)
+            );
+            exit(if ok {
+                ExitCodes::OK
+            } else {
+                ExitCodes::USER_ERROR
+            });
+        }
+    }
     if entry.is_file() {
         match run_test_target(&entry, &opts, mode, true) {
             TestTargetOutcome::Override(ok) => exit(if ok {
@@ -2059,6 +2137,7 @@ fn is_reserved_target_file(path: &Path) -> bool {
             || name == jet::Syntax::ENV_FILE
             || name == jet::Syntax::WORKSPACE_FILE
             || name == jet::Syntax::CONFIG_FILE
+            || jet::Syntax::COMMAND_ROLE_FILES.contains(&name)
     })
 }
 

@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 mod common;
 use common::{jetpack_bin, Scratch};
 
+const EXPECTED_STDOUT: &[u8] =
+    include_bytes!("../examples/continuity/script_to_system/expected.out");
+
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -87,10 +90,15 @@ fn script_to_system_continuity_preserves_one_source() {
         "direct-run",
         &["run", "run.jet", "--", "--minutes", "1"],
     );
-    assert_eq!(direct.stdout, b"60\n");
+    assert_eq!(direct.stdout, EXPECTED_STDOUT);
+    assert!(
+        compiler_text(&direct).contains("L0104"),
+        "the direct lens should report the unselected dev helper:\n{}",
+        compiler_text(&direct)
+    );
 
     let dev = run_jet_ok(&scratch.path, &cache, "dev", &["dev", "run.jet"]);
-    assert_eq!(dev.stdout, b"60\n");
+    assert_eq!(dev.stdout, EXPECTED_STDOUT);
 
     run_jet_ok(&scratch.path, &cache, "init", &["init", "run.jet"]);
     assert!(scratch.join("package.jet").is_file());
@@ -162,8 +170,6 @@ fn script_to_system_continuity_preserves_one_source() {
         package_before_install
     );
 
-    let lock_before_transition = fs::read(scratch.join(".jet/lock")).unwrap();
-
     let test = run_jet_ok(&scratch.path, &cache, "test", &["test", "run.jet"]);
     assert!(compiler_text(&test).contains("1 passed"));
 
@@ -173,7 +179,7 @@ fn script_to_system_continuity_preserves_one_source() {
         "package-jit-typed-cli",
         &["run", "run.jet", "--", "--minutes", "1"],
     );
-    assert_eq!(package_run.stdout, b"60\n");
+    assert_eq!(package_run.stdout, EXPECTED_STDOUT);
 
     let service = run_jet_ok(
         &scratch.path,
@@ -181,7 +187,7 @@ fn script_to_system_continuity_preserves_one_source() {
         "service-output",
         &["run", "--quiet", "--output", "api", "run.jet"],
     );
-    assert_eq!(service.stdout, b"60\n");
+    assert_eq!(service.stdout, EXPECTED_STDOUT);
 
     let explain = run_jet_ok(
         &scratch.path,
@@ -204,7 +210,7 @@ fn script_to_system_continuity_preserves_one_source() {
         native.status.success(),
         "built executable failed: {native:?}"
     );
-    assert_eq!(native.stdout, b"60\n");
+    assert_eq!(native.stdout, EXPECTED_STDOUT);
 
     let package_before_library = fs::read_to_string(scratch.join("package.jet")).unwrap();
     let package_with_library = package_before_library.replace(
@@ -273,12 +279,13 @@ fn script_to_system_continuity_preserves_one_source() {
             .output()
             .expect("foreign host should start");
         assert!(foreign.status.success(), "foreign host failed: {foreign:?}");
-        assert_eq!(foreign.stdout, b"60\n");
+        assert_eq!(foreign.stdout, EXPECTED_STDOUT);
     } else {
         eprintln!("note: foreign host proof skipped because no C compiler is available");
     }
 
     let package_before_split = fs::read(scratch.join("package.jet")).unwrap();
+    let lock_before_transition = fs::read(scratch.join(".jet/lock")).unwrap();
     let check = run_jet_ok(
         &scratch.path,
         &cache,
@@ -290,6 +297,13 @@ fn script_to_system_continuity_preserves_one_source() {
     run_jet_ok(&scratch.path, &cache, "split-env", &["split", "env"]);
     assert!(scratch.join("package/env.jet").is_file());
     assert_eq!(
+        fs::read_to_string(scratch.join("package/env.jet")).unwrap(),
+        "pub development :: Config{\n    environments: .{\n    development: Environment{ tools: [\"git\"] },\n}\n}\n"
+    );
+    assert!(!fs::read_to_string(scratch.join("package.jet"))
+        .unwrap()
+        .contains("environments:"));
+    assert_eq!(
         fs::read(scratch.join(".jet/lock")).unwrap(),
         lock_before_transition
     );
@@ -300,7 +314,7 @@ fn script_to_system_continuity_preserves_one_source() {
         "run-after-split",
         &["run", "run.jet", "--", "--minutes", "1"],
     );
-    assert_eq!(split_run.stdout, b"60\n");
+    assert_eq!(split_run.stdout, EXPECTED_STDOUT);
     run_jet_ok(
         &scratch.path,
         &cache,
@@ -324,5 +338,5 @@ fn script_to_system_continuity_preserves_one_source() {
         "run-after-fold",
         &["run", "run.jet", "--", "--minutes", "1"],
     );
-    assert_eq!(rollback_run.stdout, b"60\n");
+    assert_eq!(rollback_run.stdout, EXPECTED_STDOUT);
 }

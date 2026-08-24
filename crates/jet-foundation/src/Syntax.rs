@@ -127,6 +127,8 @@
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
 // and ordinary call punctuation, with the receiver resolved by sema.
+// D-SCRIPT-ENTRY1=A adds no token: byte-zero `#!...` is OS launch metadata;
+// the lexer skips the opaque line.
 // D-SUBJECT-CALL1=A adds no token: bare lower-case `.member` chains reuse the
 // existing dot punctuation and lower to ordinary one-parameter lambdas.
 // D-GENERIC-CALL1=A adds no token: `call<T>(...)` reuses the existing angle and
@@ -171,9 +173,11 @@
 // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
 // its return value is the program. A returned App is served at the runtime
 // edge; there is no hidden app-name convention or synthesized run overlay.
-// D-CMD-OVERRIDE1=C (card #1451) adds no token: `fn test(suite: TestSuite)`
-// extends the existing command-entry convention.
-// `--show-default` selects the stock harness; no keyword or sigil enters the grammar.
+// D-ROLEFILE1=A / D-CMDOVERRIDE1=A (card #1866) add no source token: the four
+// optional package-root command homes are `@run.jet`, `@build.jet`, `@dev.jet`,
+// and `@test.jet`, and ordinary `fn run|build|dev|test` overrides use the
+// existing function surface. `--show-default` selects the stock behavior.
+// D-CMD-OVERRIDE1=C (card #1451) remains the older test-suite API detail.
 // D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker
 // and every command use `job`. Canonical CLI is `jet run <entry> -- <name>`
 // and `jet jobs`. Retired spellings have no alias or fallback. Help,

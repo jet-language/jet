@@ -35,6 +35,8 @@ baseline_os=$(json_string os)
 baseline_arch=$(json_string arch)
 baseline_target=$(json_string target)
 baseline_rustc=$(json_string rustc)
+baseline_llvm=$(json_string llvm)
+baseline_rustc_vv=$(json_string rustc_vv_sha256)
 baseline_compiler=$(json_string compiler_sha256)
 baseline_kernel=$(json_string kernel)
 baseline_governor=$(json_string governor)
@@ -46,7 +48,7 @@ memory_budget=$(json_number memory_regression_pct)
 variance_budget=$(json_number variance_pct)
 baseline_samples=$(json_number samples)
 baseline_warmups=$(json_number warmups)
-for value in "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
+for value in "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
     [ -n "$value" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
 done
 
@@ -63,6 +65,8 @@ current_stage=$(printf '%s\n' "$metadata" | sed -n 's/.*stage=\([^ ]*\).*/\1/p')
 current_machine=$(printf '%s\n' "$metadata" | sed -n 's/.*machine=\([^ ]*\).*/\1/p')
 current_target=$(printf '%s\n' "$metadata" | sed -n 's/.*target=\([^ ]*\).*/\1/p')
 current_rustc=$(printf '%s\n' "$metadata" | sed -n 's/.*rustc=\([^ ]*\).*/\1/p')
+current_llvm=$(printf '%s\n' "$metadata" | sed -n 's/.*llvm=\([^ ]*\).*/\1/p')
+current_rustc_vv=$(printf '%s\n' "$metadata" | sed -n 's/.*rustc_vv_sha256=\([^ ]*\).*/\1/p')
 current_compiler=$(printf '%s\n' "$metadata" | sed -n 's/.*compiler_sha256=\([^ ]*\).*/\1/p')
 current_kernel=$(printf '%s\n' "$metadata" | sed -n 's/.*kernel=\([^ ]*\).*/\1/p')
 current_governor=$(printf '%s\n' "$metadata" | sed -n 's/.*governor=\([^ ]*\).*/\1/p')
@@ -90,6 +94,8 @@ check_identity OS "$current_os" "$baseline_os"
 check_identity architecture "$current_arch" "$baseline_arch"
 check_identity target "$current_target" "$baseline_target"
 check_identity rustc "$current_rustc" "$baseline_rustc"
+check_identity LLVM "$current_llvm" "$baseline_llvm"
+check_identity rustc-vV "$current_rustc_vv" "$baseline_rustc_vv"
 check_identity compiler "$current_compiler" "$baseline_compiler"
 check_identity kernel "$current_kernel" "$baseline_kernel"
 check_identity governor "$current_governor" "$baseline_governor"
@@ -158,12 +164,12 @@ while read -r row_program row_state row_stage row_latency row_memory row_varianc
     [ "$row_stdout" = "$base_stdout" ] || { echo "stdout parity changed for $row_program/$row_state" >&2; FAIL=1; }
     [ "$row_stderr" = "$base_stderr" ] || { echo "stderr parity changed for $row_program/$row_state" >&2; FAIL=1; }
     case "$row_phases" in
-        *phases=*) ;;
+        *phases=*source=*cache_hits=*cache_misses=*top_cause=*backend=*linker=*artifact_bytes=*) ;;
         *) echo "missing phase totals for $row_program/$row_state" >&2; FAIL=1 ;;
     esac
 done < "$CURRENT_ROWS"
 
-expected_rows=$((4 * 4))
+expected_rows=$((4 * 6))
 [ "$ROW_COUNT" -eq "$expected_rows" ] || {
     echo "checked corpus row count changed: expected $expected_rows, got $ROW_COUNT" >&2
     exit 1

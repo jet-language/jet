@@ -1745,6 +1745,7 @@ fn validate_compile_metadata(
             "edit_sha256",
             "host",
             "linker",
+            "peak_rss_bytes",
             "phase_totals",
             "profile",
             "sample_records",
@@ -1768,6 +1769,7 @@ fn validate_compile_metadata(
     hex64(&fields["edit_sha256"], "compile.edit_sha256")?;
     text(&fields["host"], "compile.host")?;
     text(&fields["linker"], "compile.linker")?;
+    unsigned(&fields["peak_rss_bytes"], "compile.peak_rss_bytes")?;
     text(&fields["profile"], "compile.profile")?;
     hex64(&fields["source_tree_sha256"], "compile.source_tree_sha256")?;
     text(&fields["target"], "compile.target")?;
@@ -1793,8 +1795,12 @@ fn validate_compile_metadata(
     }
     let mut elapsed = Vec::with_capacity(records.len());
     let mut aggregate = BTreeMap::<String, BigInt>::new();
+    let mut peak_rss_bytes = BigInt::zero();
     for record in records {
-        validate_compile_record(record, fields, &mut aggregate, &mut elapsed)?;
+        validate_compile_record(record, fields, &mut aggregate, &mut elapsed, &mut peak_rss_bytes)?;
+    }
+    if peak_rss_bytes != unsigned(&fields["peak_rss_bytes"], "compile.peak_rss_bytes")? {
+        return Err("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS".into());
     }
     let measured_samples = array(measurement_samples, "measurement.samples")?;
     if measured_samples.len() != elapsed.len() {
@@ -1833,6 +1839,7 @@ fn validate_compile_record(
     root: &BTreeMap<String, CanonicalJson>,
     aggregate: &mut BTreeMap<String, BigInt>,
     elapsed: &mut Vec<Rational>,
+    peak_rss_bytes: &mut BigInt,
 ) -> Result<(), String> {
     unsigned(&root["workload_bytes"], "compile.workload_bytes")?;
     let fields = object(
@@ -1847,6 +1854,7 @@ fn validate_compile_record(
             "elapsed_ns",
             "host",
             "linker",
+            "peak_rss_bytes",
             "phase_totals",
             "profile",
             "source_tree_sha256",
@@ -1881,6 +1889,10 @@ fn validate_compile_record(
     )?;
     let ns = unsigned(&fields["elapsed_ns"], "compile sample elapsed_ns")?;
     elapsed.push(Rational::from_bigints(ns.clone(), BigInt::one())?);
+    let rss = unsigned(&fields["peak_rss_bytes"], "compile sample peak_rss_bytes")?;
+    if rss > *peak_rss_bytes {
+        *peak_rss_bytes = rss;
+    }
     let phases = validate_phase_totals(&fields["phase_totals"], "compile sample phase_totals")?;
     for (name, value) in phases {
         let slot = aggregate.entry(name).or_insert_with(BigInt::zero);

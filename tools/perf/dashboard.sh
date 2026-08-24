@@ -1,8 +1,9 @@
 #!/usr/bin/env sh
 # Compiler-speed corpus dashboard.
 #
-# One checked corpus, four production rows per program:
-#   jit-clean, jit-incremental, aot-release-clean, aot-release-incremental.
+# One checked corpus, six production rows per program:
+#   jit-clean, jit-no-change, jit-representative-edit,
+#   aot-release-clean, aot-release-no-change, aot-release-representative-edit.
 # Every row records wall latency, peak compiler RSS, deterministic output,
 # elapsed variance, and the phase report emitted by that production path.
 #
@@ -24,7 +25,7 @@ TIME_BIN=${TIME_BIN:-}
 if [ -z "$TIME_BIN" ]; then
     TIME_BIN=$(type -P time 2>/dev/null || true)
 fi
-SAMPLES=3
+SAMPLES=20
 WARMUPS=1
 LATENCY_REGRESSION_PCT=15
 MEMORY_REGRESSION_PCT=15
@@ -45,6 +46,14 @@ sha256() {
         sha256sum "$1" | awk '{print $1}'
     else
         shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+sha256_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    else
+        shasum -a 256 | awk '{print $1}'
     fi
 }
 
@@ -79,6 +88,12 @@ machine_rustc=$(
         | sed -n 's/^release: //p' \
         | head -n1
 )
+machine_llvm=$(
+    "$JET_ENV" rustc -vV 2>/dev/null \
+        | sed -n 's/^LLVM version: //p' \
+        | head -n1
+)
+machine_rustc_vv_sha=$("$JET_ENV" rustc -vV 2>/dev/null | sha256_text)
 machine_memory=$(awk '/^MemTotal:/ { print $2 * 1024; exit }' /proc/meminfo 2>/dev/null || true)
 machine_governor=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)
 compiler_sha256=$(sha256 "$ROOT/target/debug/jet")
@@ -89,7 +104,7 @@ esac
 case "$machine_memory" in
     ''|*[!0-9]*) echo "unavailable machine memory identity" >&2; exit 1 ;;
 esac
-for identity_value in "$machine_host" "$machine_target" "$machine_rustc" "$machine_kernel" "$machine_governor"; do
+for identity_value in "$machine_host" "$machine_target" "$machine_rustc" "$machine_llvm" "$machine_rustc_vv_sha" "$machine_kernel" "$machine_governor"; do
     case "$identity_value" in
         ""|*'"'*) echo "unavailable machine/toolchain identity" >&2; exit 1 ;;
     esac
@@ -104,16 +119,20 @@ trap 'rm -rf "$run_dir"' EXIT HUP INT TERM
 
 check_corpus() {
     corpus_count=0
-    while IFS="$TAB" read -r corpus_program corpus_expected corpus_source_hash corpus_expected_hash; do
+    while IFS="$TAB" read -r corpus_program corpus_expected corpus_source_hash corpus_expected_hash corpus_edit corpus_edit_expected corpus_edit_hash corpus_edit_expected_hash; do
         case "$corpus_program" in
             ""|\#*) continue ;;
         esac
-        if [ -z "${corpus_expected:-}" ] || [ -z "${corpus_source_hash:-}" ] || [ -z "${corpus_expected_hash:-}" ]; then
+        if [ -z "${corpus_expected:-}" ] || [ -z "${corpus_source_hash:-}" ] || [ -z "${corpus_expected_hash:-}" ] || \
+            [ -z "${corpus_edit:-}" ] || [ -z "${corpus_edit_expected:-}" ] || \
+            [ -z "${corpus_edit_hash:-}" ] || [ -z "${corpus_edit_expected_hash:-}" ]; then
             echo "malformed corpus row: $corpus_program" >&2
             exit 1
         fi
         require_relative_file "$corpus_program"
         require_relative_file "$corpus_expected"
+        require_relative_file "$corpus_edit"
+        require_relative_file "$corpus_edit_expected"
         actual_hash=$(sha256 "$ROOT/$corpus_program")
         [ "$actual_hash" = "$corpus_source_hash" ] || {
             echo "corpus source changed: $corpus_program ($corpus_source_hash -> $actual_hash)" >&2
@@ -122,6 +141,20 @@ check_corpus() {
         actual_hash=$(sha256 "$ROOT/$corpus_expected")
         [ "$actual_hash" = "$corpus_expected_hash" ] || {
             echo "corpus golden changed: $corpus_expected ($corpus_expected_hash -> $actual_hash)" >&2
+            exit 1
+        }
+        actual_hash=$(sha256 "$ROOT/$corpus_edit")
+        [ "$actual_hash" = "$corpus_edit_hash" ] || {
+            echo "representative edit changed: $corpus_edit ($corpus_edit_hash -> $actual_hash)" >&2
+            exit 1
+        }
+        actual_hash=$(sha256 "$ROOT/$corpus_edit_expected")
+        [ "$actual_hash" = "$corpus_edit_expected_hash" ] || {
+            echo "representative edit golden changed: $corpus_edit_expected ($corpus_edit_expected_hash -> $actual_hash)" >&2
+            exit 1
+        }
+        [ "$corpus_source_hash" != "$corpus_edit_hash" ] || {
+            echo "representative edit is unchanged: $corpus_program -> $corpus_edit" >&2
             exit 1
         }
         corpus_count=$((corpus_count + 1))
@@ -144,13 +177,36 @@ append_timing_phases() {
     timing_file=$1
     phase_file=$2
     [ -s "$timing_file" ] || { echo "missing timing report: $timing_file" >&2; exit 1; }
-    for phase_name in load sema ffi codegen build_plan backend_link frontend jit jit_cache_hit; do
+    for phase_name in load sema ffi codegen build_plan backend_link frontend jit jit_cache_hit cache_hit rust_bytes; do
         phase_value=$(timing_field "$timing_file" "$phase_name")
         case "$phase_value" in
             ""|*[!0-9]*) ;;
             *) printf '%s%s%s\n' "$phase_name" "$TAB" "$phase_value" >> "$phase_file" ;;
         esac
     done
+}
+
+append_cache_miss() {
+    phase_file=$1
+    cache_hit_value=$2
+    case "$cache_hit_value" in
+        1) printf '%s%s%s\n' cache_miss "$TAB" 0 >> "$phase_file" ;;
+        *) printf '%s%s%s\n' cache_miss "$TAB" 1 >> "$phase_file" ;;
+    esac
+}
+
+top_cause() {
+    phase_file_path=$1
+    awk -F "$TAB" '
+        $1 !~ /^(rust_bytes|cache_hit|cache_miss)$/ && $2 ~ /^[0-9]+$/ && $2 > maximum {
+            maximum = $2
+            name = $1
+        }
+        END {
+            if (name == "") print "unavailable"
+            else print name "=" maximum "us"
+        }
+    ' "$phase_file_path"
 }
 
 run_timed() {
@@ -224,7 +280,14 @@ run_jit_trial() {
         exit 1
     }
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
-    append_timing_phases "$trial_work/timing/jet-timing.json" "$trial_phases"
+    trial_timing_file="$trial_work/timing/jet-timing.json"
+    append_timing_phases "$trial_timing_file" "$trial_phases"
+    trial_cache_hit=$(timing_field "$trial_timing_file" cache_hit)
+    case "$trial_cache_hit" in
+        1) ;;
+        *) trial_cache_hit=0 ;;
+    esac
+    append_cache_miss "$trial_phases" "$trial_cache_hit"
     read_timed_stats "$trial_stats"
 }
 
@@ -241,7 +304,7 @@ run_aot_trial() {
         JET_TIMING=1 \
         JET_TIMING_DIR="$trial_work/timing" \
         NO_COLOR=1 \
-        "$JET_ENV" bash -c "cd '$trial_work' && exec jet build --release run.jet"; then
+        "$JET_ENV" bash -c "cd '$trial_work' && exec jet build --release --verbose run.jet"; then
         trial_status=0
     else
         trial_status=$?
@@ -265,6 +328,13 @@ run_aot_trial() {
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
     append_timing_phases "$trial_work/timing/jet-timing.json" "$trial_phases"
     append_timing_phases "$trial_work/timing/build/jet-timing-backend.json" "$trial_phases"
+    aot_cache_hits=$(grep -c 'cache hit' "$trial_output.build.stderr" || true)
+    aot_cache_misses=$(grep -c 'cache miss' "$trial_output.build.stderr" || true)
+    printf '%s%s%s\n' cache_hit "$TAB" "$aot_cache_hits" >> "$trial_phases"
+    printf '%s%s%s\n' cache_miss "$TAB" "$aot_cache_misses" >> "$trial_phases"
+    TRIAL_LINKER=$(sed -n 's/.*\[build\] linker[[:space:]]*->[[:space:]]*//p' "$trial_output.build.stderr" | tail -n1)
+    TRIAL_LINKER=${TRIAL_LINKER:-unavailable}
+    TRIAL_ARTIFACT_BYTES=$(wc -c < "$trial_work/build/run" | tr -d ' ')
     read_timed_stats "$trial_stats"
 }
 
@@ -304,9 +374,11 @@ row_field() {
 measure_state() {
     state_program=$1
     state_expected=$2
-    state_name=$3
-    state_stage=$4
-    state_kind=$5
+    state_edit_program=$3
+    state_edit_expected=$4
+    state_name=$5
+    state_stage=$6
+    state_kind=$7
     state_id="$(safe_id "$state_program-$state_name")"
     state_root="$run_dir/$state_id"
     state_latency="$state_root/latency.ns"
@@ -319,16 +391,7 @@ measure_state() {
     : > "$state_memory"
     : > "$state_phases"
 
-    if [ "$state_kind" = "incremental" ]; then
-        state_work="$state_root/incremental"
-        state_cache="$state_work/cache"
-        prepare_fixture "$state_work" "$state_program" "$state_expected"
-        if [ "$state_stage" = "jit-fast" ]; then
-            run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
-        else
-            run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
-        fi
-    else
+    if [ "$state_kind" = "clean" ]; then
         state_work="$state_root/warmup"
         state_cache="$state_work/cache"
         prepare_fixture "$state_work" "$state_program" "$state_expected"
@@ -337,6 +400,18 @@ measure_state() {
         else
             run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
         fi
+    else
+        state_work="$state_root/seeded"
+        state_cache="$state_work/cache"
+        prepare_fixture "$state_work" "$state_program" "$state_expected"
+        if [ "$state_stage" = "jit-fast" ]; then
+            run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
+        else
+            run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
+        fi
+        if [ "$state_kind" = "edit" ]; then
+            prepare_fixture "$state_work" "$state_edit_program" "$state_edit_expected"
+        fi
     fi
     # Warmup proves that the path can run. Phase totals below describe only
     # the measured samples, so cache priming cannot dilute their timing.
@@ -344,13 +419,13 @@ measure_state() {
 
     sample_index=1
     while [ "$sample_index" -le "$SAMPLES" ]; do
-        if [ "$state_kind" = "incremental" ]; then
-            sample_work="$state_work"
-            sample_cache="$state_cache"
-        else
+        if [ "$state_kind" = "clean" ]; then
             sample_work="$state_root/sample-$sample_index"
             sample_cache="$sample_work/cache"
             prepare_fixture "$sample_work" "$state_program" "$state_expected"
+        else
+            sample_work="$state_work"
+            sample_cache="$state_cache"
         fi
         sample_output="$state_root/sample-$sample_index"
         sample_stats="$state_root/sample-$sample_index.stats"
@@ -375,10 +450,55 @@ measure_state() {
     state_memory_max=$(sort -n "$state_memory" | tail -n1)
     state_variance=$(variance_file "$state_latency")
     if [ "$state_stage" = "jit-fast" ]; then
+        state_backend="cranelift"
+        state_linker="none"
+        state_profile="fast"
+        state_artifact_bytes=0
         state_phase_text="frontend_us=$(phase_average "$state_phases" frontend);jit_us=$(phase_average "$state_phases" jit);jit_cache_hit=$(phase_average "$state_phases" jit_cache_hit)"
     else
+        state_backend="rustc-llvm"
+        state_linker="$TRIAL_LINKER"
+        state_profile="release"
+        state_artifact_bytes="$TRIAL_ARTIFACT_BYTES"
         state_phase_text="load_us=$(phase_average "$state_phases" load);sema_us=$(phase_average "$state_phases" sema);ffi_us=$(phase_average "$state_phases" ffi);codegen_us=$(phase_average "$state_phases" codegen);build_plan_us=$(phase_average "$state_phases" build_plan);backend_link_us=$(phase_average "$state_phases" backend_link)"
     fi
+    state_artifact_source="$state_work"
+    if [ "$state_kind" = "clean" ]; then
+        state_artifact_source="$state_root/sample-$SAMPLES"
+    fi
+    state_full_artifact="none"
+    if [ -n "${JET_PERF_ARTIFACT_DIR:-}" ]; then
+        state_full_artifact="$JET_PERF_ARTIFACT_DIR/$state_id"
+        mkdir -p "$state_full_artifact"
+        cp "$state_artifact_source/run.jet" "$state_full_artifact/run.jet"
+        cp "$state_artifact_source/expected.out" "$state_full_artifact/expected.out"
+        if [ -f "$state_artifact_source/timing/jet-timing.json" ]; then
+            cp "$state_artifact_source/timing/jet-timing.json" "$state_full_artifact/jet-timing.json"
+        fi
+        if [ -f "$state_artifact_source/timing/build/jet-timing-backend.json" ]; then
+            mkdir -p "$state_full_artifact/build"
+            cp "$state_artifact_source/timing/build/jet-timing-backend.json" "$state_full_artifact/build/jet-timing-backend.json"
+        fi
+        if [ -f "$state_artifact_source/build/run.rs" ]; then
+            mkdir -p "$state_full_artifact/build"
+            cp "$state_artifact_source/build/run.rs" "$state_full_artifact/build/run.rs"
+        fi
+        if [ -x "$state_artifact_source/build/run" ]; then
+            mkdir -p "$state_full_artifact/build"
+            cp "$state_artifact_source/build/run" "$state_full_artifact/build/run"
+        fi
+    fi
+    state_role=base
+    state_source="$state_program"
+    state_expected_source="$state_expected"
+    if [ "$state_kind" = "edit" ]; then
+        state_role=representative-edit
+        state_source="$state_edit_program"
+        state_expected_source="$state_edit_expected"
+    fi
+    state_source_hash=$(sha256 "$ROOT/$state_source")
+    state_expected_hash=$(sha256 "$ROOT/$state_expected_source")
+    state_phase_text="$state_phase_text;source=$state_source;source_sha256=$state_source_hash;expected_sha256=$state_expected_hash;role=$state_role;profile=$state_profile;backend=$state_backend;linker=$state_linker;cache_hits=$(phase_average "$state_phases" cache_hit);cache_misses=$(phase_average "$state_phases" cache_miss);generated_rust_bytes=$(phase_average "$state_phases" rust_bytes);artifact_bytes=$state_artifact_bytes;top_cause=$(top_cause "$state_phases");full_artifact=$state_full_artifact"
     printf '%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s\n' \
         "$state_program" "$TAB" "$state_name" "$TAB" "$state_stage" "$TAB" \
         "$state_latency_median" "$TAB" "$state_memory_max" "$TAB" "$state_variance" "$TAB" \
@@ -388,48 +508,48 @@ measure_state() {
 
 corpus_count=$(check_corpus)
 : > "$rows_file"
-while IFS="$TAB" read -r program expected source_hash expected_hash; do
+while IFS="$TAB" read -r program expected source_hash expected_hash edit_program edit_expected edit_hash edit_expected_hash; do
     case "$program" in
         ""|\#*) continue ;;
     esac
-    measure_state "$program" "$expected" "jit-clean" "jit-fast" "clean"
-    measure_state "$program" "$expected" "jit-incremental" "jit-fast" "incremental"
-    measure_state "$program" "$expected" "aot-release-clean" "aot-release" "clean"
-    measure_state "$program" "$expected" "aot-release-incremental" "aot-release" "incremental"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "jit-clean" "jit-fast" "clean"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "jit-no-change" "jit-fast" "no-change"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "jit-representative-edit" "jit-fast" "edit"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "aot-release-clean" "aot-release" "clean"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "aot-release-no-change" "aot-release" "no-change"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "aot-release-representative-edit" "aot-release" "edit"
     jit_clean_latency=$(row_field "$program" "jit-clean" 4)
-    jit_incremental_latency=$(row_field "$program" "jit-incremental" 4)
+    jit_no_change_latency=$(row_field "$program" "jit-no-change" 4)
     aot_clean_latency=$(row_field "$program" "aot-release-clean" 4)
-    aot_incremental_latency=$(row_field "$program" "aot-release-incremental" 4)
-    if [ "$jit_incremental_latency" -gt "$jit_clean_latency" ]; then
-        echo "incremental JIT slower than clean: $program ($jit_clean_latency -> $jit_incremental_latency ns)" >&2
+    aot_no_change_latency=$(row_field "$program" "aot-release-no-change" 4)
+    if [ "$jit_no_change_latency" -gt "$jit_clean_latency" ]; then
+        echo "no-change JIT slower than clean: $program ($jit_clean_latency -> $jit_no_change_latency ns)" >&2
         exit 1
     fi
-    if [ "$aot_incremental_latency" -gt "$aot_clean_latency" ]; then
-        echo "incremental AOT slower than clean: $program ($aot_clean_latency -> $aot_incremental_latency ns)" >&2
+    if [ "$aot_no_change_latency" -gt "$aot_clean_latency" ]; then
+        echo "no-change AOT slower than clean: $program ($aot_clean_latency -> $aot_no_change_latency ns)" >&2
         exit 1
     fi
-    program_key=$(safe_id "$program")
-    first_stdout=""
-    first_stderr=""
-    for state_name in jit-clean jit-incremental aot-release-clean aot-release-incremental; do
-        output_id="$(safe_id "$program-$state_name")"
-        output_stdout="$outputs_dir/$output_id.stdout"
-        output_stderr="$outputs_dir/$output_id.stderr"
-        [ -s "$output_stdout" ] || { echo "missing parity output: $program/$state_name" >&2; exit 1; }
-        if [ -z "$first_stdout" ]; then
-            first_stdout="$output_stdout"
-            first_stderr="$output_stderr"
-        else
-            cmp "$first_stdout" "$output_stdout" || { echo "JIT/AOT stdout parity failed: $program/$state_name" >&2; exit 1; }
-            cmp "$first_stderr" "$output_stderr" || { echo "JIT/AOT stderr parity failed: $program/$state_name" >&2; exit 1; }
-        fi
+    for scenario in clean no-change representative-edit; do
+        jit_state="jit-$scenario"
+        aot_state="aot-release-$scenario"
+        jit_output_id="$(safe_id "$program-$jit_state")"
+        aot_output_id="$(safe_id "$program-$aot_state")"
+        jit_stdout="$outputs_dir/$jit_output_id.stdout"
+        jit_stderr="$outputs_dir/$jit_output_id.stderr"
+        aot_stdout="$outputs_dir/$aot_output_id.stdout"
+        aot_stderr="$outputs_dir/$aot_output_id.stderr"
+        [ -s "$jit_stdout" ] || { echo "missing parity output: $program/$jit_state" >&2; exit 1; }
+        [ -s "$aot_stdout" ] || { echo "missing parity output: $program/$aot_state" >&2; exit 1; }
+        cmp "$jit_stdout" "$aot_stdout" || { echo "JIT/AOT stdout parity failed: $program/$scenario" >&2; exit 1; }
+        cmp "$jit_stderr" "$aot_stderr" || { echo "JIT/AOT stderr parity failed: $program/$scenario" >&2; exit 1; }
     done
 done < "$CORPUS"
 
 print_table() {
-    printf 'compiler-speed corpus=%s corpus_sha256=%s stage=matrix machine=%s target=%s rustc=%s compiler_sha256=%s kernel=%s governor=%s memory_bytes=%s warmups=%s samples=%s\n' \
+    printf 'compiler-speed corpus=%s corpus_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s compiler_sha256=%s kernel=%s governor=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s\n' \
         "$corpus_count" "$corpus_sha" "$machine" "$machine_target" "$machine_rustc" \
-        "$compiler_sha256" "$machine_kernel" "$machine_governor" "$machine_memory" "$WARMUPS" "$SAMPLES"
+        "$machine_llvm" "$machine_rustc_vv_sha" "$compiler_sha256" "$machine_kernel" "$machine_governor" "$machine_memory" "$WARMUPS" "$SAMPLES"
     printf '%-54s %-25s %-16s %16s %16s %10s %-64s\n' \
         program state stage latency_ns memory_bytes variance_pct output_sha256:stderr_sha256
     while IFS="$TAB" read -r row_program row_state row_stage row_latency row_memory row_variance row_stdout_sha row_stderr_sha row_phases; do
@@ -440,11 +560,12 @@ print_table() {
 }
 
 as_json() {
-    printf '{"schema":"jet.compiler-speed","version":2,"corpus_sha256":%s,"stage":"matrix",' "$(json_q "$corpus_sha")"
-    printf '"machine":{"arch":%s,"compiler_sha256":%s,"cpus":%s,"governor":%s,"hostname":%s,"kernel":%s,"memory_bytes":%s,"os":%s,"rustc":%s,"target":%s},' \
+    printf '{"schema":"jet.compiler-speed","version":3,"corpus_sha256":%s,"stage":"matrix",' "$(json_q "$corpus_sha")"
+    printf '"machine":{"arch":%s,"compiler_sha256":%s,"cpus":%s,"governor":%s,"hostname":%s,"kernel":%s,"llvm":%s,"memory_bytes":%s,"os":%s,"rustc":%s,"rustc_vv_sha256":%s,"target":%s},' \
         "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$machine_cpus" \
         "$(json_q "$machine_governor")" "$(json_q "$machine_host")" "$(json_q "$machine_kernel")" \
-        "$machine_memory" "$(json_q "$machine_os")" "$(json_q "$machine_rustc")" "$(json_q "$machine_target")"
+        "$(json_q "$machine_llvm")" "$machine_memory" "$(json_q "$machine_os")" "$(json_q "$machine_rustc")" \
+        "$(json_q "$machine_rustc_vv_sha")" "$(json_q "$machine_target")"
     printf '"budgets":{"latency_regression_pct":%s,"memory_regression_pct":%s,"samples":%s,"variance_pct":%s,"warmups":%s},"runs":[' \
         "$LATENCY_REGRESSION_PCT" "$MEMORY_REGRESSION_PCT" "$SAMPLES" "$VARIANCE_BUDGET_PCT" "$WARMUPS"
     first=1

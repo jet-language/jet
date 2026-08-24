@@ -3619,6 +3619,47 @@ fn cli_jet_new_creates_project_structure() {
     );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "hello, world\n");
 
+    let check = jet_cmd(&["check"], &proj, &store);
+    assert!(
+        check.status.success(),
+        "new project must check without naming a file:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let edited_source =
+        "fn run() { print(\"edited\") }\n#Test(\"scaffold smoke\") { assert(true) }\n";
+    write(&proj, "run.jet", edited_source);
+    let test = jet_cmd(&["test"], &proj, &store);
+    assert!(
+        test.status.success(),
+        "an edited project with a test must test without naming a file:\n{}",
+        String::from_utf8_lossy(&test.stderr)
+    );
+
+    write(&proj, "run.jet", "fn run() { print(unknown_scaffold_name) }\n");
+    let invalid = jet_cmd(&["check"], &proj, &store);
+    assert!(!invalid.status.success(), "invalid source must fail `jet check`");
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("Error ["),
+        "invalid source lost its diagnostic:\n{}",
+        String::from_utf8_lossy(&invalid.stderr)
+    );
+    write(&proj, "run.jet", edited_source);
+
+    for args in [["run", "--profile=debug"], ["dev", "--watch=off"]] {
+        let output = jet_cmd(&args, &proj, &store);
+        assert!(
+            output.status.success(),
+            "newcomer command {args:?} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "edited\n",
+            "newcomer command {args:?} chose a different entry or tier"
+        );
+    }
+
     let update = jet_cmd(&["update", "jet"], &proj, &store);
     assert!(
         update.status.success(),
@@ -3628,6 +3669,109 @@ fn cli_jet_new_creates_project_structure() {
     assert!(
         proj.join(".jet/lock").is_file(),
         "toolchain update must write .jet/lock"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn cli_beginner_onboarding_ordered_workflow_uses_real_binary() {
+    assert!(
+        jet_bin().is_file(),
+        "the Cargo-provided jet binary must exist for this production-path test"
+    );
+
+    let tmp = tmp_dir("cli_beginner_onboarding");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let created = jet_cmd(&["new", "hello"], &tmp, &store);
+    assert!(
+        created.status.success(),
+        "jet new failed:\n{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let project = tmp.join("hello");
+    assert!(project.join("run.jet").is_file());
+    assert!(project.join("package.jet").is_file());
+
+    let first_run = jet_cmd(&["run"], &project, &store);
+    assert!(first_run.status.success());
+    assert_eq!(String::from_utf8_lossy(&first_run.stdout), "hello, world\n");
+
+    let source = r#"fn greet(name: String) String -> {
+    return "hello, {name}"
+}
+
+#Test("greet says hello") {
+    assert_eq(greet("Jet"), "hello, Jet")
+}
+
+fn run() {
+    print(greet("Jet"))
+}
+"#;
+    write(&project, "run.jet", source);
+
+    let check = jet_cmd(&["check"], &project, &store);
+    assert!(
+        check.status.success(),
+        "jet check failed:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let tests = jet_cmd(&["test"], &project, &store);
+    assert!(
+        tests.status.success(),
+        "jet test failed:\n{}",
+        String::from_utf8_lossy(&tests.stderr)
+    );
+    let test_stdout = String::from_utf8_lossy(&tests.stdout);
+    assert!(test_stdout.contains("greet says hello: pass"), "{test_stdout}");
+    assert!(
+        test_stdout.contains("1 passed, 0 failed, 0 skipped"),
+        "{test_stdout}"
+    );
+
+    let explicit_run = jet_cmd(&["run", "run.jet"], &project, &store);
+    assert!(explicit_run.status.success());
+    assert_eq!(String::from_utf8_lossy(&explicit_run.stdout), "hello, Jet\n");
+
+    write(
+        &project,
+        "run.jet",
+        "print(\"before\")\nfn run() { print(\"middle\") }\nprint(\"after\")\n",
+    );
+    let invalid = jet_cmd(&["check"], &project, &store);
+    assert!(!invalid.status.success());
+    let invalid_stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(invalid_stderr.contains("E0621"), "{invalid_stderr}");
+
+    let fixed = jet_cmd(&["fix", "run.jet"], &project, &store);
+    assert!(
+        fixed.status.success(),
+        "jet fix failed:\n{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&fixed.stdout).contains("applied 1 fix"));
+
+    let fixed_check = jet_cmd(&["check"], &project, &store);
+    assert!(fixed_check.status.success());
+
+    let explanation = jet_cmd(&["explain", "E0621"], &project, &store);
+    assert!(explanation.status.success());
+    let explanation_stdout = String::from_utf8_lossy(&explanation.stdout);
+    assert!(
+        explanation_stdout.contains("What this means:"),
+        "{explanation_stdout}"
+    );
+    assert!(
+        explanation_stdout.contains("Why Jet enforces it:"),
+        "{explanation_stdout}"
+    );
+    assert!(
+        explanation_stdout.contains("How to fix it:"),
+        "{explanation_stdout}"
     );
 
     let _ = fs::remove_dir_all(&tmp);

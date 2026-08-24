@@ -1,0 +1,15 @@
+use core.encoding.json as json
+
+// Representative edit: reorder a source-level key list without changing its size.
+fn run() JSONError! {
+    raw :: "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
+    data :: json.parse(raw)?
+    print(json.to_string(data))
+    print(json.to_string_pretty(data).contains("\n"))
+    keys :: ["ok", "name", "items"]
+    print(keys.len())
+    print(json.to_string(DataTree.Object([
+        "name": DataTree.Text("jet"),
+        "ok": DataTree.Bool(true)
+    ])))
+}

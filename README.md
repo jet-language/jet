@@ -47,10 +47,12 @@ cd hello
 jet run
 ```
 
-The first run prints `hello, world`. For the complete walkthrough, recovery
-routes, and expert file/check/test commands, see the
-[first-hour guide](docs/first-hour.md). Continue with the ordered lessons in
-#1034 after the first successful run.
+The first run prints `hello, world`. The generated project also includes a
+smoke test, so `jet test run.jet` works before the first edit. For the complete
+walkthrough, the ordered
+`new` -> `run` -> `check` -> `test` -> `fix` -> `explain` lessons, recovery routes,
+and expert file/check/test commands, see the [first-hour guide](docs/first-hour.md).
+For hands-on diagnostic recovery, use the [recovery exercises](docs/diagnostic-recovery.md).
 
 ## Contributor quickstart
 

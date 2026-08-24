@@ -413,6 +413,41 @@ fn read_vm_hwm(pid: u32) -> Result<Option<u64>, ProviderFailure> {
 const COMPILE_WARMUPS: u128 = 1;
 const COMPILE_SAMPLES: usize = 20;
 const COMPILE_MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
+
+// D-VERDICT-666-1 / D-BUILD-DEFAULT1: the probe follows the same production
+// lens selected by the profile. `dev` is the fast resident JIT; optimized AOT
+// profiles remain the rustc ship path. This is an internal measurement choice,
+// not a second user-facing backend selector.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CompileBackend {
+    JitCranelift,
+    AotRustc,
+}
+
+impl CompileBackend {
+    fn for_profile(profile: &str) -> Self {
+        if profile == "dev" {
+            Self::JitCranelift
+        } else {
+            Self::AotRustc
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::JitCranelift => "cranelift-jit",
+            Self::AotRustc => "rustc-aot",
+        }
+    }
+
+    fn linker(self) -> String {
+        match self {
+            Self::JitCranelift => "cranelift-jit".into(),
+            Self::AotRustc => crate::NativeLinker::for_target(None).label(),
+        }
+    }
+}
+
 /// How long one real native build of a project may take: emit Rust, compile
 /// the content-addressed `jet_runtime` rlib when that toolchain artifact is
 /// cold, then compile and link the program. A CompilerProbe child compile and
@@ -491,9 +526,11 @@ pub fn compiler_probe_version(
 ) -> Result<String, String> {
     let root = project_root.canonicalize().map_err(|error| format!("cannot resolve compile workload root: {error}"))?;
     let descriptor = compile_descriptor(&root, mode, target, profile, patch)?;
+    let backend = CompileBackend::for_profile(profile);
     Ok(format!(
-        "jet-compile-latency-v1;mode={mode};target={target};profile={profile};backend=rustc;linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
-        crate::NativeLinker::for_target(None).label(),
+        "jet-compile-latency-v2;mode={mode};target={target};profile={profile};backend={};linker={};warmups={COMPILE_WARMUPS};samples={COMPILE_SAMPLES};source={};patch={}",
+        backend.label(),
+        backend.linker(),
         descriptor.source_tree_sha256, descriptor.patch_sha256
     ))
 }
@@ -652,10 +689,11 @@ fn compile_latency_samples(
     let compiler_digest = env!("JET_COMPILER_BUILD_ID").to_string();
     let core_digest = env!("JET_STDLIB_BUILD_ID").to_string();
     let host = format!("{}:{}", std::env::consts::OS, env!("JET_BUILD_TARGET"));
-    let backend = "rustc";
-    let linker = crate::NativeLinker::for_target(None).label();
+    let backend = CompileBackend::for_profile(profile);
+    let linker = backend.linker();
     let mut sample_values = Vec::with_capacity(sample_count);
     let mut sample_records = Vec::with_capacity(sample_count);
+    let mut peak_rss_bytes = 0u64;
     let edit_patch = if mode == "Edit" {
         Some(patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?)
     } else {
@@ -665,21 +703,30 @@ fn compile_latency_samples(
     // edit, so it needs a tree that was already built. Building that clean
     // tree *inside* every trial spent one extra full child compile per trial —
     // 20 wasted compiles per collection — and let every sample start from an
-    // independently produced state. Build it once here and give each trial a
-    // byte-identical copy of the resulting warm cache: the measured rebuild is
-    // still a real child compile of the patched tree, and every sample now
-    // starts from the same bytes instead of merely the same recipe.
-    let warm = scratch.join("warm");
+    // independently produced state. Prime one fixed trial path once, snapshot
+    // its cache, and restore that snapshot before each edit. The fixed path is
+    // required because the JIT cache key includes the watched absolute paths;
+    // copying a warm cache into a different path would silently turn every
+    // purported incremental sample into a cold miss.
+    let warm = scratch.join("warm-cache");
+    let edit_trial = scratch.join("edit-trial");
     if mode == "Edit" {
         std::fs::create_dir_all(scratch).map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot create edit workload scratch directory: {error}")))?;
-        copy_compile_project(root, &warm).map_err(ProviderFailure::malformed)?;
-        let copied_source_tree_sha256 = source_tree_digest(&warm).map_err(ProviderFailure::malformed)?;
+        copy_compile_project(root, &edit_trial).map_err(ProviderFailure::malformed)?;
+        let copied_source_tree_sha256 = source_tree_digest(&edit_trial).map_err(ProviderFailure::malformed)?;
         if copied_source_tree_sha256.as_str() != expected_source_tree_sha256 {
             return Err(ProviderFailure::operation(FailureClass::Incompatible, "compile workload source changed while it was copied"));
         }
+        reset_compile_cache(&edit_trial)?;
+        clear_compile_timing(&edit_trial)?;
+        run_compile_child(&edit_trial.join(relative_entry), &edit_trial, target, profile)?;
         reset_compile_cache(&warm)?;
-        clear_compile_timing(&warm)?;
-        run_compile_child(&warm.join(relative_entry), &warm, target, profile)?;
+        for name in ["build", ".jet-compile-cache"] {
+            let source = edit_trial.join(name);
+            if source.is_dir() {
+                copy_cache_tree(&source, &warm.join(name)).map_err(|error| ProviderFailure::operation(FailureClass::Execution, error))?;
+            }
+        }
     } else {
         copy_compile_project(root, scratch).map_err(ProviderFailure::malformed)?;
         let copied_source_tree_sha256 = source_tree_digest(scratch).map_err(ProviderFailure::malformed)?;
@@ -689,8 +736,7 @@ fn compile_latency_samples(
     }
     for _ in 0..warmups {
         if mode == "Edit" {
-            let trial = scratch.join("warmup");
-            let _ = compile_edit_trial(root, relative_entry, &trial, &warm, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?;
+            let _ = compile_edit_trial(root, relative_entry, &edit_trial, &warm, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?;
         } else {
             let scratch_entry = scratch.join(relative_entry);
             if mode == "Clean" { reset_compile_cache(scratch)?; }
@@ -698,21 +744,21 @@ fn compile_latency_samples(
             run_compile_child(&scratch_entry, scratch, target, profile)?;
         }
     }
-    for sample_index in 0..sample_count {
-        let (elapsed_ns, phase_totals) = if mode == "Edit" {
-            let trial = scratch.join(format!("sample-{sample_index}"));
-            compile_edit_trial(root, relative_entry, &trial, &warm, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?
+    for _ in 0..sample_count {
+        let (child, phase_totals) = if mode == "Edit" {
+            compile_edit_trial(root, relative_entry, &edit_trial, &warm, edit_patch.ok_or_else(|| ProviderFailure::malformed("Edit workload has no patch path"))?, expected_source_tree_sha256, expected_patch_sha256, target, profile)?
         } else {
             let scratch_entry = scratch.join(relative_entry);
             if mode == "Clean" { reset_compile_cache(scratch)?; }
             clear_compile_timing(scratch)?;
-            let started = Instant::now();
-            run_compile_child(&scratch_entry, scratch, target, profile)?;
-            (started.elapsed().as_nanos(), read_compile_phases(scratch)?)
+            let child = run_compile_child(&scratch_entry, scratch, target, profile)?;
+            (child, read_compile_phases(scratch, backend)?)
         };
+        peak_rss_bytes = peak_rss_bytes.max(child.peak_rss_bytes);
+        let elapsed_ns = child.elapsed_ns;
         sample_values.push(Rational::parse(&elapsed_ns.to_string(), "1").map_err(ProviderFailure::malformed)?);
         sample_records.push(CanonicalJson::object([
-            ("backend".into(), CanonicalJson::String(backend.into())),
+            ("backend".into(), CanonicalJson::String(backend.label().into())),
             ("cache_state".into(), CanonicalJson::String(mode.into())),
             ("compiler_digest".into(), CanonicalJson::String(compiler_digest.clone())),
             ("core_digest".into(), CanonicalJson::String(core_digest.clone())),
@@ -720,6 +766,7 @@ fn compile_latency_samples(
             ("elapsed_ns".into(), CanonicalJson::Integer(elapsed_ns.to_string())),
             ("host".into(), CanonicalJson::String(host.clone())),
             ("linker".into(), CanonicalJson::String(linker.clone())),
+            ("peak_rss_bytes".into(), CanonicalJson::Integer(child.peak_rss_bytes.to_string())),
             ("phase_totals".into(), phase_totals_json(&phase_totals)?),
             ("profile".into(), CanonicalJson::String(profile.into())),
             ("source_tree_sha256".into(), CanonicalJson::String(expected_source_tree_sha256.into())),
@@ -734,7 +781,7 @@ fn compile_latency_samples(
     }).map_err(ProviderFailure::malformed)?.div(&Rational::integer(sample_values.len() as i128)).map_err(ProviderFailure::malformed)?;
     let aggregate_phases = aggregate_compile_phases(&sample_records)?;
     let metadata = CanonicalJson::object([
-        ("backend".into(), CanonicalJson::String(backend.into())),
+        ("backend".into(), CanonicalJson::String(backend.label().into())),
         ("cache_state".into(), CanonicalJson::String(mode.into())),
         ("compiler_digest".into(), CanonicalJson::String(compiler_digest)),
         ("core_digest".into(), CanonicalJson::String(core_digest)),
@@ -742,6 +789,7 @@ fn compile_latency_samples(
         ("edit_sha256".into(), CanonicalJson::String(edit_sha256)),
         ("host".into(), CanonicalJson::String(host)),
         ("linker".into(), CanonicalJson::String(linker)),
+        ("peak_rss_bytes".into(), CanonicalJson::Integer(peak_rss_bytes.to_string())),
         ("phase_totals".into(), aggregate_phases),
         ("profile".into(), CanonicalJson::String(profile.into())),
         ("sample_records".into(), CanonicalJson::Array(sample_records)),
@@ -774,7 +822,7 @@ fn compile_edit_trial(
     expected_patch_sha256: &str,
     target: &str,
     profile: &str,
-) -> Result<(u128, Vec<(String, u128)>), ProviderFailure> {
+) -> Result<(ChildMetrics, Vec<(String, u128)>), ProviderFailure> {
     let result = (|| {
         copy_compile_project(root, trial).map_err(ProviderFailure::malformed)?;
         let copied_source_tree_sha256 = source_tree_digest(trial).map_err(ProviderFailure::malformed)?;
@@ -789,11 +837,9 @@ fn compile_edit_trial(
         apply_unified_patch(trial, patch).map_err(ProviderFailure::malformed)?;
         clear_compile_timing(trial)?;
         let entry = trial.join(relative_entry);
-        let started = Instant::now();
-        run_compile_child(&entry, trial, target, profile)?;
-        Ok((started.elapsed().as_nanos(), read_compile_phases(trial)?))
+        let child = run_compile_child(&entry, trial, target, profile)?;
+        Ok((child, read_compile_phases(trial, CompileBackend::for_profile(profile))?))
     })();
-    let _ = std::fs::remove_dir_all(trial);
     result
 }
 
@@ -1024,10 +1070,29 @@ fn patch_header_path(header: &str) -> Result<String, String> {
     Ok(value.into())
 }
 
-fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> Result<(), ProviderFailure> {
+#[derive(Clone, Copy)]
+struct ChildMetrics {
+    elapsed_ns: u128,
+    peak_rss_bytes: u64,
+}
+
+fn child_peak_rss(pid: u32) -> Result<Option<u64>, ProviderFailure> {
+    #[cfg(target_os = "linux")]
+    {
+        read_vm_hwm(pid)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        Ok(None)
+    }
+}
+
+fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> Result<ChildMetrics, ProviderFailure> {
     if target != "cli" {
         return Err(ProviderFailure::operation(FailureClass::Unsupported, format!("compile workload target `{target}` is unsupported by the resident fixture compiler")));
     }
+    let backend = CompileBackend::for_profile(profile);
     let executable = running_executable().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot identify resident Jet compiler: {error}")))?;
     // The child runs in the workload copy, so a relative cache root has to be
     // resolved against this process's directory before it is handed over.
@@ -1041,7 +1106,10 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
     };
     let mut command = Command::new(executable);
     command
-        .arg("build")
+        .arg(match backend {
+            CompileBackend::JitCranelift => "run",
+            CompileBackend::AotRustc => "build",
+        })
         .arg(entry)
         .current_dir(root)
         .env("JET_TIMING", "1")
@@ -1068,21 +1136,34 @@ fn run_compile_child(entry: &Path, root: &Path, target: &str, profile: &str) -> 
         name => { command.arg(format!("--profile={name}")); }
     }
     #[cfg(unix)] { use std::os::unix::process::CommandExt; command.process_group(0); }
-    let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot start compile workload build: {error}")))?;
+    let mut child = command.spawn().map_err(|error| ProviderFailure::operation(FailureClass::Execution, format!("cannot start compile workload child: {error}")))?;
+    let started = Instant::now();
+    let mut peak_rss_bytes = 0;
     let deadline = Instant::now() + NATIVE_BUILD_DEADLINE;
     loop {
+        if let Some(value) = child_peak_rss(child.id())? {
+            peak_rss_bytes = peak_rss_bytes.max(value);
+        }
         match child.try_wait() {
             Ok(Some(status)) if status.success() => {
-                let missing = ["jet-timing.json", "build/jet-timing-backend.json"].iter().filter(|rel| !root.join(rel).is_file()).copied().collect::<Vec<_>>();
+                let required = match backend {
+                    CompileBackend::JitCranelift => vec!["jet-timing.json"],
+                    CompileBackend::AotRustc => vec!["jet-timing.json", "build/jet-timing-backend.json"],
+                };
+                let missing = required.iter().filter(|rel| !root.join(rel).is_file()).copied().collect::<Vec<_>>();
                 if !missing.is_empty() {
                     return Err(ProviderFailure::operation(FailureClass::Unavailable, format!("compile timing artifact {} is unavailable after a successful child compile", missing.join(" and "))));
                 }
-                return Ok(());
+                #[cfg(target_os = "linux")]
+                if peak_rss_bytes == 0 {
+                    return Err(ProviderFailure::operation(FailureClass::Unavailable, "compile child peak RSS was not observable"));
+                }
+                return Ok(ChildMetrics { elapsed_ns: started.elapsed().as_nanos(), peak_rss_bytes });
             }
-            Ok(Some(status)) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("compile workload build exited with {status}"))),
+            Ok(Some(status)) => return Err(ProviderFailure::operation(FailureClass::Execution, format!("compile workload child exited with {status}"))),
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(2)),
-            Ok(None) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Timeout, "compile workload build exceeded its deadline")); }
-            Err(error) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot supervise compile workload build: {error}"))); }
+            Ok(None) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Timeout, "compile workload child exceeded its deadline")); }
+            Err(error) => { terminate_group(&mut child); return Err(ProviderFailure::operation(FailureClass::Execution, format!("cannot supervise compile workload child: {error}"))); }
         }
     }
 }
@@ -1100,9 +1181,13 @@ fn running_executable() -> std::io::Result<PathBuf> {
     }
 }
 
-fn read_compile_phases(root: &Path) -> Result<Vec<(String, u128)>, ProviderFailure> {
+fn read_compile_phases(root: &Path, backend: CompileBackend) -> Result<Vec<(String, u128)>, ProviderFailure> {
     let mut phases = BTreeMap::<String, u128>::new();
-    for path in [root.join("jet-timing.json"), root.join("build/jet-timing-backend.json")] {
+    let paths = match backend {
+        CompileBackend::JitCranelift => vec![root.join("jet-timing.json")],
+        CompileBackend::AotRustc => vec![root.join("jet-timing.json"), root.join("build/jet-timing-backend.json")],
+    };
+    for path in paths {
         let bytes = std::fs::read(&path).map_err(|error| ProviderFailure::operation(FailureClass::Unavailable, format!("compile timing artifact `{}` is unavailable: {error}", path.display())))?;
         let value = CanonicalJson::parse_canonical(&bytes).map_err(ProviderFailure::malformed)?;
         let CanonicalJson::Object(fields) = value else { return Err(ProviderFailure::malformed("compile timing artifact is not an object")); };
@@ -1246,15 +1331,15 @@ mod tests {
     fn compiler_probe_rejects_partial_timing_artifacts(){
         let root=temporary("partial-timing");
         std::fs::create_dir_all(root.join("build")).unwrap();
-        let missing=read_compile_phases(&root).unwrap_err();
+        let missing=read_compile_phases(&root,CompileBackend::AotRustc).unwrap_err();
         assert_eq!(missing.class,FailureClass::Unavailable);
         assert!(missing.reason.contains("unavailable"),"{}",missing.reason);
         std::fs::write(root.join("jet-timing.json"),"{\"phases\":[{\"name\":\"sema\",\"us\":1}]}\n").unwrap();
-        let partial=read_compile_phases(&root).unwrap_err();
+        let partial=read_compile_phases(&root,CompileBackend::AotRustc).unwrap_err();
         assert_eq!(partial.class,FailureClass::Unavailable);
         assert!(partial.reason.contains("jet-timing-backend.json"),"{}",partial.reason);
         std::fs::write(root.join("build/jet-timing-backend.json"),"{\"phases\":[{\"name\":\"backend_link\",\"us\":2}]}\n").unwrap();
-        let phases=read_compile_phases(&root).unwrap();
+        let phases=read_compile_phases(&root,CompileBackend::AotRustc).unwrap();
         assert_eq!(phases,vec![("backend_link".into(),2_000u128),("sema".into(),1_000u128)]);
         let _=std::fs::remove_dir_all(root);
     }
@@ -1278,6 +1363,20 @@ mod tests {
         assert!(error.contains("profile `unsupported` is unsupported"),"{error}");
         let _=std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn compiler_probe_identity_names_the_production_lens_for_each_profile() {
+        let root = temporary("compile-lenses");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("package.jet"), "name: \"lenses\"\nversion: \"0.1.0\"\n").unwrap();
+        std::fs::write(root.join("src/run.jet"), "fn run() {}\n").unwrap();
+        let jit = compiler_probe_version(&root, "Clean", "cli", "dev", None).unwrap();
+        let aot = compiler_probe_version(&root, "Clean", "cli", "release", None).unwrap();
+        assert!(jit.contains("backend=cranelift-jit;linker=cranelift-jit"), "{jit}");
+        assert!(aot.contains("backend=rustc-aot;linker="), "{aot}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[cfg(target_os="linux")]fn assert_last_group_gone(){extern "C"{fn kill(pid:i32,signal:i32)->i32;}let group=LAST_ISOLATED_GROUP.load(Ordering::SeqCst)as i32;let deadline=Instant::now()+Duration::from_millis(100);while unsafe{kill(-group,0)}==0&&Instant::now()<deadline{std::thread::yield_now()}assert_ne!(unsafe{kill(-group,0)},0,"isolated provider process group survived timeout");}
     #[cfg(target_os="linux")]const SYS_PIDFD_SEND_SIGNAL:isize=424;
     #[cfg(target_os="linux")]const SYS_PIDFD_OPEN:isize=434;

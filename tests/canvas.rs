@@ -1784,6 +1784,46 @@ fn canvas_statement_state_nodes_and_toggle_transaction() {
 }
 
 #[test]
+fn canvas_debug_only_execution_path_keeps_source_backed_incoming_wires() {
+    let path = write_fixture(
+        "debug_only_execution_flow",
+        r#"fn run() {
+    print("before")
+    #DebugOnly print("debug")
+    print("after")
+}
+"#,
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    let graph_json = jet::Canvas::graph_json_for_file(&path).expect("debug-only graph");
+    let graph = graph_object_for_title(&graph_json, "run");
+    let nodes = json_top_level_objects(json_array_field(graph, "nodes"));
+    let node_for_call = |call: &str| {
+        let start = source.find(call).expect("call source");
+        nodes
+            .iter()
+            .find(|node| node.contains(&format!("\"source_span\":{{\"start\":{start},")))
+            .map(|node| json_field(node, "node_id"))
+            .unwrap_or_else(|| panic!("missing source-backed node for {call}"))
+    };
+    let before = node_for_call("print(\"before\")");
+    let debug = node_for_call("print(\"debug\")");
+    let after = node_for_call("print(\"after\")");
+    let wires = json_top_level_objects(json_array_field(graph, "wires"));
+    let control_wire = |from: &str, to: &str| {
+        wires.iter().find(|wire| {
+            wire.contains(&format!("\"from_pin\":\"{from}:output:then\""))
+                && wire.contains(&format!("\"to_pin\":\"{to}:input:exec\""))
+                && wire.contains("\"wire_kind\":\"control\"")
+                && wire.contains("\"from_source_span\":{")
+                && wire.contains("\"to_source_span\":{")
+        })
+    };
+    assert!(control_wire(&before, &debug).is_some(), "missing before -> debug wire: {graph}");
+    assert!(control_wire(&debug, &after).is_some(), "missing debug -> after wire: {graph}");
+}
+
+#[test]
 fn canvas_projects_and_edits_subjectless_guard_arms() {
     let path = write_fixture(
         "subjectless_guards",
@@ -5546,7 +5586,7 @@ fn canvas_does_not_project_unimported_event_named_calls() {
 }
 
 fn run() {
-    event :: Resource{ id: 1 }
+    event := Resource{ id: 1 }
     event.new()
 }
 "#,

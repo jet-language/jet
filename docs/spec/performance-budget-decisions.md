@@ -35,8 +35,10 @@ tree; it never infers an edit from a timestamp or ambient cache file.
 
 Every candidate records source-tree and patch identities, cache scenario,
 compiler/Core digests, target, profile, backend, linker, host, one fixed
-warmup, twenty samples, elapsed variance, workload bytes, edit bytes, and
-resident-compiler phase totals. Missing or changed inputs, unsupported targets,
+warmup, twenty samples, elapsed variance, peak RSS, workload bytes, edit bytes,
+and resident-compiler phase totals. The built-in `dev` profile measures the
+production Cranelift JIT lens; optimized `release` measures the rustc AOT lens.
+Missing or changed inputs, unsupported targets,
 incompatible identities, partial timing artifacts, unsupported profiles,
 provider crashes, and deadlines are unavailable evidence or operation failures;
 they never become a pass. The resident fixture accepts the built-in `dev`,

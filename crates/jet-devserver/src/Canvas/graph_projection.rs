@@ -1315,7 +1315,7 @@ fn project_stmt(
                 &node_id,
                 "binding",
                 &b.name,
-                b.name_span.into(),
+                binding_source_span(src, b),
                 x,
                 y,
                 vec!["local"],
@@ -2110,6 +2110,28 @@ fn expr_source_end(expr: &Expr) -> usize {
     }
 }
 
+fn binding_source_span(src: &str, binding: &AST::Binding) -> SourceSpan {
+    let mut init_end = expr_source_end(&binding.init);
+    while src
+        .as_bytes()
+        .get(init_end)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        init_end += 1;
+    }
+    if src.as_bytes().get(init_end) == Some(&b'(') {
+        init_end += 1;
+    }
+    let init_span = span_through_closing_parens(
+        src,
+        Span::new(binding.init.span().start, init_end),
+    );
+    SourceSpan {
+        start: binding.name_span.start,
+        end: init_span.end,
+    }
+}
+
 fn binding_init_span(src: &str, binding: &AST::Binding) -> Span {
     let end = expr_source_end(&binding.init);
     let mut start = binding
@@ -2140,7 +2162,7 @@ fn connect_expr_to_input_with_span(
     if let Some(out) = project_value_node(g, index, src, expr, ordinal, role, x, provider_y) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         add_wire_with_span(g, &out, input_pin, "data", Some(expr.span().into()));
-    } else if pure_leaf(expr) {
+    } else if pure_leaf(expr) && !matches!(expr, Expr::Binary(..)) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         wire_ident_refs(g, expr, input_pin);
     } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
@@ -2183,11 +2205,6 @@ fn project_value_node(
     y: i32,
 ) -> Option<String> {
     if let Expr::Place(inner, _, _) = expr {
-        if let Expr::Ident(name, _) = inner.as_ref() {
-            if let Some(pin) = g.local_pins.get(name).cloned() {
-                return Some(pin);
-            }
-        }
         return project_value_node(g, index, src, inner, ordinal, role, x, y);
     }
     if let Expr::Ident(name, span) = expr {
@@ -2293,6 +2310,81 @@ fn project_expr_node(
     exec_context: bool,
 ) -> Option<String> {
     match expr {
+        Expr::Binary(op, left, right, span) => {
+            let node_id = format!(
+                "{}:expr:{ordinal}:operator:{}-{}",
+                g.graph_id, span.start, span.end
+            );
+            add_node(
+                g,
+                &node_id,
+                "expression",
+                op.spell(),
+                (*span).into(),
+                x,
+                y,
+                Vec::new(),
+                vec!["edit_inline_expr", "source_jump"],
+            );
+            add_inline(g, &node_id, ordinal, "value", src, *span);
+
+            let left_ty = expr_type(g, index, left);
+            let left_input = add_pin(
+                g,
+                &node_id,
+                "left",
+                "input",
+                &left_ty,
+                "",
+                false,
+            );
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                left,
+                ordinal * 1000 + 1,
+                "left",
+                &node_id,
+                &left_input,
+                x - 220,
+                y,
+            );
+
+            let right_ty = expr_type(g, index, right);
+            let right_input = add_pin(
+                g,
+                &node_id,
+                "right",
+                "input",
+                &right_ty,
+                "",
+                false,
+            );
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                right,
+                ordinal * 1000 + 2,
+                "right",
+                &node_id,
+                &right_input,
+                x - 220,
+                y + 74,
+            );
+
+            let result_ty = expr_type(g, index, expr);
+            Some(add_pin(
+                g,
+                &node_id,
+                "result",
+                "output",
+                &result_ty,
+                "",
+                false,
+            ))
+        }
         Expr::Call(c) => {
             let node_id = format!("{}:expr:{ordinal}:call:{}", g.graph_id, c.name);
             let archetype = if exec_context || call_has_effects(index, &c.name) {

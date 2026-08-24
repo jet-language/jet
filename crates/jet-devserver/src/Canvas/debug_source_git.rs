@@ -967,9 +967,17 @@ fn snapshot_call_stack_json(
             truncated = true;
             break;
         }
+        // The interpreter names Jet's source entry wrapper `main`; Canvas
+        // exposes the user-written `run` function instead of leaking that
+        // host frame into the source-level overlay.
+        let function = if frame.function == "main" {
+            "run"
+        } else {
+            frame.function.as_str()
+        };
         let entry = json_str(&format!(
             "#{}  {}()  at {}:{}",
-            index, frame.function, source_id, frame.line
+            index, function, source_id, frame.line
         ));
         if bytes + entry.len() > MAX_DEBUG_CALL_STACK_BYTES {
             truncated = true;

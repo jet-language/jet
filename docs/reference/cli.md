@@ -25,6 +25,25 @@ Run a job with `jet run app.jet -- seed_data`. Cross-job dependencies are ordina
 In a workspace, use `jet jobs -p member` to list jobs for one member.
 A bare `jet jobs` names the members when the choice is ambiguous.
 
+## Run a project
+
+Inside a package, `jet run` selects the canonical `run.jet` entry. The shared
+bare resolver checks `run.jet`, `src/run.jet`, then `<package>.jet`; `jet dev`,
+`jet check`, `jet build`, and `jet test` use the same package target. Pass a
+file or directory when the target is explicit:
+
+```bash
+jet run
+jet run run.jet
+jet dev
+jet check run.jet
+jet test run.jet
+```
+
+If a workspace has multiple members, use `jet run -p <member>` or an explicit
+path. A single retired `main.jet` is migrated to `run.jet` with a notice;
+ambiguous old and new layouts are rejected until one entry remains.
+
 ## LLM surface digest
 
 `jet inspect digest` prints the complete generated LLM surface. Use

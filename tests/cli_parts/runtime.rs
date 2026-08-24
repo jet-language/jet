@@ -453,6 +453,95 @@ fn run() {}
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// Card #1866 / D-ROLEFILE1=A / D-CMDOVERRIDE1=A: a package-root command home
+/// wins over the ordinary stock entry, `--show-default` returns to the stock
+/// path, scaffolding writes all four homes, and duplicate package functions are
+/// a registered command-resolution error.
+#[test]
+fn command_role_home_overrides_stock_and_show_default_reports_stock() {
+    let dir = isolated_cwd("command_role_home");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"command-role-home\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(dir.join("run.jet"), "fn run() { print(\"stock\") }\n").unwrap();
+    fs::write(
+        dir.join("@run.jet"),
+        "fn run() { print(\"role\") }\n",
+    )
+    .unwrap();
+
+    let role = Command::new(jet())
+        .arg("run")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(role.status.success(), "role command failed: {:?}", role);
+    assert!(String::from_utf8_lossy(&role.stdout).contains("role"));
+
+    fs::write(
+        dir.join("explicit.jet"),
+        "fn run() { print(\"file scope\") }\n",
+    )
+    .unwrap();
+    let file_scope = Command::new(jet())
+        .args(["run", "explicit.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(file_scope.status.success(), "file-scope command failed: {:?}", file_scope);
+    let file_scope_stdout = String::from_utf8_lossy(&file_scope.stdout);
+    assert!(file_scope_stdout.contains("file scope"), "{file_scope_stdout}");
+    assert!(!file_scope_stdout.contains("role\n"), "{file_scope_stdout}");
+
+    let stock = Command::new(jet())
+        .args(["run", "--show-default"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(stock.status.success(), "stock command failed: {:?}", stock);
+    let stock_stdout = String::from_utf8_lossy(&stock.stdout);
+    assert!(stock_stdout.contains("jet run: using stock default"), "{stock_stdout}");
+    assert!(stock_stdout.contains("stock"), "{stock_stdout}");
+    assert!(!stock_stdout.contains("role\n"), "{stock_stdout}");
+
+    let scaffold = Command::new(jet())
+        .args(["new", "scaffold"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(scaffold.status.success(), "scaffold failed: {:?}", scaffold);
+    for file in jet::Syntax::COMMAND_ROLE_FILES {
+        let source = fs::read_to_string(dir.join("scaffold").join(file)).unwrap();
+        assert!(source.contains("jet ") && source.contains("--show-default"), "{file}: {source}");
+    }
+
+    let duplicate = isolated_cwd("command_role_duplicate");
+    fs::write(
+        duplicate.join("package.jet"),
+        "name: \"command-role-duplicate\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(duplicate.join("run.jet"), "fn run() {}\n").unwrap();
+    fs::write(duplicate.join("a.jet"), "fn run() {}\n").unwrap();
+    fs::write(duplicate.join("b.jet"), "fn run() {}\n").unwrap();
+    let duplicate = Command::new(jet())
+        .arg("run")
+        .current_dir(&duplicate)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(duplicate.status.code(), Some(1), "{duplicate:?}");
+    let duplicate_stderr = String::from_utf8_lossy(&duplicate.stderr);
+    assert!(duplicate_stderr.contains("Error [E3540]"), "{duplicate_stderr}");
+    assert!(duplicate_stderr.contains("Why:") && duplicate_stderr.contains("Fix:"), "{duplicate_stderr}");
+}
+
 /// #1659 criterion 2: `jet <cmd> --help`/`-h` works for a command that used
 /// to hit the generic E2102 "unknown flag" — it neither runs the command nor
 /// errors, and names the command in its own help text.

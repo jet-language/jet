@@ -112,7 +112,8 @@ fn usage_for(cmd: &str) -> String {
 /// A short, real example line — only for commands with one worth showing.
 fn example_for(cmd: &str) -> Option<String> {
     match cmd {
-        "run" | "check" | "build" => {
+        "run" => Some("jet run".to_string()),
+        "check" | "build" => {
             Some(format!("jet {} examples/features/basics/hello.jet", cmd))
         }
         "dev" => Some("jet dev run.jet".to_string()),

@@ -27,11 +27,11 @@ The manifest-free source carries the checked `Executable`/`Service` addresses an
 
 ## Host matrix
 
-The fixture was smoke-run on the current Linux checkout with the prebuilt binary. The focused test records `elapsed_ms` for every Jet action when run with `--nocapture`. Clean-host Linux, macOS, and Windows runs, including their edit/build latency receipts, remain required before this card can claim the cross-host criterion.
+The fixture was smoke-run on the current Linux checkout with the prebuilt binary. The focused test records `elapsed_ms` for every Jet action when run with `--nocapture`, and `expected.out` is the committed stdout golden. Clean-host Linux, macOS, and Windows runs, including their edit/build latency receipts, remain required before this card can claim the cross-host criterion.
 
-The current repository already has the cross-host package-transition and native-library test surfaces. This card does not claim those external hosts were executed here. A disposable Linux run with the prebuilt binary did exercise the direct, package test, typed service, config explain, AOT executable, native Library, C host, split, and fold commands; the focused Cargo test could not start because the workspace currently fails in unrelated `jet-jit` compilation.
+The current repository already has the cross-host package-transition and native-library test surfaces. This card does not claim those external hosts were executed here. A disposable Linux run with the prebuilt binary did exercise the direct, package test, typed service, config explain, AOT executable, native Library, C host, split, and fold commands. The first focused test run found a stale lock baseline after those later build actions (`test result: FAILED. 9 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 79.70s`); the baseline now captures immediately before split. A Cargo rerun then reached an unrelated sibling edit in `crates/jet-foundation/src/Syntax/package_files.rs` and stopped on Rust `E0658` before executing the test.
 
-No independent fresh-context reviewer has signed off this journey yet.
+Two fresh-context reviews compared the journey. They confirm the source-growth path and identify the remaining gaps: local-source install still fails closed with `E1272`, split identity and foreign-host proof need stronger receipts, and clean-host coverage is absent. This is review evidence, not owner acceptance.
 
 ## Canonical surfaces used
 

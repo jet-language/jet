@@ -1215,6 +1215,13 @@ mode (structural check).
 
 **`jet new <name>`** creates `<name>/run.jet` with a zero-argument `fn run()`
 (hello world), plus `<name>/package.jet` and `<name>/.gitignore` (`build/`).
+Inside that package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
+`jet test` use the shared entry resolver: `run.jet`, then `src/run.jet`, then
+`<package>.jet`. An explicit file or directory remains an explicit target;
+workspace ambiguity names the members and requires `-p` or an explicit path.
+One retired `main.jet` layout migrates to `run.jet` with a notice; mixed or
+canonical-plus-retired layouts fail closed as ambiguous (D-ILE1,
+D-CLI-BARE1, D-VERDICT-678-1).
 
 Example: `examples/features/tooling/tests.jet`; scope members in
 `examples/features/tooling/test_members.jet`. Goldens: `examples/features/expected/20_tests.test.out`,

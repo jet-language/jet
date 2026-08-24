@@ -149,6 +149,26 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
 }
 
 #[test]
+fn run_help_teaches_the_project_default_and_keeps_explicit_targets() {
+    let usage = jet::CLI::command_usage("run");
+    assert_eq!(usage, "jet run [<file.jet|dir>] [-- <args>]");
+
+    for args in [["run", "--help"], ["help", "run"]] {
+        let out = Command::new(jet())
+            .args(args)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("jet run [<file.jet|dir>] [-- <args>]"),
+            "{args:?} omitted the optional project target: {stdout}"
+        );
+    }
+}
+
+#[test]
 fn external_completion_preserves_checked_program_commands() {
     let dir = isolated_cwd("shape_cli_program_commands");
     fs::write(dir.join("commands.jet"), r#"#CLI(Standard)

@@ -265,6 +265,12 @@ fn ui_snapshots() {
         // D-BUILDENTRY1: selected-root build diagnostics need programmable
         // staging, not ordinary runtime compilation.
         let programmable_build = src.lines().any(|l| l.trim() == "// @programmable_build");
+        // D-CMDOVERRIDE1=A / E3540: package-scope command collisions are
+        // authority diagnostics, so this fixture asks the same checked
+        // Package resolver for its duplicate locations.
+        let command_override_conflict = src
+            .lines()
+            .any(|l| l.trim() == "// @command_override_conflict");
         let build_grants = src
             .lines()
             .find_map(|line| line.trim().strip_prefix("// @build_grants "))
@@ -417,6 +423,28 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
+        } else if command_override_conflict {
+            let root = path.parent().expect("command conflict fixture parent");
+            let resolver = jet::Authority::AuthorityResolver::open(root)
+                .expect("command conflict fixture authority");
+            let package = resolver
+                .checked_package(Path::new("."))
+                .expect("command conflict fixture package")
+                .facts;
+            let error = package
+                .resolve_command_entry_checked(&resolver, "run")
+                .expect_err("command conflict fixture must have duplicate run overrides");
+            let marker = "// @command_override_conflict";
+            let marker_start = src.find(marker).expect("command conflict marker");
+            let diagnostic = jet::Diagnostics::Diagnostic::from_row(
+                "E3540",
+                &[("command", "run"), ("locations", error.as_str())],
+                Some(jet::Diagnostics::Span::new(
+                    marker_start,
+                    marker_start + marker.len(),
+                )),
+            );
+            jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if dev_interpreter {
             match jet::Interpreter::dev_iteration(&file_arg, false, true) {
                 jet::Interpreter::RunOutcome::Problems(diags) => {

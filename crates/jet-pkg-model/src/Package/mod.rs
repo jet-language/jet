@@ -826,9 +826,11 @@ impl PackageFacts {
         Ok(output)
     }
 
-    /// Resolve the selected runnable output. A canonical checked `run.jet`
-    /// wins before any other selector. Retired entry filenames are migrated
-    /// once, before the authority snapshot is refreshed.
+    /// Resolve the stock runnable output. The ordinary checked `run.jet`
+    /// fallback wins before any other selector; command-role homes are chosen
+    /// by the command front door, not by this stock-entry resolver. Retired
+    /// entry filenames are migrated once, before the authority snapshot is
+    /// refreshed.
     pub fn resolve_run_entry(
         &self,
         root: &std::path::Path,
@@ -940,6 +942,91 @@ impl PackageFacts {
                 .join(" and ");
             return Err(format!(
                 "two build entries for the package: {locations}"
+            ));
+        }
+        Ok(entries.into_iter().next().map(|(file, _)| file))
+    }
+
+    /// Resolve one optional command-function override from the package scope.
+    ///
+    /// D-CMDOVERRIDE1=A makes the package source tree the scope for a bare
+    /// command. The first source file is deterministic (the `@…jet` home sorts
+    /// first), but a command still has exactly one owner: two top-level
+    /// functions with the same command name are an authority error. Nested
+    /// marked role files are not command homes; only the package root may use
+    /// the marked namespace (D-ROLEFILE1=A).
+    pub fn resolve_command_entry(
+        &self,
+        root: &std::path::Path,
+        command: &str,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        let resolver = AuthorityResolver::open(root)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        self.resolve_command_entry_checked(&resolver, command)
+            .map(|file| file.map(|file| file.path))
+    }
+
+    /// Resolve a command override from one already-open authority snapshot.
+    pub fn resolve_command_entry_checked(
+        &self,
+        resolver: &AuthorityResolver,
+        command: &str,
+    ) -> Result<Option<CheckedFile>, String> {
+        let mut files = self
+            .source_files_checked(resolver)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        files.retain(|file| {
+            let is_role_file = file
+                .relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| crate::Syntax::COMMAND_ROLE_FILES.contains(&name));
+            if !is_role_file {
+                return true;
+            }
+            file.relative
+                .parent()
+                .map(|parent| parent.as_os_str().is_empty() || parent == Path::new("."))
+                .unwrap_or(true)
+        });
+        if let Some(role_name) = crate::Syntax::command_role_file(command) {
+            let role_path = Path::new(role_name);
+            if let Some(role_file) = files.iter().find(|file| file.relative == role_path) {
+                let role_entries = self
+                    .discover_function_entries_from_files(
+                        resolver,
+                        std::slice::from_ref(role_file),
+                        command,
+                        false,
+                        false,
+                    )
+                    .map_err(|error| format!("{}: {error}", self.origin))?;
+                if !role_entries.is_empty() {
+                    if role_entries.len() > 1 {
+                        let locations = role_entries
+                            .iter()
+                            .map(|(file, line)| format!("{}:{line}", file.path.display()))
+                            .collect::<Vec<_>>()
+                            .join(" and ");
+                        return Err(format!(
+                            "two `{command}` command overrides for the package: {locations}"
+                        ));
+                    }
+                    return Ok(role_entries.into_iter().next().map(|(file, _)| file));
+                }
+            }
+        }
+        let entries = self
+            .discover_function_entries_from_files(resolver, &files, command, false, false)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        if entries.len() > 1 {
+            let locations = entries
+                .iter()
+                .map(|(file, line)| format!("{}:{line}", file.path.display()))
+                .collect::<Vec<_>>()
+                .join(" and ");
+            return Err(format!(
+                "two `{command}` command overrides for the package: {locations}"
             ));
         }
         Ok(entries.into_iter().next().map(|(file, _)| file))

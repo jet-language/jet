@@ -1325,7 +1325,6 @@
       return { ok: false, label: "Source changed since this editor opened", color: "#fb7185" };
     }
     const input = inlinePinFacts(found.graph, found.expr);
-    if (!input) return null;
     const facts = expressionFacts(found.graph, body.new_expr);
     if (facts.invalid) return { ok: false, label: facts.label, color: "#fb7185" };
     if (!facts.known || !facts.type) {
@@ -1335,6 +1334,7 @@
         color: "#fb7185"
       };
     }
+    if (!input) return null;
     const plan = dataCompatibilityPlan({ type: facts.type, fallible: facts.fallible, ability: facts.ability }, input);
     if (plan.ok && !plan.exact) {
       return { ok: false, label: "Inline value type " + facts.type + " does not match " + input.type, color: "#fb7185" };
@@ -2028,7 +2028,8 @@
     const targetNode = nodeForPin(graph, target);
     if (!node || !targetNode || !node.source_span || !targetNode.source_span) return false;
     if (!["branch", "dispatch"].includes(node.kind)) return false;
-    return Number(targetNode.source_span.start) >= Number(node.source_span.end);
+    if (Number(targetNode.source_span.start) < Number(node.source_span.end)) return false;
+    return (graph.wires || []).filter((wire) => wire.wire_kind === "control" && wire.to_pin === target.pin_id).length > 1;
   }
 
   function inlineForPin(graph, pin) {
@@ -2078,7 +2079,7 @@
         label: "Structured join already represented",
         color: "#7dd3fc"
       };
-      showToast("Structured join already represented; downstream source step stays single");
+      showToast("structured join already represented; downstream source step stays single");
       return true;
     }
     if (!drag?.rewire

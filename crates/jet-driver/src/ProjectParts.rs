@@ -178,6 +178,7 @@ pub fn source_files(root: &Path) -> Vec<PathBuf> {
         .iter()
         .filter(|file| {
             !is_manifest_file(&file.relative)
+                && !is_command_role_file(&file.relative)
                 && !nested.iter().any(|package| file.relative.starts_with(package))
         })
         .map(|file| file.path.clone())
@@ -191,6 +192,15 @@ fn is_manifest_file(relative: &Path) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name == Syntax::PACKAGE_FILE || name == Syntax::PAYLOAD_FILE)
+}
+
+/// D-ROLEFILE1=A: command homes are selected by the command resolver, not
+/// indexed as automatic project modules or package test members.
+fn is_command_role_file(relative: &Path) -> bool {
+    relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| Syntax::COMMAND_ROLE_FILES.contains(&name))
 }
 
 pub fn scan_with_diagnostics(
@@ -207,7 +217,9 @@ pub fn scan_with_diagnostics(
     };
     let mut files = checked_files
         .iter()
-        .filter(|file| !is_manifest_file(&file.relative))
+        .filter(|file| {
+            !is_manifest_file(&file.relative) && !is_command_role_file(&file.relative)
+        })
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     files.extend(
@@ -217,6 +229,7 @@ pub fn scan_with_diagnostics(
             .filter(|path| {
                 path.starts_with(root)
                     && path.extension().and_then(|ext| ext.to_str()) == Some(Syntax::FILE_EXT)
+                    && !is_command_role_file(path.strip_prefix(root).unwrap_or(path))
             })
             .cloned(),
     );

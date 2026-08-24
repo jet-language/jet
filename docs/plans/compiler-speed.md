@@ -67,10 +67,12 @@ the interpreter path. A missing row, a newly broken oracle, a tier refusal, or
 a divergent result is a failed differential, not a workload exclusion.
 
 The speed proof uses the existing phase reports and typed `CompilerProbe`
-provider. Its corpus pins each source and expected-output digest. Each measured
-row records compiler and Core identities, target, profile, backend, linker,
-host, cache state, fixed warmup/sample counts, elapsed variance, and phase
-totals. Clean, no-change, and representative-edit measurements remain separate.
+provider. Its corpus pins each source and expected-output digest. The `dev`
+profile invokes the production Cranelift JIT lens; optimized `release` invokes
+the production rustc AOT lens. Each measured row records compiler and Core
+identities, target, profile, backend, linker, host, cache state, fixed
+warmup/sample counts, elapsed variance, peak RSS, and phase totals. Clean,
+no-change, and representative-edit measurements remain separate.
 Missing, partial, stale, or incompatible evidence is unavailable/failure; it
 never passes by changing the corpus, hiding a cold run, or increasing warmups.
 
@@ -80,7 +82,7 @@ AOT budgets until those rows and their variance are present. The same report
 must retain the failure rail for cache invalidation, nondeterminism, pathological
 inputs, and unstable samples.
 
-The checked-corpus dashboard uses one warmup and three measured samples for
+The checked-corpus dashboard uses one warmup and twenty measured samples for
 each clean and incremental JIT/AOT row. Its committed policy allows at most
 15% latency or peak-RSS regression against the pinned row and a range/median
 sample variance of at most 100%; output and phase records must remain exact.

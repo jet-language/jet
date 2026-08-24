@@ -1555,7 +1555,16 @@ fn main() {
         // c6vz465: `jet <file>` → `jet run <file>` when the first word names a
         // source path (not a typo'd subcommand like `buld`).
         if looks_like_jet_source(cmd) {
-            let resolved = resolve_command_target("run", cmd, flag_value(&raw, "-p"));
+            let resolved = resolve_command_target(
+                "run",
+                cmd,
+                flag_value(&raw, "-p"),
+                mode,
+                !raw.iter().any(|arg| arg == "--show-default"),
+            );
+            if raw.iter().any(|arg| arg == "--show-default") {
+                println!("jet run: using stock default");
+            }
             let program_args: Vec<&String> = if passthrough_sep.is_some() {
                 passthrough.clone()
             } else {
@@ -2296,7 +2305,13 @@ fn main() {
             let policy = watch_policy_from(&raw, WatchPolicy::Auto);
             let bare_member = flag_value(&raw, "-p");
             let file: String = match args.get(1) {
-                Some(f) => resolve_command_target("dev", f, bare_member),
+                Some(f) => resolve_command_target(
+                    "dev",
+                    f,
+                    bare_member,
+                    mode,
+                    !jet_argv.iter().any(|arg| arg == "--show-default"),
+                ),
                 None => match resolve_bare_entry("dev", &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")), bare_member) {
                     Some(entry) => entry.to_string_lossy().into_owned(),
                     None => {
@@ -2311,6 +2326,9 @@ fn main() {
             // different runner branch below.
             if let Some(target) = cross_target.as_deref() {
                 validate_target(target, mode);
+            }
+            if jet_argv.iter().any(|arg| arg == "--show-default") {
+                println!("jet dev: using stock default");
             }
             let dev_profile = if freestanding {
                 BuildProfile::Freestanding
@@ -2335,7 +2353,7 @@ fn main() {
             // cut checked #Target(Web) first, which made `fn dev()` totally
             // unreachable on any file that also declared #Target(Web), e.g.
             // ui_web_click.jet, which has both.)
-            if has_dev_entry_fn(&file) {
+            if has_dev_entry_fn(&file) && !jet_argv.iter().any(|arg| arg == "--show-default") {
                 run_dev_entry(
                     &file,
                     dev_profile,
@@ -2413,7 +2431,13 @@ fn main() {
             // entry the same way run/build/check/dev do; outside a package
             // the usage error is unchanged.
             let file: String = match args.get(1) {
-                Some(f) => resolve_command_target("debug", f, flag_value(&raw, "-p")),
+                Some(f) => resolve_command_target(
+                    "debug",
+                    f,
+                    flag_value(&raw, "-p"),
+                    mode,
+                    false,
+                ),
                 None => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     let member_flag = flag_value(&raw, "-p");
@@ -2553,6 +2577,13 @@ fn main() {
                 "run" | "build" | "test" | "check" | "dev" => {
                     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                     if let Some(entry) = resolve_bare_entry(cmd, &cwd, bare_member_flag) {
+                        let entry = if matches!(cmd, "run" | "dev")
+                            && !jet_argv.iter().any(|arg| arg == "--show-default")
+                        {
+                            package_command_override_for_entry(cmd, &entry, mode).unwrap_or(entry)
+                        } else {
+                            entry
+                        };
                         let entry_str = entry.to_string_lossy().to_string();
                         match cmd {
                             "test" => {
@@ -2567,6 +2598,9 @@ fn main() {
                                     .unwrap_or_else(|| Path::new("."));
                                 let root = jet::Loader::find_manifest_root(entry_dir)
                                     .unwrap_or_else(|| entry_dir.to_path_buf());
+                                if jet_argv.iter().any(|arg| arg == "--show-default") {
+                                    println!("jet test: using stock default");
+                                }
                                 run_test_package(
                                     &root,
                                     TestRunOpts {
@@ -2599,6 +2633,9 @@ fn main() {
                                 return;
                             }
                             _ => {
+                                if jet_argv.iter().any(|arg| arg == "--show-default") {
+                                    println!("jet {cmd}: using stock default");
+                                }
                                 // D-CLI1: use passthrough slice if `--` was present;
                                 // otherwise fall back to positional words after the subcommand.
                                 let program_args: Vec<&String> = if passthrough_sep.is_some() {
@@ -2728,6 +2765,9 @@ fn main() {
             let serial = jet_argv.iter().any(|a| a == "--serial");
             let show_default = jet_argv.iter().any(|a| a == "--show-default");
             let measure = jet_argv.iter().any(|a| a == "--measure");
+            if show_default {
+                println!("jet test: using stock default");
+            }
             // Keep directory targets intact so package tests/checks are
             // collected together instead of resolving to one run entry.
             let target_path = Path::new(target);
@@ -2862,7 +2902,13 @@ fn main() {
             // Ext-optional CLI: `jet run examples/test` resolves to `examples/test.jet`
             // for the path-accepting compile commands.
             let resolved = if matches!(cmd, "run" | "build" | "check") {
-                resolve_command_target(cmd, target, bare_member_flag)
+                resolve_command_target(
+                    cmd,
+                    target,
+                    bare_member_flag,
+                    mode,
+                    !jet_argv.iter().any(|arg| arg == "--show-default"),
+                )
             } else {
                 target.to_string()
             };
@@ -2885,6 +2931,9 @@ fn main() {
                     );
                     return;
                 }
+            }
+            if jet_argv.iter().any(|arg| arg == "--show-default") {
+                println!("jet {cmd}: using stock default");
             }
             let effective = effective_target(cmd, &resolved, cross_target.as_deref());
             run_compile_cmd(
@@ -3042,14 +3091,89 @@ fn manifest_default_target(file: &str) -> Option<String> {
     manifest.target
 }
 
+/// Report a package-scope command collision through the registered diagnostic
+/// row. The package authority owns discovery; the CLI only supplies the
+/// command name and the checked source locations.
+fn report_command_resolution_error(command: &str, error: &str, mode: OutputMode) -> ! {
+    if error.contains("command overrides for the package") {
+        crate::emit_cli_row(
+            "E3540",
+            &[("command", command), ("locations", error)],
+            mode.json,
+        );
+    } else {
+        crate::cli_error!(
+            @full "E2105",
+            error,
+            "command resolution uses the checked package source tree",
+            "repair the package source and run the command again"
+        );
+    }
+    exit(ExitCodes::USER_ERROR);
+}
+
+/// Resolve one package-scoped command-function override. A package without a
+/// manifest still has a single-file/package root for command discovery; a
+/// nested `@…jet` home is filtered by `PackageFacts` and cannot become a role
+/// file by accident.
+pub(crate) fn resolve_package_command_override(
+    root: &Path,
+    command: &str,
+    mode: OutputMode,
+) -> Option<PathBuf> {
+    let resolver = match jet::Authority::AuthorityResolver::open(root) {
+        Ok(resolver) => resolver,
+        Err(error) => report_entry_authority_error(error),
+    };
+    let package = match resolver.checked_package(Path::new(".")) {
+        Ok(package) => package.facts,
+        Err(error) if error.is_missing() => jet::Package::PackageFacts::default(),
+        Err(error) => report_entry_authority_error(error),
+    };
+    match package.resolve_command_entry_checked(&resolver, command) {
+        Ok(Some(file)) => Some(file.path),
+        Ok(None) => None,
+        Err(error) => report_command_resolution_error(command, &error, mode),
+    }
+}
+
+fn command_scope_root(entry: &Path) -> PathBuf {
+    let directory = if entry.is_dir() {
+        entry
+    } else {
+        entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."))
+    };
+    jet::Loader::find_manifest_root(directory).unwrap_or_else(|| directory.to_path_buf())
+}
+
+fn package_command_override_for_entry(
+    command: &str,
+    entry: &Path,
+    mode: OutputMode,
+) -> Option<PathBuf> {
+    let root = command_scope_root(entry);
+    resolve_package_command_override(&root, command, mode)
+}
+
 /// Resolve a command target through the shared bare-entry rule when it names a
 /// project directory. Explicit files keep the ordinary path resolver, so a
 /// directory target and a bare command have one workspace/member decision.
-fn resolve_command_target(cmd: &str, raw: &str, member_flag: Option<&str>) -> String {
+fn resolve_command_target(
+    cmd: &str,
+    raw: &str,
+    member_flag: Option<&str>,
+    mode: OutputMode,
+    use_override: bool,
+) -> String {
     if Path::new(raw).is_dir() {
         if let Some(entry) = resolve_bare_entry(cmd, Path::new(raw), member_flag) {
             if let Some(checked) = checked_explicit_file(&entry) {
-                return checked.to_string_lossy().into_owned();
+                let selected = if use_override && matches!(cmd, "run" | "dev") {
+                    package_command_override_for_entry(cmd, &checked, mode).unwrap_or(checked)
+                } else {
+                    checked
+                };
+                return selected.to_string_lossy().into_owned();
             }
         }
     }
@@ -3148,9 +3272,10 @@ fn checked_explicit_file(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Find the entry `.jet` file for a project rooted at `root` (D-ILE1, owner
-/// amendment 2026-07-17). `run.jet` is the zero-ceremony default, followed by
-/// `src/run.jet` and `<package>.jet`. Missing-entry errors name `run.jet`.
+/// Find the stock entry `.jet` file for a project rooted at `root` (D-ILE1,
+/// amended by D-ROLEFILE1). `run.jet` is the ordinary zero-ceremony fallback,
+/// followed by `src/run.jet` and `<package>.jet`; command homes are selected by
+/// the command resolver before this stock fallback is used.
 pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     let resolver = match jet::Authority::AuthorityResolver::open(root) {
         Ok(resolver) => resolver,

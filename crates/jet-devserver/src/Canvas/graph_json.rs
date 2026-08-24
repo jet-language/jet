@@ -463,6 +463,10 @@ fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> Executio
                     .collect(),
             }
         }
+        AST::Stmt::Switched { marker, .. } if AST::switched_off(marker) => {
+            ExecutionFlow::default()
+        }
+        AST::Stmt::Switched { body, .. } => execution_block(g, src, body),
         AST::Stmt::Unsafe { body, .. }
         | AST::Stmt::Impure { body, .. }
         | AST::Stmt::Reactive { body, .. }
@@ -538,7 +542,14 @@ fn direct_execution_node(g: &GraphBuilder, stmt: &AST::Stmt) -> Option<NodeRec> 
     g.nodes
         .iter()
         .filter(|node| node_wants_exec(node) && node.kind != "entry")
-        .find(|node| node.span.start == anchor.start && node.span.end == anchor.end)
+        .find(|node| match stmt {
+            AST::Stmt::Val(binding) => {
+                node.kind == "binding"
+                    && node.title == binding.name
+                    && node.span.start == binding.name_span.start
+            }
+            _ => node.span.start == anchor.start && node.span.end == anchor.end,
+        })
         .cloned()
 }
 

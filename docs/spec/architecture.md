@@ -469,14 +469,16 @@ oracle, missing record, or divergent result remains visible as a failure.
 The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
 compiler/Core identities, target, profile, backend, linker, host, cache state,
-fixed warmups and samples, elapsed variance, and phase totals. Clean,
-no-change, and representative-edit runs are distinct. Partial timing, changed
-inputs, incompatible identities, nondeterminism, pathological inputs, and
-unstable samples are unavailable/failure; they cannot be made green by changing
-the workload or hiding cold-cache work. The checked-corpus dashboard drives the
-production default JIT and optimized AOT paths through clean and incremental
-rows, with one warmup and three samples per row. Its pinned baseline allows at
-most 15% latency or peak-RSS regression and 100% range/median variance; exact
+fixed warmups and samples, elapsed variance, peak RSS, and phase totals. The
+`dev` profile invokes the production Cranelift JIT lens; optimized `release`
+invokes the production rustc AOT lens. Clean, no-change, and representative-
+edit runs are distinct. Partial timing, changed inputs, incompatible
+identities, nondeterminism, pathological inputs, and unstable samples are
+unavailable/failure; they cannot be made green by changing the workload or
+hiding cold-cache work. The checked-corpus dashboard drives the production
+default JIT and optimized AOT paths through clean and incremental rows, with
+one warmup and twenty samples per row. Its pinned baseline allows at most 15%
+latency or peak-RSS regression and 100% range/median variance; exact
 stdout/stderr hashes and phase totals remain part of each row. A baseline is
 valid only for its pinned machine and toolchain.
 
@@ -665,6 +667,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   later as `jet build --small`; the default leans toward speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
   runs a single file with no manifest, no project folder, and no config.
+  Inside a package, a bare `jet run` resolves the same complete program from
+  `run.jet`, `src/run.jet`, or `<package>.jet`; `jet dev`, `jet check`,
+  `jet build`, and `jet test` share that resolver, while an explicit source
+  path stays explicit.
   The generated `.rs` file remains a complete standalone program for audits.
   Native builds can split its marked fixed-runtime block into Jet's hidden
   cached `rlib`, then compile and link the generated user program. This process

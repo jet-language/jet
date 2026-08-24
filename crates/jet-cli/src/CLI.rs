@@ -438,7 +438,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
-        usage: Some("run <file.jet|dir> [-- <args>]"),
+        usage: Some("run [<file.jet|dir>] [-- <args>]"),
     },
     CommandSpec {
         name: "jobs",
@@ -1099,7 +1099,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--filter", help: "with test: only run claims whose name contains --filter=<substr>" },
     FlagSpec { long: "--shuffle", help: "with test: run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "with test: run tests one at a time instead of the parallel default" },
-    FlagSpec { long: "--show-default", help: "with test: ignore fn test and use the stock harness" },
+    FlagSpec { long: "--show-default", help: "with run/build/dev/test: use and report the stock default" },
     FlagSpec { long: "--measure", help: "with test: measure `.measure` claims" },
     FlagSpec { long: "--record", help: "with run/dev/test: record a named replay as --record=<name>" },
     FlagSpec { long: "--replay", help: "with debug: consume a named replay as --replay=<name>" },

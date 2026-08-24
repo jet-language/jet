@@ -112,6 +112,7 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     assert!(first.contains("\"state\":\"running\""), "{first}");
     assert!(first.contains("\"tier\":\"jet-dev-interpreter\""), "{first}");
     assert!(first.contains(&format!("\"revision\":\"{}\"", revision)), "{first}");
+    assert!(first.contains("run()"), "Canvas must expose the Jet entry function, not its host wrapper: {first}");
 
     let marker = "\"id\":\"canvas-debug-";
     let start = first.find(marker).expect("live response session id") + 6;
@@ -310,6 +311,20 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
         }
     }
     assert_eq!(std::fs::read_to_string(path).unwrap(), source);
+}
+
+#[test]
+fn canvas_graph_source_id_stays_project_relative_for_relative_entries() {
+    let graph = jet::Canvas::graph_json_for_file(Path::new("examples/features/basics/hello.jet"))
+        .expect("relative Canvas entry should project");
+    assert!(
+        graph.contains("\"source_id\":\"hello.jet\""),
+        "Canvas/debug source identity must match project file ids: {graph}"
+    );
+    assert!(
+        !graph.contains("examples/features/basics/hello.jet"),
+        "relative entry path leaked into the source identity: {graph}"
+    );
 }
 
 /// `step`/`s` stops on the very first statement of `main`, with the right Jet

@@ -129,7 +129,7 @@ fn alt_enter_guides_example_without_hooks_instead_of_pasting() {
     // Expand category, then Alt-Enter (ESC then Enter) for the example line.
     let transcript = run_pty(b"\r\x1b\r", "never", false).replace('\r', "");
     assert!(
-        transcript.contains("selected: jet run examples/features/basics/hello.jet"),
+        transcript.contains("selected: jet run"),
         "Alt-Enter should name the selected example:\n{transcript}"
     );
     assert!(

@@ -33,8 +33,8 @@
   }
   function defaultArgsForAction(item, pin) {
     const existing = (item.default_args || item.args || []).slice();
-    if (!pin) return existing.length ? existing : ["\"canvas\""];
     const inputs = (item.pins || []).filter((p) => p.direction === "input");
+    if (!pin) return inputs.length ? (existing.length ? existing : ["\"canvas\""]) : existing;
     if (!inputs.length) return existing;
     const graph = currentGraph(latestDoc);
     if (pin.direction === "output") {
@@ -707,7 +707,8 @@
           pins: action.pins || [],
           pure: !!action.pure,
           ret: action.ret || actionReturnType(action) || "Void",
-          args: action.default_args || ["\"canvas\""]
+          args: Array.isArray(action.default_args) ? action.default_args : [],
+          default_args: Array.isArray(action.default_args) ? action.default_args : []
         }));
         // `project_functions` is the query's source metadata view. The
         // authoritative action view already contains those exports with
@@ -789,8 +790,8 @@
               pure: !!member.pure,
               pins: member.pins || [],
               ret: member.ret || actionReturnType(member) || "Value",
-              args: member.default_args || ["1"],
-              default_args: member.default_args || ["1"]
+              args: Array.isArray(member.default_args) ? member.default_args : [],
+              default_args: Array.isArray(member.default_args) ? member.default_args : []
             }));
           }
         }

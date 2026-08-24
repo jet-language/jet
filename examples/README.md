@@ -8,6 +8,10 @@ each example's golden output. Run any example directly:
 jet run examples/features/basics/hello.jet
 ```
 
+For a new project, the default is shorter: `jet new hello && cd hello && jet
+run`. That command selects the generated `run.jet`; the explicit path above
+is the standalone-example form.
+
 ## Short path first (D-EXAMPLES-SHORTPATH1=A)
 
 Flagship examples teach the **magic default** first. Manual mechanics stay in a
@@ -22,6 +26,11 @@ the only path.
 
 New examples should land the same way: beginner default in the named flagship,
 long path only as an expert variant when the manual form is still worth teaching.
+
+Start with the [onboarding example](features/basics/onboarding/run.jet) after
+`jet new`: it is a normal `run.jet` project entry and teaches the same
+`new` -> `run` -> `check` -> `test` -> `fix` -> `explain` workflow as the first-hour
+guide.
 
 ## Genre marker (one rule)
 

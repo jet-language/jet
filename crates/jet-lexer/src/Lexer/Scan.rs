@@ -48,6 +48,17 @@ fn lex_raw_with_policy(
         allow_reserved_identifiers,
         config_surface,
     };
+    // D-SCRIPT-ENTRY1=A: the operating system owns a byte-zero shebang line.
+    // Advance the real source cursor so every later token keeps its original
+    // byte span and line number.
+    if src.as_bytes().starts_with(b"#!") {
+        while lx.i < lx.chars.len() && lx.at(lx.i) != '\n' {
+            lx.i += 1;
+        }
+        if lx.i < lx.chars.len() {
+            lx.i += 1;
+        }
+    }
     let mut toks = lx.run();
     toks.push(Token {
         kind: TokKind::Eof,
@@ -223,6 +234,21 @@ impl<'a> Lexer<'a> {
 
             if c.is_whitespace() {
                 self.i += 1;
+                continue;
+            }
+
+            // D-SCRIPT-ENTRY1=A: only byte-zero `#!` is launch metadata. A
+            // later marker is rejected, and its OS-owned line stays opaque.
+            if c == '#' && self.at(self.i + 1) == '!' {
+                let start = self.pos(self.i);
+                self.diags.push(Diagnostic::from_row(
+                    "E0042",
+                    &[],
+                    Some(Span::new(start, self.pos(self.i + 2))),
+                ));
+                while self.i < self.chars.len() && self.at(self.i) != '\n' {
+                    self.i += 1;
+                }
                 continue;
             }
 

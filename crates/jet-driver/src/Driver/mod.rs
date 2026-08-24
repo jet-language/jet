@@ -5436,7 +5436,7 @@ pub fn check_file_with_effect_facts_incremental_overlays(
 pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
     file: &str,
     overlays: &[(&Path, &str)],
-    _is_lsp: bool,
+    is_lsp: bool,
     cache: &mut crate::Sema::IncrementalSemaCache,
     prepared_frontend: &mut crate::Loader::PreparedFrontend,
 ) -> (
@@ -5448,7 +5448,7 @@ pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
     check_file_with_effect_facts_impl(
         file,
         overlays,
-        true,
+        is_lsp,
         Some(cache),
         Some(prepared_frontend),
         "dev",

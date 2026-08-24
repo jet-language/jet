@@ -25,12 +25,39 @@ pub const HANGAR_DIR: &str = "/etc/jet/hangar";
 /// E1225 and points users to the Jet-grammar files that replace its jobs.
 pub const JETPACK_TOML: &str = "jetpack.toml";
 
-/// Owner ruling 2026-07-17: a project's zero-ceremony executable entry is
-/// `run.jet`, matching Jet's `fn run()` entry function.
+/// D-VERDICT-678-1, amended by D-ROLEFILE1 (ratified 2026-08-10): `run.jet`
+/// remains the ordinary zero-ceremony fallback source for `jet run`, but it
+/// is not a reserved command-role filename. The optional command home is
+/// `@run.jet`.
 pub const DEFAULT_ENTRY_FILE: &str = "run.jet";
 
 /// Pre-ruling project entry name, accepted only as a compatibility fallback.
 pub const LEGACY_ENTRY_FILE: &str = "main.jet";
+
+/// D-ROLEFILE1=A (ratified 2026-08-10, card #1866): optional package-root
+/// command homes. The marked namespace is closed to these four command names;
+/// there is no command directory and no package/module role-file spelling.
+pub const COMMAND_FILE_RUN: &str = "@run.jet";
+pub const COMMAND_FILE_BUILD: &str = "@build.jet";
+pub const COMMAND_FILE_DEV: &str = "@dev.jet";
+pub const COMMAND_FILE_TEST: &str = "@test.jet";
+pub const COMMAND_ROLE_FILES: &[&str] = &[
+    COMMAND_FILE_RUN,
+    COMMAND_FILE_BUILD,
+    COMMAND_FILE_DEV,
+    COMMAND_FILE_TEST,
+];
+
+/// Return the package-root home for one of Jet's four command verbs.
+pub fn command_role_file(command: &str) -> Option<&'static str> {
+    match command {
+        "run" => Some(COMMAND_FILE_RUN),
+        "build" => Some(COMMAND_FILE_BUILD),
+        "dev" => Some(COMMAND_FILE_DEV),
+        "test" => Some(COMMAND_FILE_TEST),
+        _ => None,
+    }
+}
 
 /// D-LIT-DOT1=B (ratified 2026-08-20): named struct construction `Type{ field: val }`.
 /// Inferred form (type from context): `{ field: val }` — no type name.

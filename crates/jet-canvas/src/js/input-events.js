@@ -330,7 +330,7 @@
         return pin.node_id === graph.entry_node && pin.direction === "output" && pin.name === sourceNode.title;
       });
       if (inBody(sourceNode.source_span) || isEntryParam || (definition && Number(definition.source_span.end) < branchStart)) continue;
-      if (definition && inBody(definition.source_span)) continue;
+      if (definition && Number(definition.source_span.end) <= branchStart) continue;
       return `Convergence refused: ${sourceNode.title} is only available on another execution path; source unchanged.`;
     }
     return null;
@@ -562,6 +562,14 @@
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
     if (hitPinDefaultEditorAt(x, y)) return;
+    const pin = hitPinAt(x, y);
+    if (pin && pin.direction === "output" && pin.type === "exec") {
+      hoverPin = pin;
+      const graph = currentGraphOrNull();
+      drag = { mode: "pin", pin, graphId: graph && graph.graph_id, revision: latestDoc && latestDoc.revision, sourceId: currentCanvasSourceId(), x, y, mx: x, my: y };
+      showToast(pin.name + ": " + pin.type);
+      return;
+    }
     const endpoint = hitWireEndpointAt(x, y);
     if (endpoint && endpoint.pin) {
       hoverPin = endpoint.pin;
@@ -570,7 +578,6 @@
       showToast("Rewire " + pinName(endpoint.pin));
       return;
     }
-    const pin = hitPinAt(x, y);
     if (pin) {
       hoverPin = pin;
       const graph = currentGraphOrNull();

@@ -1259,40 +1259,19 @@ async function elementCenter(ctx, expression, label) {
 async function replaceSearch(ctx, expression, value, label) {
   const point = await elementCenter(ctx, expression, label);
   await ctx.driver.click(point.x, point.y);
-  await ctx.driver.send("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "Control",
-    code: "ControlLeft",
-    modifiers: 2,
-    windowsVirtualKeyCode: 17,
-    nativeVirtualKeyCode: 17,
-  }, ctx.driver.pageSession);
-  await ctx.driver.send("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "a",
-    code: "KeyA",
-    modifiers: 2,
-    windowsVirtualKeyCode: 65,
-    nativeVirtualKeyCode: 65,
-  }, ctx.driver.pageSession);
-  await ctx.driver.send("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "a",
-    code: "KeyA",
-    modifiers: 2,
-    windowsVirtualKeyCode: 65,
-    nativeVirtualKeyCode: 65,
-  }, ctx.driver.pageSession);
-  await ctx.driver.send("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Control",
-    code: "ControlLeft",
-    modifiers: 0,
-    windowsVirtualKeyCode: 17,
-    nativeVirtualKeyCode: 17,
-  }, ctx.driver.pageSession);
-  await ctx.driver.press("Backspace");
-  await ctx.driver.type(value);
+  const focused = await ctx.driver.evaluate(`(() => {
+    const element = ${expression};
+    if (!element) return false;
+    element.focus();
+    if (typeof element.select === "function") element.select();
+    return document.activeElement === element;
+  })()`);
+  if (!focused) throw new Error(`element could not receive text input: ${label}`);
+  await ctx.driver.send("Input.insertText", { text: String(value) }, ctx.driver.pageSession);
+  await ctx.driver.evaluate(`(() => {
+    const element = ${expression};
+    element?.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
 }
 
 async function assertLiveDetailsControls(ctx, label) {
@@ -2436,23 +2415,42 @@ export const scenarios = {
     const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
     const root = project.project_root;
     await writeFile(join(root, "package.jet"), "name: \"canvas_alias_insert\"\nversion: \"0.1.0\"\n");
-    await writeFile(join(root, "helper.jet"), `module tools {
+    const helperSource = `module tools {
     pub fn square(n: Int) Int -> {
         return n * n
     }
 }
-`);
-    await writeFile(join(root, "main.jet"), `use "./helper" as h
+`;
+    const baseSource = `use "./helper" as h
 
 fn run() {
     limit :: 4
     print(limit)
 }
-`);
+`;
+    await writeFile(join(root, "helper.jet"), helperSource);
+    await writeFile(join(root, "main.jet"), baseSource);
     await ctx.openCanvas();
-    await ctx.openPinActionMenu("limit", "limit");
-    await ctx.type("square");
-    await ctx.expectMenu("square");
+
+    const openSquareMenu = async () => {
+      const from = await ctx.pin("limit", "limit");
+      await ctx.driver.drag({ x: from.x, y: from.y }, { x: from.x + 190, y: from.y + 30 });
+      await ctx.expectMenu("Search actions");
+      await ctx.type("square");
+      await ctx.expectMenu("square");
+    };
+    const clickMenuEntry = async (label) => {
+      const point = await elementCenter(
+        ctx,
+        `Array.from(document.querySelectorAll("#context-menu [data-menu-action]")).find((button) => button.textContent.includes(${JSON.stringify(label)}))`,
+        `${label} Canvas menu entry`,
+      );
+      await ctx.driver.click(point.x, point.y);
+      await sleep(500);
+      await ctx.waitForCanvas();
+    };
+
+    await openSquareMenu();
     const action = await ctx.driver.evaluate(`(() => {
       const entries = window.__jetCanvasTest.actionEntries();
       return entries.find((entry) => entry.title === "square") || null;
@@ -2460,8 +2458,17 @@ fn run() {
     if (!action || action.node_descriptor_id !== "function_pure" || action.insert_callee !== "h.tools.square") {
       throw new Error(`imported alias action lost descriptor callee: ${JSON.stringify(action)}`);
     }
-    await ctx.pickEntry("square");
+    await clickMenuEntry("square");
     await ctx.expectSourceContains("h.tools.square(limit)");
+    const successReceipt = await ctx.driver.evaluate(`({
+      tx: window.__jetCanvasLastTx || null,
+      result: window.__jetCanvasLastTxResult || null
+    })`);
+    if (successReceipt.tx?.op !== "insert_call"
+      || successReceipt.tx?.callee !== action.insert_callee
+      || successReceipt.result?.changed !== true) {
+      throw new Error(`menu insertion did not use the descriptor callee through the source transaction: ${JSON.stringify(successReceipt)}`);
+    }
     const insertedSource = await ctx.source();
     const insertedGraph = await ctx.graph();
     const insertedRun = graphByTitle(insertedGraph, "run");
@@ -2481,30 +2488,63 @@ fn run() {
     await ctx.openCanvas();
     if (await ctx.source() !== insertedSource) throw new Error("alias insertion reload changed canonical source");
 
-    const current = await ctx.graph();
-    const run = graphByTitle(current, "run");
-    const stale = await ctx.uiTransaction({
-      schema_version: 1,
-      op: "insert_call",
-      revision: "sha256-stale",
-      graph_id: run.graph_id,
-      callee: "h.tools.square",
-      args: ["limit"]
-    });
-    if (stale.ok || !/stale|conflict/i.test(JSON.stringify(stale.json || stale)) || await ctx.source() !== insertedSource) {
-      throw new Error(`stale alias insertion was not recoverably refused: ${JSON.stringify(stale)}`);
+    await openSquareMenu();
+    const staleAction = await ctx.driver.evaluate(`(() => {
+      const entries = window.__jetCanvasTest.actionEntries();
+      return entries.find((entry) => entry.title === "square") || null;
+    })()`);
+    await writeFile(join(root, "main.jet"), insertedSource + "\n// external stale edit\n");
+    const staleSource = await ctx.source();
+    await ctx.driver.evaluate("window.__jetCanvasLastTx = null; window.__jetCanvasLastTxResult = null;");
+    await clickMenuEntry("square");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasLastTxResult !== null"), "stale menu insertion refusal");
+    const staleReceipt = await ctx.driver.evaluate(`({
+      tx: window.__jetCanvasLastTx || null,
+      result: window.__jetCanvasLastTxResult || null,
+      state: window.__jetCanvasCanvasState || null,
+      toast: window.__jetCanvasTest?.lastToast || ""
+    })`);
+    if (staleReceipt.tx?.op !== "insert_call"
+      || staleReceipt.tx?.callee !== staleAction?.insert_callee
+      || staleReceipt.result?.kind !== "conflict"
+      || staleReceipt.state?.kind !== "stale"
+      || !/stale|source changed|unchanged/i.test(`${staleReceipt.state?.detail || ""} ${staleReceipt.toast}`)
+      || await ctx.source() !== staleSource) {
+      throw new Error(`stale menu insertion did not preserve the source and show recovery: ${JSON.stringify(staleReceipt)}`);
     }
-    const invalidDoc = await ctx.graph();
-    const invalid = await ctx.uiTransaction({
-      schema_version: 1,
-      op: "insert_call",
-      revision: invalidDoc.revision,
-      graph_id: run.graph_id,
-      callee: "h.tools.square",
-      args: ["\"wrong type\""]
-    });
-    if (invalid.ok || !/diagnostic|type|E\d{4}/i.test(JSON.stringify(invalid.json || invalid)) || await ctx.source() !== insertedSource) {
-      throw new Error(`ill-typed alias insertion was not recoverably refused: ${JSON.stringify(invalid)}`);
+
+    const invalidHelperSource = helperSource.replace("n: Int", "n: String").replace("return n * n", "return 1");
+    await writeFile(join(root, "helper.jet"), helperSource);
+    await writeFile(join(root, "main.jet"), baseSource);
+    await ctx.openCanvas();
+    await openSquareMenu();
+    const invalidAction = await ctx.driver.evaluate(`(() => {
+      const entries = window.__jetCanvasTest.actionEntries();
+      return entries.find((entry) => entry.title === "square") || null;
+    })()`);
+    if (!invalidAction || invalidAction.insert_callee !== "h.tools.square") {
+      throw new Error(`ill-typed menu action lost descriptor callee before refusal: ${JSON.stringify(invalidAction)}`);
+    }
+    const unchangedSource = await ctx.source();
+    await writeFile(join(root, "helper.jet"), invalidHelperSource);
+    await ctx.driver.evaluate("window.__jetCanvasLastTx = null; window.__jetCanvasLastTxResult = null");
+    await clickMenuEntry("square");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasLastTxResult !== null"), "ill-typed menu insertion refusal");
+    const invalidReceipt = await ctx.driver.evaluate(`({
+      tx: window.__jetCanvasLastTx || null,
+      result: window.__jetCanvasLastTxResult || null,
+      state: window.__jetCanvasCanvasState || null
+    })`);
+    const problem = await ctx.expectProblem();
+    if (invalidReceipt.tx?.op !== "insert_call"
+      || invalidReceipt.tx?.callee !== invalidAction.insert_callee
+      || invalidReceipt.result?.kind !== "diagnostic"
+      || !Array.isArray(invalidReceipt.result?.diagnostics)
+      || invalidReceipt.state?.kind !== "invalid"
+      || !String(problem?.rendered || "").includes("Why:")
+      || !String(problem?.rendered || "").includes("Fix:")
+      || await ctx.source() !== unchangedSource) {
+      throw new Error(`ill-typed menu insertion did not show the checked refusal or preserve source: ${JSON.stringify({ invalidReceipt, problem })}`);
     }
   },
 
@@ -4628,6 +4668,9 @@ fn run() {
       await ctx.waitFor(visible, label);
     };
     await ctx.openCanvas();
+    if (await ctx.driver.evaluate("document.getElementById('first-run-tour')?.classList.contains('is-open')")) {
+      await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide before project rename");
+    }
     const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
     const root = project.project_root;
     await writeFile(join(root, "package.jet"), "name: \"canvas_project_rename\"\nversion: \"0.1.0\"\n");
@@ -4682,10 +4725,12 @@ fn use_helper() Int -> {
         return realFetch(input, init);
       };
     })()`);
-    await clickElement(ctx, `document.getElementById("function-rename-to")`, "function rename input");
-    await ctx.driver.shortcut(["Control", "A"]);
-    await ctx.driver.type("compute");
-    await clickElement(ctx, `document.getElementById("rename-function")`, "project rename apply");
+    await replaceSearch(ctx, `document.getElementById("function-rename-to")`, "compute", "project rename input");
+    const renameValue = await ctx.driver.evaluate(`document.getElementById("function-rename-to")?.value || ""`);
+    if (renameValue !== "compute") throw new Error(`project rename input gesture did not update the field: ${renameValue}`);
+    const renamePhase = await ctx.driver.evaluate(`window.__jetCanvasDetailsState?.phase || ""`);
+    if (renamePhase !== "dirty") throw new Error(`project rename input gesture did not mark the editor dirty: ${renamePhase}`);
+    await pressAttribute(ctx, "id", "rename-function", "project rename apply");
     await ctx.waitFor(async () => {
       return await ctx.driver.evaluate(`window.__jetCanvasLastTxResult !== null && window.__jetCanvasLastTxResult !== undefined`);
     }, "project rename UI result");
@@ -4762,10 +4807,10 @@ fn use_helper() Int -> {
         return originalFetch(input, init);
       };
     })()`);
-    await clickElement(ctx, `document.getElementById("function-rename-to")`, "stale function rename input");
-    await ctx.driver.shortcut(["Control", "A"]);
-    await ctx.driver.type("compute");
-    await clickElement(ctx, `document.getElementById("rename-function")`, "stale project rename apply");
+    await replaceSearch(ctx, `document.getElementById("function-rename-to")`, "compute", "stale project rename input");
+    const staleRenameValue = await ctx.driver.evaluate(`document.getElementById("function-rename-to")?.value || ""`);
+    if (staleRenameValue !== "compute") throw new Error(`stale project rename input gesture did not update the field: ${staleRenameValue}`);
+    await pressAttribute(ctx, "id", "rename-function", "stale project rename apply");
     await ctx.waitFor(async () => {
       const result = await ctx.driver.evaluate(`window.__jetCanvasLastTxResult`);
       return result && result.kind === "conflict";
@@ -5739,13 +5784,27 @@ fn run() {
     const changedSource = originalSource
       .replace("event.new<Int>()", "event.new<String>()")
       .replace("clicked.emit(1)", 'clicked.emit("one")');
+    const selectSourceText = async () => {
+      const session = ctx.driver.pageSession;
+      await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Control", code: "ControlLeft", modifiers: 2, windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 }, session);
+      await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyDown", key: "A", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 }, session);
+      await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyUp", key: "A", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 }, session);
+      await ctx.driver.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft", modifiers: 0, windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 }, session);
+    };
     const applySourceByGesture = async (source, label) => {
       const before = await ctx.source();
+      await ctx.driver.evaluate(`(() => {
+        const drawer = document.getElementById("right-drawer");
+        drawer?.removeAttribute("style");
+        drawer?.classList.remove("is-drawer-open");
+        document.getElementById("dock-details")?.classList.remove("is-active");
+      })()`);
       const toolsOpen = await ctx.driver.evaluate(`!!document.querySelector("#more-tools-toggle")?.parentElement?.open`);
       if (!toolsOpen) await clickElement(ctx, `document.getElementById("more-tools-toggle")`, `${label} tools`);
       await clickElement(ctx, `document.getElementById("edit-source")`, `${label} open editor`);
-      await ctx.driver.shortcut(["Control", "a"]);
-      await ctx.driver.type(source);
+      await clickElement(ctx, `document.getElementById("source-editor")`, `${label} focus editor`);
+      await selectSourceText();
+      await ctx.driver.send("Input.insertText", { text: source }, ctx.driver.pageSession);
       await clickElement(ctx, `document.getElementById("apply-source-edit")`, `${label} apply`);
       await ctx.waitFor(async () => {
         const result = await ctx.driver.evaluate("window.__jetCanvasLastTxResult || null");
@@ -5780,11 +5839,18 @@ fn run() {
 
     const staleSource = await ctx.source();
     const staleRevision = (await ctx.graph()).revision;
+    await ctx.driver.evaluate(`(() => {
+      const drawer = document.getElementById("right-drawer");
+      drawer?.removeAttribute("style");
+      drawer?.classList.remove("is-drawer-open");
+      document.getElementById("dock-details")?.classList.remove("is-active");
+    })()`);
     const toolsOpen = await ctx.driver.evaluate(`!!document.querySelector("#more-tools-toggle")?.parentElement?.open`);
     if (!toolsOpen) await clickElement(ctx, `document.getElementById("more-tools-toggle")`, "stale source tools");
     await clickElement(ctx, `document.getElementById("edit-source")`, "open stale source editor");
-    await ctx.driver.shortcut(["Control", "a"]);
-    await ctx.driver.type(staleSource);
+    await clickElement(ctx, `document.getElementById("source-editor")`, "focus stale source editor");
+    await selectSourceText();
+    await ctx.driver.send("Input.insertText", { text: staleSource }, ctx.driver.pageSession);
     const externalSource = staleSource.replace('clicked.emit("one")', 'clicked.emit("external")');
     const external = await ctx.transaction({
       schema_version: 1,
@@ -5809,7 +5875,8 @@ fn run() {
     if (await ctx.source() !== externalSource) throw new Error("stale event source overwrote the external edit");
 
     await ctx.openCanvas();
-    await clickElement(ctx, `document.getElementById("dock-graphs")`, "reopen event source files");
+    const filesAlreadyVisible = await ctx.driver.evaluate(`!!document.querySelector('[data-project-file="events.jet"]')`);
+    if (!filesAlreadyVisible) await clickElement(ctx, `document.getElementById("dock-graphs")`, "reopen event source files");
     await ctx.waitFor(async () => !!(await ctx.driver.evaluate(`document.querySelector('[data-project-file="events.jet"]')`)), "event source file after reload");
     await clickElement(ctx, `document.querySelector('[data-project-file="events.jet"]')`, "reopen events source");
     await ctx.waitFor(async () => {
@@ -6119,6 +6186,9 @@ fn run() {
 
   "debug-live-session": async (ctx) => {
     await ctx.openCanvas();
+    if (await ctx.driver.evaluate(`document.getElementById("first-run-tour")?.classList.contains("is-open")`)) {
+      await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
+    }
     await ctx.driver.evaluate(`(() => {
       window.__debugProof = { requests: [], fetch: window.fetch.bind(window) };
       window.fetch = async (input, init) => {
@@ -6160,7 +6230,7 @@ fn run() {
         && state.debugOverlay && state.debugOverlay.revision === firstRevision
         && state.debugOverlay && state.debugOverlay.active_line !== first.debugOverlay.active_line
         && state.debugOverlay.runtime_state === "live"
-        && state.debugOverlay.locals && state.debugOverlay.locals.some((local) => local.name === "total" && local.type === "Int" && local.value === "1")
+        && state.debugOverlay.locals && state.debugOverlay.locals.some((local) => local.name === "value" && local.type === "Int" && local.value === "16")
         && state.debugOverlay.call_stack && state.debugOverlay.call_stack.some((frame) => frame.includes("run()"))
         && state.debugOverlay.active_node_id
         && Array.isArray(state.debugOverlay.wire_path)
@@ -6169,7 +6239,7 @@ fn run() {
     const stepProof = await ctx.driver.evaluate(`window.__debugProof.requests.find((entry) => entry.request.session_id === ${JSON.stringify(firstSessionId)} && !entry.request.stop) || null`);
     if (!stepProof || stepProof.response.protocol !== "jet.canvas.debug" || !stepProof.response.ok
       || !stepProof.response.overlay || stepProof.response.overlay.runtime_state !== "live"
-      || !stepProof.response.overlay.locals?.some((local) => local.name === "total" && local.type === "Int" && local.value === "1")
+      || !stepProof.response.overlay.locals?.some((local) => local.name === "value" && local.type === "Int" && local.value === "16")
       || !Array.isArray(stepProof.response.overlay.call_stack) || !stepProof.response.overlay.call_stack.some((frame) => frame.includes("run()"))
       || !stepProof.response.overlay.active_node_id || !Array.isArray(stepProof.response.overlay.wire_path)) {
       throw new Error(`debug step bypassed the live production payload: ${JSON.stringify(stepProof)}`);
@@ -6493,6 +6563,7 @@ fn run() {
     await ctx.expectMenu("abs");
     await ctx.pickEntry("abs");
     await sleep(500);
+    console.error("RAD_GRAPH_TX_DEBUG", JSON.stringify(await ctx.driver.evaluate(`(async () => ({ tx: window.__jetCanvasLastTx || null, result: window.__jetCanvasLastTxResult || null, state: window.__jetCanvasCanvasState || null, source: await fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text()) }))()`)));
     await ctx.waitForCanvas();
     await ctx.waitFor(async () => (await ctx.source()).includes("math.abs"), "graph gesture source transaction");
     const sourceAfterGraph = await ctx.source();

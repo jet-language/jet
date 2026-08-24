@@ -568,19 +568,44 @@ fn call_insert_target(
     if node.node_id.ends_with(":entry") {
         return Ok((anchor.insert_offset, "    ".to_string()));
     }
+    let indent = indentation_at(src, node.span.start);
+    let statement_indent = if indent.is_empty() {
+        "    ".to_string()
+    } else {
+        indent
+    };
+    let line = line_start(src, node.span.start);
+    let node_end = node.span.end.min(src.len());
+    let line_end = src[node_end..]
+        .find('\n')
+        .map(|offset| node_end + offset)
+        .unwrap_or(src.len());
+    let inline_body = line == line_start(src, anchor.insert_offset)
+        && src
+            .get(line..node.span.start.min(src.len()))
+            .is_some_and(|prefix| prefix.contains('{'))
+        && src
+            .get(node_end..line_end)
+            .is_some_and(|suffix| suffix.contains('}'));
+    if inline_body {
+        let insert = if direction == "input" {
+            anchor.insert_offset
+        } else {
+            src[node_end..line_end]
+                .find('}')
+                .map(|offset| node_end + offset)
+                .unwrap_or(line_end)
+        };
+        return Ok((insert, format!("\n{statement_indent}")));
+    }
     let insert = if direction == "input" {
-        line_start(src, node.span.start)
+        line
     } else {
         line_after(src, node.span.end)
     };
-    let indent = indentation_at(src, node.span.start);
     Ok((
         insert,
-        if indent.is_empty() {
-            "    ".to_string()
-        } else {
-            indent
-        },
+        statement_indent,
     ))
 }
 

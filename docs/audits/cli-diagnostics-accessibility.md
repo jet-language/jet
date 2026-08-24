@@ -143,7 +143,7 @@ single static frame:
 `tests/help_pty.rs` covers these TTY states without claiming reader output:
 
 - Enter expands a category and reports `selected: jet run`.
-- Alt-Enter reports `selected: jet run examples/features/basics/hello.jet`.
+- Alt-Enter reports the runnable newcomer example `selected: jet run`.
 - F1 enters `\x1b[?1049h`; Escape restores `\x1b[?1049l`.
 - Up/down keeps selection inside the viewport at normal, zero-size, and
   shrinking terminal sizes.
