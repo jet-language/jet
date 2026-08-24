@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2156,
-    "rev": 43371,
+    "nextNum": 2164,
+    "rev": 43420,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2807,6 +2807,24 @@
       "criteria": [],
       "status": "open",
       "created": "2026-08-23T01:57:01.796Z"
+    },
+    {
+      "id": "m0xzlz0i",
+      "epochId": "e5",
+      "title": "M09 · Native nixpkgs ingestion and no-Nix dogfood",
+      "goal": "",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-24T12:08:13.249Z"
+    },
+    {
+      "id": "e5-m09-native-nixpkgs-dogfood",
+      "epochId": "e5",
+      "title": "M09 · Native nixpkgs ingestion and no-Nix dogfood",
+      "goal": "Jetpack ingests nixpkgs natively with no nix installed, and this repository dogfoods it as its dev shell.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-24T12:08:39.158Z"
     }
   ],
   "cards": [
@@ -143592,6 +143610,565 @@
       "created": "2026-08-24T11:40:28.379Z",
       "updated": "2026-08-24T11:40:28.380Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c01b5i3v",
+      "num": 2156,
+      "title": "Jetpack native Nix binary-cache admission",
+      "body": "Verify standard signed .narinfo, stream, decompress and hash NARs, fetch transitive references, and atomically admit a complete closure with no nix and no curl on PATH.\n\nGap evidence: the NAR model accepts only Compression: none, requires FileSize == NarSize, and accepts Jet HMAC signatures only (crates/jetpack/src/Store/Nar.rs:137-187). Real cache entries use zstd and an upstream Ed25519 signature. HTTP transport shells out to curl (Store/Cache.rs:2491-2534) and the Nix endpoint shells out to nix path-info/verify/copy (Store/Cache.rs:2303-2474), which is expressly a non-answer. Nix provider results always set references: Vec::new() (Provider.rs:2551-2563), so no closure ever reaches the graph. ed25519-dalek is already a dependency (crates/jetpack/Cargo.toml:17-30).\n\nVerified upstream floor: GET https://cache.nixos.org/nix-cache-info returns 200; a real narinfo for ripgrep-15.1.0 returns URL nar/...nar.zst, Compression: zstd, NarSize 6531256, an Ed25519 Sig, and 3 References. Plain HTTP, no nix.\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 1.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Standard .narinfo parses, including zstd Compression and FileHash distinct from NarHash",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:39.943Z"
+        },
+        {
+          "n": 2,
+          "text": "Upstream Ed25519 signatures verify over the canonical Nix fingerprint; a wrong key or any changed signed field is rejected",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:40.299Z"
+        },
+        {
+          "n": 3,
+          "text": "NARs stream and decompress natively with no curl and no nix anywhere on PATH",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:40.649Z"
+        },
+        {
+          "n": 4,
+          "text": "Transitive References are fetched recursively and the complete closure is admitted atomically",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:40.979Z"
+        },
+        {
+          "n": 5,
+          "text": "Corruption, missing reference, path traversal and duplicate-entry cases each fail closed with a coded diagnostic",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:41.309Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:39.571Z",
+      "updated": "2026-08-24T12:08:41.310Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c00s3cle",
+      "num": 2157,
+      "title": "Signed nixpkgs channel index pipeline",
+      "body": "Generate, differentially verify, measure, sign, publish, refresh and retain an immutable index mapping channel revision plus attrpath plus system to version, named outputs, derivation path and store path.\n\nThis is the evaluation half. The index producer may run Nix off-device against channel and Hydra data; that is build infrastructure, not a user dependency. The user machine must never need nix.\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 2.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An index record for a pinned channel revision resolves attrpath plus system to the exact store path Nix selects, verified differentially against Nix off-device",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:42.063Z"
+        },
+        {
+          "n": 2,
+          "text": "Index bytes are deterministic: reordered producer input generates identical output",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:42.403Z"
+        },
+        {
+          "n": 3,
+          "text": "The index is Jet-signed, immutably published, and the client rejects forged, stale, cross-system, duplicate and ambiguous records",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:42.761Z"
+        },
+        {
+          "n": 4,
+          "text": "Refresh is either delta or whole-index with explicit retention, rollback and expiry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:43.126Z"
+        },
+        {
+          "n": 5,
+          "text": "A coverage report states, per system, which attrs are indexed and which are not",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:43.479Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:41.716Z",
+      "updated": "2026-08-24T12:08:43.480Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c01fm9ou",
+      "num": 2158,
+      "title": "Index-backed NixProvider realization",
+      "body": "Resolve locked nixpkgs refs through the signed index, substitute the complete closure into the Hangar, record closure and provenance, and reuse it offline through the existing provider contract.\n\nToday the Nix provider admits exactly two states: an explicit fixture file or verified Hangar reuse (crates/jetpack/src/Provider.rs:1246-1290), and otherwise emits E1272 at CLI/realize.rs:357-364. The negative test no_nix_nixpkgs_package_reports_e1272 (tests/jetpack_engine.rs:4066) locks that in; this card is its missing positive complement.\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 3.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "default.[ripgrep] in a minimal env.jet enters from a cold root and runs rg --version with no nix, no fixture directory and no host /nix/store",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:44.297Z"
+        },
+        {
+          "n": 2,
+          "text": "Realized.references is populated and the closure graph records every transitive reference",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:44.656Z"
+        },
+        {
+          "n": 3,
+          "text": "The record carries both the upstream cache proof and the index proof",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:44.997Z"
+        },
+        {
+          "n": 4,
+          "text": "With network access removed the same closure still runs offline from the Hangar",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:45.341Z"
+        },
+        {
+          "n": 5,
+          "text": "Deleting one transitive object makes the offline run fail naming that exact reference, and an online repair fetches only that object",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:45.715Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:43.932Z",
+      "updated": "2026-08-24T12:08:45.715Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c025wleh",
+      "num": 2159,
+      "title": "Host-store-independent Nix closure projection",
+      "body": "Run Hangar-backed Nix outputs with their exact loaders and libraries when /nix/store is absent.\n\nThe Linux overlay currently uses the host /nix/store as its lower layer and defers an exact runtime closure (crates/jetpack/src/Shell.rs:265-297), so a machine with no Nix store can still miss loaders and libraries even after substitution succeeds. The path also depends on host unshare, mount and sh with no equivalent elsewhere (Shell.rs:216-238,423-437).\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 4.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Projection composes only Hangar snapshots; no host /nix/store lower layer participates",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:46.532Z"
+        },
+        {
+          "n": 2,
+          "text": "A dynamically linked nixpkgs binary runs with its loader and libraries resolved entirely from the Hangar closure",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:46.915Z"
+        },
+        {
+          "n": 3,
+          "text": "Linux proof runs in a rootless user namespace on a machine with no /nix/store",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:47.303Z"
+        },
+        {
+          "n": 4,
+          "text": "Unsupported platforms report an explicit coded diagnostic rather than silently falling back to host paths",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:47.658Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:46.153Z",
+      "updated": "2026-08-24T12:08:47.659Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0yfdicc",
+      "num": 2160,
+      "title": "Jet repository env.jet no-Nix dogfood gate",
+      "body": "The success gate the owner named: dogfooding. Cold-realize every tool this repository declares, build and test Jet with it, restart offline, and reconcile exact closure disk use on a machine with no Nix.\n\nMeasured cold-machine coverage at audit time was 0 of 20 packages in env.jet, 0 of 22 direct nixpkgs selections in devShells.default, and 0 of 48 Nix-derived selections in Linux devShells.full.\n\nThe missing acceptance sentence, quoted from the audit: with a fresh writable Hangar, empty ambient tool path, no /nix/store, no fixture directory and no nix executable, jetpack enter resolves default.[ripgrep], verifies and stores its complete signed closure, executes it, restarts offline, and reports exact disk use.\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 5. The E1317 provider-name collision is owned separately on card #2155.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "All 20 attrs declared in this repository env.jet cold-realize on a machine with no nix, no fixture directory and no host /nix/store",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:48.483Z"
+        },
+        {
+          "n": 2,
+          "text": "jetpack enter -- cargo build completes a real compiler build inside that environment, and a targeted test suite passes there",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:48.821Z"
+        },
+        {
+          "n": 3,
+          "text": "All 20 command version probes succeed, preserving declared package order and the PATH collision rules",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:49.162Z"
+        },
+        {
+          "n": 4,
+          "text": "A fresh process repeats the whole run offline",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:49.547Z"
+        },
+        {
+          "n": 5,
+          "text": "hangar du reconciles against the measured closure size rather than an estimate",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:49.914Z"
+        },
+        {
+          "n": 6,
+          "text": "CI runs this gate so the dogfood claim cannot silently regress",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:50.311Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:48.104Z",
+      "updated": "2026-08-24T12:08:50.311Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c064zfby",
+      "num": 2161,
+      "title": "Jet default and full shell semantic translation",
+      "body": "Replace repo-local wrappers, jetR, shell hooks, output selection, platform conditionals and library-path composition with ratified Jet-native environment mechanisms, then prove devShells.default parity followed by .#full.\n\nenv.jet already records what it cannot express and leaves to the flake: shellHook (JET_ROOT, TZDIR, clean-nix-tmp) and the jetDev/jetpackDev wrappers (env.jet:1-6). Package realization alone cannot claim shell parity, which is why this is separate from the dogfood gate.\n\nMay require owner ballots for user-visible environment syntax (I7). Do not smuggle shell-hook execution back in.\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 6.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jetDev and jetpackDev have Jet-native definitions with no shell-hook execution",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:51.120Z"
+        },
+        {
+          "n": 2,
+          "text": "JET_ROOT, TZDIR, JET_ENV_DISABLE, the Linux loader path and the one-time cleanup behaviour are modelled through ratified typed mechanisms",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:51.500Z"
+        },
+        {
+          "n": 3,
+          "text": "A declared environment manifest is compared against the Nix oracle in CI and the same build and test probes pass with Nix absent",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:51.881Z"
+        },
+        {
+          "n": 4,
+          "text": "Unsupported hook facts are zero, or each one is an explicitly owner-ratified replacement",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:52.244Z"
+        },
+        {
+          "n": 5,
+          "text": "All 48 Nix-derived selections in Linux devShells.full are covered, with store paths generated rather than hand-pinned",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:52.609Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:50.747Z",
+      "updated": "2026-08-24T12:08:52.610Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c087yjjx",
+      "num": 2162,
+      "title": "Native Nix evaluator conformance program",
+      "body": "Decide the Snix reuse and licence posture, expand the bounded evaluator against a whole-nixpkgs differential corpus, and publish measured coverage and unsupported semantics.\n\njet-nix-eval today is a bounded projection, not a nixpkgs evaluator: the root environment injects pkgs as a symbolic namespace (crates/jet-nix-eval/src/Evaluator.rs:1154-1197) and selecting an unknown attribute converts it to a package-name string (Evaluator.rs:1878-1928), so pkgs.fd becomes the identity fd and no nixpkgs function runs. Dynamic derivations and import-from-derivation are explicitly skipped (lib.rs:207-218). The bridge_flake_*_without_nix tests therefore prove shape translation, not evaluation, and must not be read as nixpkgs coverage.\n\nThis is the long fidelity program and the only path that covers overlays and custom flakes. See docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 7.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner decision records the Snix and Tvix reuse and licence posture",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:53.423Z"
+        },
+        {
+          "n": 2,
+          "text": "Per-revision differential counts against Nix are published for the evaluated corpus",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:53.800Z"
+        },
+        {
+          "n": 3,
+          "text": "Every attr the index covers for this repository evaluates to the same derivation and output identity as Nix",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:54.161Z"
+        },
+        {
+          "n": 4,
+          "text": "Overlays and custom flakes are admitted only when their evaluated graph and closure agree with Nix",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:54.522Z"
+        },
+        {
+          "n": 5,
+          "text": "Index-only limitation claims are removed from user-facing text only where evaluation genuinely covers the surface",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:54.894Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:53.050Z",
+      "updated": "2026-08-24T12:08:54.895Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0aaqsem",
+      "num": 2163,
+      "title": "Native Nix derivation builder",
+      "body": "After evaluator demand is measured, realize uncached derivations and overlays inside Jet own sandbox with the same Hangar identity, receipts and diagnostics.\n\nOrdered last on purpose: substitution plus index covers ordinary cached attrs, and building is only required for what the cache does not carry. NixDrv already implements Nix32, store-path calculus, stable ATerm derivations and derivation modulo hashing (crates/jetpack/src/NixDrv.rs:50-190,396-749).\n\nSee docs/audits/jetpack-native-nixpkgs-2026-08-24.md step 8.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An uncached derivation builds inside the Jet sandbox and lands in the Hangar with the same content-addressed identity substitution would produce",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:55.736Z"
+        },
+        {
+          "n": 2,
+          "text": "Build receipts and diagnostics match the substituted path, so a consumer cannot tell which route produced an object except from provenance",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:56.106Z"
+        },
+        {
+          "n": 3,
+          "text": "A restricted or cache-missing package from this repository builds by this route",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:56.465Z"
+        },
+        {
+          "n": 4,
+          "text": "Reproducibility is checked by rebuilding and comparing identity",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T12:08:56.820Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T12:08:55.352Z",
+      "updated": "2026-08-24T12:08:56.820Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -191919,6 +192496,349 @@
   ],
   "events": [
     {
+      "at": "2026-08-24T12:08:56.820Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0aaqsem",
+      "note": "#4 Reproducibility is checked by rebuilding and comparing ident"
+    },
+    {
+      "at": "2026-08-24T12:08:56.466Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0aaqsem",
+      "note": "#3 A restricted or cache-missing package from this repository b"
+    },
+    {
+      "at": "2026-08-24T12:08:56.107Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0aaqsem",
+      "note": "#2 Build receipts and diagnostics match the substituted path, s"
+    },
+    {
+      "at": "2026-08-24T12:08:55.737Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0aaqsem",
+      "note": "#1 An uncached derivation builds inside the Jet sandbox and lan"
+    },
+    {
+      "at": "2026-08-24T12:08:55.353Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0aaqsem",
+      "note": "Native Nix derivation builder"
+    },
+    {
+      "at": "2026-08-24T12:08:54.895Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c087yjjx",
+      "note": "#5 Index-only limitation claims are removed from user-facing te"
+    },
+    {
+      "at": "2026-08-24T12:08:54.523Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c087yjjx",
+      "note": "#4 Overlays and custom flakes are admitted only when their eval"
+    },
+    {
+      "at": "2026-08-24T12:08:54.161Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c087yjjx",
+      "note": "#3 Every attr the index covers for this repository evaluates to"
+    },
+    {
+      "at": "2026-08-24T12:08:53.800Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c087yjjx",
+      "note": "#2 Per-revision differential counts against Nix are published f"
+    },
+    {
+      "at": "2026-08-24T12:08:53.424Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c087yjjx",
+      "note": "#1 An owner decision records the Snix and Tvix reuse and licenc"
+    },
+    {
+      "at": "2026-08-24T12:08:53.050Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c087yjjx",
+      "note": "Native Nix evaluator conformance program"
+    },
+    {
+      "at": "2026-08-24T12:08:52.610Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c064zfby",
+      "note": "#5 All 48 Nix-derived selections in Linux devShells.full are co"
+    },
+    {
+      "at": "2026-08-24T12:08:52.244Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c064zfby",
+      "note": "#4 Unsupported hook facts are zero, or each one is an explicitl"
+    },
+    {
+      "at": "2026-08-24T12:08:51.881Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c064zfby",
+      "note": "#3 A declared environment manifest is compared against the Nix "
+    },
+    {
+      "at": "2026-08-24T12:08:51.500Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c064zfby",
+      "note": "#2 JET_ROOT, TZDIR, JET_ENV_DISABLE, the Linux loader path and "
+    },
+    {
+      "at": "2026-08-24T12:08:51.120Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c064zfby",
+      "note": "#1 jetDev and jetpackDev have Jet-native definitions with no sh"
+    },
+    {
+      "at": "2026-08-24T12:08:50.748Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c064zfby",
+      "note": "Jet default and full shell semantic translation"
+    },
+    {
+      "at": "2026-08-24T12:08:50.311Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfdicc",
+      "note": "#6 CI runs this gate so the dogfood claim cannot silently regre"
+    },
+    {
+      "at": "2026-08-24T12:08:49.915Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfdicc",
+      "note": "#5 hangar du reconciles against the measured closure size rathe"
+    },
+    {
+      "at": "2026-08-24T12:08:49.548Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfdicc",
+      "note": "#4 A fresh process repeats the whole run offline"
+    },
+    {
+      "at": "2026-08-24T12:08:49.163Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfdicc",
+      "note": "#3 All 20 command version probes succeed, preserving declared p"
+    },
+    {
+      "at": "2026-08-24T12:08:48.822Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfdicc",
+      "note": "#2 jetpack enter -- cargo build completes a real compiler build"
+    },
+    {
+      "at": "2026-08-24T12:08:48.483Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfdicc",
+      "note": "#1 All 20 attrs declared in this repository env.jet cold-realiz"
+    },
+    {
+      "at": "2026-08-24T12:08:48.104Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0yfdicc",
+      "note": "Jet repository env.jet no-Nix dogfood gate"
+    },
+    {
+      "at": "2026-08-24T12:08:47.659Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c025wleh",
+      "note": "#4 Unsupported platforms report an explicit coded diagnostic ra"
+    },
+    {
+      "at": "2026-08-24T12:08:47.304Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c025wleh",
+      "note": "#3 Linux proof runs in a rootless user namespace on a machine w"
+    },
+    {
+      "at": "2026-08-24T12:08:46.915Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c025wleh",
+      "note": "#2 A dynamically linked nixpkgs binary runs with its loader and"
+    },
+    {
+      "at": "2026-08-24T12:08:46.533Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c025wleh",
+      "note": "#1 Projection composes only Hangar snapshots; no host /nix/stor"
+    },
+    {
+      "at": "2026-08-24T12:08:46.154Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c025wleh",
+      "note": "Host-store-independent Nix closure projection"
+    },
+    {
+      "at": "2026-08-24T12:08:45.715Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01fm9ou",
+      "note": "#5 Deleting one transitive object makes the offline run fail na"
+    },
+    {
+      "at": "2026-08-24T12:08:45.342Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01fm9ou",
+      "note": "#4 With network access removed the same closure still runs offl"
+    },
+    {
+      "at": "2026-08-24T12:08:44.998Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01fm9ou",
+      "note": "#3 The record carries both the upstream cache proof and the ind"
+    },
+    {
+      "at": "2026-08-24T12:08:44.657Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01fm9ou",
+      "note": "#2 Realized.references is populated and the closure graph recor"
+    },
+    {
+      "at": "2026-08-24T12:08:44.297Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01fm9ou",
+      "note": "#1 default.[ripgrep] in a minimal env.jet enters from a cold ro"
+    },
+    {
+      "at": "2026-08-24T12:08:43.933Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c01fm9ou",
+      "note": "Index-backed NixProvider realization"
+    },
+    {
+      "at": "2026-08-24T12:08:43.480Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#5 A coverage report states, per system, which attrs are indexe"
+    },
+    {
+      "at": "2026-08-24T12:08:43.127Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#4 Refresh is either delta or whole-index with explicit retenti"
+    },
+    {
+      "at": "2026-08-24T12:08:42.762Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#3 The index is Jet-signed, immutably published, and the client"
+    },
+    {
+      "at": "2026-08-24T12:08:42.403Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#2 Index bytes are deterministic: reordered producer input gene"
+    },
+    {
+      "at": "2026-08-24T12:08:42.063Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#1 An index record for a pinned channel revision resolves attrp"
+    },
+    {
+      "at": "2026-08-24T12:08:41.716Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c00s3cle",
+      "note": "Signed nixpkgs channel index pipeline"
+    },
+    {
+      "at": "2026-08-24T12:08:41.310Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01b5i3v",
+      "note": "#5 Corruption, missing reference, path traversal and duplicate-"
+    },
+    {
+      "at": "2026-08-24T12:08:40.980Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01b5i3v",
+      "note": "#4 Transitive References are fetched recursively and the comple"
+    },
+    {
+      "at": "2026-08-24T12:08:40.650Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01b5i3v",
+      "note": "#3 NARs stream and decompress natively with no curl and no nix "
+    },
+    {
+      "at": "2026-08-24T12:08:40.299Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01b5i3v",
+      "note": "#2 Upstream Ed25519 signatures verify over the canonical Nix fi"
+    },
+    {
+      "at": "2026-08-24T12:08:39.944Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01b5i3v",
+      "note": "#1 Standard .narinfo parses, including zstd Compression and Fil"
+    },
+    {
+      "at": "2026-08-24T12:08:39.572Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c01b5i3v",
+      "note": "Jetpack native Nix binary-cache admission"
+    },
+    {
+      "at": "2026-08-24T12:08:39.158Z",
+      "by": "Main",
+      "action": "milestone.add",
+      "ref": "e5-m09-native-nixpkgs-dogfood",
+      "note": "M09 · Native nixpkgs ingestion and no-Nix dogfood"
+    },
+    {
+      "at": "2026-08-24T12:08:13.249Z",
+      "by": "Main",
+      "action": "milestone.add",
+      "ref": "m0xzlz0i",
+      "note": "M09 · Native nixpkgs ingestion and no-Nix dogfood"
+    },
+    {
       "at": "2026-08-24T12:05:50.847Z",
       "by": "Main",
       "action": "card.update",
@@ -195074,349 +195994,6 @@
       "action": "card.update",
       "ref": "c0o45fur",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-23T08:42:35.846Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o45fur",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T08:42:34.355Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uy7emy",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T08:42:34.001Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uy7emy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T08:42:33.644Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uy7emy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T08:42:33.060Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04i1z4x",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T08:42:32.329Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T08:42:31.756Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xha49b",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T08:42:31.034Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xha49b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T08:42:30.196Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pq060v",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T08:42:29.197Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pq060v",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-23T08:42:28.860Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pq060v",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T08:42:28.507Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pq060v",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T08:42:28.169Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pq060v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T08:42:27.816Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pq060v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T08:42:27.482Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pq060v",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T08:42:26.922Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0k8mz9e",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T08:42:26.229Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0k8mz9e",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:53:06.999Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06r4us6",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:53:06.025Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y9u5wy",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:53:04.057Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cvrfl7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:53:03.256Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0cvrfl7",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T07:53:02.887Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0cvrfl7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:53:02.515Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0cvrfl7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T07:53:02.153Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0cvrfl7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T07:53:00.753Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wfhchp",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T07:53:00.358Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wfhchp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:52:59.633Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wfhchp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T07:52:58.251Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wfhchp",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T07:52:56.592Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0frfdwy",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:52:55.088Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0frfdwy",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T07:52:53.879Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0frfdwy",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T07:52:52.610Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0frfdwy",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:52:51.626Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0frfdwy",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T07:52:50.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0frfdwy",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T07:52:49.207Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04i1z4x",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:52:47.536Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-23T07:52:46.107Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-23T07:52:45.087Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-23T07:52:44.165Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-23T07:52:43.001Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T07:52:42.620Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T07:52:41.503Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:52:40.480Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04i1z4x",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T07:52:39.892Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vjriuo",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T07:52:39.186Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vjriuo",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T07:52:38.833Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vjriuo",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T07:52:38.493Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vjriuo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T07:52:38.153Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vjriuo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T07:52:37.823Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vjriuo",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
