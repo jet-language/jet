@@ -2539,7 +2539,10 @@ pub fn realize_verified(
     project_receipt_projection(ctx, &entry)?;
     if !is_private_untrusted_build(&realized.producer) {
         promote_shared_entry(roots, &entry).map_err(RealizeError::Store)?;
-        if realized.source_state == super::Provider::SourceState::Built {
+        if matches!(
+            realized.source_state,
+            super::Provider::SourceState::Built | super::Provider::SourceState::Downloaded
+        ) {
             publish_realized_to_bound_caches(roots, &entry);
         }
     }

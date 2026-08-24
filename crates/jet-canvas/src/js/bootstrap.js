@@ -1,4 +1,10 @@
 
+function canvasPayload(value) {
+  return value && value.schema === "jet.report/v1" && value.canvas && typeof value.canvas === "object"
+    ? value.canvas
+    : value;
+}
+
 // Canvas ability markers, initial UI setup, endpoint binding, and graph load.
   window.__jetCanvasPinAuthoring = true;
   window.__jetCanvasDebugOverlay = true;

@@ -377,7 +377,7 @@ fn tool_run(theme: &Theme, parsed: &Parsed) -> i32 {
         project_root: std::env::current_dir().unwrap_or_default(),
         refs: vec![spec.clone()],
         adapters: Vec::new(),
-        table: RefSpec::SourceTable::empty(),
+        table: cwd_table(),
         label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
         prompt_path: ModuleEval::PromptPathMode::default(),
         prompt_strip: ModuleEval::PromptStripMode::default(),
@@ -430,7 +430,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         project_root: project_dir.clone(),
         refs: vec![spec.clone()],
         adapters: Vec::new(),
-        table: RefSpec::SourceTable::empty(),
+        table: cwd_table(),
         label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
         prompt_path: ModuleEval::PromptPathMode::default(),
         prompt_strip: ModuleEval::PromptStripMode::default(),
@@ -1256,9 +1256,46 @@ fn refresh_tool_manifest_sources(
         }
     }
     if changed {
+        refresh_manifest_tool_pins(manifest, &table);
         manifest.sources = manifest_sources_from_table(&table);
     }
     Ok(changed)
+}
+
+/// A moving source keeps its visible tier marker, but the realization input
+/// must become an exact package ref when the source channel advances. This
+/// gives Store a new immutable reference instead of treating a changed
+/// channel as a corrupted prior output.
+fn refresh_manifest_tool_pins(manifest: &mut ToolManifest, table: &RefSpec::SourceTable) {
+    for (name, upstream, _) in table.declarations() {
+        let Some((_, selector)) = upstream.rsplit_once(Syntax::REF_CHANNEL_MARKER) else {
+            continue;
+        };
+        if selector.is_empty()
+            || matches!(selector, "latest" | "main")
+            || (selector.starts_with('v') && selector.ends_with(".x"))
+        {
+            continue;
+        }
+        for tool in &mut manifest.tools {
+            let (_policy, resolved) = RefSpec::split_channel_policy(&tool.resolved);
+            let Some((package, source)) = resolved.rsplit_once(Syntax::REF_PROVIDER_AT) else {
+                continue;
+            };
+            if source != name {
+                continue;
+            }
+            let package = package
+                .split_once(Syntax::REF_CHANNEL_MARKER)
+                .map(|(package, _)| package)
+                .unwrap_or(package);
+            tool.resolved = format!(
+                "{package}{}{selector}{}{name}",
+                Syntax::REF_CHANNEL_MARKER,
+                Syntax::REF_PROVIDER_AT
+            );
+        }
+    }
 }
 
 fn activate_generation_locked(generation: u64) -> io::Result<()> {
@@ -1458,7 +1495,7 @@ fn project_install(
         return Err("verified tool receipt disagrees with requested package".to_string());
     }
     let version = receipt.version.clone();
-    let declared_sources = cwd_table();
+    let declared_sources = tool_manifest_source_table(spec, &version, channel_policy);
     RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
         recover_profile_state()?;
         let mut tools = read_current_tools().map_err(io::Error::other)?;
@@ -1491,6 +1528,28 @@ fn project_install(
     })
     .map(|generation| (generation, version))
     .map_err(|error| error.to_string())
+}
+
+fn tool_manifest_source_table(
+    spec: &RefSpec::RefSpec,
+    version: &str,
+    policy: ChannelPolicy,
+) -> RefSpec::SourceTable {
+    let mut table = cwd_table();
+    if spec.source.label() == crate::Provider::native::SOURCE_NAME && !version.is_empty() {
+        let upstream = format!(
+            "{}#v{}",
+            crate::Provider::native::UPSTREAM,
+            version.trim_start_matches('v')
+        );
+        table.set_upstream(crate::Provider::native::SOURCE_NAME, upstream.clone());
+        table.set_channel_metadata(
+            crate::Provider::native::SOURCE_NAME,
+            policy,
+            source_manifest_ref(&upstream, policy),
+        );
+    }
+    table
 }
 
 fn uninstall_tool(theme: &Theme, name: &str) -> Result<bool, String> {

@@ -1189,7 +1189,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 realized_refs.push(entry.reference);
                 completed_steps += 1;
                 match state {
-                    Provider::SourceState::Built => built += 1,
+                    Provider::SourceState::Built | Provider::SourceState::Downloaded => built += 1,
                     Provider::SourceState::Cached => cached += 1,
                     Provider::SourceState::Substituted => substituted += 1,
                 }
@@ -1222,7 +1222,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 realized_refs.push(entry.reference);
                 completed_steps += 1;
                 match state {
-                    Provider::SourceState::Built => built += 1,
+                    Provider::SourceState::Built | Provider::SourceState::Downloaded => built += 1,
                     Provider::SourceState::Cached => cached += 1,
                     Provider::SourceState::Substituted => substituted += 1,
                 }

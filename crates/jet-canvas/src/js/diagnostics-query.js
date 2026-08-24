@@ -494,7 +494,7 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify(Object.assign(request, body))
     })
-      .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
+      .then((r) => r.json().then((j) => ({ ok: r.ok, json: canvasPayload(j) })))
       .then((result) => {
         if (!result.ok) {
           searchState.stale = true;
@@ -634,7 +634,7 @@
     const requestedRevision = latestDoc && latestDoc.revision;
     const requestedProjectRevision = latestProject && latestProject.project_revision;
     return fetch(sourceControlUrl, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => r.json().then(canvasPayload))
       .then((doc) => {
         if (loadToken !== sourceControlLoadToken) return null;
         const sourceRevision = sourceControlRevision(doc, requestedSourceId);
@@ -679,7 +679,7 @@
     const requestedSourceId = currentCanvasSourceId();
     const requestedRevision = latestDoc && latestDoc.revision;
     return fetch(proofRequestUrl(requestedSourceId), { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => r.json().then(canvasPayload))
       .then((doc) => {
         if (currentCanvasSourceId() !== requestedSourceId || (latestDoc && latestDoc.revision !== requestedRevision) || (doc.revision && doc.revision !== requestedRevision)) {
           proofState.textContent = "stale — reload";

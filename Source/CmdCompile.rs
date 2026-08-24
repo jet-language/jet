@@ -169,7 +169,11 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
 /// through one schema-versioned, deterministic JSON command. The operation
 /// names map directly to the read-only `core.compiler` surface; no second
 /// parser or checker is introduced here.
-pub(crate) fn run_compiler_api(operation: &str, file: &str, _mode: OutputMode) {
+pub(crate) fn run_compiler_api(operation: &str, file: &str, mode: OutputMode) {
+    debug_assert!(
+        mode.json,
+        "inspect compiler must use the shared machine-output mode"
+    );
     let path = Path::new(file);
     let document = match operation {
         "lex" => match fs::read_to_string(path) {

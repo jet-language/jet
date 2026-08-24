@@ -508,6 +508,8 @@ pub const REF_SOURCE_CARGO: &str = "cargo";
 pub const REF_SOURCE_PYPI: &str = "pypi";
 /// D-JPK-EXTPROV1: direct SwiftPM ecosystem root.
 pub const REF_SOURCE_SWIFTPM: &str = "swiftpm";
+/// D-CHANNEL-AUTO1=A / card #2166: the native release-artifact source.
+pub const REF_SOURCE_RELEASES: &str = "releases";
 
 /// The one home for "which source tokens are built-in providers" — every
 /// recognized `REF_SOURCE_*` above, in the order a ref may not put them
@@ -529,6 +531,7 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
     REF_SOURCE_CARGO,
     REF_SOURCE_PYPI,
     REF_SOURCE_SWIFTPM,
+    REF_SOURCE_RELEASES,
 ];
 
 /// D-JPK2/9: the Phase 1 verb set.

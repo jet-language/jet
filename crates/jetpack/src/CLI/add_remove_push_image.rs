@@ -232,7 +232,8 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
             | RefSpec::Source::Npm
             | RefSpec::Source::Cargo
             | RefSpec::Source::PyPI
-            | RefSpec::Source::SwiftPM => {
+            | RefSpec::Source::SwiftPM
+            | RefSpec::Source::Releases => {
                 theme.error_coded(
                     "E1270",
                     "adapter draft needs source bytes",

@@ -73,6 +73,8 @@ pub fn read_machine_output(text: &str) -> Result<Vec<MachineRecord>, String> {
 #[cfg(test)]
 mod tests {
     use super::{read_machine_line, read_machine_output, MachineRecord};
+    use crate::Diagnostics::Severity;
+    use crate::Registry::diagnostic_rows;
     use crate::Report::{render_status_json, ReportEnvelope};
 
     #[test]
@@ -181,5 +183,33 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(records, expected);
+    }
+
+    #[test]
+    fn reader_accepts_every_registered_report_row() {
+        let output = diagnostic_rows()
+            .iter()
+            .map(|row| {
+                let severity = match row.severity {
+                    Severity::Error => "error",
+                    Severity::Lint => "warning",
+                };
+                ReportEnvelope::new(
+                    row.moment.as_str(),
+                    severity,
+                    row.code,
+                    row.what,
+                    row.why,
+                    row.fix,
+                )
+                .json()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let records = read_machine_output(&output).unwrap();
+        assert_eq!(records.len(), diagnostic_rows().len());
+        assert!(records
+            .iter()
+            .all(|record| *record == MachineRecord::Report));
     }
 }

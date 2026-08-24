@@ -1364,8 +1364,8 @@ fn main() {
     let dry_run = jet_argv.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
     // D-ONCE-LAW1: the build ability projection is a payload choice, not a
     // second output grammar. It uses the same machine-output mode as --json.
-    let abilities_json = jet_argv.iter().any(|a| a == "--abilities-json");
-    let json = jet::CLI::machine_output_requested(jet_argv) || abilities_json;
+    let abilities_json = jet::CLI::abilities_output_requested(jet_argv);
+    let json = jet::CLI::machine_output_requested(jet_argv);
     reject_retired_gate_flags(jet_argv, json);
     let small = jet_argv.iter().any(|a| a == "--small");
     let library_flag = jet_argv.iter().any(|a| a == "--lib");

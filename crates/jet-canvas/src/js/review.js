@@ -534,7 +534,7 @@
       ? Promise.resolve(loadGraph(path)).finally(() => { reviewState.graphLoadingPath = null; })
       : Promise.resolve();
     return Promise.resolve(reload).then(() => fetch(reviewSourceControlUrl(), { cache: "no-store" }))
-      .then((response) => response.json())
+      .then((response) => response.json().then(canvasPayload))
       .then((doc) => {
         scm = doc;
         reviewState.loading = false;
@@ -561,7 +561,7 @@
     reviewState.loading = true;
     renderReview();
     return fetch(reviewSourceControlUrl(), { cache: "no-store" })
-      .then((response) => response.json())
+      .then((response) => response.json().then(canvasPayload))
       .then((doc) => {
         scm = doc;
         reviewState.loading = false;

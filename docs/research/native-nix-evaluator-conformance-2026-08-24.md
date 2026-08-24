@@ -13,7 +13,7 @@ per-attribute differential ledger, and no evaluated graph or closure result.
 The five card criteria therefore remain open. The existing dogfood index path
 must stay separate from this evaluator program.
 
-Coverage counts below use current `HEAD` (`14f1a62ec`). The earlier 20-item
+Coverage counts below use current `HEAD` (`f9abed095`). The earlier 20-item
 `env.jet` count is a historical card baseline; `env.jet` gained the full
 runtime/tool projection after that baseline was recorded.
 
@@ -50,6 +50,20 @@ output-map comparison, and publication stop on any mismatch
 (`docs/plans/jetpack-dogfood/plan-2157-2158.md:103-112`). This evaluator plan
 does not replace that producer contract.
 
+## Differential report implementation
+
+`tools/jet-nix-eval/differential-report.mjs` is the first bounded program slice.
+It compares one Nix oracle and one Jet result for one pinned revision and
+system. It requires exact derivation, output, direct-reference, and closure
+identity before it reports a match. Missing graph or closure identity is
+`missing_identity`, not a match. Empty inputs report `not-measured`.
+
+The tool has no Nix, store, network, or process authority. The Nix side remains
+an off-device producer. The existing `tools/jetpack-nix-index/oracle.nix`
+provides the producer pattern; a future Jet runner must emit the same row shape
+after real nixpkgs evaluation. This slice does not create whole-nixpkgs rows,
+so it does not close criteria 2–4.
+
 ## Snix and Tvix reuse posture
 
 ### Proposed decision
@@ -75,6 +89,8 @@ Tvix records the same split in its repository README.
 
 The pinned source review is recorded in
 [`docs/audits/snix-tvix-license-research-2026-08-24.md`](../audits/snix-tvix-license-research-2026-08-24.md).
+The exact package and file-level SPDX inventory is in
+[`docs/audits/jet-nix-eval-snix-tvix-research-2026-08-24.md`](../audits/jet-nix-eval-snix-tvix-research-2026-08-24.md).
 It checked Snix commit `6e990352dd1fe25248a9b47ca61e5b90cc829faf` and the Tvix
 mirror commit `92e60f242b880f641e3346d42d3f4f4334ac3ee2`. Jet's existing
 `D-JPK-NIXENGINE1=D` already says to ship no Tvix code and use Nix/Tvix only as

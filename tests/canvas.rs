@@ -639,6 +639,11 @@ fn canvas_graph_json_is_stable_and_typed() {
     let path = write_fixture("graph", CANVAS_FIXTURE);
     let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
 
+    assert!(json.starts_with("{\"schema\":\"jet.report/v1\""), "{json}");
+    assert_eq!(
+        jet_foundation::MachineOutput::read_machine_line(&json),
+        Ok(jet_foundation::MachineOutput::MachineRecord::Status)
+    );
     assert!(json.contains("\"protocol\":\"jet.canvas.graph\""));
     assert!(json.contains("\"schema_version\":1"));
     assert!(json.contains("\"node_descriptors\":["));

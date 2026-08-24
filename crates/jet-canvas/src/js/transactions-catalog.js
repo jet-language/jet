@@ -260,7 +260,7 @@
     window.__jetCanvasLastTx = request;
     window.__jetCanvasLastTxResult = null;
     return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })
-      .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
+      .then((r) => r.json().then((j) => ({ ok: r.ok, json: canvasPayload(j) })))
       .then((result) => {
         if (!result.ok) {
           window.__jetCanvasLastTxResult = result.json;
@@ -374,7 +374,7 @@
     window.__jetCanvasLastTx = request;
     window.__jetCanvasLastTxResult = null;
     return fetch(txUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })
-      .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
+      .then((r) => r.json().then((j) => ({ ok: r.ok, json: canvasPayload(j) })))
       .then((result) => {
         window.__jetCanvasLastTxResult = result.json;
         if (!result.ok) {
@@ -541,7 +541,7 @@
       .then((r) => r.text().then((body) => {
         let doc;
         try {
-          doc = JSON.parse(body);
+          doc = canvasPayload(JSON.parse(body));
         } catch (_) {
           doc = { protocol: "jet.canvas.query", ok: false, kind: "diagnostic", message: body };
         }
@@ -672,8 +672,9 @@
       headers: { "content-type": "application/json" },
       body: JSON.stringify(Object.assign({ schema_version: 1, revision: loadRevision, op: "actions" }, loadSourceId ? { source_id: loadSourceId } : {}))
     })
-      .then((r) => r.json())
+      .then((r) => r.json().then(canvasPayload))
       .then((doc) => {
+        doc = canvasPayload(doc);
         if (!latestDoc || latestDoc.revision !== loadRevision || currentCanvasSourceId() !== loadSourceId) return actionEntries;
         if (!doc || !Array.isArray(doc.actions)) throw new Error("checked action query returned no actions");
         const canvasActions = doc.actions.map((action) => withNodeDescriptor({
@@ -757,8 +758,9 @@
     if (coreCatalogLoading && !query) return coreCatalogLoading;
     const url = coreCatalogUrl + "?query=" + encodeURIComponent(query || "");
     coreCatalogLoading = fetch(url, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => r.json().then(canvasPayload))
       .then((doc) => {
+        doc = canvasPayload(doc);
         if (!doc || !Array.isArray(doc.modules)) throw new Error("core library query returned no modules");
         const entries = [];
         for (const module of doc.modules || []) {

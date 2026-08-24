@@ -156,9 +156,21 @@ pub fn reserved_report_json() -> String {
 pub const DRY_RUN_FLAG: &str = "--dry-run";
 /// The one spelling that selects machine-readable command output.
 pub const MACHINE_OUTPUT_FLAG: &str = "--json";
+/// Build's machine-readable ability projection uses the shared machine mode.
+pub const ABILITIES_OUTPUT_FLAG: &str = "--abilities-json";
 
 pub fn machine_output_requested(args: &[String]) -> bool {
-    args.iter().any(|arg| arg == MACHINE_OUTPUT_FLAG)
+    args.iter().any(|arg| {
+        arg == MACHINE_OUTPUT_FLAG || arg == ABILITIES_OUTPUT_FLAG
+    })
+        || args.first().is_some_and(|arg| arg == "compiler")
+        || args
+            .windows(2)
+            .any(|pair| pair[0] == "inspect" && pair[1] == "compiler")
+}
+
+pub fn abilities_output_requested(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == ABILITIES_OUTPUT_FLAG)
 }
 
 #[derive(Clone)]
@@ -1530,7 +1542,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
         help: "with build --target=web: show which code becomes JavaScript or WebAssembly",
     },
     // E2-M11 flags.
-    FlagSpec { long: "--abilities-json", help: "with build: write used abilities as JSON" },
+    FlagSpec { long: ABILITIES_OUTPUT_FLAG, help: "with build: write used abilities as JSON" },
     FlagSpec { long: "--update-snapshots", help: "with test: replace expected snapshot output" },
     FlagSpec { long: "--coverage", help: "with test: show function and branch coverage" },
     FlagSpec { long: "--rust", help: "with emit: print generated Rust source" },
@@ -2731,6 +2743,23 @@ mod tests {
             FLAGS.iter().filter(|flag| flag.long == MACHINE_OUTPUT_FLAG).count(),
             1
         );
+    }
+
+    #[test]
+    fn scoped_and_always_machine_commands_use_the_shared_reader() {
+        assert!(machine_output_requested(&[
+            "build".to_string(),
+            ABILITIES_OUTPUT_FLAG.to_string(),
+        ]));
+        assert!(abilities_output_requested(&[
+            "build".to_string(),
+            ABILITIES_OUTPUT_FLAG.to_string(),
+        ]));
+        assert!(machine_output_requested(&[
+            "inspect".to_string(),
+            "compiler".to_string(),
+        ]));
+        assert!(machine_output_requested(&["compiler".to_string()]));
     }
 
     #[test]

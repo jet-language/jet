@@ -893,12 +893,11 @@ fn handle_connection(
                 body.as_bytes(),
             ),
             Err(diags) => {
-                let src = fs::read_to_string(canvas_file).unwrap_or_default();
-                let body = jet_driver::Diagnostics::render_all(canvas_file, &src, &diags);
+                let body = crate::Canvas::graph_json_error_for_file(Path::new(canvas_file), &diags);
                 write_response(
                     &mut stream,
                     "409 Conflict",
-                    "text/plain; charset=utf-8",
+                    "application/json; charset=utf-8",
                     body.as_bytes(),
                 )
             }

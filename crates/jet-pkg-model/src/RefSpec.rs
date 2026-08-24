@@ -42,6 +42,8 @@ pub enum Source {
     PyPI,
     /// A package from Swift Package Manager (D-JPK-EXTPROV1).
     SwiftPM,
+    /// A verified release artifact admitted directly by Jetpack (card #2166).
+    Releases,
     /// A pack-declared named source, e.g. `stable` → a pinned nixpkgs (D-JPK17).
     Named(String),
 }
@@ -63,6 +65,7 @@ impl Source {
             Source::Cargo => Syntax::REF_SOURCE_CARGO,
             Source::PyPI => Syntax::REF_SOURCE_PYPI,
             Source::SwiftPM => Syntax::REF_SOURCE_SWIFTPM,
+            Source::Releases => Syntax::REF_SOURCE_RELEASES,
             Source::Named(name) => name,
         }
     }
@@ -89,6 +92,7 @@ impl Source {
             n if n == Syntax::REF_SOURCE_CARGO => Some(Source::Cargo),
             n if n == Syntax::REF_SOURCE_PYPI => Some(Source::PyPI),
             n if n == Syntax::REF_SOURCE_SWIFTPM => Some(Source::SwiftPM),
+            n if n == Syntax::REF_SOURCE_RELEASES => Some(Source::Releases),
             _ => None,
         }
     }
@@ -121,6 +125,8 @@ pub enum ProviderKind {
     Cargo,
     PyPI,
     SwiftPM,
+    /// A native Jetpack release-artifact recipe.
+    JetPackage,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
     /// `package.jet` (U9). Only the typed `…@github` surface produces this.
     Infer,
@@ -143,6 +149,7 @@ impl ProviderKind {
             "cargo" => ProviderKind::Cargo,
             "pypi" => ProviderKind::PyPI,
             "swiftpm" => ProviderKind::SwiftPM,
+            "jetpackage" => ProviderKind::JetPackage,
             _ => ProviderKind::Nix,
         }
     }
@@ -161,6 +168,7 @@ impl ProviderKind {
             ProviderKind::Cargo => "cargo",
             ProviderKind::PyPI => "pypi",
             ProviderKind::SwiftPM => "swiftpm",
+            ProviderKind::JetPackage => "jetpackage",
             // Never user-shown: resolved before any listing/diagnostic.
             ProviderKind::Infer => "infer",
         }
@@ -239,6 +247,26 @@ impl SourceTable {
                 })
                 .collect(),
         }
+    }
+
+    /// Add a source declaration when a CLI surface supplies a built-in native
+    /// catalog entry alongside project declarations.
+    pub fn ensure_decl(
+        &mut self,
+        name: impl Into<String>,
+        upstream: impl Into<String>,
+        via: ProviderKind,
+    ) {
+        let name = name.into();
+        self.named.entry(name).or_insert_with(|| {
+            let upstream = upstream.into();
+            SourceEntry {
+                policy: policy_for_upstream(&upstream),
+                raw: upstream.clone(),
+                upstream,
+                via,
+            }
+        });
     }
 
     /// Set the authoring policy and raw source spelling for a declaration.
@@ -321,7 +349,12 @@ pub struct RefSpec {
 impl RefSpec {
     /// A short, human display name for the package (last path segment).
     pub fn short_name(&self) -> &str {
-        self.package.rsplit('/').next().unwrap_or(&self.package)
+        let package = self
+            .package
+            .split_once(Syntax::REF_CHANNEL_MARKER)
+            .map(|(name, _)| name)
+            .unwrap_or(&self.package);
+        package.rsplit('/').next().unwrap_or(package)
     }
 }
 
@@ -890,6 +923,20 @@ mod tests {
             assert_eq!(spec.source, source);
             assert_eq!(ProviderKind::parse(spec.source.label()), provider);
         }
+    }
+
+    #[test]
+    fn classifies_native_release_source() {
+        let spec = classify("omp@releases").unwrap();
+        assert_eq!(spec.source, Source::Releases);
+        assert_eq!(spec.package, "omp");
+        assert_eq!(ProviderKind::parse("jetpackage"), ProviderKind::JetPackage);
+    }
+
+    #[test]
+    fn short_name_discards_version_selector() {
+        let spec = classify("omp#18.0.0@releases").unwrap();
+        assert_eq!(spec.short_name(), "omp");
     }
 
     #[test]

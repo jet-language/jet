@@ -1098,7 +1098,7 @@
     return fetch(projectUrl, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error("project request failed (" + r.status + ")");
-        return r.json();
+        return r.json().then(canvasPayload);
       })
       .then((project) => {
         if (loadToken !== projectLoadGeneration || currentCanvasSourceId() !== requestedSourceId) return latestProject;
@@ -1686,7 +1686,7 @@
     if (snapshot.sourceId) body.source_id = snapshot.sourceId;
     if (snapshot.tier) body.tier = snapshot.tier;
     return fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      .then((response) => response.json().catch(() => ({})).then((json) => ({ ok: response.ok, json })))
+      .then((response) => response.json().catch(() => ({})).then((json) => ({ ok: response.ok, json: canvasPayload(json) })))
       .then((result) => {
         if (report && !result.ok) showToast((result.json && result.json.message) || "Debug stop rejected", { isError: true });
       })
@@ -1760,7 +1760,7 @@
     if (requestedSession) body.session_id = requestedSession.id;
     if (debugSessionInfo && debugSessionInfo.tier) body.tier = debugSessionInfo.tier;
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      .then((r) => r.json().then((j) => ({ ok: r.ok, json: j })))
+      .then((r) => r.json().then((j) => ({ ok: r.ok, json: canvasPayload(j) })))
       .then((result) => {
         if (requestGeneration !== debugRequestGeneration) {
           releaseDebugSession(debugResponseSnapshot(result.json));

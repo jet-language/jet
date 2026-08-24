@@ -19,7 +19,7 @@
 
 mod common;
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -1098,6 +1098,263 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
     assert!(stdout.contains("\"event\":\"exited\""), "{stdout}");
     assert!(stdout.contains("\"event\":\"terminated\""), "{stdout}");
     let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn dap_cli_pauses_a_running_target_through_production_wire() {
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let tag = format!(
+        "dap_cli_pause_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    );
+    let file = native_fixture(
+        &tag,
+        "fn run() {\n    total := 0\n    loop i in 1..1000000000 {\n        total += i\n    }\n    print(\"{total}\")\n}\n",
+    );
+    let input = format!(
+        "{}{}{}{}",
+        dap_frame(
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path"}}"#
+        ),
+        dap_frame(&format!(
+            r#"{{"seq":2,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false,"args":[],"env":{{}}}}}}"#,
+            file
+        )),
+        dap_frame(r#"{"seq":3,"type":"request","command":"configurationDone","arguments":{}}"#),
+        dap_frame(r#"{"seq":4,"type":"request","command":"pause","arguments":{}}"#),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    let mut input_pipe = child.stdin.take().expect("DAP stdin");
+    input_pipe
+        .write_all(input.as_bytes())
+        .expect("send initialize, launch, configuration, and pause");
+    input_pipe.flush().expect("flush DAP requests");
+
+    let mut stdout = child.stdout.take().expect("DAP stdout");
+    let (output_tx, output_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let output_reader = std::thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        loop {
+            match stdout.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(size) => {
+                    if output_tx.send(chunk[..size].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut transcript = String::new();
+    let mut paused = false;
+    while Instant::now() < deadline && !paused {
+        match output_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(chunk) => {
+                transcript.push_str(&String::from_utf8_lossy(&chunk));
+                paused = transcript
+                    .contains("\"request_seq\":4,\"success\":true,\"command\":\"pause\"")
+                    && transcript.contains("\"event\":\"stopped\"")
+                    && transcript.contains("\"reason\":\"pause\"");
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let mut threads_ok = false;
+    if paused {
+        input_pipe
+            .write_all(
+                dap_frame(r#"{"seq":5,"type":"request","command":"threads","arguments":{}}"#)
+                    .as_bytes(),
+            )
+            .expect("send threads after pause");
+        input_pipe.flush().expect("flush threads request");
+        let threads_deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < threads_deadline && !threads_ok {
+            match output_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(chunk) => {
+                    transcript.push_str(&String::from_utf8_lossy(&chunk));
+                    threads_ok = transcript
+                        .contains("\"request_seq\":5,\"success\":true,\"command\":\"threads\"");
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        input_pipe
+            .write_all(
+                dap_frame(r#"{"seq":6,"type":"request","command":"disconnect","arguments":{}}"#)
+                    .as_bytes(),
+            )
+            .expect("send disconnect after pause");
+        input_pipe.flush().expect("flush disconnect");
+    }
+    drop(input_pipe);
+
+    let exit_deadline = Instant::now() + Duration::from_secs(10);
+    let mut status = None;
+    while Instant::now() < exit_deadline {
+        if let Some(result) = child.try_wait().expect("check production DAP process") {
+            status = Some(result);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if status.is_none() {
+        let _ = child.kill();
+        status = child.wait().ok();
+    }
+    let _ = output_reader.join();
+    while let Ok(chunk) = output_rx.try_recv() {
+        transcript.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    let _ = std::fs::remove_file(&file);
+    assert!(paused, "production DAP pause did not settle:\n{transcript}");
+    assert!(
+        threads_ok,
+        "production DAP stopped state was not usable:\n{transcript}"
+    );
+    assert!(
+        status.is_some_and(|status| status.success()),
+        "production DAP pause session failed:\n{transcript}"
+    );
+}
+
+#[test]
+fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let tag = format!(
+        "dap_cli_raw_frames_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    );
+    let file = native_fixture(&tag, LOOPS);
+    let stem = Path::new(&file)
+        .file_stem()
+        .expect("raw-frame fixture has a file stem")
+        .to_string_lossy();
+    let rust_file = format!("{stem}.rs");
+    let setup = format!(
+        "{}{}{}",
+        dap_frame(
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path"}}"#
+        ),
+        dap_frame(&format!(
+            r#"{{"seq":2,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":true,"args":[],"env":{{}}}}}}"#,
+            file
+        )),
+        dap_frame(r#"{"seq":3,"type":"request","command":"configurationDone","arguments":{}}"#),
+    );
+    let follow_up = format!(
+        "{}{}{}{}",
+        dap_frame(
+            r#"{"seq":4,"type":"request","command":"stackTrace","arguments":{"threadId":1,"showRawFrames":"yes"}}"#
+        ),
+        dap_frame(
+            r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#
+        ),
+        dap_frame(
+            r#"{"seq":6,"type":"request","command":"stackTrace","arguments":{"threadId":1,"showRawFrames":true}}"#
+        ),
+        dap_frame(r#"{"seq":7,"type":"request","command":"disconnect","arguments":{"terminateDebuggee":true}}"#),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    let mut input_pipe = child.stdin.take().expect("DAP stdin");
+    input_pipe
+        .write_all(setup.as_bytes())
+        .expect("send DAP setup requests");
+    input_pipe.flush().expect("flush DAP setup requests");
+
+    let mut stdout_pipe = child.stdout.take().expect("DAP stdout");
+    let (output_tx, output_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let output_reader = std::thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        loop {
+            match stdout_pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(size) => {
+                    if output_tx.send(chunk[..size].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut stdout = String::new();
+    let mut stopped = false;
+    while Instant::now() < deadline && !stopped {
+        match output_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(chunk) => {
+                stdout.push_str(&String::from_utf8_lossy(&chunk));
+                stopped = stdout.contains("\"event\":\"stopped\"");
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    if stopped {
+        input_pipe
+            .write_all(follow_up.as_bytes())
+            .expect("send DAP stack requests");
+        input_pipe.flush().expect("flush DAP stack requests");
+    }
+    drop(input_pipe);
+    let status = child
+        .wait()
+        .expect("wait for the production Jet DAP command");
+    output_reader.join().expect("join DAP output reader");
+    while let Ok(chunk) = output_rx.try_recv() {
+        stdout.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    let _ = std::fs::remove_file(&file);
+    assert!(stopped, "production DAP did not stop at entry:\n{stdout}");
+    assert!(status.success(), "DAP command failed:\nstdout:\n{stdout}");
+
+    let rejected = dap_response(&stdout, 4, "stackTrace")
+        .unwrap_or_else(|| panic!("invalid stack response:\n{stdout}"));
+    assert!(rejected.contains("\"success\":false"), "{rejected}");
+    assert!(rejected.contains("\"id\":22032"), "{rejected}");
+    assert!(rejected.contains("\"code\":\"E2236\""), "{rejected}");
+
+    let safe = dap_response(&stdout, 5, "stackTrace").expect("safe stack response");
+    assert!(safe.contains("\"success\":true"), "{safe}");
+    assert!(!safe.contains("__jet_"), "generated Rust leaked into Jet view: {safe}");
+    assert!(!safe.contains(&rust_file), "generated Rust source leaked into Jet view: {safe}");
+
+    let raw = dap_response(&stdout, 6, "stackTrace").expect("raw stack response");
+    assert!(raw.contains("\"success\":true"), "{raw}");
+    assert!(raw.contains("\"name\":\"[raw]"), "{raw}");
+    assert!(
+        raw.contains(&format!("\"path\":\"{}\"", rust_file)),
+        "raw stack must expose the generated frame source only in expert mode: {raw}"
+    );
+    let disconnected = dap_response(&stdout, 7, "disconnect").expect("disconnect response");
+    assert!(disconnected.contains("\"success\":true"), "{disconnected}");
 }
 
 #[test]

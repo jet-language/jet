@@ -11,6 +11,7 @@ use std::time::Duration;
 pub struct StreamResponse {
     status: u16,
     content_length: Option<u64>,
+    location: Option<String>,
     reader: Box<dyn Read + Send>,
 }
 
@@ -21,6 +22,11 @@ impl StreamResponse {
 
     pub fn content_length(&self) -> Option<u64> {
         self.content_length
+    }
+
+    /// The redirect target, when the response carries a `Location` header.
+    pub fn location(&self) -> Option<&str> {
+        self.location.as_deref()
     }
 }
 
@@ -217,8 +223,59 @@ fn get_stream_with_timeout(url: &str, timeout: Duration) -> Result<StreamRespons
     Ok(StreamResponse {
         status,
         content_length,
+        location: response.header("Location").map(str::to_string),
         reader: Box::new(response.into_reader()),
     })
+}
+
+/// Fetch a bounded stream while following a small, explicit redirect chain.
+/// The plain `get_stream` API remains redirect-free for callers that need to
+/// inspect the original HTTP response.
+pub fn get_stream_follow_redirects(
+    url: &str,
+    timeout: Duration,
+    max_redirects: usize,
+) -> Result<StreamResponse, FetchError> {
+    let mut current = url.to_string();
+    for _ in 0..=max_redirects {
+        let response = get_stream_with_timeout(&current, timeout)?;
+        if !(300..400).contains(&response.status()) {
+            return Ok(response);
+        }
+        let location = response.location().ok_or_else(|| {
+            FetchError::http(
+                &current,
+                "redirect response has no Location header".to_string(),
+            )
+        })?;
+        current = resolve_redirect(&current, location)?;
+    }
+    Err(FetchError::http(
+        url,
+        format!("too many redirects (limit {max_redirects})"),
+    ))
+}
+
+fn resolve_redirect(current: &str, location: &str) -> Result<String, FetchError> {
+    if location.starts_with("https://") || location.starts_with("http://") {
+        return Ok(location.to_string());
+    }
+    if location.starts_with('/') {
+        let authority = current
+            .split_once("://")
+            .and_then(|(_, rest)| rest.split('/').next())
+            .ok_or_else(|| FetchError::http(current, "redirect URL has no authority".into()))?;
+        return Ok(format!(
+            "{}://{}{}",
+            current.split_once("://").unwrap().0,
+            authority,
+            location
+        ));
+    }
+    Err(FetchError::http(
+        current,
+        "redirect Location must be an absolute or root-relative URL".into(),
+    ))
 }
 
 fn classify_http_error(url: &str, detail: &str) -> FetchErrorKind {

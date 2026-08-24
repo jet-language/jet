@@ -320,11 +320,19 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
         std::process::exit(code);
     }
     let dir = project_root(&cwd);
-    let table = match checked_env_file(&dir) {
+    let mut table = match checked_env_file(&dir) {
         Ok(Some(env)) => env.source_table(),
         Ok(None) => RefSpec::SourceTable::empty(),
         Err(diagnostic) => report_authority_error(diagnostic),
     };
+    // Card #2166: the first native release recipe is a built-in catalog entry,
+    // but the standalone tool/profile surfaces still need its source authority
+    // available for channel writeback and manifest receipts.
+    table.ensure_decl(
+        crate::Provider::native::SOURCE_NAME,
+        crate::Provider::native::UPSTREAM,
+        RefSpec::ProviderKind::JetPackage,
+    );
     table
 }
 

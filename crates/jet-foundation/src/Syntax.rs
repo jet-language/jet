@@ -61,6 +61,12 @@
 // operators exercise. A program's own error type still needs its own
 // declaration.
 //
+// D-LITCARRIER1=D (owner, 2026-08-24; card #2164): numeric literals have two
+// suffix mechanisms. Carrier suffix `f` selects Float; component suffixes
+// `i`, `j`, and `k` build imaginary or vector components. Expected-type
+// inference remains the default, and these reserved suffixes precede
+// #UnitFamily resolution.
+//
 // D-APILABEL1=A adds the two parameter-zone separators
 // PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in
 // a parameter list rather than as operators. It also gives a parameter an

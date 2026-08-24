@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4147,19 +4147,40 @@ fn no_nix_unindexed_nixpkgs_package_reports_e1349() {
 fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     const TEST_NAME: &str = "indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object";
     const PHASE_ENV: &str = "JETPACK_INDEXED_NIX_PHASE";
+    const PROJECT_ENV: &str = "JETPACK_INDEXED_NIX_PROJECT";
+    const ROOT_ENV: &str = "JETPACK_INDEXED_NIX_ROOT";
 
-    let project = Scratch::new("indexed-nixpkgs-project");
-    let root = Scratch::new("root");
-    let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project.path);
-    server.install(&root.path);
+    let (project_dir, root_dir, _owned_project, _owned_root, server, child) = match (
+        std::env::var_os(PROJECT_ENV).map(PathBuf::from),
+        std::env::var_os(ROOT_ENV).map(PathBuf::from),
+    ) {
+        (Some(project_dir), Some(root_dir)) => (project_dir, root_dir, None, None, None, true),
+        (None, None) => {
+            let project = Scratch::new("indexed-nixpkgs-project");
+            let root = Scratch::new("root");
+            let project_dir = project.path.clone();
+            let root_dir = root.path.clone();
+            let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project_dir);
+            server.install(&root_dir);
+            (
+                project_dir,
+                root_dir,
+                Some(project),
+                Some(root),
+                Some(server),
+                false,
+            )
+        }
+        _ => panic!("indexed Nix project/root environment must be configured together"),
+    };
     fs::write(
-        project.join("env.jet"),
+        project_dir.join("env.jet"),
         "module dev {\n    sources: { default: NixOS/nixpkgs/nixos-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
     )
     .unwrap();
-    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::create_dir_all(project_dir.join(".jet")).unwrap();
     fs::write(
-        project.join(".jet/lock"),
+        project_dir.join(".jet/lock"),
         format!(
             "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
             nix_index_cache_server::CHANNEL,
@@ -4172,8 +4193,8 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
         let mut command = jetpack();
         command
             .args(["enter", "--no-color", "--trust"])
-            .current_dir(&project.path)
-            .env("JETPACK_ROOT", &root.path)
+            .current_dir(&project_dir)
+            .env("JETPACK_ROOT", &root_dir)
             .env("PATH", "")
             .env_remove("JETPACK_FIXTURES");
         if offline {
@@ -4183,7 +4204,8 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
         command.output().unwrap()
     };
 
-    if let Ok(phase) = std::env::var(PHASE_ENV) {
+    if child {
+        let phase = std::env::var(PHASE_ENV).expect("indexed Nix child phase");
         let network = match phase.as_str() {
             "online-initial" | "online-repair" => no_nix_namespace::NetworkMode::Enabled,
             "offline-reuse" | "offline-missing" => no_nix_namespace::NetworkMode::Disabled,
@@ -4195,7 +4217,10 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             match phase.as_str() {
                 "online-initial" | "offline-reuse" | "online-repair" => {
-                    assert!(output.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+                    assert!(
+                        output.status.success(),
+                        "stdout: {stdout}\nstderr: {stderr}"
+                    );
                     assert!(stdout.contains("ripgrep 15.2.0"), "stdout: {stdout}");
                 }
                 "offline-missing" => {
@@ -4216,6 +4241,8 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
         return;
     }
 
+    std::env::set_var(PROJECT_ENV, &project_dir);
+    std::env::set_var(ROOT_ENV, &root_dir);
     for (phase, network) in [
         ("online-initial", no_nix_namespace::NetworkMode::Enabled),
         ("offline-reuse", no_nix_namespace::NetworkMode::Disabled),
@@ -4225,7 +4252,7 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     }
     std::env::remove_var(PHASE_ENV);
 
-    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let roots = jetpack::Store::Roots::at(root_dir.clone());
     let entries = jetpack::Store::list_checked(&roots).unwrap();
     let producer = |entry: &jetpack::Store::StoreEntry| {
         jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap()
@@ -4263,7 +4290,9 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
         graph.direct_references(&library_digest),
         vec![runtime_digest.clone()]
     );
-    assert!(graph.transitive_references(&root_digest).contains(&runtime_digest));
+    assert!(graph
+        .transitive_references(&root_digest)
+        .contains(&runtime_digest));
 
     let missing = roots.hangar_dir().join("objects").join(&runtime_digest);
     make_tree_writable(&missing);
@@ -4285,6 +4314,9 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     );
     std::env::remove_var(PHASE_ENV);
 
+    std::env::remove_var(PROJECT_ENV);
+    std::env::remove_var(ROOT_ENV);
+    let server = server.as_ref().expect("parent owns indexed Nix server");
     assert_eq!(
         server.object_request_count(nix_index_cache_server::ROOT_PATH),
         2,

@@ -17,9 +17,14 @@
 //! a bounded Jet-facing response. Backend text is never a user-facing
 //! diagnostic or source location.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::Arc;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use super::Inferior::{
     parse_current_thread_id, parse_exit_signal, Inferior, RawFrame, ResumeResult,
@@ -103,41 +108,85 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
         terminal_failure: false,
         client_sequences: HashSet::new(),
         seq: 1,
+        resume_task: None,
     };
-    let stdin = std::io::stdin();
-    let mut reader = std::io::BufReader::new(stdin.lock());
+    let reader = std::io::BufReader::new(std::io::stdin());
     let mut stdout = std::io::stdout();
-    let result = run_io(&mut server, &mut reader, &mut stdout);
+    let result = run_io(&mut server, reader, &mut stdout);
     result
 }
 
-fn run_io(server: &mut DapServer, reader: &mut impl BufRead, out: &mut impl Write) -> i32 {
+fn run_io(
+    server: &mut DapServer,
+    reader: impl BufRead + Send + 'static,
+    out: &mut impl Write,
+) -> i32 {
+    let (input_tx, input_rx) = mpsc::channel::<io::Result<Option<String>>>();
+    std::thread::spawn(move || {
+        let mut reader = reader;
+        loop {
+            let message = read_message(&mut reader);
+            let done = !matches!(&message, Ok(Some(_)));
+            if input_tx.send(message).is_err() || done {
+                break;
+            }
+        }
+    });
+    let mut requests = VecDeque::new();
+    let mut input_closed = false;
     loop {
-        let body = match read_message(reader) {
-            Ok(Some(body)) => body,
-            Ok(None) => break,
-            Err(error) => {
+        server.poll_resume(out);
+        if server.state == State::Terminated || server.terminal_failure {
+            break;
+        }
+
+        let next = if server.has_pending_resume() {
+            requests
+                .iter()
+                .position(is_running_control_request)
+                .and_then(|position| requests.remove(position))
+        } else {
+            requests.pop_front()
+        };
+        if let Some(msg) = next {
+            if server.handle(&msg, out).is_none()
+                || server.state == State::Terminated
+                || server.terminal_failure
+            {
+                break;
+            }
+            continue;
+        }
+        if input_closed && (!server.has_pending_resume() || requests.is_empty()) {
+            break;
+        }
+        match input_rx.recv_timeout(Duration::from_millis(10)) {
+            Ok(Ok(Some(body))) => match parse_dap_request(&body) {
+                Ok(msg) => requests.push_back(msg),
+                Err(error) => {
+                    eprintln!("error: invalid DAP request: {error}");
+                    return server.finish(crate::ExitCodes::USER_ERROR);
+                }
+            },
+            Ok(Ok(None)) => input_closed = true,
+            Ok(Err(error)) => {
                 // A framing or UTF-8 failure cannot be correlated to a
                 // request. Fail closed without emitting a fabricated reply.
                 eprintln!("error: invalid DAP frame: {error}");
                 return server.finish(crate::ExitCodes::USER_ERROR);
             }
-        };
-        let msg = match parse_dap_request(&body) {
-            Ok(msg) => msg,
-            Err(error) => {
-                eprintln!("error: invalid DAP request: {error}");
-                return server.finish(crate::ExitCodes::USER_ERROR);
-            }
-        };
-        if server.handle(&msg, out).is_none()
-            || server.state == State::Terminated
-            || server.terminal_failure
-        {
-            break;
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => input_closed = true,
         }
     }
     server.finish(crate::ExitCodes::OK)
+}
+
+fn is_running_control_request(msg: &JSONValue) -> bool {
+    matches!(
+        json_get(msg, "command").and_then(json_str),
+        Some("pause" | "cancel" | "disconnect" | "terminate")
+    )
 }
 
 struct DapServer {
@@ -181,6 +230,7 @@ struct DapServer {
     terminal_failure: bool,
     client_sequences: HashSet<u32>,
     seq: i64,
+    resume_task: Option<ResumeTask>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -201,6 +251,119 @@ enum BreakpointAction {
     Stop(Vec<u32>),
     Continue,
     Log(String),
+}
+
+enum ResumeControl {
+    Interrupt,
+    Stop,
+}
+
+struct ResumeEvent {
+    inferior: Inferior,
+    result: io::Result<ResumeResult>,
+    mode: ResumeMode,
+}
+
+struct ResumeTask {
+    control: Sender<ResumeControl>,
+    events: Receiver<ResumeEvent>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl ResumeTask {
+    fn spawn(inferior: Inferior, command: &'static str, mode: ResumeMode) -> Self {
+        let (control, control_rx) = mpsc::channel();
+        let (events, event_rx) = mpsc::channel();
+        let stop = control.clone();
+        let pid = inferior.debugger_pid();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let worker_interrupted = Arc::clone(&interrupted);
+        let join = std::thread::spawn(move || {
+            let signaler = std::thread::spawn(move || {
+                while let Ok(control) = control_rx.recv() {
+                    match control {
+                        ResumeControl::Interrupt => {
+                            worker_interrupted.store(true, Ordering::Release);
+                            let _ = signal_debugger(pid);
+                        }
+                        ResumeControl::Stop => break,
+                    }
+                }
+            });
+            let mut inferior = inferior;
+            let result = inferior.resume_and_locate(command);
+            let _ = stop.send(ResumeControl::Stop);
+            let _ = signaler.join();
+            let _ = events.send(ResumeEvent {
+                inferior,
+                result,
+                mode: if interrupted.load(Ordering::Acquire) {
+                    ResumeMode::Pause
+                } else {
+                    mode
+                },
+            });
+        });
+        Self {
+            control,
+            events: event_rx,
+            join: Some(join),
+        }
+    }
+
+    fn interrupt(&self) {
+        let _ = self.control.send(ResumeControl::Interrupt);
+    }
+
+    fn take_event(&mut self) -> Result<Option<ResumeEvent>, ()> {
+        match self.events.try_recv() {
+            Ok(event) => {
+                if let Some(join) = self.join.take() {
+                    let _ = join.join();
+                }
+                Ok(Some(event))
+            }
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(()),
+        }
+    }
+
+    fn wait(mut self) -> io::Result<ResumeEvent> {
+        self.interrupt();
+        let event = self.events.recv().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "native debugger resume worker closed before settling",
+            )
+        })?;
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+        Ok(event)
+    }
+}
+
+#[cfg(unix)]
+fn signal_debugger(pid: u32) -> io::Result<()> {
+    let status = std::process::Command::new("kill")
+        .args(["-INT", &pid.to_string()])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "native debugger rejected the interrupt signal",
+        ))
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_debugger(_pid: u32) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "native debugger interruption is unsupported on this platform",
+    ))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -239,7 +402,7 @@ impl AttachFailure {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ReferenceKind {
     Frame,
     Scope,
@@ -247,7 +410,7 @@ enum ReferenceKind {
     Value,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct FrameLocation {
     thread_id: u32,
     position: usize,
@@ -289,6 +452,17 @@ fn project_frames<'a>(
     projected
 }
 
+/// Raw-frame opt-in appends backend frames to a verified Jet stack. It never
+/// turns a native helper thread or helper stop into a Jet task/stop that can
+/// be selected or stepped. The DAP control plane must use this predicate
+/// independently of presentation mode.
+fn has_jet_frame(frames: &[RawFrame], map: &LineMap, rust_file: &str) -> bool {
+    frames.iter().any(|frame| {
+        map.jet_line_for_file(&frame.rust_file, rust_file, frame.rust_line)
+            .is_some()
+    })
+}
+
 struct ValueReference {
     frame: FrameLocation,
     expression: String,
@@ -303,9 +477,12 @@ struct ObjectReferences {
     next_id: u32,
     live: HashMap<u32, (u64, ReferenceKind)>,
     frame_ids: HashMap<(u32, usize), u32>,
+    raw_frame_ids: HashMap<(u32, usize), u32>,
     frame_positions: HashMap<u32, FrameLocation>,
     frame_raw: HashMap<u32, bool>,
+    scope_ids: HashMap<(u32, ReferenceKind), u32>,
     scope_positions: HashMap<u32, FrameLocation>,
+    value_ids: HashMap<(FrameLocation, String, bool), u32>,
     values: HashMap<u32, ValueReference>,
 }
 
@@ -316,9 +493,12 @@ impl Default for ObjectReferences {
             next_id: 1,
             live: HashMap::new(),
             frame_ids: HashMap::new(),
+            raw_frame_ids: HashMap::new(),
             frame_positions: HashMap::new(),
             frame_raw: HashMap::new(),
+            scope_ids: HashMap::new(),
             scope_positions: HashMap::new(),
+            value_ids: HashMap::new(),
             values: HashMap::new(),
         }
     }
@@ -361,7 +541,11 @@ impl ObjectReferences {
     }
 
     fn issue_raw_frame(&mut self, thread_id: u32, position: usize) -> u32 {
+        if let Some(id) = self.raw_frame_ids.get(&(thread_id, position)) {
+            return *id;
+        }
         let id = self.issue(ReferenceKind::Frame);
+        self.raw_frame_ids.insert((thread_id, position), id);
         self.frame_positions.insert(
             id,
             FrameLocation {
@@ -378,8 +562,12 @@ impl ObjectReferences {
     }
 
     fn issue_scope(&mut self, frame_id: u32, kind: ReferenceKind) -> u32 {
+        if let Some(id) = self.scope_ids.get(&(frame_id, kind)) {
+            return *id;
+        }
         let id = self.issue(kind);
         if let Some(location) = self.frame_positions.get(&frame_id) {
+            self.scope_ids.insert((frame_id, kind), id);
             self.scope_positions.insert(id, *location);
         }
         id
@@ -394,7 +582,12 @@ impl ObjectReferences {
     }
 
     fn issue_value_at(&mut self, frame: FrameLocation, expression: String, raw: bool) -> u32 {
+        let key = (frame, expression.clone(), raw);
+        if let Some(id) = self.value_ids.get(&key) {
+            return *id;
+        }
         let id = self.issue(ReferenceKind::Value);
+        self.value_ids.insert(key, id);
         self.values.insert(
             id,
             ValueReference {
@@ -414,15 +607,81 @@ impl ObjectReferences {
         self.generation = self.generation.wrapping_add(1).max(1);
         self.live.clear();
         self.frame_ids.clear();
+        self.raw_frame_ids.clear();
         self.frame_positions.clear();
         self.frame_raw.clear();
+        self.scope_ids.clear();
         self.scope_positions.clear();
+        self.value_ids.clear();
         self.values.clear();
     }
 }
 
 impl DapServer {
+    fn has_pending_resume(&self) -> bool {
+        self.resume_task.is_some()
+    }
+
+    fn poll_resume(&mut self, out: &mut impl Write) {
+        let event = match self.resume_task.as_mut() {
+            Some(task) => match task.take_event() {
+                Ok(Some(event)) => Some(event),
+                Ok(None) => None,
+                Err(()) => {
+                    self.resume_task = None;
+                    self.terminate_with_diagnostic(
+                        out,
+                        "E2234",
+                        "the native debugger resume worker closed unexpectedly",
+                    );
+                    return;
+                }
+            },
+            None => None,
+        };
+        let Some(event) = event else { return };
+        self.resume_task = None;
+        self.inf = Some(event.inferior);
+        match event.result {
+            Ok(result) => self.emit_resume(out, result, event.mode),
+            Err(error) => {
+                self.terminate_backend(out, &error, "the native debugger lost the running session")
+            }
+        }
+    }
+
+    fn wait_resume(&mut self) -> io::Result<ResumeEvent> {
+        let Some(task) = self.resume_task.take() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "no native debugger resume is pending",
+            ));
+        };
+        task.wait()
+    }
+
+    fn settle_resume(&mut self) -> io::Result<()> {
+        let event = self.wait_resume()?;
+        self.inf = Some(event.inferior);
+        event.result.map(|_| ())
+    }
+
     fn finish(&mut self, code: i32) -> i32 {
+        if self.resume_task.is_some() {
+            match self.wait_resume() {
+                Ok(event) => {
+                    self.inf = Some(event.inferior);
+                    if let Err(error) = event.result {
+                        self.terminal_failure = true;
+                        eprintln!("error: native debugger resume failed during cleanup: {error}");
+                    }
+                }
+                Err(error) => {
+                    self.terminal_failure = true;
+                    eprintln!("error: native debugger resume cleanup failed: {error}");
+                }
+            }
+        }
         self.state = State::Terminated;
         self.invalidate_references();
         let terminate = self.target == Some(TargetKind::Launched);
@@ -730,7 +989,6 @@ impl DapServer {
             .and_then(json_u32)
             .filter(|thread_id| *thread_id > 0)
             .ok_or((22032, "run control requires a positive threadId"))?;
-        let raw_frames = self.show_raw_frames;
         let map = &self.map;
         let rust_file = self.rust_file.as_str();
         let Some(inf) = self.inf.as_mut() else {
@@ -738,25 +996,37 @@ impl DapServer {
         };
         inf.select_thread(thread_id)
             .map_err(|_| (22034, "the requested Jet task is no longer stopped"))?;
-        if !raw_frames {
-            let backtrace = inf
-                .backtrace()
-                .map_err(|_| (22034, "the requested Jet task is no longer stopped"))?;
-            if !Inferior::parse_frames(&backtrace).iter().any(|frame| {
-                map.jet_line_for_file(&frame.rust_file, rust_file, frame.rust_line)
-                    .is_some()
-            }) {
-                return Err((
-                    22039,
-                    "the requested thread has no verified Jet source location",
-                ));
-            }
+        let backtrace = inf
+            .backtrace()
+            .map_err(|_| (22034, "the requested Jet task is no longer stopped"))?;
+        if !has_jet_frame(&Inferior::parse_frames(&backtrace), map, rust_file) {
+            return Err((
+                22039,
+                "the requested thread has no verified Jet source location",
+            ));
         }
         self.current_thread = thread_id;
         Ok(())
     }
 
     fn restart_target(&mut self, out: &mut impl Write, request_seq: i64) {
+        if self.resume_task.is_some() {
+            if let Err(_error) = self.settle_resume() {
+                if let Some(inf) = self.inf.take() {
+                    inf.quit();
+                }
+                self.target = None;
+                self.state = State::Ready;
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    "restart",
+                    22034,
+                    "restart could not stop the current native target",
+                );
+                return;
+            }
+        }
         self.invalidate_references();
         if let Some(inf) = self.inf.take() {
             inf.quit();
@@ -862,22 +1132,21 @@ impl DapServer {
         self.start_target(out);
     }
 
-    fn start_target(&mut self, out: &mut impl Write) {
-        self.state = State::Running;
-        let result = self.inf.as_mut().map(|inf| inf.resume_and_locate("run"));
-        match result {
-            Some(Ok(result)) => self.emit_resume(out, result, ResumeMode::Launch),
-            Some(Err(error)) => self.terminate_backend(
-                out,
-                &error,
-                "the native debugger could not start the program",
-            ),
-            None => self.terminate_with_diagnostic(
+    fn begin_resume(&mut self, out: &mut impl Write, command: &'static str, mode: ResumeMode) {
+        let Some(inf) = self.inf.take() else {
+            self.terminate_with_diagnostic(
                 out,
                 "E2234",
                 "the native debugger has no target to start",
-            ),
-        }
+            );
+            return;
+        };
+        self.state = State::Running;
+        self.resume_task = Some(ResumeTask::spawn(inf, command, mode));
+    }
+
+    fn start_target(&mut self, out: &mut impl Write) {
+        self.begin_resume(out, "run", ResumeMode::Launch);
     }
 
     /// Dispatch one DAP request. `Some(())` to keep the loop going; `None` to
@@ -925,7 +1194,7 @@ impl DapServer {
                     request_seq,
                     "initialize",
                     true,
-                    "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}",
+                    "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsPauseRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}",
                 );
                 Some(())
             }
@@ -1176,16 +1445,11 @@ impl DapServer {
                     Some(Ok(threads)) => threads
                         .into_iter()
                         .filter(|(_, backtrace)| {
-                            self.show_raw_frames
-                                || Inferior::parse_frames(backtrace).iter().any(|frame| {
-                                    self.map
-                                        .jet_line_for_file(
-                                            &frame.rust_file,
-                                            &self.rust_file,
-                                            frame.rust_line,
-                                        )
-                                        .is_some()
-                                })
+                            has_jet_frame(
+                                &Inferior::parse_frames(backtrace),
+                                &self.map,
+                                &self.rust_file,
+                            )
                         })
                         .map(|(thread, _)| thread)
                         .collect::<Vec<_>>(),
@@ -1210,7 +1474,7 @@ impl DapServer {
                         return Some(());
                     }
                 };
-                if threads.is_empty() && !self.show_raw_frames {
+                if threads.is_empty() {
                     self.respond_jet_error(
                         out,
                         request_seq,
@@ -1313,13 +1577,7 @@ impl DapServer {
                         return Some(());
                     }
                 };
-                if !show_raw_frames
-                    && !frames.iter().any(|frame| {
-                        self.map
-                            .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
-                            .is_some()
-                    })
-                {
+                if !has_jet_frame(&frames, &self.map, &self.rust_file) {
                     self.respond_jet_error(
                         out,
                         request_seq,
@@ -1828,30 +2086,12 @@ impl DapServer {
                     true,
                     "{\"allThreadsContinued\":true}",
                 );
-                let result = self
-                    .inf
-                    .as_mut()
-                    .map(|inf| inf.resume_and_locate(resume_cmd));
-                match result {
-                    Some(Ok(result)) => {
-                        let mode = if command == "continue" {
-                            ResumeMode::Continue
-                        } else {
-                            ResumeMode::Step
-                        };
-                        self.emit_resume(out, result, mode);
-                    }
-                    Some(Err(error)) => {
-                        self.terminate_backend(
-                            out,
-                            &error,
-                            "the native debugger lost the running session",
-                        );
-                    }
-                    None => {
-                        self.terminate_with_diagnostic(out, "E2234", "Jet debugger has no target");
-                    }
-                }
+                let mode = if command == "continue" {
+                    ResumeMode::Continue
+                } else {
+                    ResumeMode::Step
+                };
+                self.begin_resume(out, resume_cmd, mode);
                 Some(())
             }
             "pause" => {
@@ -1863,6 +2103,14 @@ impl DapServer {
                         22031,
                         "pause requires a running target",
                     );
+                    return Some(());
+                }
+                if self.resume_task.is_some() {
+                    if let Some(task) = self.resume_task.as_ref() {
+                        task.interrupt();
+                    }
+                    self.invalidate_references();
+                    self.respond(out, request_seq, command, true, "{}");
                     return Some(());
                 }
                 if self.inf.is_none() {
@@ -2035,6 +2283,9 @@ impl DapServer {
                     return Some(());
                 }
                 self.respond(out, request_seq, command, true, "{}");
+                if let Some(task) = &self.resume_task {
+                    task.interrupt();
+                }
                 Some(())
             }
             "disconnect" | "terminate" => {
@@ -2060,9 +2311,24 @@ impl DapServer {
                 };
                 self.invalidate_references();
                 self.state = State::Terminated;
+                let resume_error = if self.resume_task.is_some() {
+                    self.settle_resume().err()
+                } else {
+                    None
+                };
                 match self.close_target(terminate) {
                     Ok(()) => {
-                        self.respond(out, request_seq, command, true, "{}");
+                        if resume_error.is_some() {
+                            self.respond_jet_error(
+                                out,
+                                request_seq,
+                                command,
+                                22034,
+                                "the native debugger could not settle before disconnect",
+                            );
+                        } else {
+                            self.respond(out, request_seq, command, true, "{}");
+                        }
                         if command == "terminate" {
                             self.event(out, "terminated", "{}");
                         }
@@ -2130,25 +2396,12 @@ impl DapServer {
         } else {
             "run"
         };
-        let result = self.inf.as_mut().map(|inf| inf.resume_and_locate(resume));
-        match result {
-            Some(Ok(result)) => {
-                let mode = if self.target == Some(TargetKind::Launched) {
-                    ResumeMode::Launch
-                } else {
-                    ResumeMode::Continue
-                };
-                self.emit_resume(out, result, mode);
-            }
-            Some(Err(error)) => {
-                self.terminate_backend(out, &error, "the native debugger lost the running session")
-            }
-            None => self.terminate_with_diagnostic(
-                out,
-                "E2234",
-                "the native debugger has no target to run",
-            ),
-        }
+        let mode = if self.target == Some(TargetKind::Launched) {
+            ResumeMode::Launch
+        } else {
+            ResumeMode::Continue
+        };
+        self.begin_resume(out, resume, mode);
     }
 
     /// Send a DAP `output` event for any Jet `print()`/`eprint()` the debuggee
@@ -2279,7 +2532,9 @@ impl DapServer {
                     return;
                 }
             }
-            let reason = if self.last_exception.is_some()
+            let reason = if mode == ResumeMode::Pause {
+                "pause"
+            } else if self.last_exception.is_some()
                 || self.last_signal.is_some()
                 || bt_text.contains("signal")
                 || bt_text.contains("exception")
@@ -2289,8 +2544,6 @@ impl DapServer {
                 "entry"
             } else if mode == ResumeMode::Step {
                 "step"
-            } else if mode == ResumeMode::Pause {
-                "pause"
             } else {
                 "breakpoint"
             };
@@ -2300,7 +2553,7 @@ impl DapServer {
                     .map
                     .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
                 {
-                    None if !self.show_raw_frames => {
+                    None => {
                         if self.unmapped_steps >= 200 {
                             self.terminate_with_diagnostic(
                             out,
@@ -2382,9 +2635,6 @@ impl DapServer {
                                 }
                             }
                         }
-                    }
-                    None => {
-                        self.unmapped_steps = 0;
                     }
                     Some(_) => {
                         self.unmapped_steps = 0;
@@ -3392,6 +3642,7 @@ mod tests {
             terminal_failure: false,
             client_sequences: HashSet::new(),
             seq: 1,
+            resume_task: None,
         }
     }
 
@@ -3439,6 +3690,31 @@ mod tests {
     }
 
     #[test]
+    fn raw_frame_opt_in_does_not_make_a_helper_stop_a_jet_task() {
+        let map = LineMap::build("// jet:line 2\nlet x = 1;\n");
+        let helper = [RawFrame {
+            func: "runtime_helper".to_string(),
+            rust_file: "main.rs".to_string(),
+            rust_line: 1,
+        }];
+        assert!(!has_jet_frame(&helper, &map, "main.rs"));
+
+        let jet_and_helper = [
+            RawFrame {
+                func: "runtime_helper".to_string(),
+                rust_file: "main.rs".to_string(),
+                rust_line: 1,
+            },
+            RawFrame {
+                func: "__jet_run".to_string(),
+                rust_file: "main.rs".to_string(),
+                rust_line: 2,
+            },
+        ];
+        assert!(has_jet_frame(&jet_and_helper, &map, "main.rs"));
+    }
+
+    #[test]
     fn dap_request_envelope_rejects_wrong_shapes_and_numbers() {
         assert!(parse_dap_request(
             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#
@@ -3477,7 +3753,7 @@ mod tests {
             r#"{"seq":2,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":false,"columnsStartAt1":false,"supportsANSIStyling":true}}"#,
         );
         assert!(accepted.contains("\"success\":true"), "{accepted}");
-        assert!(!accepted.contains("supportsPauseRequest"), "{accepted}");
+        assert!(accepted.contains("supportsPauseRequest"), "{accepted}");
         assert!(accepted.contains("supportsVariablePaging"), "{accepted}");
         assert!(!server.lines_start_at_1);
         assert!(!server.columns_start_at_1);
@@ -3732,7 +4008,7 @@ mod tests {
             frame(r#"{"seq":2,"type":"request","command":"attach","arguments":{"processId":0}}"#),
         );
         let mut output = Vec::new();
-        let code = run_io(&mut server, &mut std::io::Cursor::new(input), &mut output);
+        let code = run_io(&mut server, std::io::Cursor::new(input), &mut output);
         let text = String::from_utf8(output).unwrap();
         assert_eq!(code, crate::ExitCodes::OK);
         assert!(text.contains("\"command\":\"attach\""));
@@ -3768,7 +4044,7 @@ mod tests {
         );
         let mut server = test_server(State::New);
         let mut output = Vec::new();
-        let code = run_io(&mut server, &mut std::io::Cursor::new(input), &mut output);
+        let code = run_io(&mut server, std::io::Cursor::new(input), &mut output);
         let text = String::from_utf8(output).unwrap();
         let _ = target.kill();
         let _ = target.wait();
@@ -3819,7 +4095,7 @@ mod tests {
         );
         let mut server = test_server(State::New);
         let mut output = Vec::new();
-        let code = run_io(&mut server, &mut std::io::Cursor::new(input), &mut output);
+        let code = run_io(&mut server, std::io::Cursor::new(input), &mut output);
         let text = String::from_utf8(output).expect("DAP output is UTF-8");
         let target_alive = target.try_wait().expect("check detached target").is_none();
         let _ = target.kill();
@@ -3867,11 +4143,7 @@ mod tests {
             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
         );
         let mut server = test_server(State::New);
-        let code = run_io(
-            &mut server,
-            &mut std::io::Cursor::new(input),
-            &mut BrokenPipe,
-        );
+        let code = run_io(&mut server, std::io::Cursor::new(input), &mut BrokenPipe);
 
         assert_eq!(code, crate::ExitCodes::USER_ERROR);
         assert!(server.terminal_failure);
@@ -3896,6 +4168,32 @@ mod tests {
         let stable = refs.issue_frame(1, 0);
         assert_eq!(stable, refs.issue_frame(1, 0));
         assert_ne!(stable, refs.issue_frame(2, 0));
+    }
+
+    #[test]
+    fn repeated_stopped_snapshot_requests_reuse_object_references() {
+        let mut refs = ObjectReferences::default();
+        let raw_frame = refs.issue_raw_frame(1, 2);
+        let frame = refs.issue_frame(1, 2);
+        let raw_scope = refs.issue_scope(raw_frame, ReferenceKind::RawScope);
+        let scope = refs.issue_scope(frame, ReferenceKind::Scope);
+        let location = FrameLocation {
+            thread_id: 1,
+            position: 2,
+        };
+
+        assert_eq!(raw_frame, refs.issue_raw_frame(1, 2));
+        assert_eq!(
+            raw_scope,
+            refs.issue_scope(raw_frame, ReferenceKind::RawScope)
+        );
+        assert_eq!(scope, refs.issue_scope(frame, ReferenceKind::Scope));
+
+        let value = refs.issue_value_at(location, "answer".to_string(), false);
+        assert_eq!(
+            value,
+            refs.issue_value_at(location, "answer".to_string(), false)
+        );
     }
 
     #[test]

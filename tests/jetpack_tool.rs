@@ -16,6 +16,8 @@ use std::process::{Command, Stdio};
 
 mod common;
 
+use jetpack::SHA256;
+
 #[path = "support/jetpack_fixtures.rs"]
 mod jetpack_fixtures;
 use jetpack_fixtures::*;
@@ -47,6 +49,21 @@ fn write_tool_bin_fixture(root: &Path, fixtures: &Path, pkg: &str, bin: &str, sc
         out_dir.to_string_lossy()
     );
     fs::write(fixtures.join(format!("nixpkgs-{pkg}.json")), json).unwrap();
+}
+
+fn write_native_omp_fixture(fixtures: &Path, version: &str, script: &str) {
+    fs::create_dir_all(fixtures).unwrap();
+    let artifact_name = format!("omp-{version}");
+    let artifact = fixtures.join(&artifact_name);
+    fs::write(&artifact, script).unwrap();
+    let digest = SHA256::sha256_file_hex(&artifact).unwrap();
+    fs::write(
+        fixtures.join("jetpackage-omp.json"),
+        format!(
+            "{{\"tag\":\"v{version}\",\"version\":\"{version}\",\"sha256\":\"{digest}\",\"artifact\":\"{artifact_name}\"}}"
+        ),
+    )
+    .unwrap();
 }
 
 fn tool_install_command(
@@ -423,6 +440,134 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
 }
 
 #[test]
+fn native_omp_recipe_admits_hangar_projects_and_rolls_back() {
+    let root = Scratch::new("native-omp-root");
+    let project = Scratch::new("native-omp-project");
+    let fixtures = Scratch::new("native-omp-fixtures");
+    let home = Scratch::new("native-omp-home");
+    write_native_omp_fixture(&fixtures.path, "1.0.0", "#!/bin/sh\necho omp version one\n");
+
+    let install = |reference: &str| {
+        jetpack()
+            .args([
+                "tool",
+                "install",
+                reference,
+                "--no-color",
+                "--offline",
+                "--fixtures",
+            ])
+            .arg(&fixtures.path)
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("HOME", &home.path)
+            .output()
+            .unwrap()
+    };
+    let first = install("#auto omp@releases");
+    assert!(
+        first.status.success(),
+        "first native install failed: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let link = home.join(".jet/bin/omp");
+    let first_run = Command::new(&link)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&first_run.stdout).trim(),
+        "omp version one"
+    );
+    let manifest = fs::read_to_string(home.join(".jet/tools/manifest.json")).unwrap();
+    assert!(
+        manifest.contains("\"provider\":\"jetpackage\""),
+        "{manifest}"
+    );
+    assert!(manifest.contains("github:can1357/oh-my-pi") || manifest.contains("can1357/oh-my-pi"));
+    assert!(manifest.contains("\"tier\":\"#auto\""), "{manifest}");
+
+    let first_generation =
+        fs::read_to_string(home.join(".jet/tools/generations/1/meta.json")).unwrap();
+    let first_store_root = json_meta_field(&first_generation, "store_root");
+    assert!(first_store_root.starts_with(root.path.to_string_lossy().as_ref()));
+    assert!(
+        !first_generation.contains("/nix/store/"),
+        "{first_generation}"
+    );
+    let mut hangar_objects = Vec::new();
+    for entry in fs::read_dir(Path::new(&first_store_root).join("hangar")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.join("meta.json").is_file() {
+            hangar_objects.push(path);
+        }
+    }
+    assert!(
+        !hangar_objects.is_empty(),
+        "native install did not register Hangar metadata"
+    );
+    assert!(
+        hangar_objects.iter().any(|path| {
+            let metadata = fs::read_to_string(path.join("meta.json")).unwrap();
+            metadata.contains("omp@releases") && !metadata.contains("/nix/store/")
+        }),
+        "native package was not recorded as a Hangar-owned output: {hangar_objects:?}"
+    );
+
+    write_native_omp_fixture(&fixtures.path, "2.0.0", "#!/bin/sh\necho omp version two\n");
+    fs::write(
+        fixtures.path.join("channels.txt"),
+        "github:can1357/oh-my-pi latest v2.0.0\n",
+    )
+    .unwrap();
+    let second = jetpack()
+        .args(["profile", "build", "tools", "--no-color", "--fixtures"])
+        .arg(&fixtures.path)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        second.status.success(),
+        "native channel update failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_run = Command::new(&link)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&second_run.stdout).trim(),
+        "omp version two"
+    );
+
+    let rollback = jetpack()
+        .args(["profile", "rollback", "tools", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        rollback.status.success(),
+        "rollback failed: {}",
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+    let rolled_back = Command::new(&link)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&rolled_back.stdout).trim(),
+        "omp version one"
+    );
+}
+
+#[test]
 fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation() {
     let (base, _project, root) = core_hello_project("user-tools-declarative");
     let repo = base.join("jet-pkgs");
@@ -472,16 +617,12 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
         String::from_utf8_lossy(&first_run.stdout).trim(),
         "hello from jet-pkgs"
     );
-    assert!(
-        fs::read_to_string(home.join(".jet/tools/current"))
-            .unwrap()
-            .contains("generation\t1")
-    );
-    assert!(
-        fs::read_to_string(home.join(".jet/tools/profile.json"))
-            .unwrap()
-            .contains("\"current\": 1")
-    );
+    assert!(fs::read_to_string(home.join(".jet/tools/current"))
+        .unwrap()
+        .contains("generation\t1"));
+    assert!(fs::read_to_string(home.join(".jet/tools/profile.json"))
+        .unwrap()
+        .contains("\"current\": 1"));
 
     let repo_two = base.join("jet-pkgs-two");
     fs::create_dir_all(repo_two.join("pkgs/hello/bin")).unwrap();
@@ -518,16 +659,12 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
         String::from_utf8_lossy(&second_run.stdout).trim(),
         "hello from user-tools generation two"
     );
-    assert!(
-        fs::read_to_string(home.join(".jet/tools/current"))
-            .unwrap()
-            .contains("generation\t2")
-    );
-    assert!(
-        fs::read_to_string(home.join(".jet/tools/profile.json"))
-            .unwrap()
-            .contains("\"current\": 2")
-    );
+    assert!(fs::read_to_string(home.join(".jet/tools/current"))
+        .unwrap()
+        .contains("generation\t2"));
+    assert!(fs::read_to_string(home.join(".jet/tools/profile.json"))
+        .unwrap()
+        .contains("\"current\": 2"));
 
     let rollback = jetpack()
         .args(["profile", "rollback", "tools", "--no-color"])
@@ -547,16 +684,12 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
         String::from_utf8_lossy(&rolled_back.stdout).trim(),
         "hello from jet-pkgs"
     );
-    assert!(
-        fs::read_to_string(home.join(".jet/tools/current"))
-            .unwrap()
-            .contains("generation\t1")
-    );
-    assert!(
-        fs::read_to_string(home.join(".jet/tools/profile.json"))
-            .unwrap()
-            .contains("\"current\": 1")
-    );
+    assert!(fs::read_to_string(home.join(".jet/tools/current"))
+        .unwrap()
+        .contains("generation\t1"));
+    assert!(fs::read_to_string(home.join(".jet/tools/profile.json"))
+        .unwrap()
+        .contains("\"current\": 1"));
 
     let generations = jetpack()
         .args(["profile", "generations", "tools", "--no-color", "--json"])

@@ -28,11 +28,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod cran;
 mod fetch;
 mod luarocks;
+pub(crate) mod native;
 mod package;
 mod remote;
 mod script_registry;
 use cran::CranProvider;
 use luarocks::LuaRocksProvider;
+use native::NativeProvider;
 use script_registry::{Kind as ScriptRegistryKind, ScriptRegistryProvider};
 
 use package::{
@@ -525,6 +527,7 @@ pub fn cache_expectation(
                 allow_unsigned_local: true,
             })
         }
+        ProviderKind::JetPackage => native::cache_expectation(spec, table, ctx),
         ProviderKind::JetRegistry
         | ProviderKind::Npm
         | ProviderKind::Cargo
@@ -1066,6 +1069,8 @@ pub(crate) fn record_nix_lock_after_store(
 pub enum SourceState {
     /// Compiled from source by the first-party core provider this run.
     Built,
+    /// Downloaded from a verified native release artifact.
+    Downloaded,
     /// Reused an already-realized, content-addressed object (no rebuild).
     Cached,
     /// Realized through the Nix compatibility provider (substituted, not built
@@ -1077,6 +1082,7 @@ impl SourceState {
     pub fn label(self) -> &'static str {
         match self {
             SourceState::Built => "built",
+            SourceState::Downloaded => "downloaded",
             SourceState::Cached => "cached",
             SourceState::Substituted => "substituted",
         }
@@ -1211,6 +1217,7 @@ pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
         Source::Cargo => format!("cargo:{}", spec.package),
         Source::PyPI => format!("pypi:{}", spec.package),
         Source::SwiftPM => format!("swiftpm:{}", spec.package),
+        Source::Releases => format!("releases:{}", spec.package),
         Source::Named(name) => {
             let upstream = table.upstream(name).unwrap_or(name);
             let package = if table.provider(name) == ProviderKind::Nix {
@@ -2304,6 +2311,7 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
         ProviderKind::RubyGems => Box::new(ScriptRegistryProvider(ScriptRegistryKind::RubyGems)),
         ProviderKind::Cpan => Box::new(ScriptRegistryProvider(ScriptRegistryKind::Cpan)),
         ProviderKind::Packagist => Box::new(ScriptRegistryProvider(ScriptRegistryKind::Packagist)),
+        ProviderKind::JetPackage => Box::new(NativeProvider),
         ProviderKind::JetRegistry => Box::new(UnsupportedProvider("jet-registry")),
         ProviderKind::Npm => Box::new(UnsupportedProvider("npm")),
         ProviderKind::Cargo => Box::new(UnsupportedProvider("cargo")),
@@ -2357,6 +2365,9 @@ pub fn resolve_kind(
     if matches!(spec.source, Source::SwiftPM) {
         return ProviderKind::SwiftPM;
     }
+    if matches!(spec.source, Source::Releases) {
+        return ProviderKind::JetPackage;
+    }
     let Source::Named(name) = &spec.source else {
         return ProviderKind::Nix;
     };
@@ -2372,6 +2383,7 @@ pub fn resolve_kind(
         ProviderKind::Cargo => ProviderKind::Cargo,
         ProviderKind::PyPI => ProviderKind::PyPI,
         ProviderKind::SwiftPM => ProviderKind::SwiftPM,
+        ProviderKind::JetPackage => ProviderKind::JetPackage,
         ProviderKind::Nix => ProviderKind::Nix,
         // U9: peek the remote's `pkg.jet` to choose core vs nix.
         ProviderKind::Infer => match table.upstream(name) {
@@ -2717,7 +2729,8 @@ fn stage_adapter_source(
         | Source::Npm
         | Source::Cargo
         | Source::PyPI
-        | Source::SwiftPM => Err(ProviderError::Adapter(
+        | Source::SwiftPM
+        | Source::Releases => Err(ProviderError::Adapter(
             "Jet registry, npm, and Cargo packages must be realized before they can be adapter source bytes."
                 .to_string(),
         )),

@@ -1,6 +1,7 @@
 //! Rootless Linux harness for tests that must start without a host Nix store.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,40 +34,55 @@ where
         let umount = find_helper("umount");
         let shell = find_helper("sh");
         let mkdir = find_helper("mkdir");
-        let rmdir = find_helper("rmdir");
         let ldd = find_helper("ldd");
         let readlink = find_helper("readlink");
-        let sed = find_helper("sed");
         let sort = find_helper("sort");
+        let ln = find_helper("ln");
         let test_binary = std::env::current_exe().expect("current test executable");
+        let bootstrap_root =
+            std::env::temp_dir().join(format!("jet-no-nix-bootstrap-{}", std::process::id()));
+        fs::create_dir_all(&bootstrap_root).expect("create no-host-store bootstrap");
+        let bootstrap_unshare = patch_interpreter(&unshare, &bootstrap_root.join("unshare"));
+        let bootstrap_mount = patch_interpreter(&mount, &bootstrap_root.join("mount"));
+        let bootstrap_shell = patch_interpreter(&shell, &bootstrap_root.join("sh"));
         let script = r#"set -eu
-mount="$1"
-umount="$2"
-mkdir="$3"
-rmdir="$4"
-ldd="$5"
-readlink="$6"
-sed="$7"
+unshare="$1"
+mount="$2"
+umount="$3"
+shell="$4"
+mkdir="$5"
+ldd="$6"
+readlink="$7"
 sort="$8"
-test_binary="$9"
-test_name="${10}"
+ln="$9"
+test_binary="${10}"
+test_name="${11}"
+bootstrap_unshare="${12}"
+bootstrap_mount="${13}"
+bootstrap_shell="${14}"
+# The binary under test is spawned inside the namespace, so its own runtime
+# closure has to be staged as well. Without it the process cannot load its
+# interpreter and dies with ENOENT before any package resolution happens.
+subject_binary="${15}"
 scratch_root="${TMPDIR:-/tmp}"
 host_nix="$scratch_root/jet-no-nix-host-$$"
 runtime_stage="$scratch_root/jet-no-nix-runtime-$$"
 mount_real="$($readlink -f "$mount")"
 umount_real="$($readlink -f "$umount")"
 mkdir_real="$($readlink -f "$mkdir")"
-rmdir_real="$($readlink -f "$rmdir")"
-ldd_real="$($readlink -f "$ldd")"
-readlink_real="$($readlink -f "$readlink")"
-sed_real="$($readlink -f "$sed")"
-sort_real="$($readlink -f "$sort")"
 set -f
 emit_store_root() {
     case "$1" in
         /nix/store/*)
             token=${1#/nix/store/}
             printf '/nix/store/%s\n' "${token%%/*}"
+            resolved="$($readlink -f "$1" 2>/dev/null || true)"
+            case "$resolved" in
+                /nix/store/*)
+                    token=${resolved#/nix/store/}
+                    printf '/nix/store/%s\n' "${token%%/*}"
+                    ;;
+            esac
             ;;
     esac
 }
@@ -80,47 +96,89 @@ store_roots() {
 }
 runtime_roots="$(
     store_roots "$test_binary"
+    [ -n "$subject_binary" ] && store_roots "$subject_binary"
     store_roots /bin
     store_roots /bin/sh
     store_roots /run/current-system/sw
-    for helper in "$mount" "$umount" "$mkdir" "$rmdir" "$ldd" "$readlink" "$sed" "$sort"; do
+    for helper in "$unshare" "$mount" "$umount" "$shell" "$mkdir" "$ldd" "$readlink" "$sort" "$ln"; do
         store_roots "$helper"
     done
 )"
 runtime_roots=$(printf '%s\n' "$runtime_roots" | $sort -u)
-mount="$mount_real"
-umount="$umount_real"
-mkdir="$mkdir_real"
-rmdir="$rmdir_real"
-ldd="$ldd_real"
-readlink="$readlink_real"
-sed="$sed_real"
-sort="$sort_real"
-"$mkdir" --coreutils-prog=mkdir -p /nix
-"$mkdir" --coreutils-prog=mkdir -p "$host_nix"
-"$mkdir" --coreutils-prog=mkdir -p "$runtime_stage/store"
-"$mount" --rbind /nix "$host_nix"
-"$mount" --make-rslave "$host_nix"
+loader=""
+for token in $($ldd "$test_binary"); do
+    case "$token" in
+        */ld-linux*.so*) loader="$token" ;;
+    esac
+done
+[ -n "$loader" ]
+exec 9<"$loader"
+loader=/proc/self/fd/9
+
+stage_path() {
+    case "$1" in
+        /nix/store/*) printf '%s/store/%s\n' "$runtime_stage" "${1#/nix/store/}" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+library_path=""
+run() {
+    if [ -n "$library_path" ]; then
+        "$loader" --library-path "$library_path" "$@"
+    else
+        "$loader" "$@"
+    fi
+}
+
+"$mkdir_real" --coreutils-prog=mkdir -p /nix
+"$mkdir_real" --coreutils-prog=mkdir -p "$host_nix"
+"$mkdir_real" --coreutils-prog=mkdir -p "$runtime_stage/store" "$runtime_stage/usr/bin"
+"$mount_real" --rbind /nix "$host_nix"
+"$mount_real" --make-rslave "$host_nix"
 for runtime in $runtime_roots; do
     name=${runtime##*/}
-    "$mkdir" --coreutils-prog=mkdir -p "$runtime_stage/store/$name"
-    "$mount" --rbind "$host_nix/store/$name" "$runtime_stage/store/$name"
-"$mount" --make-rslave "$runtime_stage/store/$name"
+    "$mkdir_real" --coreutils-prog=mkdir -p "$runtime_stage/store/$name"
+    "$mount_real" --rbind "$host_nix/store/$name" "$runtime_stage/store/$name"
+    "$mount_real" --make-rslave "$runtime_stage/store/$name"
 done
-mount="$runtime_stage${mount_real#/nix}"
-umount="$runtime_stage${umount_real#/nix}"
-mkdir="$runtime_stage${mkdir_real#/nix}"
-rmdir="$runtime_stage${rmdir_real#/nix}"
-ldd="$runtime_stage${ldd_real#/nix}"
-readlink="$runtime_stage${readlink_real#/nix}"
-sed="$runtime_stage${sed_real#/nix}"
-sort="$runtime_stage${sort_real#/nix}"
-"$mount" --rbind "$runtime_stage" /nix
-"$umount" -l "$host_nix"
-exec "$test_binary" "$test_name" --exact --nocapture
+for runtime in $runtime_roots; do
+    name=${runtime##*/}
+    for libdir in lib lib64; do
+        path="$runtime_stage/store/$name/$libdir"
+        if [ -d "$path" ]; then
+            [ -z "$library_path" ] || library_path="$library_path:"
+            library_path="$library_path$path"
+        fi
+    done
+done
+if [ -n "$bootstrap_unshare" ]; then
+    "$ln" -s "$bootstrap_unshare" "$runtime_stage/usr/bin/unshare"
+fi
+if [ -n "$bootstrap_mount" ]; then
+    "$ln" -s "$bootstrap_mount" "$runtime_stage/usr/bin/mount"
+fi
+if [ -n "$bootstrap_shell" ]; then
+    "$ln" -s "$bootstrap_shell" "$runtime_stage/usr/bin/sh"
+fi
+if [ -n "$bootstrap_unshare$bootstrap_mount$bootstrap_shell" ]; then
+    "$mount_real" --bind "$runtime_stage/usr/bin" /usr/bin
+fi
+
+mount="$(stage_path "$mount_real")"
+umount="$(stage_path "$umount_real")"
+run "$mount" -t tmpfs -o mode=0755 jet-no-nix /nix
+run "$umount" -l "$host_nix"
+test ! -e /nix/store
+export LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+if [ -n "$library_path" ]; then
+    exec "$loader" --library-path "$library_path" "$test_binary" "$test_name" --exact --nocapture
+else
+    exec "$loader" "$test_binary" "$test_name" --exact --nocapture
+fi
 "#;
 
-        let mut command = Command::new(unshare);
+        let mut command = Command::new(&unshare);
         command
             .args([
                 "--user",
@@ -130,22 +188,32 @@ exec "$test_binary" "$test_name" --exact --nocapture
                 "private",
             ])
             .args((network_mode == NetworkMode::Disabled).then_some("--net"))
-            .arg(shell)
+            .arg(&shell)
             .args(["-c", script, "jet-no-nix-namespace"])
+            .arg(&unshare)
             .arg(mount)
             .arg(umount)
+            .arg(&shell)
             .arg(mkdir)
-            .arg(rmdir)
             .arg(ldd)
             .arg(readlink)
-            .arg(sed)
             .arg(sort)
+            .arg(ln)
             .arg(test_binary)
             .arg(exact_test_name)
+            .arg(
+                bootstrap_unshare
+                    .as_deref()
+                    .unwrap_or_else(|| Path::new("")),
+            )
+            .arg(bootstrap_mount.as_deref().unwrap_or_else(|| Path::new("")))
+            .arg(bootstrap_shell.as_deref().unwrap_or_else(|| Path::new("")))
+            .arg(crate::common::jetpack_bin().as_os_str())
             .env(CHILD_MARKER, "1");
         let status = command
             .status()
             .unwrap_or_else(|error| panic!("starting no-host-store namespace: {error}"));
+        let _ = fs::remove_dir_all(&bootstrap_root);
         assert!(
             status.success(),
             "no-host-store namespace proof failed for `{exact_test_name}`: {status}"
@@ -153,24 +221,41 @@ exec "$test_binary" "$test_name" --exact --nocapture
     }
 }
 
+#[cfg(target_os = "linux")]
+fn patch_interpreter(source: &Path, destination: &Path) -> Option<PathBuf> {
+    let mut bytes = fs::read(source).ok()?;
+    let replacement = b"/proc/self/fd/9";
+    let mut offset = 0;
+    let mut patched = false;
+    while offset < bytes.len() {
+        let end = bytes[offset..]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map_or(bytes.len(), |length| offset + length);
+        let value = &bytes[offset..end];
+        if value.starts_with(b"/nix/store/") && value.windows(8).any(|part| part == b"ld-linux") {
+            if replacement.len() >= value.len() {
+                return None;
+            }
+            bytes[offset..end].fill(0);
+            bytes[offset..offset + replacement.len()].copy_from_slice(replacement);
+            patched = true;
+            break;
+        }
+        offset = end.saturating_add(1);
+    }
+    if !patched {
+        return None;
+    }
+    fs::write(destination, bytes).ok()?;
+    fs::set_permissions(destination, fs::metadata(source).ok()?.permissions()).ok()?;
+    Some(destination.to_path_buf())
+}
+
 fn assert_no_host_store() {
-    let host_mount_prefix = std::env::var_os("TMPDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("jet-no-nix-host-")
-        .to_string_lossy()
-        .into_owned();
     match std::fs::symlink_metadata("/nix/store") {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Ok(metadata) if metadata.is_dir() => {
-            assert!(
-                !std::fs::read_to_string("/proc/self/mountinfo")
-                    .expect("read namespace mountinfo")
-                    .contains(&host_mount_prefix),
-                "the host Nix mount remained visible in the test namespace"
-            );
-        }
-        Ok(_) => panic!("test child started with a visible non-directory /nix/store"),
+        Ok(_) => panic!("test child started with a visible /nix/store"),
         Err(error) => panic!("could not inspect /nix/store before Jetpack: {error}"),
     }
 }

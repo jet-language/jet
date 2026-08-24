@@ -140,6 +140,10 @@ impl Inferior {
             .unwrap_or(false)
     }
 
+    pub(crate) fn debugger_pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Launch `lldb` against `binary` (built with debug symbols) and consume its
     /// startup banner. The process is NOT running yet — call [`Self::resume_and_locate`]
     /// with `"run"` to start it.

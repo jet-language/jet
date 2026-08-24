@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use jet_driver::Diagnostics::{Diagnostic, Severity};
+use jet_driver::Diagnostics::{Diagnostic, ReportEnvelope, Severity};
 use jet_driver::SHA256;
 use jet_semindex::{semantic_ops_for_file, SemanticOp, SourceSpan};
 
@@ -58,6 +58,24 @@ pub const ACTION_SCHEMA_VERSION: u32 = 1;
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
 pub const CORE_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const PROOF_SCHEMA_VERSION: u32 = 1;
+
+/// Put the Canvas command payload behind the one machine-output envelope.
+///
+/// The existing protocol object remains named command data rather than a
+/// second machine-output door.
+fn canvas_machine_output(action: &str, status: &str, ok: bool, payload: &str) -> String {
+    ReportEnvelope::status_record("tool", status, ok, action)
+        .with_json_field("canvas", payload.trim())
+        .json()
+}
+
+fn canvas_machine_success(action: &str, payload: &str) -> String {
+    canvas_machine_output(action, "ok", true, payload)
+}
+
+fn canvas_machine_error(action: &str, payload: &str) -> String {
+    canvas_machine_output(action, "error", false, payload)
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct InlineExpr {
@@ -172,7 +190,19 @@ pub fn source_revision(src: &str) -> String {
 
 /// Project a checked Jet file into the public Canvas graph schema.
 pub fn graph_json_for_file(path: &Path) -> Result<String, Vec<Diagnostic>> {
-    project_file(path).map(|p| p.json)
+    project_file(path).map(|p| canvas_machine_success("canvas.graph", &p.json))
+}
+
+/// Render graph projection diagnostics through the same machine-output door.
+pub fn graph_json_error_for_file(path: &Path, diags: &[Diagnostic]) -> String {
+    let src = fs::read_to_string(path).unwrap_or_default();
+    canvas_machine_error(
+        "canvas.graph",
+        &query_error(
+            "diagnostic",
+            &jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, diags),
+        ),
+    )
 }
 
 /// Project a file graph selected from the entry file's package/workspace graph.
@@ -180,14 +210,9 @@ pub fn graph_json_for_entry_source(
     entry: &Path,
     source_id: Option<&str>,
 ) -> Result<String, String> {
-    let path = resolve_entry_source_path(entry, source_id)?;
-    graph_json_for_file(&path).map_err(|diags| {
-        let src = fs::read_to_string(&path).unwrap_or_default();
-        query_error(
-            "diagnostic",
-            &jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags),
-        )
-    })
+    let path = resolve_entry_source_path(entry, source_id)
+        .map_err(|error| canvas_machine_error("canvas.graph", &error))?;
+    graph_json_for_file(&path).map_err(|diags| graph_json_error_for_file(&path, &diags))
 }
 
 /// Project executed Event/AsyncEvent/DecisionHook facts from the existing
@@ -197,19 +222,15 @@ pub fn graph_json_for_entry_source_with_live_pid(
     source_id: Option<&str>,
     pid: u32,
 ) -> Result<String, String> {
-    let snapshot =
-        crate::LiveInspect::read(pid).map_err(|message| query_error("live", &message))?;
-    let runtime_events = runtime_events_json(&snapshot)?;
-    let path = resolve_entry_source_path(entry, source_id)?;
+    let snapshot = crate::LiveInspect::read(pid)
+        .map_err(|message| canvas_machine_error("canvas.graph", &query_error("live", &message)))?;
+    let runtime_events = runtime_events_json(&snapshot)
+        .map_err(|error| canvas_machine_error("canvas.graph", &error))?;
+    let path = resolve_entry_source_path(entry, source_id)
+        .map_err(|error| canvas_machine_error("canvas.graph", &error))?;
     project_file_with_runtime(&path, Some(&runtime_events))
-        .map(|projection| projection.json)
-        .map_err(|diags| {
-            let src = fs::read_to_string(&path).unwrap_or_default();
-            query_error(
-                "diagnostic",
-                &jet_driver::Diagnostics::render_all(&path.display().to_string(), &src, &diags),
-            )
-        })
+        .map(|projection| canvas_machine_success("canvas.graph", &projection.json))
+        .map_err(|diags| graph_json_error_for_file(&path, &diags))
 }
 
 fn runtime_events_json(snapshot: &str) -> Result<String, String> {
@@ -331,7 +352,8 @@ fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
 pub fn project_json_for_entry(path: &Path) -> String {
     // Parent-walk discovery can parse `.jet` files; use the compiler stack +
     // TIR bridge rather than the thin test/UI thread (default ~2MiB).
-    jet_driver::run_compiler_work(|| project_json_for_entry_inner(path))
+    let payload = jet_driver::run_compiler_work(|| project_json_for_entry_inner(path));
+    canvas_machine_success("canvas.project", &payload)
 }
 
 fn project_json_for_entry_inner(path: &Path) -> String {
@@ -440,6 +462,8 @@ fn project_json_for_entry_inner(path: &Path) -> String {
 /// Apply one versioned package/workspace transaction and write source-truth files.
 pub fn apply_project_transaction_json(path: &Path, request: &str) -> Result<String, String> {
     jet_driver::run_compiler_work(|| apply_project_transaction_json_inner(path, request))
+        .map(|payload| canvas_machine_success("canvas.project.edit", &payload))
+        .map_err(|error| canvas_machine_error("canvas.project.edit", &error))
 }
 
 fn apply_project_transaction_json_inner(path: &Path, request: &str) -> Result<String, String> {
@@ -483,6 +507,8 @@ fn apply_project_transaction_json_inner(path: &Path, request: &str) -> Result<St
 /// Query Canvas graph/source facts through the same semindex data LSP consumes.
 pub fn query_json_for_file(path: &Path, request: &str) -> Result<String, String> {
     jet_driver::run_compiler_work(|| query_json_for_file_inner(path, request))
+        .map(|payload| canvas_machine_success("canvas.query", &payload))
+        .map_err(|error| canvas_machine_error("canvas.query", &error))
 }
 
 fn query_json_for_file_inner(path: &Path, request: &str) -> Result<String, String> {
@@ -531,6 +557,8 @@ fn query_json_for_file_inner(path: &Path, request: &str) -> Result<String, Strin
 /// Query graph/source facts for a selected file inside the entry project.
 pub fn query_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
     jet_driver::run_compiler_work(|| query_json_for_entry_inner(entry, request))
+        .map(|payload| canvas_machine_success("canvas.query", &payload))
+        .map_err(|error| canvas_machine_error("canvas.query", &error))
 }
 
 fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, String> {
@@ -600,19 +628,29 @@ fn query_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, Str
             expected_project_revision.as_deref(),
         );
     }
-    query_json_for_file(&path, request)
+    query_json_for_file_inner(&path, request)
 }
 
 /// Expose the canonical Core library catalog to Canvas without granting
 /// execution authority.
 pub fn core_catalog_json_for_entry(entry: &Path, query: &str) -> Result<String, String> {
-    let path = resolve_entry_source_path(entry, None)?;
-    let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
-    canvas_core_catalog(&path, &src, query)
+    let result = (|| {
+        let path = resolve_entry_source_path(entry, None)?;
+        let src = fs::read_to_string(&path).map_err(|e| query_error("io", &e.to_string()))?;
+        canvas_core_catalog(&path, &src, query)
+    })();
+    result
+        .map(|payload| canvas_machine_success("canvas.core_catalog", &payload))
+        .map_err(|error| canvas_machine_error("canvas.core_catalog", &error))
 }
 
 /// Report Git text truth for Canvas source-control UI.
 pub fn source_control_json_for_file(path: &Path) -> String {
+    let payload = source_control_json_for_file_inner(path);
+    canvas_machine_success("canvas.source_control", &payload)
+}
+
+fn source_control_json_for_file_inner(path: &Path) -> String {
     let src = fs::read_to_string(path).unwrap_or_default();
     let semantic_ops = semantic_ops_json(path, &src);
     let Some(root) = git_root(path) else {
@@ -698,7 +736,8 @@ fn semantic_op_json(op: &SemanticOp) -> String {
 
 /// Report Git text truth for the whole projected package/workspace.
 pub fn source_control_json_for_entry(path: &Path) -> String {
-    jet_driver::run_compiler_work(|| source_control_json_for_entry_inner(path))
+    let payload = jet_driver::run_compiler_work(|| source_control_json_for_entry_inner(path));
+    canvas_machine_success("canvas.source_control", &payload)
 }
 
 fn source_control_json_for_entry_inner(path: &Path) -> String {
@@ -785,6 +824,16 @@ pub fn proof_json_for_entry(entry: &Path, source_id: Option<&str>) -> Result<Str
 }
 
 pub fn proof_json_for_entry_with_receipt(
+    entry: &Path,
+    source_id: Option<&str>,
+    command_receipt: Option<&str>,
+) -> Result<String, String> {
+    proof_json_for_entry_with_receipt_inner(entry, source_id, command_receipt)
+        .map(|payload| canvas_machine_success("canvas.proof", &payload))
+        .map_err(|error| canvas_machine_error("canvas.proof", &error))
+}
+
+fn proof_json_for_entry_with_receipt_inner(
     entry: &Path,
     source_id: Option<&str>,
     command_receipt: Option<&str>,
@@ -889,6 +938,12 @@ pub fn proof_json_for_entry_with_receipt(
 }
 
 pub fn command_receipt_json_for_entry(entry: &Path, request: &str) -> Result<String, String> {
+    command_receipt_json_for_entry_inner(entry, request)
+        .map(|payload| canvas_machine_success("canvas.command_receipt", &payload))
+        .map_err(|error| canvas_machine_error("canvas.command_receipt", &error))
+}
+
+fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<String, String> {
     let source_id = json_string_field(request, "source_id");
     let source_path = resolve_entry_source_path(entry, source_id.as_deref())?;
     let src = fs::read_to_string(&source_path).map_err(|e| query_error("io", &e.to_string()))?;
@@ -1014,6 +1069,12 @@ fn run_jet_command(entry: &Path, args: &[&str]) -> Result<std::process::Output, 
 
 /// Apply one versioned Canvas edit transaction and write ordinary Jet source.
 pub fn apply_transaction_json(path: &Path, request: &str) -> Result<String, String> {
+    apply_transaction_json_inner(path, request)
+        .map(|payload| canvas_machine_success("canvas.edit", &payload))
+        .map_err(|error| canvas_machine_error("canvas.edit", &error))
+}
+
+fn apply_transaction_json_inner(path: &Path, request: &str) -> Result<String, String> {
     let path = match json_string_field(request, "source_id") {
         Some(source_id) => project_path_for_source_id(path, &source_id).ok_or_else(|| {
             edit_error(
@@ -1375,7 +1436,7 @@ pub fn debug_session_json_for_entry_with_sessions(
     let source_id = json_string_field(request, "source_id");
     let path = match resolve_entry_source_path(entry, source_id.as_deref()) {
         Ok(path) => path,
-        Err(error) => return Err(error),
+        Err(error) => return Err(canvas_machine_error("canvas.debug", &error)),
     };
     debug_session_json_for_file_with_sessions(&path, request, sessions)
 }
@@ -1387,6 +1448,16 @@ pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String,
 }
 
 pub fn debug_session_json_for_file_with_sessions(
+    path: &Path,
+    request: &str,
+    sessions: &DebugSessions,
+) -> Result<String, String> {
+    debug_session_json_for_file_with_sessions_inner(path, request, sessions)
+        .map(|payload| canvas_machine_success("canvas.debug", &payload))
+        .map_err(|error| canvas_machine_error("canvas.debug", &error))
+}
+
+fn debug_session_json_for_file_with_sessions_inner(
     path: &Path,
     request: &str,
     sessions: &DebugSessions,

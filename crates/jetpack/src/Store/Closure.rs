@@ -2563,6 +2563,10 @@ fn store_validates_complete_closure(
         "store-record" if authority == Some("hangar-cas") => {
             rehashes_as_recorded(roots, meta, record)
         }
+        // A jetpackage release artifact is a complete native output with no
+        // dependency edges. Store registration has already canonicalized it
+        // into Hangar, so the same byte proof used by Core applies here.
+        "jetpackage" if output == local => rehashes_as_recorded(roots, meta, record),
         "nix" if output == local => rehashes_as_recorded(roots, meta, record),
         "nix" if output.starts_with("/nix/store") => {
             let root = roots.hangar_dir().join(&record.id).join("nix-gc-root");

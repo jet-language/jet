@@ -263,6 +263,7 @@ fn admit_dynamic_closure(roots: &Roots) -> String {
         admitted.objects.len() > 1,
         "dynamic binary needs a runtime closure"
     );
+    canonicalize_admitted_records(roots, &admitted);
     drop(server);
     root_path
 }

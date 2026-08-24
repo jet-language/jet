@@ -1115,7 +1115,7 @@
     runHud.textContent = item.title + " running";
     runHud.classList.add("is-running");
     fetch(commandUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      .then((r) => r.json().then((json) => ({ ok: r.ok, json })))
+      .then((r) => r.json().then((json) => ({ ok: r.ok, json: canvasPayload(json) })))
       .then((result) => {
         if (latestDoc && (latestDoc.revision !== requestedRevision || (selectedSourceId || latestDoc.source_id || null) !== requestedSourceId)) {
           runHud.classList.remove("is-running");
