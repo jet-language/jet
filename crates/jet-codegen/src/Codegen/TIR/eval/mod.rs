@@ -31,7 +31,10 @@ mod gc_runtime {
 // so the unreached rows in the shared source are not dead product code.
 #[allow(dead_code)]
 mod contract_semantics {
-    use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
+    use jet_foundation::Outcome::{
+        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr,
+        JetRuntimeDiagnostic,
+    };
     include!("../../../Prelude/Core/Contracts.rs");
 }
 

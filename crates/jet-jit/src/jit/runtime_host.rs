@@ -30,7 +30,10 @@ mod measurement_kernel {
 }
 
 pub(crate) mod contract_kernel {
-    use jet_foundation::Outcome::{jet_render_runtime_stop, JetRuntimeDiagnostic};
+    use jet_foundation::Outcome::{
+        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr,
+        JetRuntimeDiagnostic,
+    };
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
 

@@ -32,6 +32,29 @@ pub(crate) fn jet_runtime_stop_report(
     )
 }
 
+/// D-INTBIG1: an exact `Int` that cannot cross a C i64 edge is an entry
+/// diagnostic, not a program-side runtime breach. Keep its code and wording
+/// in the shared Prelude so AOT, JIT, and the interpreter use one boundary.
+pub(crate) const JET_C_INT_RANGE_CODE: &str = "E1003";
+pub(crate) const JET_C_INT_RANGE_MESSAGE: &str =
+    "a default Int value does not fit in the C i64 range";
+
+pub(crate) fn jet_c_int_range_message() -> &'static str {
+    JET_C_INT_RANGE_MESSAGE
+}
+
+pub(crate) fn jet_c_int_range_error() -> JetErr {
+    jet_err(
+        jet_c_int_range_message().to_string(),
+        Ok(JET_C_INT_RANGE_CODE.to_string()),
+        Err(JetAbsent),
+    )
+}
+
+pub(crate) fn jet_c_int_range_report() -> String {
+    jet_render_err(&jet_c_int_range_error())
+}
+
 /// Project a user-requested process status into the native carrier. Exit 101
 /// is reserved for Jet defects, so an explicit user exit becomes status 1.
 pub(crate) fn jet_runtime_exit_code(code: i64) -> i32 {

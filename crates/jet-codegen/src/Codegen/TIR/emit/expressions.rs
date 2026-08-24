@@ -50,7 +50,6 @@ use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::struct_field_type;
-use crate::Codegen::INT_RANGE_MESSAGE;
 
 fn emit_tir_lambda_with_arc(lam: &TLambda, force_arc: bool) -> String {
     let move_kw = if lam.is_move { "move " } else { "" };
@@ -6433,7 +6432,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     if *c_abi && matches!(&a.value.ty, Type::Int) {
                         s = format!(
-                            "{root}jet_std::jet_int_to_i64({s}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), \"{INT_RANGE_MESSAGE}\"))",
+                            "{root}jet_std::jet_int_to_i64({s}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()))",
                             root = cx.root_prefix,
                         );
                     }

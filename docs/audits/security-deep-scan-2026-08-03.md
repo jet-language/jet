@@ -60,6 +60,15 @@ production-path checks are `core_process_pipeline_honors_stage_timeout`,
 candidate record below remains unchanged; this note records its current source
 disposition and does not replace independent security validation.
 
+The `processspec-output-limit-late` candidate is also addressed in the current
+tree. The shared `core.process` Prelude bounds captured and streamed output
+before wait or receipt assembly, stops the full child tree on overflow, and
+returns a typed `IOError`. The production-path checks are
+`core_process_limits_kill_descendants_and_stop_output_early` and
+`process_session_resource_limits_match_all_execution_tiers`. The historical
+candidate record below remains unchanged; this note records its current source
+disposition and does not replace independent security validation.
+
 ## tower-control-plane
 
 ### Tower authorization, CSRF, and document containment

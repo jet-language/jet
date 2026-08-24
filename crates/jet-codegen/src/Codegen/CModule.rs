@@ -19,7 +19,6 @@ const UTF8_RETURN_PANIC: &str =
     "a C function declared to return String returned bytes that are not valid UTF-8";
 const UTF8_WRITE_PANIC: &str =
     "a C function writing through a String capability returned bytes that are not valid UTF-8";
-pub(crate) const INT_RANGE_MESSAGE: &str = "a default Int value does not fit in the C i64 range";
 
 /// Card #436: `CModule` functions are always emitted in a synthetic per-lib
 /// Rust module (`CFFI::assemble` in the jetpack crate folds every
@@ -94,7 +93,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
             match (p.convention, &p.ty) {
                 (AccessConvention::Write, Type::Int) => {
                     conv_lines.push(format!(
-                        "    let mut c{i} = {root}jet_std::jet_int_to_i64(*a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), \"{INT_RANGE_MESSAGE}\"));",
+                        "    let mut c{i} = {root}jet_std::jet_int_to_i64(*a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()));",
                         root = cx.root_prefix,
                     ));
                     call_args.push(format!("&mut c{i}"));
@@ -122,7 +121,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                 (AccessConvention::Write, _) => call_args.push(format!("a{i} as *mut _")),
                 (AccessConvention::Move, Type::Int) => {
                     conv_lines.push(format!(
-                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), \"{INT_RANGE_MESSAGE}\"));",
+                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()));",
                         root = cx.root_prefix,
                     ));
                     call_args.push(format!("c{i}"));
@@ -137,7 +136,7 @@ pub(crate) fn emit_c_module(cx: &Cx, cm: &crate::AST::CModule, out: &mut String)
                 (AccessConvention::Move, _) => call_args.push(format!("a{i}")),
                 (AccessConvention::Read, Type::Int) => {
                     conv_lines.push(format!(
-                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), \"{INT_RANGE_MESSAGE}\"));",
+                        "    let c{i} = {root}jet_std::jet_int_to_i64(a{i}).unwrap_or_else(|| {root}jet_runtime_stop(\"E1003\", file!(), line!(), {root}jet_c_int_range_message()));",
                         root = cx.root_prefix,
                     ));
                     call_args.push(format!("c{i}"));

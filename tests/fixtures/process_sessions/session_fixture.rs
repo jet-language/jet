@@ -12,8 +12,18 @@ fn main() {
         Some("terminal") => terminal(),
         Some("tree") => tree(args.next().expect("tree needs a pid file")),
         Some("descendant") => descendant(args.next().expect("descendant needs a pid file")),
+        Some("output") => output(args.next().as_deref().unwrap_or("large")),
         _ => process::exit(2),
     }
+}
+
+fn output(size: &str) {
+    let bytes = if size == "small" {
+        b"ok\n".as_slice()
+    } else {
+        b"0123456789abcdef0123456789abcdef\n".as_slice()
+    };
+    io::stdout().write_all(bytes).expect("write process output");
 }
 
 fn terminal() {

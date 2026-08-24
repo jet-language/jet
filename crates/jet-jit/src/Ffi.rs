@@ -323,6 +323,24 @@ fn ffi_diag(wrapper: &str, detail: impl Into<String>, span: Span) -> Diagnostic 
     )
 }
 
+fn ffi_int_range_diag(span: Span) -> Diagnostic {
+    let code = crate::runtime_host::contract_kernel::JET_C_INT_RANGE_CODE;
+    let row = jet_foundation::Registry::diagnostic(code)
+        .expect("C Int range diagnostic must be registered");
+    Diagnostic::error(
+        code,
+        crate::runtime_host::contract_kernel::jet_c_int_range_message().to_string(),
+        row.why.to_string(),
+        row.fix.to_string(),
+        Some(span),
+    )
+}
+
+fn ffi_int_range_runtime_stop() {
+    let report = crate::runtime_host::contract_kernel::jet_c_int_range_report();
+    Concurrency::with_runtime_mut(|rt| rt.set_rendered_runtime_stop(report, 1));
+}
+
 fn int_result(value: i64) -> CtValue {
     const SMALL_MIN: i64 = -(1i64 << 62);
     const SMALL_MAX: i64 = (1i64 << 62) - 1;
@@ -395,11 +413,7 @@ pub(crate) fn call_ctvalue(
     let int_arg = |index: usize| match args.get(index) {
         Some(CtValue::Int(value)) => Ok(*value),
         Some(CtValue::BigInt(value)) => value.try_i64().ok_or_else(|| {
-            ffi_diag(
-                wrapper,
-                "a default Int value does not fit in the C i64 range",
-                span,
-            )
+            ffi_int_range_diag(span)
         }),
         _ => Err(ffi_diag(
             wrapper,
@@ -673,7 +687,7 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
     let ct_args: Vec<CtValue> = match ct_args {
         Ok(args) => args,
         Err(()) => {
-            trap("E1003: a default Int value does not fit in the C i64 range");
+            ffi_int_range_runtime_stop();
             return 0;
         }
     };
@@ -690,7 +704,7 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
         CtValue::BigInt(value) => match value.try_i64() {
             Some(value) => crate::Encoding::json_rt::jet_int_from_i64(value),
             None => {
-                trap("E1003: a default Int value does not fit in the C i64 range");
+                ffi_int_range_runtime_stop();
                 0
             }
         },

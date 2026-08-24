@@ -1451,6 +1451,14 @@ value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
 `stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, `detached()`, and
 `terminal()` or `terminal(policy)`.
 
+`timeout(duration)` and `output_limit(bytes)` are portable resource controls
+on the same `ProcessSpec`. A timeout stops the full child tree and returns a
+receipt with `timed_out: true`. An output limit counts raw bytes from captured
+or streamed stdout and stderr together; when it trips, Jet stops the child
+tree, closes its streams, and returns an `IOError` before unbounded capture.
+Pipeline stages apply their own timeout and output limit. The controls keep
+the same meaning in AOT, default `jet run`, and the interpreter.
+
 #### Authority-bound execution (D-AGENT-EXEC1=A)
 
 `process.workspace()` returns the ordinary `Abilities` value for the safe
@@ -1603,7 +1611,10 @@ interrupt, terminate, kill, timeout, and drop cleanup of a descendant:
 
 The machine-readable rows are in
 `tests/fixtures/process_sessions/compatibility.tsv`; the targeted integration
-test is `tests/process_sessions.rs`.
+test is `tests/process_sessions.rs`. The resource-control case is
+`process_session_resource_limits_match_all_execution_tiers`; it proves an
+under-limit receipt and a rejected over-limit capture through the same
+`ProcessSpec` path.
 
 `pipeline()` keeps ordinary pipe edges and honors the final stage's declared
 stdout and each stage's declared stderr mode; an intermediate stdout is the

@@ -884,6 +884,9 @@ fn jet_runtime_panic_exit() -> ! {
 }
 
 fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
+    if code == JET_C_INT_RANGE_CODE {
+        jet_entry_error_exit(jet_c_int_range_report());
+    }
     jet_runtime_stop_with_context(code, file, line, "", "", msg)
 }
 

@@ -153,6 +153,41 @@ fn run() {{
 
 #[cfg(any(unix, windows))]
 #[test]
+fn process_session_resource_limits_match_all_execution_tiers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_session_resource_limits_tiers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fixture = jet_string_path(&compile_native_fixture(&dir));
+    let src = format!(
+        r#"
+use core.process as process
+
+fn run() {{
+    accepted :: process.cmd(["{fixture}", "output", "small"]).output_limit(16).run() ?? panic("under-limit run failed")
+    print(accepted.success)
+    print(accepted.output == "ok\n")
+    limited :: process.cmd(["{fixture}", "output", "large"]).output_limit(16).run()
+    if limited == {{
+        .Ok(_) -> {{ print("limit:accepted") }}
+        .Err(_) -> {{ print("limit:rejected") }}
+    }}
+}}
+"#,
+        fixture = fixture,
+    );
+    tir_support::assert_tiers_agree(
+        "process_session_resource_limits",
+        &src,
+        "true\ntrue\nlimit:rejected\n",
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop() {
     let dir = std::env::temp_dir().join(format!(
         "jet_process_session_fixture_tree_{}",

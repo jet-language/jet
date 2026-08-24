@@ -66,6 +66,80 @@ The capture command is one run on one machine. It does not add a benchmark runne
 
 `docs/audits/agent-workload-corpus-report.tsv` is the generated report. Each row scores Jet, Bash, Python, and Node for one task. `jet_vs_baselines=pass` requires exact output, exit status, cold and warm stability, unchanged input authority, and clean scratch state for all four adapters. The row also records source-token counts, cold and warm times, and the shared policy digest for each adapter run.
 
+### Criterion 6 platform rows
+
+Decision `D-PLATFORM-EVIDENCE1 = D` requires a matching CI pass for a native row. A generic host job does not close the row.
+
+| Platform row | Status | Evidence or remaining action |
+| --- | --- | --- |
+| Linux x86_64 | NEEDS CI JOB | No CI job calls `tools/ci/agent-workload-gate.sh` on Linux. `jetpack-platform` at `.github/workflows/ci.yml:54` runs other tests only. |
+| macOS any | NEEDS CI JOB | No CI job calls `tools/ci/agent-workload-gate.sh` on macOS. The committed report is Linux-only. |
+| Windows any | NEEDS OWNER EXCLUSION | `native_os_matrix.tsv` marks Windows `excluded` because Bash has no native adapter. The owner must name this row and set an expiry or reopen trigger. |
+
+No platform row is closed by a real workload CI job. The following jobs are the exact YAML to add to `.github/workflows/ci.yml`; this file is not edited under the card rules.
+
+```yaml
+  agent-workload-native:
+    name: Agent workload corpus (${{ matrix.label }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+          - os: macos-latest
+            label: macos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Run native corpus gate
+        env:
+          JET_AGENT_WORKLOAD_REPORT: ${{ github.workspace }}/agent-workload-reports/${{ matrix.label }}.tsv
+        run: |
+          scratch="$HOME/.cache/jet-test-scratch"
+          mkdir -p "$scratch"
+          TMPDIR="$scratch" nix develop -c bash tools/ci/agent-workload-gate.sh
+
+      - name: Upload native corpus report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-workload-${{ matrix.label }}-${{ github.sha }}
+          path: agent-workload-reports/${{ matrix.label }}.tsv
+          if-no-files-found: error
+          retention-days: 30
+
+  agent-workload-matrix:
+    name: Agent workload native matrix
+    if: needs.agent-workload-native.result == 'success'
+    needs: agent-workload-native
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download native corpus reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-workload-*-${{ github.sha }}
+          path: agent-workload-reports
+          merge-multiple: true
+
+      - name: Check native OS matrix
+        run: bash tools/ci/agent-workload-matrix.sh agent-workload-reports
+```
+
 Run the gate on each required native host:
 
 ```sh

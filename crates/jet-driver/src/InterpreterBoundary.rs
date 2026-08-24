@@ -218,7 +218,7 @@ fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
         // same Process Prelude as AOT and Cranelift. The authority argument
         // is ordinary data at this boundary; sema has already checked it is
         // the named `Abilities` carrier.
-        ("core.process", "argv" | "cmd" | "exit" | "run" | "workspace")
+        ("core.process", "argv" | "cmd" | "exit" | "run" | "pipeline" | "workspace")
         | ("core.sys", "atexit" | "stop") => None,
         // #2003: the interpreter ambient marshals these three through the one
         // CoreHost accessor over Jet's logical environment table — the same
