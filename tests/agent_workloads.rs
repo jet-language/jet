@@ -45,7 +45,7 @@ const EXPECTED_NATIVE_OS_MATRIX: &[(&str, &str, &str, &str, &str)] = &[
         "any",
         "excluded",
         "jet,python,node",
-        "bash-not-native",
+        "bash-not-native;exclusion=D-PLATFORM-EVIDENCE1;expires=2026-11-24;reopen=windows-native-bash-adapter-lands",
     ),
 ];
 const JET_BASELINE_HEADER: &str = "version\ttask_id\tjet_status\tloss_owner";

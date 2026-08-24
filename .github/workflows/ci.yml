@@ -167,11 +167,25 @@ jobs:
         run: nix develop .#full -c cargo test --test build_sandbox -- --nocapture
 
       # Card #1173 rows: the agent corpus on its frozen OS matrix. The corpus
-      # doc excludes Windows at docs/audits/agent-workload-corpus.md:61, so
-      # that row needs an owner exclusion with an expiry, not a job.
+      # doc excludes Windows at docs/audits/agent-workload-corpus.md:61 and
+      # the exclusion is recorded with an expiry in native_os_matrix.tsv, so
+      # the Windows row closes by that exclusion rather than by a job.
       - name: Agent workload corpus
         if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
         run: nix develop .#full -c cargo test --test agent_workloads -- --nocapture
+
+      # The gate scripts are the committed report/matrix checks. Running the
+      # corpus suite alone left them unexercised in CI, so the generated
+      # report path and the frozen OS matrix were never gated.
+      - name: Agent workload gate (report + matrix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: |
+          nix develop .#full -c bash tools/ci/agent-workload-gate.sh
+          nix develop .#full -c bash tools/ci/agent-workload-matrix.sh
+
+      - name: Agent workload gate self-check
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c bash tools/ci/test-agent-workload-gate.sh
 
   # c730: named strict JIT↔AOT parity job. Matrix = every host where native
   # Cranelift JIT is supported today (x86_64 only). aarch64 / Apple Silicon /
