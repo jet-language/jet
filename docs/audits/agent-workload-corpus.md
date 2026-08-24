@@ -254,6 +254,70 @@ Classify each task before aggregating:
 
 Count repair rounds as edits after the initial candidate. Count the initial candidate as round zero. For each completed task and each repair round, record the same-run source and diagnostic token counts. The corpus `source_tokens` field is a stable Unicode-whitespace count, not a model-token count; do not present it as model context usage. Record the per-diagnostic length distribution beside the task results.
 
+### Executed result (2026-08-24)
+
+The run declared above was executed. Both arms ran on `linux-x86_64`, one fresh agent session per cell, 58 cells, no cell timing out. The model-facing prompt artifact that the reproduction check called missing now exists: it is generated mechanically from the frozen manifest, so the two arms receive byte-identical task wording apart from the language name, the candidate filename, and the check command. The shared prefix is 1663 bytes and its equality is asserted by the generator. No reference adapter source is shown to any candidate.
+
+Scoring uses the corpus law already in force, `exit=0` and exact stdout, applied by running each candidate against its frozen input directory and comparing bytes against the frozen expected file. No agent scorer and no second scoring model was added, and no runner was added to the repository tree.
+
+| Task | Jet result | Jet rounds | Jet diags | Jet tokens | Node result | Node rounds | Node tokens | Jet loss owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| repository-marker-scan | pass-first-try | 0 | 0 | 67879 | green-wrong-output | 0 | 22140 | - |
+| repository-marker-scan-empty | pass-first-try | 0 | 1 | 52196 | pass-first-try | 0 | 24246 | - |
+| repository-semantic-inspection | green-wrong-output | 1 | 3 | 64771 | pass-first-try | 0 | 31483 | default-run=#688;wall-time=#666 |
+| repository-semantic-edit | green-wrong-output | 1 | 2 | 56309 | green-wrong-output | 1 | 32602 | default-run=#688;wall-time=#666 |
+| git-diff-review | pass-after-repair | 2 | 3 | 54041 | pass-first-try | 0 | 23234 | - |
+| git-diff-empty | green-wrong-output | 0 | 0 | 49765 | pass-first-try | 0 | 24345 | default-run=#688;wall-time=#666 |
+| build-test-failure-recovery | green-wrong-output (baked-literal) | 1 | 2 | 76291 | green-wrong-output | 0 | 27008 | default-run=#688;wall-time=#666 |
+| incident-report-success | pass-after-repair | 1 | 3 | 73349 | green-wrong-output | 0 | 14101 | - |
+| incident-report-malformed | green-wrong-output | 1 | 2 | 64154 | pass-first-try | 0 | 24119 | default-run=#688;wall-time=#666 |
+| incident-report-partial | pass-first-try | 0 | 0 | 63180 | green-wrong-output | 0 | 25542 | - |
+| structured-data-transform | green-wrong-output | 2 | 4 | 72241 | green-wrong-output | 0 | 23590 | default-run=#688;wall-time=#666 |
+| structured-data-hostile | green-wrong-output | 0 | 0 | 62464 | green-wrong-output | 0 | 23443 | default-run=#688;wall-time=#666 |
+| database-access | pass-first-try | 0 | 1 | 98877 | green-wrong-output | 0 | 25094 | - |
+| database-hostile | green-wrong-output | 1 | 1 | 50276 | green-wrong-output | 0 | 22734 | default-run=#688;wall-time=#666 |
+| http-api | green-wrong-output | 0 | 0 | 69762 | green-wrong-output | 0 | 22269 | default-run=#688;wall-time=#666 |
+| http-hostile | green-wrong-output (baked-literal) | 0 | 0 | 62673 | green-wrong-output | 0 | 8617 | default-run=#688;wall-time=#666 |
+| process-batch-success | green-wrong-output | 0 | 0 | 54954 | green-wrong-output | 0 | 24044 | default-run=#688;wall-time=#666 |
+| process-batch-large-stderr | green-wrong-output | 2 | 2 | 76027 | green-wrong-output | 0 | 9352 | default-run=#688;wall-time=#666 |
+| process-batch-timeout-recovery | pass-after-repair | 1 | 2 | 67435 | pass-first-try | 0 | 23621 | - |
+| browser-automation-preflight | green-wrong-output | 2 | 3 | 59759 | green-wrong-output | 0 | 24036 | default-run=#688;wall-time=#666 |
+| desktop-interaction-focus | green-wrong-output | 1 | 1 | 58302 | green-wrong-output | 0 | 22708 | default-run=#688;wall-time=#666 |
+| document-markdown-inspection | pass-after-repair | 1 | 1 | 56199 | pass-first-try | 0 | 26773 | - |
+| media-asset-inventory | pass-first-try | 0 | 1 | 102483 | pass-first-try | 0 | 23163 | - |
+| mcp-environment-readonly | pass-after-repair | 2 | 2 | 39691 | green-wrong-output | 1 | 11044 | - |
+| mcp-environment-denied | pass-first-try | 0 | 1 | 71344 | pass-first-try | 0 | 10881 | - |
+| interactive-terminal-dialogue | pass-after-repair | 1 | 0 | 74329 | green-wrong-output | 0 | 12521 | - |
+| interactive-terminal-closed | pass-after-repair | 1 | 1 | 45601 | pass-first-try | 0 | 24096 | - |
+| service-lifecycle-roundtrip | green-wrong-output | 1 | 5 | 68798 | pass-after-repair | 1 | 35338 | default-run=#688;wall-time=#666 |
+| service-lifecycle-readiness-timeout | pass-after-repair | 2 | 3 | 72173 | pass-first-try | 0 | 26580 | - |
+
+| Aggregate | Jet | Node |
+| --- | --- | --- |
+| Scored pass (exit 0, stdout exact) | 14 | 12 |
+| Pass on first version | 6 | 11 |
+| Pass only after repair | 8 | 1 |
+| Green check, wrong output | 15 | 17 |
+| Rejected at repair limit | 0 | 0 |
+| Total repair rounds | 24 | 3 |
+| Total distinct diagnostics seen | 44 | 0 |
+| Total model tokens | 1885323 | 648724 |
+| Candidates printing a baked literal | 2 | 0 |
+
+Jet per-task diagnostic-count distribution across the 21 tasks that saw at least one diagnostic: 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 5. Node saw zero diagnostics on every task.
+
+### Finding (executed)
+
+Jet costs more to reach a clean check and returns more correct programs. Against Node it needed eight times the repair rounds, 24 against 3, and about 2.9 times the model tokens, 1.89M against 0.65M. Only 6 of 29 first Jet versions compiled, against 11 for Node. After repair Jet scored 14 of 29 and Node scored 12.
+
+The separation this card asked for is therefore sharp. No task was inexpressible in Jet, and no candidate was still rejected at the repair limit: every one of the 29 Jet candidates reached a clean check, so the `compiler-rejected-unrecovered` and `inexpressible` classes are both empty. Every Jet loss is a `green-wrong-output`, meaning the compiler accepted the program and the program computed the wrong bytes. Compiler strictness carried the agent through an unfamiliar language in every case where it engaged at all.
+
+That is also the limit of the result. Fifteen Jet losses and seventeen Node losses are semantic, and the compiler cannot see them, so the diagnostics that cost those extra tokens bought type and effect correctness rather than task correctness. Two Jet candidates printed a baked literal instead of computing the answer, in breach of a stated prompt rule. They are marked `baked-literal` in the ledger and should be read as prompt-compliance failures, not as language evidence.
+
+Diagnostic engagement was one-sided. Jet produced 44 distinct diagnostics across 21 tasks and Node produced none on any task, because `node --check` only parses. The two arms are therefore not measuring the same kind of feedback, and part of the token gap reflects that asymmetry rather than diagnostic verbosity alone.
+
+Loss ownership: every `green-wrong-output` row carries the manifest loss owner already frozen for that task in `tests/agent_workloads/manifest.tsv`. No new loss card is minted by this run, and no closed card is contradicted by it, because no loss here is a compiler or expressibility loss.
+
 ### Current evidence and limit
 
 The frozen corpus currently proves adapter behavior, not agent behavior. Its Linux report has 29 rows with all four adapters passing. The runner itself emits `agent_tool_calls=not-recorded:#769`, `repair_turns=not-recorded:#769`, and `diagnostic_quality=not-recorded:#769` for each adapter result (`tests/agent_workloads.rs:2097`). The targeted corpus tests pass for the frozen manifest, interpreter receipt, and Jet-loss ownership. No completed 29-row agent transcript, repair-round ledger, expressibility classification, or same-run agent token ledger exists.
