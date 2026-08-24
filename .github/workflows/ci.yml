@@ -108,30 +108,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The sandbox and PTY backends come from the devshell, exactly as they
+      # do locally: build_sandbox fails on a bare host because bubblewrap is
+      # absent, not because containment is broken. Nix is unavailable on the
+      # Windows runner, so that row runs native tooling directly.
+      - name: Install Nix
+        if: matrix.os != 'windows-latest'
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
       # Card #1186 rows: native PTY fixtures on every supported platform.
-      - name: Process sessions native fixtures
+      # Every row below uses `!cancelled()` so one red row still reports the
+      # others; a skipped step is not evidence either way.
+      - name: Process sessions native fixtures (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c cargo test --test process_sessions -- --nocapture
+
+      - name: Process sessions native fixtures (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test process_sessions -- --nocapture
 
       # Card #1182 row: ConPTY is Windows-only, so only this row can close it.
+      # The test lives in tests/corelib_parts/platform.rs, reached through the
+      # corelib_platform target — process_sessions has no conpty test at all.
       - name: Windows ConPTY session backend
-        if: matrix.os == 'windows-latest'
-        run: cargo test --test process_sessions conpty -- --nocapture
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
+        run: cargo test --test corelib_platform core_process_terminal_uses_windows_conpty_for_bytes_resize_and_close -- --nocapture
 
       # Card #891 row: AppContainer isolation is a Windows facility.
       - name: Windows AppContainer build sandbox isolation
-        if: matrix.os == 'windows-latest'
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
         run: cargo test --test build_sandbox -- --nocapture
 
       # Card #891 rows: the Unix sandbox path on its own platforms.
       - name: Unix build sandbox isolation
-        if: matrix.os != 'windows-latest'
-        run: cargo test --test build_sandbox -- --nocapture
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c cargo test --test build_sandbox -- --nocapture
 
       # Card #1173 rows: the agent corpus on its frozen OS matrix. The corpus
-      # doc excludes Windows, so that row needs an owner exclusion, not a job.
+      # doc excludes Windows at docs/audits/agent-workload-corpus.md:61, so
+      # that row needs an owner exclusion with an expiry, not a job.
       - name: Agent workload corpus
-        if: matrix.os != 'windows-latest'
-        run: cargo test --test agent_workloads -- --nocapture
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c cargo test --test agent_workloads -- --nocapture
 
   # c730: named strict JIT↔AOT parity job. Matrix = every host where native
   # Cranelift JIT is supported today (x86_64 only). aarch64 / Apple Silicon /
