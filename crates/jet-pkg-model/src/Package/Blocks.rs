@@ -114,7 +114,9 @@ fn boundary_pattern_matches(pattern: &str, value: &str) -> bool {
 fn parse_boundary_pattern(field: &str, value: &str) -> Result<String, PackageParseError> {
     let value = value.trim();
     if value.len() < 2 || !value.starts_with('"') || !value.ends_with('"') {
-        return Err(err(format!("`boundaries.deny.{field}` must be a quoted module pattern")));
+        return Err(err(format!(
+            "`boundaries.deny.{field}` must be a quoted module pattern"
+        )));
     }
     let value = unquote(value);
     let stars = value.chars().filter(|ch| *ch == '*').count();
@@ -145,7 +147,10 @@ pub(super) fn parse_boundaries(body: &str) -> Result<Vec<ImportBoundary>, Packag
         return Ok(Vec::new());
     };
     let value = value.trim();
-    let Some(list) = value.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) else {
+    let Some(list) = value
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
         return Err(err("`boundaries.deny` must be a list of edge records"));
     };
     let mut boundaries = Vec::new();
@@ -167,7 +172,9 @@ pub(super) fn parse_boundaries(body: &str) -> Result<Vec<ImportBoundary>, Packag
                 "from" if from.is_none() => from = Some(parse_boundary_pattern("from", &value)?),
                 "to" if to.is_none() => to = Some(parse_boundary_pattern("to", &value)?),
                 "from" | "to" => {
-                    return Err(err(format!("`boundaries.deny.{field}` is declared more than once")))
+                    return Err(err(format!(
+                        "`boundaries.deny.{field}` is declared more than once"
+                    )))
                 }
                 other => return Err(err(format!("unknown boundary edge field `{other}`"))),
             }
@@ -188,15 +195,21 @@ fn err(detail: impl Into<String>) -> PackageParseError {
 }
 
 fn bad_mem(detail: impl Into<String>) -> PackageParseError {
-    PackageParseError::BadMemoryPolicy { detail: detail.into() }
+    PackageParseError::BadMemoryPolicy {
+        detail: detail.into(),
+    }
 }
 
 fn bad_guarantee(detail: impl Into<String>) -> PackageParseError {
-    PackageParseError::BadGuaranteePolicy { detail: detail.into() }
+    PackageParseError::BadGuaranteePolicy {
+        detail: detail.into(),
+    }
 }
 
 fn bad_allocator(detail: impl Into<String>) -> PackageParseError {
-    PackageParseError::BadAllocatorPolicy { detail: detail.into() }
+    PackageParseError::BadAllocatorPolicy {
+        detail: detail.into(),
+    }
 }
 
 /// D-ALLOC-PROGRAM1=A: parse the hosted program allocator as one typed fact.
@@ -207,7 +220,10 @@ pub(super) fn parse_program_allocator(
 ) -> Result<crate::TargetMachine::AllocatorPolicy, PackageParseError> {
     use crate::TargetMachine::{AllocatorPolicy, ByteSize};
 
-    let compact = value.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+    let compact = value
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
     if compact == "mem.Heap" {
         return Ok(AllocatorPolicy::HostedDefault);
     }
@@ -256,9 +272,12 @@ fn parse_allocator_bytes(value: &str) -> Result<u64, PackageParseError> {
     let count = digits.parse::<u64>().map_err(|_| {
         bad_allocator("`cap:` must be a positive whole-byte quantity such as `2.gb`")
     })?;
-    let bytes = count.checked_mul(multiplier).filter(|bytes| *bytes > 0).ok_or_else(|| {
-        bad_allocator("`cap:` must be a positive byte quantity that fits in 64 bits")
-    })?;
+    let bytes = count
+        .checked_mul(multiplier)
+        .filter(|bytes| *bytes > 0)
+        .ok_or_else(|| {
+            bad_allocator("`cap:` must be a positive byte quantity that fits in 64 bits")
+        })?;
     Ok(bytes)
 }
 
@@ -375,7 +394,9 @@ pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, Pack
             }
         };
         if deps.insert(name.clone(), source).is_some() {
-            return Err(err(format!("dependency `{name}` is declared more than once")));
+            return Err(err(format!(
+                "dependency `{name}` is declared more than once"
+            )));
         }
     }
     Ok(deps)
@@ -395,10 +416,7 @@ fn parse_c_lib_ref(value: &str) -> Option<String> {
 /// provider ref quoted: that is the boundary between the foreign language
 /// root and the provider's own ref grammar. C remains owned by S59's native
 /// `c@target` form and is therefore deliberately not captured here.
-fn parse_foreign_ref(
-    name: &str,
-    value: &str,
-) -> Result<Option<DepSource>, PackageParseError> {
+fn parse_foreign_ref(name: &str, value: &str) -> Result<Option<DepSource>, PackageParseError> {
     let Some((language, reference)) = value.split_once(Syntax::REF_PROVIDER_AT) else {
         return Ok(None);
     };
@@ -437,7 +455,9 @@ fn parse_git_dep(name: &str, body: &str) -> Result<DepSource, PackageParseError>
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(body)? {
         if !seen.insert(key.clone()) {
-            return Err(err(format!("git dependency `{name}.{key}` is declared more than once")));
+            return Err(err(format!(
+                "git dependency `{name}.{key}` is declared more than once"
+            )));
         }
         let v = unquote(&value);
         match key.as_str() {
@@ -503,7 +523,10 @@ pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, PackagePar
                 let name = k.trim().to_string();
                 let value = v.trim();
                 if let Some(inner) = value.strip_prefix('{') {
-                    let inner = inner.trim_end().strip_suffix('}').unwrap_or(inner.trim_end());
+                    let inner = inner
+                        .trim_end()
+                        .strip_suffix('}')
+                        .unwrap_or(inner.trim_end());
                     let targets = parse_package_entry_block(&name, inner)?;
                     (name, targets)
                 } else {
@@ -621,7 +644,9 @@ fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, Pack
             });
         }
         if key == Syntax::PACKAGE_FIELD_KIND_REMOVED {
-            return Err(PackageParseError::KindFieldRemoved { name: name.to_string() });
+            return Err(PackageParseError::KindFieldRemoved {
+                name: name.to_string(),
+            });
         }
         if key == Syntax::PACKAGE_FIELD_TARGETS {
             return parse_targets_list(name, value.trim());
@@ -635,7 +660,10 @@ fn parse_package_entry_block(name: &str, body: &str) -> Result<Vec<Target>, Pack
 }
 
 fn parse_targets_list(name: &str, value: &str) -> Result<Vec<Target>, PackageParseError> {
-    let inner = value.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(value);
+    let inner = value
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(value);
     let mut targets = Vec::new();
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
@@ -698,7 +726,9 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
     let mut seen = HashSet::new();
     for (name, value) in key_value_entries(body)? {
         if !seen.insert(name.clone()) {
-            return Err(err(format!("build field `{name}` is declared more than once")));
+            return Err(err(format!(
+                "build field `{name}` is declared more than once"
+            )));
         }
         if name == Syntax::BUILD_FIELD_ALLOW {
             continue;
@@ -706,7 +736,9 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
         let value = value.trim();
         let inner_block = if let Some(rest) = value.strip_prefix(Syntax::BUILD_CTOR) {
             let rest = rest.trim_start_matches('.').trim();
-            rest.strip_prefix('{').and_then(|s| s.strip_suffix('}')).map(|s| s.trim())
+            rest.strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .map(|s| s.trim())
         } else if let Some(s) = value.strip_prefix('{') {
             s.strip_suffix('}').map(|s| s.trim())
         } else {
@@ -723,7 +755,9 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
         let mut seen_fields = HashSet::new();
         for (key, val) in key_value_entries(inner)? {
             if !seen_fields.insert(key.clone()) {
-                return Err(err(format!("build profile `{name}.{key}` is declared more than once")));
+                return Err(err(format!(
+                    "build profile `{name}.{key}` is declared more than once"
+                )));
             }
             if key == Syntax::BUILD_FIELD_OPTIMIZE {
                 optimize_val = Some(unquote(&val));
@@ -745,13 +779,22 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                     .strip_prefix('{')
                     .and_then(|s| s.strip_suffix('}'))
                     .map(|s| s.trim())
-                    .ok_or_else(|| err(format!("build profile `{name}` needs `settings: .{{ key: value, … }}`")))?;
+                    .ok_or_else(|| {
+                        err(format!(
+                            "build profile `{name}` needs `settings: .{{ key: value, … }}`"
+                        ))
+                    })?;
                 for (k, v) in key_value_entries(inner)? {
                     if settings.insert(k.clone(), unquote(&v)).is_some() {
-                        return Err(err(format!("build profile `{name}.settings.{k}` is declared more than once")));
+                        return Err(err(format!(
+                            "build profile `{name}.settings.{k}` is declared more than once"
+                        )));
                     }
                 }
-            } else if matches!(key.as_str(), Syntax::RETIRED_BUILD_FIELD_FEATURES | Syntax::RETIRED_BUILD_FIELD_ENV) {
+            } else if matches!(
+                key.as_str(),
+                Syntax::RETIRED_BUILD_FIELD_FEATURES | Syntax::RETIRED_BUILD_FIELD_ENV
+            ) {
                 return Err(err(format!(
                     "build profile `{name}` uses retired `{key}:`; declare a typed `settings: .{{ key: Type = default }}` entry and override it with `--set key=value`"
                 )));
@@ -771,7 +814,14 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                 )))
             }
         };
-        profiles.push(BuildProfileDef { name, optimize, debug_info, small, panic, settings });
+        profiles.push(BuildProfileDef {
+            name,
+            optimize,
+            debug_info,
+            small,
+            panic,
+            settings,
+        });
     }
     Ok(profiles)
 }
@@ -816,12 +866,18 @@ fn parse_bool(profile: &str, value: &str) -> Result<bool, PackageParseError> {
     match value.trim() {
         "true" => Ok(true),
         "false" => Ok(false),
-        _ => Err(err(format!("build profile `{profile}` expected `true` or `false`"))),
+        _ => Err(err(format!(
+            "build profile `{profile}` expected `true` or `false`"
+        ))),
     }
 }
 
 fn parse_string_list(value: &str) -> Result<Vec<String>, ()> {
-    let inner = value.trim().strip_prefix('[').and_then(|s| s.strip_suffix(']')).ok_or(())?;
+    let inner = value
+        .trim()
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .ok_or(())?;
     let mut out = Vec::new();
     for entry in top_level_commas(inner) {
         let entry = entry.trim();
@@ -848,8 +904,9 @@ pub(super) fn parse_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, Pac
 }
 
 fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackageParseError> {
-    let names = parse_string_list(value)
-        .map_err(|_| PackageParseError::BadEffectsBlock(format!("`{field}:` must be a list like `[DB, Net]`")))?;
+    let names = parse_string_list(value).map_err(|_| {
+        PackageParseError::BadEffectsBlock(format!("`{field}:` must be a list like `[DB, Net]`"))
+    })?;
     for name in &names {
         if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
             return Err(PackageParseError::BadEffectsBlock(format!(
@@ -942,10 +999,14 @@ fn authority_bad(detail: impl Into<String>) -> PackageParseError {
 fn authority_object_body<'a>(value: &'a str, field: &str) -> Result<&'a str, PackageParseError> {
     let value = value.trim();
     let Some(open) = value.find('{') else {
-        return Err(authority_bad(format!("`authority.{field}` must be a record")));
+        return Err(authority_bad(format!(
+            "`authority.{field}` must be a record"
+        )));
     };
     let Some(close) = value.rfind('}') else {
-        return Err(authority_bad(format!("`authority.{field}` is missing `}}`")));
+        return Err(authority_bad(format!(
+            "`authority.{field}` is missing `}}`"
+        )));
     };
     if close <= open || !value[close + 1..].trim().is_empty() {
         return Err(authority_bad(format!(
@@ -960,7 +1021,9 @@ fn parse_authority_holds(body: &str) -> Result<AuthorityHolds, PackageParseError
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(body).map_err(authority_error)? {
         if !seen.insert(key.clone()) {
-            return Err(authority_bad(format!("authority.holds.{key} is declared more than once")));
+            return Err(authority_bad(format!(
+                "authority.holds.{key} is declared more than once"
+            )));
         }
         match key.as_str() {
             Syntax::AUTHORITY_HOLDS_FIELD_ALLOW => {
@@ -992,7 +1055,9 @@ pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParse
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(body).map_err(authority_error)? {
         if !seen.insert(key.clone()) {
-            return Err(authority_bad(format!("authority.{key} is declared more than once")));
+            return Err(authority_bad(format!(
+                "authority.{key} is declared more than once"
+            )));
         }
         match key.as_str() {
             Syntax::AUTHORITY_FIELD_HOLDS => {
@@ -1003,14 +1068,13 @@ pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParse
                     .map_err(authority_error)?;
             }
             Syntax::AUTHORITY_FIELD_TRUST => {
-                authority.trust = Some(parse_authority_trust_body(
-                    authority_object_body(&value, "trust")?,
-                )?);
+                authority.trust = Some(parse_authority_trust_body(authority_object_body(
+                    &value, "trust",
+                )?)?);
             }
             Syntax::AUTHORITY_FIELD_PROVIDERS => {
-                authority.providers = parse_provider_authority_body(
-                    authority_object_body(&value, "providers")?,
-                )?;
+                authority.providers =
+                    parse_provider_authority_body(authority_object_body(&value, "providers")?)?;
             }
             _ => {
                 return Err(authority_bad(format!(
@@ -1045,7 +1109,9 @@ fn parse_authority_trust_body(body: &str) -> Result<TrustPolicy, PackageParseErr
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(body).map_err(authority_error)? {
         if !seen.insert(key.clone()) {
-            return Err(authority_bad(format!("authority.trust.{key} is declared more than once")));
+            return Err(authority_bad(format!(
+                "authority.trust.{key} is declared more than once"
+            )));
         }
         if key == Syntax::AUTHORITY_TRUST_FIELD_DEFAULT {
             policy.default = Some(parse_trust_decision(&value).map_err(authority_error)?);
@@ -1068,13 +1134,17 @@ fn parse_authority_trust_body(body: &str) -> Result<TrustPolicy, PackageParseErr
     Ok(policy)
 }
 
-fn parse_provider_authority_body(providers: &str) -> Result<Vec<ProviderAuthority>, PackageParseError> {
+fn parse_provider_authority_body(
+    providers: &str,
+) -> Result<Vec<ProviderAuthority>, PackageParseError> {
     let mut out = Vec::new();
     let mut seen_providers = HashSet::new();
     for (raw_provider, value) in key_value_entries(providers).map_err(authority_error)? {
         let provider = unquote(&raw_provider);
         if !seen_providers.insert(provider.clone()) {
-            return Err(authority_bad(format!("authority.providers.{provider} is declared more than once")));
+            return Err(authority_bad(format!(
+                "authority.providers.{provider} is declared more than once"
+            )));
         }
         let authority = authority_object_body(&value, &format!("providers.{provider}"))?;
         let mut registry = None;
@@ -1096,15 +1166,17 @@ fn parse_provider_authority_body(providers: &str) -> Result<Vec<ProviderAuthorit
                 }
                 registry = Some(unquote(value));
             } else if field == Syntax::PROVIDER_FIELD_ALLOW {
-                allow = parse_string_list(&value)
-                    .map_err(|_| authority_bad(format!(
+                allow = parse_string_list(&value).map_err(|_| {
+                    authority_bad(format!(
                         "authority.providers.{provider}.allow must be a list"
-                    )))?;
+                    ))
+                })?;
             } else if field == Syntax::PROVIDER_FIELD_DENY {
-                deny = parse_string_list(&value)
-                    .map_err(|_| authority_bad(format!(
+                deny = parse_string_list(&value).map_err(|_| {
+                    authority_bad(format!(
                         "authority.providers.{provider}.deny must be a list"
-                    )))?;
+                    ))
+                })?;
             } else {
                 return Err(authority_bad(format!(
                     "unknown authority.providers.{provider} field `{field}`"
@@ -1114,7 +1186,12 @@ fn parse_provider_authority_body(providers: &str) -> Result<Vec<ProviderAuthorit
         let registry = registry.ok_or_else(|| {
             authority_bad(format!("authority.providers.{provider} needs registry"))
         })?;
-        out.push(ProviderAuthority { provider, registry, allow, deny });
+        out.push(ProviderAuthority {
+            provider,
+            registry,
+            allow,
+            deny,
+        });
     }
     Ok(out)
 }
@@ -1144,10 +1221,14 @@ fn parse_ci_trust_prompt(value: &str) -> Result<TrustDecision, PackageParseError
     let mut seen = HashSet::new();
     for (key, value) in key_value_entries(body)? {
         if !seen.insert(key.clone()) {
-            return Err(err(format!("authority.trust.ci.{key} is declared more than once")));
+            return Err(err(format!(
+                "authority.trust.ci.{key} is declared more than once"
+            )));
         }
         if key != Syntax::AUTHORITY_TRUST_FIELD_PROMPT {
-            return Err(err(format!("unknown `authority.trust.ci` field `{key}` — allowed: `prompt`")));
+            return Err(err(format!(
+                "unknown `authority.trust.ci` field `{key}` — allowed: `prompt`"
+            )));
         }
         prompt = Some(parse_trust_decision(&value)?);
     }
@@ -1166,7 +1247,9 @@ fn parse_service_trust(value: &str) -> Result<Vec<(String, TrustDecision)>, Pack
     for (raw_name, value) in key_value_entries(body)? {
         let name = unquote(&raw_name);
         if !seen.insert(name.clone()) {
-            return Err(err(format!("authority.trust.services.{name} is declared more than once")));
+            return Err(err(format!(
+                "authority.trust.services.{name} is declared more than once"
+            )));
         }
         services.push((name, parse_trust_decision(&value)?));
     }
@@ -1178,7 +1261,9 @@ fn parse_trust_decision(value: &str) -> Result<TrustDecision, PackageParseError>
         v if v == Syntax::AUTHORITY_TRUST_DECISION_ALLOW => Ok(TrustDecision::Allow),
         v if v == Syntax::AUTHORITY_TRUST_DECISION_PROMPT => Ok(TrustDecision::Prompt),
         v if v == Syntax::AUTHORITY_TRUST_DECISION_DENY => Ok(TrustDecision::Deny),
-        other => Err(err(format!("`{other}` is not a trust decision — use `allow`, `prompt`, or `deny`"))),
+        other => Err(err(format!(
+            "`{other}` is not a trust decision — use `allow`, `prompt`, or `deny`"
+        ))),
     }
 }
 
@@ -1209,11 +1294,13 @@ pub(super) fn parse_policy(
             let replacement = match name.as_str() {
                 "no_alloc" => Some("`authority: .{ holds: { deny: [Mem.Alloc] } }`".to_string()),
                 "zero_rc" => Some("`authority: .{ holds: { deny: [Mem.Rc] } }`".to_string()),
-                "arena_bounded" => raw
-                    .parse::<u64>()
-                    .ok()
-                    .filter(|bytes| *bytes > 0)
-                    .map(|bytes| format!("`authority: .{{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`")),
+                "arena_bounded" => raw.parse::<u64>().ok().filter(|bytes| *bytes > 0).map(
+                    |bytes| {
+                        format!(
+                            "`authority: .{{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`"
+                        )
+                    },
+                ),
                 _ => None,
             };
             if let Some(replacement) = replacement {
@@ -1231,9 +1318,10 @@ pub(super) fn parse_policy(
             {
                 continue;
             }
-            if name == jet_foundation::LintPolicy::auto_derive_lint()
-                .lint_name
-                .expect("auto_derive lint must have a name")
+            if name
+                == jet_foundation::LintPolicy::auto_derive_lint()
+                    .lint_name
+                    .expect("auto_derive lint must have a name")
             {
                 return Err(PackageParseError::RetiredPolicyField {
                     field: format!("policy.{name}"),
@@ -1248,10 +1336,11 @@ pub(super) fn parse_policy(
             return Err(bad_mem(format!("`{name}` is not a registered package policy; memory floors belong in `authority.holds.deny`")));
         };
         if !seen.insert(key) {
-            return Err(bad_mem(format!("package policy `{name}` is declared more than once")));
+            return Err(bad_mem(format!(
+                "package policy `{name}` is declared more than once"
+            )));
         }
-        let value = crate::Policy::parse_value(key, &raw)
-            .map_err(|detail| bad_mem(detail))?;
+        let value = crate::Policy::parse_value(key, &raw).map_err(|detail| bad_mem(detail))?;
         out.push(crate::Policy::PolicyDeclaration {
             key,
             value,
@@ -1262,8 +1351,12 @@ pub(super) fn parse_policy(
         });
     }
     for key in crate::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
-        crate::Policy::resolve(key, out.clone())
-            .map_err(|error| bad_mem(format!("conflicting `{}` declarations: {error:?}", key.name())))?;
+        crate::Policy::resolve(key, out.clone()).map_err(|error| {
+            bad_mem(format!(
+                "conflicting `{}` declarations: {error:?}",
+                key.name()
+            ))
+        })?;
     }
     Ok(out)
 }
@@ -1306,11 +1399,15 @@ pub(super) fn parse_package_policy_surface(
                     bad_policy("`policy.licenses` must contain a non-empty string list")
                 })?;
                 if values.is_empty() || values.iter().any(|value| value.trim().is_empty()) {
-                    return Err(bad_policy("`policy.licenses` must contain a non-empty string list"));
+                    return Err(bad_policy(
+                        "`policy.licenses` must contain a non-empty string list",
+                    ));
                 }
                 let mut unique = BTreeSet::new();
                 if values.iter().any(|value| !unique.insert(value.clone())) {
-                    return Err(bad_policy("`policy.licenses` cannot repeat an SPDX identifier"));
+                    return Err(bad_policy(
+                        "`policy.licenses` cannot repeat an SPDX identifier",
+                    ));
                 }
                 licenses = Some(values);
             }
@@ -1378,7 +1475,9 @@ fn parse_policy_exceptions(
         .trim()
         .strip_prefix('[')
         .and_then(|value| value.strip_suffix(']'))
-        .ok_or_else(|| bad_policy("`policy.exceptions` must be a list of PolicyException records"))?;
+        .ok_or_else(|| {
+            bad_policy("`policy.exceptions` must be a list of PolicyException records")
+        })?;
     let mut exceptions = Vec::new();
     let mut seen_ids = HashSet::new();
     let mut seen_scopes = HashSet::new();
@@ -1453,21 +1552,23 @@ fn parse_policy_exceptions(
     Ok(exceptions)
 }
 
-fn exception_string(
-    value: Option<String>,
-    field: &str,
-) -> Result<String, PackageParseError> {
-    let value = value
-        .ok_or_else(|| bad_policy(format!("`PolicyException.{field}` is required")))?;
+fn exception_string(value: Option<String>, field: &str) -> Result<String, PackageParseError> {
+    let value =
+        value.ok_or_else(|| bad_policy(format!("`PolicyException.{field}` is required")))?;
     let value = unquote(&value);
     if value.trim().is_empty() {
-        return Err(bad_policy(format!("`PolicyException.{field}` must not be empty")));
+        return Err(bad_policy(format!(
+            "`PolicyException.{field}` must not be empty"
+        )));
     }
     Ok(value)
 }
 
 fn validate_exception_text(field: &str, value: &str) -> Result<(), PackageParseError> {
-    if value.chars().any(|character| character.is_control() || matches!(character, ';' | '|')) {
+    if value
+        .chars()
+        .any(|character| character.is_control() || matches!(character, ';' | '|'))
+    {
         return Err(bad_policy(format!(
             "`PolicyException.{field}` cannot contain control, `;`, or `|` characters"
         )));
@@ -1513,13 +1614,19 @@ fn parse_policy_expiry(raw: &str) -> Result<u64, PackageParseError> {
     let month = parts.next().and_then(|value| value.parse::<i64>().ok());
     let day = parts.next().and_then(|value| value.parse::<i64>().ok());
     if parts.next().is_some() {
-        return Err(bad_policy("`PolicyException.expires` has an invalid calendar date"));
+        return Err(bad_policy(
+            "`PolicyException.expires` has an invalid calendar date",
+        ));
     }
     let (Some(year), Some(month), Some(day)) = (year, month, day) else {
-        return Err(bad_policy("`PolicyException.expires` has an invalid calendar date"));
+        return Err(bad_policy(
+            "`PolicyException.expires` has an invalid calendar date",
+        ));
     };
     if !(1..=12).contains(&month) || day < 1 || day > days_in_month(year, month) {
-        return Err(bad_policy("`PolicyException.expires` has an invalid calendar date"));
+        return Err(bad_policy(
+            "`PolicyException.expires` has an invalid calendar date",
+        ));
     }
     let days = days_from_civil(year, month, day);
     u64::try_from(days)
@@ -1612,19 +1719,30 @@ pub(super) fn parse_guarantee_policy(
 /// Parse a standalone organization policy file whose entire content is one
 /// `policy: .{ … }` block (`JET_ORG_UNSAFE_POLICY`) — no other manifest
 /// fields are legal there.
-pub fn parse_policy_document(text: &str) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {
+pub fn parse_policy_document(
+    text: &str,
+) -> Result<Vec<crate::Policy::PolicyDeclaration>, PackageParseError> {
     let text = super::strip_comments(text);
     let mut rest = text
         .trim()
         .strip_prefix(Syntax::MANIFEST_BLOCK_POLICY)
         .ok_or_else(|| bad_mem("expected only `policy: .{ … }`"))?
         .trim_start();
-    rest = rest.strip_prefix(':').ok_or_else(|| bad_mem("expected `:` after `policy`"))?.trim_start();
+    rest = rest
+        .strip_prefix(':')
+        .ok_or_else(|| bad_mem("expected `:` after `policy`"))?
+        .trim_start();
     rest = rest.strip_prefix('.').unwrap_or(rest).trim_start();
-    rest = rest.strip_prefix('{').ok_or_else(|| bad_mem("expected `.{` after `policy:`"))?;
-    let close = rest.find('}').ok_or_else(|| bad_mem("missing `}` after organization policy"))?;
+    rest = rest
+        .strip_prefix('{')
+        .ok_or_else(|| bad_mem("expected `.{` after `policy:`"))?;
+    let close = rest
+        .find('}')
+        .ok_or_else(|| bad_mem("missing `}` after organization policy"))?;
     if !rest[close + 1..].trim().is_empty() {
-        return Err(bad_mem("organization policy file may contain only the `policy` block"));
+        return Err(bad_mem(
+            "organization policy file may contain only the `policy` block",
+        ));
     }
     parse_policy(&rest[..close], false)
 }
@@ -1787,7 +1905,9 @@ fn manifest_block_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
 /// `{ … }` body — the end is the next top-level separator (`,`/`\n`) or EOF.
 fn manifest_scalar_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
     for key in MANIFEST_SCALAR_FIELDS {
-        let Some(end) = at.checked_add(key.len()) else { continue };
+        let Some(end) = at.checked_add(key.len()) else {
+            continue;
+        };
         if bytes.get(at..end) != Some(key.as_bytes()) {
             continue;
         }

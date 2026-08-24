@@ -25,9 +25,9 @@
 //! Lives at `.jet/cache/api/<package>.api` (committed, durable contract — the same
 //! discipline as the D-MIGRATE1 `#PublishedSchema` snapshot).
 
+use crate::Sema::{inline_effect_key, EffectSet};
 use crate::Syntax;
 use crate::AST::{Func, Item, TraitMethodSig, Type};
-use crate::Sema::{inline_effect_key, EffectSet};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -166,10 +166,9 @@ pub type ApiUnitDimensions = HashMap<String, String>;
 
 pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> String {
     match ty {
-        Type::Named(name) => dimensions.get(name).map_or_else(
-            || ty.name(),
-            |identity| format!("{name}{identity}"),
-        ),
+        Type::Named(name) => dimensions
+            .get(name)
+            .map_or_else(|| ty.name(), |identity| format!("{name}{identity}")),
         Type::List(inner) => format!("[{}]", canonical_api_type_name(inner, dimensions)),
         Type::Map { key, value, .. } => format!(
             "[{}:{}]",
@@ -201,8 +200,17 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
                 format!("{ok} {err}!")
             }
         }
-        Type::Fn { params, ret, effect_bound, .. } => {
-            let params = params.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ");
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            ..
+        } => {
+            let params = params
+                .iter()
+                .map(|ty| canonical_api_type_name(ty, dimensions))
+                .collect::<Vec<_>>()
+                .join(", ");
             let mut signature = format!("fn({params})");
             if let Some(ret) = ret {
                 signature.push(' ');
@@ -224,9 +232,27 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             format!("*{}", canonical_api_type_name(&args[0], dimensions))
         }
         Type::Apply { .. } if ty.quantity_parts().is_some() => ty.name(),
-        Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ")),
-        Type::Tuple(fields) => format!("({})", fields.iter().map(|(name, ty)| format!("{name}: {}", canonical_api_type_name(ty, dimensions))).collect::<Vec<_>>().join(", ")),
-        Type::FixedList { elem, len } => format!("[{}#{}]", canonical_api_type_name(elem, dimensions), len.expression()),
+        Type::Apply { name, args } => format!(
+            "{}<{}>",
+            name,
+            args.iter()
+                .map(|ty| canonical_api_type_name(ty, dimensions))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::Tuple(fields) => format!(
+            "({})",
+            fields
+                .iter()
+                .map(|(name, ty)| format!("{name}: {}", canonical_api_type_name(ty, dimensions)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        Type::FixedList { elem, len } => format!(
+            "[{}#{}]",
+            canonical_api_type_name(elem, dimensions),
+            len.expression()
+        ),
         Type::Tagged { marker, inner }
             if matches!(
                 marker,
@@ -238,7 +264,9 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         {
             canonical_api_type_name(inner, dimensions)
         }
-        Type::Tagged { marker, inner } => format!("#{marker} {}", canonical_api_type_name(inner, dimensions)),
+        Type::Tagged { marker, inner } => {
+            format!("#{marker} {}", canonical_api_type_name(inner, dimensions))
+        }
         Type::Union(members) => members
             .iter()
             .map(|member| canonical_api_type_name(member, dimensions))
@@ -248,10 +276,7 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
     }
 }
 
-pub fn canonical_fn_signature(
-    f: &Func,
-    dimensions: &ApiUnitDimensions,
-) -> String {
+pub fn canonical_fn_signature(f: &Func, dimensions: &ApiUnitDimensions) -> String {
     canonical_fn_signature_with_effects(f, None, dimensions)
 }
 
@@ -264,7 +289,14 @@ pub fn canonical_fn_signature_with_effects(
     let params: Vec<String> = f
         .params
         .iter()
-        .map(|p| format!("{}: {}{}", p.name, p.convention.sigil(), canonical_api_type_name(&p.ty, dimensions)))
+        .map(|p| {
+            format!(
+                "{}: {}{}",
+                p.name,
+                p.convention.sigil(),
+                canonical_api_type_name(&p.ty, dimensions)
+            )
+        })
         .collect();
     let mut signature = format!("fn {}{}({})", f.name, type_params, params.join(", "));
     if let Some(return_type) = &f.return_type {
@@ -282,16 +314,19 @@ pub fn canonical_fn_signature_with_effects(
         );
         signature.push_str("]>");
     }
-    let provenance = f.return_view_provenance.as_ref().map_or_else(String::new, |map| {
-        if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
-            format!(" ; view_source = {}", direct.canonical())
-        } else {
-            format!(
-                " ; view_sources = {}",
-                crate::AST::canonical_view_provenance_map(map)
-            )
-        }
-    });
+    let provenance = f
+        .return_view_provenance
+        .as_ref()
+        .map_or_else(String::new, |map| {
+            if let Some(direct) = map.get(&Vec::<String>::new()).filter(|_| map.len() == 1) {
+                format!(" ; view_source = {}", direct.canonical())
+            } else {
+                format!(
+                    " ; view_sources = {}",
+                    crate::AST::canonical_view_provenance_map(map)
+                )
+            }
+        });
     signature.push_str(&provenance);
     signature
 }
@@ -393,16 +428,17 @@ pub fn qualify_api_signature(namespace: Option<&str>, signature: &str) -> String
 pub fn legacy_api_signature(signature: &str) -> String {
     let signature = [
         ("Int (a whole number)", "Int"),
-        ("Float (a decimal number)", "Float"),
+        ("Float (an approximate binary number)", "Float"),
         ("Bool (true or false)", "Bool"),
         ("String (text)", "String"),
         ("Char (one character)", "Char"),
-        ("F32 (a 32-bit decimal number)", "F32"),
+        ("F32 (a 32-bit approximate binary number)", "F32"),
     ]
     .into_iter()
-    .fold(signature_without_effect_row(signature), |signature, (old, new)| {
-        signature.replace(old, new)
-    });
+    .fold(
+        signature_without_effect_row(signature),
+        |signature, (old, new)| signature.replace(old, new),
+    );
     let Some(rest) = signature.strip_prefix("fn ") else {
         return signature;
     };
@@ -432,15 +468,7 @@ pub fn snapshot_from_items_with_effects(
     solved: Option<&std::collections::HashMap<String, EffectSet>>,
     module_alias: Option<&str>,
 ) -> ApiSnapshot {
-    snapshot_from_items_with_context(
-        items,
-        package,
-        version,
-        solved,
-        module_alias,
-        0,
-        None,
-    )
+    snapshot_from_items_with_context(items, package, version, solved, module_alias, 0, None)
 }
 
 /// Build current publish metadata from sema's one name ledger.
@@ -507,11 +535,7 @@ fn snapshot_from_items_with_context(
 /// `module { … }` bodies. The package's own module block carries the library's
 /// surface (`module foo { pub fn … }`) and need not itself be marked `pub`; it is
 /// the `pub` on the *function* that puts it on the contract.
-pub fn collect_api_unit_dimensions(
-    items: &[Item],
-    package: &str,
-    out: &mut ApiUnitDimensions,
-) {
+pub fn collect_api_unit_dimensions(items: &[Item], package: &str, out: &mut ApiUnitDimensions) {
     let mut resolved = HashMap::<String, crate::AST::Dimension>::new();
     for item in items {
         let Item::UnitFamily(family) = item else {
@@ -859,7 +883,9 @@ pub fn project_capability_digest(project_root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::Diagnostics::Span;
-    use crate::AST::{AccessConvention, Func, Param, Type, UnitFamilyDef, UnitFamilyMember, UnitRatio};
+    use crate::AST::{
+        AccessConvention, Func, Param, Type, UnitFamilyDef, UnitFamilyMember, UnitRatio,
+    };
 
     fn zero() -> Span {
         Span::new(0, 0)
@@ -877,7 +903,8 @@ mod tests {
             ty_span: zero(),
             default: None,
             variadic: false,
-            variadic_bound_list: None, declared_view_from_names: None,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
         }
     }
 
@@ -904,7 +931,7 @@ mod tests {
             unsafe_span: None,
             is_pure: false,
             is_reactive: false,
-                reactive_upgrades: Vec::new(),
+            reactive_upgrades: Vec::new(),
             is_replayable: false,
             replayable_span: None,
             is_job: false,
@@ -1107,7 +1134,12 @@ mod tests {
         let api = snapshot_from_items(
             &[
                 Item::UnitFamily(family),
-                Item::Func(func("distance", true, vec![], Some(Type::Named("Meter".into())))),
+                Item::Func(func(
+                    "distance",
+                    true,
+                    vec![],
+                    Some(Type::Named("Meter".into())),
+                )),
             ],
             "physics",
             "1.0.0",
@@ -1124,8 +1156,15 @@ mod tests {
         let mut f = func(
             "first",
             true,
-            vec![param("xs", AccessConvention::Read, Type::List(Box::new(Type::Int)))],
-            Some(Type::Apply { name: "View".into(), args: vec![Type::Int] }),
+            vec![param(
+                "xs",
+                AccessConvention::Read,
+                Type::List(Box::new(Type::Int)),
+            )],
+            Some(Type::Apply {
+                name: "View".into(),
+                args: vec![Type::Int],
+            }),
         );
         f.return_view_provenance = Some(std::collections::BTreeMap::from([(
             Vec::new(),
@@ -1147,10 +1186,21 @@ mod tests {
                 "pick",
                 true,
                 vec![
-                    param("left", AccessConvention::Read, Type::List(Box::new(Type::Int))),
-                    param("right", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                    param(
+                        "left",
+                        AccessConvention::Read,
+                        Type::List(Box::new(Type::Int)),
+                    ),
+                    param(
+                        "right",
+                        AccessConvention::Read,
+                        Type::List(Box::new(Type::Int)),
+                    ),
                 ],
-                Some(Type::Apply { name: "View".into(), args: vec![Type::Int] }),
+                Some(Type::Apply {
+                    name: "View".into(),
+                    args: vec![Type::Int],
+                }),
             );
             f.return_view_provenance = Some(std::collections::BTreeMap::from([(
                 Vec::new(),
@@ -1170,8 +1220,12 @@ mod tests {
         assert_eq!(ApiSnapshot::parse(&left.write()).unwrap(), left);
         assert_eq!(ApiSnapshot::parse(&right.write()).unwrap(), right);
         assert_ne!(left.capability_digest(), right.capability_digest());
-        assert!(left.funcs[0].signature.contains("view_source = parameter:0"));
-        assert!(right.funcs[0].signature.contains("view_source = parameter:1"));
+        assert!(left.funcs[0]
+            .signature
+            .contains("view_source = parameter:0"));
+        assert!(right.funcs[0]
+            .signature
+            .contains("view_source = parameter:1"));
     }
 
     #[test]
@@ -1181,8 +1235,16 @@ mod tests {
                 "pair",
                 true,
                 vec![
-                    param("left", AccessConvention::Read, Type::List(Box::new(Type::Int))),
-                    param("right", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                    param(
+                        "left",
+                        AccessConvention::Read,
+                        Type::List(Box::new(Type::Int)),
+                    ),
+                    param(
+                        "right",
+                        AccessConvention::Read,
+                        Type::List(Box::new(Type::Int)),
+                    ),
                 ],
                 Some(Type::Named("Pair".into())),
             );
@@ -1227,10 +1289,21 @@ mod tests {
                 "choose",
                 true,
                 vec![
-                    param("left", AccessConvention::Read, Type::List(Box::new(Type::Int))),
-                    param("right", AccessConvention::Read, Type::List(Box::new(Type::Int))),
+                    param(
+                        "left",
+                        AccessConvention::Read,
+                        Type::List(Box::new(Type::Int)),
+                    ),
+                    param(
+                        "right",
+                        AccessConvention::Read,
+                        Type::List(Box::new(Type::Int)),
+                    ),
                 ],
-                Some(Type::Apply { name: "View".into(), args: vec![Type::Int] }),
+                Some(Type::Apply {
+                    name: "View".into(),
+                    args: vec![Type::Int],
+                }),
             );
             f.return_view_provenance = Some(std::collections::BTreeMap::from([(
                 Vec::new(),

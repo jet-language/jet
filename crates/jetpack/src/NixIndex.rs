@@ -535,6 +535,10 @@ impl<'a> NixIndexClient<'a> {
                 "nix index record count disagrees with manifest",
             ));
         }
+        if !cached_target {
+            self.cache_target_atomically(key, &target, &compressed, &signature_bytes)?;
+        }
+        self.cache_manifest_atomically(&key.channel, &manifest)?;
         let record = document
             .records
             .iter()
@@ -559,10 +563,6 @@ impl<'a> NixIndexClient<'a> {
                 });
             }
         };
-        if !cached_target {
-            self.cache_target_atomically(key, &target, &compressed, &signature_bytes)?;
-        }
-        self.cache_manifest_atomically(&key.channel, &manifest)?;
         let index_sha256 = sha256_hex(&compressed);
         let proof = IndexProof {
             schema: INDEX_SCHEMA,
@@ -602,6 +602,11 @@ impl<'a> NixIndexClient<'a> {
         let signature_bytes = read_regular(&signature_path, MAX_SIGNATURE_BYTES)?;
         let manifest = parse_manifest_strict(&bytes)?;
         validate_manifest(&manifest)?;
+        if manifest.channel != channel {
+            return Err(NixIndexError::invalid(
+                "cached nixpkgs channel manifest disagrees with requested channel",
+            ));
+        }
         verify_manifest_signature(&self.public_key, &self.key_id, &signature_bytes, &bytes)?;
         self.check_generation(channel, &manifest, &bytes)?;
         Ok(Some(CachedManifest {
@@ -1011,7 +1016,10 @@ fn validate_document(document: &IndexDocument) -> Result<(), NixIndexError> {
             return Err(NixIndexError::invalid("nix index record has no outputs"));
         }
         for output in &record.outputs {
-            if output.name.is_empty() || !output_names.insert(output.name.clone()) {
+            if output.name.is_empty()
+                || output.name.chars().any(|character| character.is_control())
+                || !output_names.insert(output.name.clone())
+            {
                 return Err(NixIndexError::invalid(
                     "nix index record has duplicate output names",
                 ));
@@ -1428,6 +1436,37 @@ fn parse_output(value: &Value) -> Result<OutputWire, NixIndexError> {
     })
 }
 
+fn parse_oracle_outputs(value: &Value) -> Result<Vec<OutputWire>, NixIndexError> {
+    match value {
+        Value::Array(_) => value_array(value, "oracle outputs")?
+            .iter()
+            .map(parse_output)
+            .collect(),
+        Value::Object(outputs) => outputs
+            .iter()
+            .map(|(name, value)| {
+                let map = object(value.clone(), "oracle output")?;
+                reject_unknown(&map, &["path", "storePath"])?;
+                let store_path = map
+                    .iter()
+                    .find(|(key, _)| key == "path" || key == "storePath")
+                    .map(|(_, value)| string_value(value, "oracle output path"))
+                    .transpose()?
+                    .ok_or_else(|| {
+                        NixIndexError::invalid("oracle output is missing its store path")
+                    })?;
+                Ok(OutputWire {
+                    name: name.clone(),
+                    store_path: store_path.to_string(),
+                })
+            })
+            .collect(),
+        _ => Err(NixIndexError::invalid(
+            "oracle outputs must be an array or object",
+        )),
+    }
+}
+
 fn parse_coverage(value: &Value) -> Result<Coverage, NixIndexError> {
     let map = object(value.clone(), "nix index coverage")?;
     reject_unknown(&map, &["indexed", "notIndexed"])?;
@@ -1591,7 +1630,10 @@ fn verify_manifest_signature(
     bytes: &[u8],
 ) -> Result<(), NixIndexError> {
     let signature = parse_signature_strict(signature_bytes)?;
-    if signature.key_id != expected_key_id || signature.algorithm != "ed25519" {
+    if signature.schema != INDEX_SCHEMA
+        || signature.key_id != expected_key_id
+        || signature.algorithm != "ed25519"
+    {
         return Err(NixIndexError::invalid(
             "nix index manifest signature key or algorithm is not trusted",
         ));
@@ -1971,12 +2013,13 @@ fn xxh64(data: &[u8]) -> u64 {
     if offset + 4 <= data.len() {
         hash ^= u64::from(u32::from_le_bytes(
             data[offset..offset + 4].try_into().unwrap(),
-        )) * P1;
+        ))
+        .wrapping_mul(P1);
         hash = hash.rotate_left(23).wrapping_mul(P2).wrapping_add(P3);
         offset += 4;
     }
     while offset < data.len() {
-        hash ^= u64::from(data[offset]) * P5;
+        hash ^= u64::from(data[offset]).wrapping_mul(P5);
         hash = hash.rotate_left(11).wrapping_mul(P1);
         offset += 1;
     }
@@ -2062,10 +2105,7 @@ fn parse_oracle(bytes: &[u8], system: &str) -> Result<Vec<OracleRecord>, NixInde
             if record_system != system {
                 return Err(NixIndexError::invalid("oracle record has the wrong system"));
             }
-            let outputs = array_field(&map, "outputs")?
-                .iter()
-                .map(parse_output)
-                .collect::<Result<Vec<_>, _>>()?;
+            let outputs = parse_oracle_outputs(field(&map, "outputs")?)?;
             let mut output_names = BTreeSet::new();
             let mut output_paths = BTreeSet::new();
             for output in &outputs {
@@ -2126,7 +2166,7 @@ fn validate_oracle_record(record: &IndexRecord) -> Result<(), NixIndexError> {
     }
     let mut output_paths = BTreeSet::new();
     for (name, path) in &record.outputs {
-        if name.is_empty() {
+        if name.is_empty() || name.chars().any(|character| character.is_control()) {
             return Err(NixIndexError::invalid(
                 "oracle record has an empty output name",
             ));
@@ -2333,10 +2373,11 @@ fn format_generation_report(decoded: &[u8], compressed: &[u8], document: &IndexD
     let indexed = document.coverage.indexed.len();
     let not_indexed = document.coverage.not_indexed.len();
     format!(
-        "{{\"schema\":1,\"channel\":\"{}\",\"revision\":\"{}\",\"system\":\"{}\",\"compressed_bytes\":{},\"decoded_bytes\":{},\"record_count\":{},\"output_count\":{},\"indexed_count\":{},\"not_indexed_count\":{}}}",
+        "{{\"schema\":1,\"channel\":\"{}\",\"revision\":\"{}\",\"system\":\"{}\",\"released_unix\":{},\"compressed_bytes\":{},\"decoded_bytes\":{},\"record_count\":{},\"output_count\":{},\"indexed_count\":{},\"not_indexed_count\":{}}}",
         json_escape(&document.channel),
         json_escape(&document.revision),
         json_escape(&document.system),
+        document.released_unix,
         compressed.len(),
         decoded.len(),
         document.records.len(),
@@ -2400,6 +2441,19 @@ pub(crate) fn decode_index_records_for_producer(
         .iter()
         .map(record_from_wire)
         .collect())
+}
+
+#[allow(dead_code)]
+pub(crate) fn producer_index_identity(
+    bytes: &[u8],
+) -> Result<(String, String, String), NixIndexError> {
+    let decoded = if bytes.starts_with(&0xfd2f_b528u32.to_le_bytes()) {
+        zstd_decode_bounded(bytes, MAX_DECODED_BYTES)?
+    } else {
+        bytes.to_vec()
+    };
+    let document = parse_index_strict(&decoded)?;
+    Ok((document.channel, document.revision, document.system))
 }
 
 #[allow(dead_code)]
@@ -2538,7 +2592,9 @@ mod tests {
     }
 
     fn signed_fixture() -> (PathBuf, MapTransport, FixedClock, SigningKey, IndexKey) {
-        let root = std::env::temp_dir().join(format!("jet-nix-index-{}", std::process::id()));
+        let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("jet-nix-index-{}-{serial}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let key = SigningKey::from_bytes(&[7; 32]);
         let (decoded, compressed) = canonical_test_index(
@@ -2692,6 +2748,16 @@ mod tests {
     }
 
     #[test]
+    fn nix_index_differential_oracle_accepts_nix_output_map() {
+        let oracle = format!(
+            "[{{\"system\":\"x86_64-linux\",\"attrpath\":[\"ripgrep\"],\"version\":\"15.2.0\",\"drvPath\":\"{RIPGREP_DRV}\",\"outputs\":{{\"out\":{{\"path\":\"{RIPGREP_OUT}\"}}}}}}]"
+        );
+        let records = parse_oracle(oracle.as_bytes(), "x86_64-linux").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record, ripgrep_record());
+    }
+
+    #[test]
     fn nix_index_rejects_forged_cross_system_duplicate_and_ambiguous_input() {
         let key = SigningKey::from_bytes(&[7; 32]);
         let (decoded, _) = canonical_test_index(
@@ -2751,6 +2817,22 @@ mod tests {
             Err(NixIndexError::Invalid(_))
         ));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn nix_index_rejects_manifest_signature_schema_drift() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let bytes = b"{}";
+        let signature = key.sign(&manifest_signature_request(bytes));
+        let sidecar = canonical_signature_bytes(&IndexSignature {
+            schema: 0,
+            key_id: "test-key".to_string(),
+            algorithm: "ed25519".to_string(),
+            signature: base64_encode(&signature.to_bytes()),
+        });
+        assert!(
+            verify_manifest_signature(&key.verifying_key(), "test-key", &sidecar, bytes).is_err()
+        );
     }
 
     #[test]

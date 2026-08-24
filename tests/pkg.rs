@@ -713,10 +713,7 @@ fn nix_import_emits_exact_refs_and_retains_native_facts() {
         "flake.lock",
         r#"{"name":"app","version":"1.0.0","source":"nixpkgs","packages":[{"name":"ripgrep","version":"14.1.1","drvPath":"/nix/store/hash-ripgrep-14.1.1.drv","buildInputs":["openssl"],"system":"x86_64-linux","license":"BSD-3-Clause"}]}"#,
     );
-    assert_eq!(
-        plan.deps[0].provider_ref,
-        "ripgrep#version=14.1.1@nixpkgs"
-    );
+    assert_eq!(plan.deps[0].provider_ref, "ripgrep#version=14.1.1@nixpkgs");
     assert_eq!(plan.deps[0].locked_version, "14.1.1");
     assert!(plan
         .emit_pkg_jet()
@@ -725,17 +722,11 @@ fn nix_import_emits_exact_refs_and_retains_native_facts() {
     facts.validate().expect("exact Nix import is lossless");
     assert_eq!(facts.native_format, "flake-facts.json");
     assert!(facts.native_document.contains("drvPath"));
-    assert!(facts
-        .facts
-        .contains_key("provider.nix.import.drvPath"));
-    assert!(facts
-        .facts
-        .contains_key("provider.nix.dependency.build"));
+    assert!(facts.facts.contains_key("provider.nix.import.drvPath"));
+    assert!(facts.facts.contains_key("provider.nix.dependency.build"));
     assert!(facts.facts.contains_key("provider.nix.variant.system"));
     assert!(facts.facts.contains_key("provider.nix.license"));
-    assert!(facts
-        .facts
-        .contains_key("provider.nix.source.drv_path"));
+    assert!(facts.facts.contains_key("provider.nix.source.drv_path"));
 }
 
 #[test]
@@ -771,7 +762,9 @@ fn nix_import_reports_malformed_package_facts_without_generating_them() {
         .losses
         .iter()
         .any(|loss| loss.reason.contains("buildInputs")));
-    assert!(!plan.emit_pkg_jet().contains("broken: broken#version=1.0.0@nixpkgs"));
+    assert!(!plan
+        .emit_pkg_jet()
+        .contains("broken: broken#version=1.0.0@nixpkgs"));
 }
 
 #[test]
@@ -2026,11 +2019,8 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     assert_eq!(locked.0.packages, lock.packages);
 
     fs::remove_dir_all(fixtures.join("foreign/npm")).unwrap();
-    let failed_manifest = jet::Manifest::parse(
-        &failed_project.join("package.jet"),
-        &manifest_text,
-    )
-    .unwrap();
+    let failed_manifest =
+        jet::Manifest::parse(&failed_project.join("package.jet"), &manifest_text).unwrap();
     let failure = jet::Fetch::fetch(
         &failed_project.path,
         &failed_manifest,
@@ -3636,9 +3626,16 @@ fn cli_jet_new_creates_project_structure() {
         String::from_utf8_lossy(&test.stderr)
     );
 
-    write(&proj, "run.jet", "fn run() { print(unknown_scaffold_name) }\n");
+    write(
+        &proj,
+        "run.jet",
+        "fn run() { print(unknown_scaffold_name) }\n",
+    );
     let invalid = jet_cmd(&["check"], &proj, &store);
-    assert!(!invalid.status.success(), "invalid source must fail `jet check`");
+    assert!(
+        !invalid.status.success(),
+        "invalid source must fail `jet check`"
+    );
     assert!(
         String::from_utf8_lossy(&invalid.stderr).contains("Error ["),
         "invalid source lost its diagnostic:\n{}",
@@ -3727,7 +3724,10 @@ fn run() {
         String::from_utf8_lossy(&tests.stderr)
     );
     let test_stdout = String::from_utf8_lossy(&tests.stdout);
-    assert!(test_stdout.contains("greet says hello: pass"), "{test_stdout}");
+    assert!(
+        test_stdout.contains("greet says hello: pass"),
+        "{test_stdout}"
+    );
     assert!(
         test_stdout.contains("1 passed, 0 failed, 0 skipped"),
         "{test_stdout}"
@@ -3735,7 +3735,10 @@ fn run() {
 
     let explicit_run = jet_cmd(&["run", "run.jet"], &project, &store);
     assert!(explicit_run.status.success());
-    assert_eq!(String::from_utf8_lossy(&explicit_run.stdout), "hello, Jet\n");
+    assert_eq!(
+        String::from_utf8_lossy(&explicit_run.stdout),
+        "hello, Jet\n"
+    );
 
     write(
         &project,
@@ -3812,8 +3815,14 @@ fn cli_run_migrates_all_retired_entry_layouts() {
         assert!(project.join(canonical).is_file());
         assert!(!project.join(retired).exists());
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("notice: migrated retired entry"), "{stderr}");
-        assert!(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}");
+        assert!(
+            stderr.contains("notice: migrated retired entry"),
+            "{stderr}"
+        );
+        assert!(
+            stderr.contains("main.jet") && stderr.contains("run.jet"),
+            "{stderr}"
+        );
     }
 
     fs::remove_dir_all(&tmp).unwrap();
@@ -3837,7 +3846,10 @@ fn cli_run_reports_ambiguous_retired_entry_layout() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("ambiguous project entry"), "{stderr}");
-    assert!(stderr.contains("main.jet") && stderr.contains("run.jet"), "{stderr}");
+    assert!(
+        stderr.contains("main.jet") && stderr.contains("run.jet"),
+        "{stderr}"
+    );
     assert_eq!(stderr.matches("`run.jet`").count(), 1, "{stderr}");
     assert!(tmp.join("main.jet").is_file());
     assert!(tmp.join("run.jet").is_file());
@@ -4261,9 +4273,7 @@ fn returned_view_source_union_change_feeds_e1218_and_e2601() {
     let item = |source: &str| ApiItem {
         kind: "fn".into(),
         name: "pick".into(),
-        signature: format!(
-            "fn pick(left: [Int], right: [Int]) View<Int> ; view_source = {source}"
-        ),
+        signature: format!("fn pick(left: [Int], right: [Int]) View<Int> ; view_source = {source}"),
     };
     let changes = diff_public_api(
         &[item("parameter:0;access:read;path:range")],
@@ -4574,11 +4584,7 @@ fn public_effect_metadata_preserves_symbolic_rows() {
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
-    assert!(
-        api[0].signature.contains("-[..E]>"),
-        "{}",
-        api[0].signature
-    );
+    assert!(api[0].signature.contains("-[..E]>"), "{}", api[0].signature);
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -5403,9 +5409,11 @@ fn registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it() {
     assert!(denied[0].what.contains("consumer -> textkit#1.2.0"));
     assert!(denied[0].why.contains("package `consumer`"));
     assert!(denied[0].fix.contains("use an allowed source"));
-    assert!(jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
-        .into_iter()
-        .all(|entry| !(entry.name == "textkit" && entry.version == "1.2.0")));
+    assert!(
+        jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
+            .into_iter()
+            .all(|entry| !(entry.name == "textkit" && entry.version == "1.2.0"))
+    );
 
     let (lock, dep_dirs) = with_store(&store, || {
         let previous = [
@@ -5649,13 +5657,11 @@ fn registry_fetch_rejects_tampered_referrer_index_before_hangar_ingest() {
         .and_then(|text| text.lines().find_map(jet::Publish::IndexEntry::parse_line))
         .expect("published refkit entry");
 
-    assert!(
-        Command::new("git")
-            .args(["clone", url.as_str(), tamper.to_str().unwrap()])
-            .status()
-            .unwrap()
-            .success()
-    );
+    assert!(Command::new("git")
+        .args(["clone", url.as_str(), tamper.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
     let referrer_index = tamper
         .join("referrers")
         .join(&entry.content_hash)
@@ -5908,13 +5914,11 @@ fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
     // valid metadata edit must fail before a fresh Hangar can ingest it even
     // when the package source and signed referrer evidence are unchanged.
     let tamper_work = tmp.join("tamper-registry");
-    assert!(
-        Command::new("git")
-            .args(["clone", url.as_str(), tamper_work.to_str().unwrap()])
-            .status()
-            .unwrap()
-            .success()
-    );
+    assert!(Command::new("git")
+        .args(["clone", url.as_str(), tamper_work.to_str().unwrap()])
+        .status()
+        .unwrap()
+        .success());
     let metadata_path = tamper_work
         .join("artifacts")
         .join("rolekit")
@@ -5925,7 +5929,10 @@ fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
         "\"build_dependencies\":{\"buildtool\":\"1.0.0\"}",
         "\"build_dependencies\":{\"runtime\":\"1.0.0\"}",
     );
-    assert_ne!(metadata, tampered_metadata, "tamper fixture must change meaning");
+    assert_ne!(
+        metadata, tampered_metadata,
+        "tamper fixture must change meaning"
+    );
     fs::write(&metadata_path, tampered_metadata).unwrap();
     for args in [
         vec!["config", "user.email", "test@jet.test"],
@@ -5949,11 +5956,8 @@ fn registry_fetch_applies_artifact_dependency_roles_features_and_constraints() {
     let tampered_cache = tmp.join("registry-cache-tampered");
     let tampered_hangar = tmp.join("jetpack-root-tampered");
     fs::create_dir_all(&tampered_consumer).unwrap();
-    let tampered_raw = manifest_with_deps(
-        "tampered-consumer",
-        "0.1.0",
-        "    rolekit: rolekit#1.0.0,",
-    );
+    let tampered_raw =
+        manifest_with_deps("tampered-consumer", "0.1.0", "    rolekit: rolekit#1.0.0,");
     write(&tampered_consumer, "package.jet", &tampered_raw);
     let tampered_manifest =
         jet::Manifest::parse(&tampered_consumer.join("package.jet"), &tampered_raw).unwrap();
@@ -6125,13 +6129,9 @@ fn registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest() {
         let exception_manifest =
             jet::Manifest::parse(&consumer.join("package.jet"), &exception_raw)
                 .expect("source exception manifest should parse");
-        let (_exception_lock, exception_dirs) = jet::Fetch::fetch(
-            &consumer,
-            &exception_manifest,
-            None,
-            &opts,
-        )
-        .expect("an active exact source exception should admit the fresh release");
+        let (_exception_lock, exception_dirs) =
+            jet::Fetch::fetch(&consumer, &exception_manifest, None, &opts)
+                .expect("an active exact source exception should admit the fresh release");
         assert!(exception_dirs.contains_key("freshlib"));
         let excepted_entry = jetpack::Store::list(&jetpack::Store::Roots::at(hangar_root.clone()))
             .into_iter()
@@ -6480,13 +6480,14 @@ fn registry_feature_cycle_fails_before_staging() {
     let error = jet::Publish::publish_artifact(&repo, &source, "cycle-kit", "1.0.0", "")
         .expect_err("cyclic default feature closure must fail before publication");
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-    assert!(
-        error
-            .to_string()
-            .contains("feature closure contains a cycle")
-    );
+    assert!(error
+        .to_string()
+        .contains("feature closure contains a cycle"));
     let destination = jet::Publish::artifact_path(&repo, "cycle-kit", "1.0.0").unwrap();
-    assert!(!destination.exists(), "invalid metadata installed an artifact");
+    assert!(
+        !destination.exists(),
+        "invalid metadata installed an artifact"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -7425,7 +7426,9 @@ fn takeover_requires_review_and_resigning() {
         let missing_review = jet::Publish::Index::write_index_entry(&repo, &v2)
             .expect_err("takeover without review must be refused");
         assert!(
-            missing_review.to_string().contains("no approved registry review"),
+            missing_review
+                .to_string()
+                .contains("no approved registry review"),
             "missing review must be named: {missing_review}"
         );
 

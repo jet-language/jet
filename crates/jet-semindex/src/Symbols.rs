@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use jet_foundation::Syntax;
 use jet_foundation::AST::ProgramBundle;
-use jet_foundation::{AST, Collections};
+use jet_foundation::{Collections, AST};
 
 use crate::Build::{function_parameter_parts, SymKind, SymbolDB};
 use crate::Types::SourceSpan;
@@ -106,7 +106,9 @@ impl SemanticSymbolIndex {
     }
 
     pub fn lookup_identity(&self, identity: &str) -> Option<&SemanticSymbol> {
-        self.symbols.iter().find(|symbol| symbol.identity == identity)
+        self.symbols
+            .iter()
+            .find(|symbol| symbol.identity == identity)
     }
 
     pub fn lookup_qualified(&self, name: &str) -> Option<&SemanticSymbol> {
@@ -146,11 +148,14 @@ impl SemanticSymbolIndex {
         name: &str,
         module_path: Option<&str>,
     ) -> Option<&SemanticSymbol> {
-        self.resolve_with_anchor(name, module_path.map(|module_path| SemanticVisibilityAnchor {
-            module_path,
-            offset: None,
-            session_top_level: false,
-        }))
+        self.resolve_with_anchor(
+            name,
+            module_path.map(|module_path| SemanticVisibilityAnchor {
+                module_path,
+                offset: None,
+                session_top_level: false,
+            }),
+        )
     }
 
     pub fn resolve_visible_at(
@@ -314,12 +319,20 @@ fn visibility_key(
             return None;
         }
         let offset = anchor.offset?;
-        if offset < scope.declaration_offset || offset < scope.span.start || scope.span.end < offset {
+        if offset < scope.declaration_offset || offset < scope.span.start || scope.span.end < offset
+        {
             return None;
         }
-        return Some((1, usize::MAX - scope.depth, usize::MAX - scope.declaration_offset));
+        return Some((
+            1,
+            usize::MAX - scope.depth,
+            usize::MAX - scope.declaration_offset,
+        ));
     }
-    if matches!(symbol.kind, SemanticSymbolKind::Local | SemanticSymbolKind::Parameter) {
+    if matches!(
+        symbol.kind,
+        SemanticSymbolKind::Local | SemanticSymbolKind::Parameter
+    ) {
         if let Some(anchor) = anchor {
             if anchor.session_top_level {
                 return None;
@@ -333,11 +346,15 @@ fn visibility_key(
         match symbol.provenance {
             SemanticProvenance::Session => return Some((2, 0, 0)),
             SemanticProvenance::Source { .. } => {
-                return Some((if module_path.is_none_or(|path| symbol.module_path == path) {
-                    2
-                } else {
-                    5
-                }, 0, 0));
+                return Some((
+                    if module_path.is_none_or(|path| symbol.module_path == path) {
+                        2
+                    } else {
+                        5
+                    },
+                    0,
+                    0,
+                ));
             }
             _ => {}
         }
@@ -369,14 +386,9 @@ pub(crate) fn canonical_symbol_name(
     if let Some((start, end)) = span {
         // The span resolves generated inline-module keys, while the ledger
         // still owns the short-vs-canonical user-facing spelling.
-        if let Some(path) = ledger.display_path_at(
-            module_idx,
-            start,
-            end,
-            name,
-            owner,
-            Some(module_idx),
-        ) {
+        if let Some(path) =
+            ledger.display_path_at(module_idx, start, end, name, owner, Some(module_idx))
+        {
             return path;
         }
     }
@@ -419,14 +431,15 @@ pub fn build_semantic_symbol_index(db: &SymbolDB, bundle: &ProgramBundle) -> Sem
         .collect();
 
     for def in &db.defs {
-        let owner = members.get(def.identity.as_str()).map(|owner| (*owner).to_string()).or_else(|| {
-            match &def.kind {
+        let owner = members
+            .get(def.identity.as_str())
+            .map(|owner| (*owner).to_string())
+            .or_else(|| match &def.kind {
                 SymKind::Field { parent, .. } | SymKind::EnumVariant { parent } => {
                     Some(parent.clone())
                 }
                 _ => None,
-            }
-        });
+            });
         let qualified_name = canonical_symbol_name(
             bundle,
             &def.module_path,
@@ -514,10 +527,7 @@ fn collect_import_symbols(
 ) {
     for import in imports {
         match &import.kind {
-            jet_foundation::AST::ImportKind::Unqualified {
-                module_alias,
-                ..
-            } => {
+            jet_foundation::AST::ImportKind::Unqualified { module_alias, .. } => {
                 let source_import = imports
                     .iter()
                     .chain(module.imports.iter())
@@ -527,8 +537,8 @@ fn collect_import_symbols(
                             jet_foundation::AST::ImportKind::Unqualified { .. }
                         ) && candidate.import_alias() == *module_alias
                     });
-                let imported_module = source_import.and_then(|source_import| {
-                    match &source_import.kind {
+                let imported_module =
+                    source_import.and_then(|source_import| match &source_import.kind {
                         jet_foundation::AST::ImportKind::File(path, _) => {
                             let relative = module
                                 .path
@@ -545,8 +555,7 @@ fn collect_import_symbols(
                             .iter()
                             .find(|candidate| candidate.alias == *name),
                         jet_foundation::AST::ImportKind::Unqualified { .. } => None,
-                    }
-                });
+                    });
                 let bindings = import.walk_bindings();
                 let items_span = bindings
                     .first()
@@ -602,11 +611,7 @@ fn collect_import_symbols(
                     .iter()
                     .position(|candidate| candidate.display == module.display);
                 let alias_name = module_idx
-                    .and_then(|module_idx| {
-                        bundle
-                            .name_ledger
-                            .effective_alias(module_idx, &alias)
-                    })
+                    .and_then(|module_idx| bundle.name_ledger.effective_alias(module_idx, &alias))
                     .map(|name| name.name.clone())
                     .unwrap_or_else(|| alias.clone());
                 symbols.push(SemanticSymbol {
@@ -654,13 +659,7 @@ fn collect_inline_import_symbols(
             continue;
         };
         let scope = inline_module_scope(db, module.display.as_str(), code_module, parent_scope);
-        collect_import_symbols(
-            symbols,
-            bundle,
-            module,
-            &code_module.imports,
-            Some(&scope),
-        );
+        collect_import_symbols(symbols, bundle, module, &code_module.imports, Some(&scope));
         if let Some(body) = &code_module.body {
             collect_inline_import_symbols(db, bundle, module, body, Some(&scope), symbols);
         }
@@ -798,7 +797,10 @@ fn distinct_conversion_symbols(
             .map(|(method, source)| (method.to_string(), source.to_string()))
             .collect()
     } else {
-        vec![(Syntax::conversion_method_for_source(&base.name()), base.name())]
+        vec![(
+            Syntax::conversion_method_for_source(&base.name()),
+            base.name(),
+        )]
     };
     methods
         .into_iter()
@@ -869,7 +871,11 @@ fn lexical_scope_for_def(
     let (parent, slot) = innermost.or_else(|| {
         nodes
             .iter()
-            .filter(|node| node.class == "item" && node.span.start <= def_span.start && def_span.end <= node.span.end)
+            .filter(|node| {
+                node.class == "item"
+                    && node.span.start <= def_span.start
+                    && def_span.end <= node.span.end
+            })
             .min_by_key(|node| node.span.end.saturating_sub(node.span.start))
             .map(|node| (node.id, "body".to_string()))
     })?;
@@ -913,11 +919,8 @@ fn semantic_shape(
             effect_via,
             ..
         } => {
-            let mut parameter_parts = function_parameter_parts(
-                params,
-                param_contract,
-                param_variadic,
-            );
+            let mut parameter_parts =
+                function_parameter_parts(params, param_contract, param_variadic);
             for part in &mut parameter_parts {
                 for (_, ty) in params {
                     let raw = ty.name();
@@ -928,7 +931,8 @@ fn semantic_shape(
                 }
             }
             let params = parameter_parts.join(", ");
-            let prefix = owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
+            let prefix =
+                owner.map_or_else(|| format!("fn {name}"), |owner| format!("{owner}.{name}"));
             // D-SIG-SHAPE1=B: return type bare after the parameter list, and an
             // effect ceiling in the body-arrow slot as `-[IO]>`. The retired
             // `=[…]=>` must not reach a hover, completion or symbol label.
@@ -959,7 +963,10 @@ fn semantic_shape(
             } else {
                 format!(" -[{}]>", shown.join(", "))
             };
-            (SemanticSymbolKind::Function, format!("{prefix}({params}){result}{ceiling}"))
+            (
+                SemanticSymbolKind::Function,
+                format!("{prefix}({params}){result}{ceiling}"),
+            )
         }
         SymKind::Struct { fields, .. } => (
             SemanticSymbolKind::Type,
@@ -980,10 +987,7 @@ fn semantic_shape(
         SymKind::Tag => (SemanticSymbolKind::Type, format!("tag {name}")),
         SymKind::Type { .. } => (SemanticSymbolKind::Type, format!("type {name}")),
         SymKind::Const => (SemanticSymbolKind::Constant, format!("const {name}")),
-        SymKind::EnumVariant { parent } => (
-            SemanticSymbolKind::Member,
-            format!("{parent}.{name}"),
-        ),
+        SymKind::EnumVariant { parent } => (SemanticSymbolKind::Member, format!("{parent}.{name}")),
         SymKind::Field { ty, parent } => (
             SemanticSymbolKind::Member,
             format!("{parent}.{name}: {}", display_type(&ty.name())),
@@ -1082,7 +1086,9 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             signature: format!("type {ty}"),
             summary: "Built-in Jet type.".to_string(),
             examples: Vec::new(),
-            provenance: SemanticProvenance::Builtin { module: "core".to_string() },
+            provenance: SemanticProvenance::Builtin {
+                module: "core".to_string(),
+            },
             span: None,
             lexical_scope: None,
         });
@@ -1098,13 +1104,17 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             signature: (*keyword).to_string(),
             summary: "Jet keyword.".to_string(),
             examples: Vec::new(),
-            provenance: SemanticProvenance::Builtin { module: "syntax".to_string() },
+            provenance: SemanticProvenance::Builtin {
+                module: "syntax".to_string(),
+            },
             span: None,
             lexical_scope: None,
         });
     }
     for &(qualified_name, signature, summary, example) in BUILTIN_METHODS {
-        let (owner, name) = qualified_name.split_once('.').expect("qualified builtin method");
+        let (owner, name) = qualified_name
+            .split_once('.')
+            .expect("qualified builtin method");
         symbols.push(SemanticSymbol {
             identity: format!("builtin:method:{qualified_name}"),
             name: name.to_string(),
@@ -1115,7 +1125,9 @@ fn language_symbols() -> Vec<SemanticSymbol> {
             signature: signature.to_string(),
             summary: summary.to_string(),
             examples: example.into_iter().map(str::to_string).collect(),
-            provenance: SemanticProvenance::Builtin { module: "core.collections".to_string() },
+            provenance: SemanticProvenance::Builtin {
+                module: "core.collections".to_string(),
+            },
             span: None,
             lexical_scope: None,
         });
@@ -1154,8 +1166,7 @@ fn language_symbols() -> Vec<SemanticSymbol> {
     }
     for &(method, source_name) in Syntax::NUMERIC_CONVERSION_SOURCES {
         for target_name in [
-            "I8", "I16", "I32", "I64", "Int", "U8", "U16", "U32", "U64", "F32", "F64",
-            "Float",
+            "I8", "I16", "I32", "I64", "Int", "U8", "U16", "U32", "U64", "F32", "F64", "Float",
         ] {
             let target = AST::numeric_type_from_name(target_name)
                 .expect("numeric catalog target names a numeric type");
@@ -1177,7 +1188,9 @@ fn language_symbols() -> Vec<SemanticSymbol> {
                 signature: format!("{target_name}.{method}(value: {source_name}) -> {result}"),
                 summary: format!("Converts {source_name} to {target_name}."),
                 examples: Vec::new(),
-                provenance: SemanticProvenance::Builtin { module: "core.numeric".to_string() },
+                provenance: SemanticProvenance::Builtin {
+                    module: "core.numeric".to_string(),
+                },
                 span: None,
                 lexical_scope: None,
             });
@@ -1187,68 +1200,368 @@ fn language_symbols() -> Vec<SemanticSymbol> {
 }
 
 const BUILTIN_METHODS: &[(&str, &str, &str, Option<&str>)] = &[
-    ("Duration.milliseconds", "Duration.milliseconds(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in milliseconds.", None),
-    ("Duration.seconds", "Duration.seconds(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in seconds.", None),
-    ("Duration.minutes", "Duration.minutes(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in minutes.", None),
-    ("Clock.system", "Clock.system() -> Clock #(Time)", "Explicit monotonic production clock.", None),
-    ("Duration.hours", "Duration.hours(value: Int | Float) -> Duration RangeError!", "Checked runtime duration in hours.", None),
-    ("Duration.in", "Duration.in(unit: DurationUnit) -> Int RangeError!", "Reads a checked whole duration unit.", Some("duration.in(.Milliseconds)?")),
-    ("List.len", "List.len() -> Int", "Number of items.", Some("items.len()")),
-    ("List.is_empty", "List.is_empty() -> Bool", "True when there are no items.", None),
-    ("List.push", "List.push(item: T)", "Appends an item to the end.", None),
-    ("List.pop", "List.pop() -> T?", "Removes and returns the last item, if any.", None),
-    ("List.get", "List.get(i: Int) -> T?", "The item at index i, if in bounds.", None),
-    ("List.first", "List.first() -> T?", "The first item, if any.", None),
-    ("List.last", "List.last() -> T?", "The last item, if any.", None),
-    ("List.contains", "List.contains(item: T) -> Bool", "True when item appears in the list.", None),
-    ("List.index_of", "List.index_of(item: T) -> Int?", "Index of the first matching item, if any.", None),
-    ("List.join", "List.join(sep: String) -> String", "Joins string items with sep.", None),
+    (
+        "Duration.milliseconds",
+        "Duration.milliseconds(value: Int | Float) -> Duration RangeError!",
+        "Checked runtime duration in milliseconds.",
+        None,
+    ),
+    (
+        "Duration.seconds",
+        "Duration.seconds(value: Int | Float) -> Duration RangeError!",
+        "Checked runtime duration in seconds.",
+        None,
+    ),
+    (
+        "Duration.minutes",
+        "Duration.minutes(value: Int | Float) -> Duration RangeError!",
+        "Checked runtime duration in minutes.",
+        None,
+    ),
+    (
+        "Clock.system",
+        "Clock.system() -> Clock #(Time)",
+        "Explicit monotonic production clock.",
+        None,
+    ),
+    (
+        "Duration.hours",
+        "Duration.hours(value: Int | Float) -> Duration RangeError!",
+        "Checked runtime duration in hours.",
+        None,
+    ),
+    (
+        "Duration.in",
+        "Duration.in(unit: DurationUnit) -> Int RangeError!",
+        "Reads a checked whole duration unit.",
+        Some("duration.in(.Milliseconds)?"),
+    ),
+    (
+        "List.len",
+        "List.len() -> Int",
+        "Number of items.",
+        Some("items.len()"),
+    ),
+    (
+        "List.is_empty",
+        "List.is_empty() -> Bool",
+        "True when there are no items.",
+        None,
+    ),
+    (
+        "List.push",
+        "List.push(item: T)",
+        "Appends an item to the end.",
+        None,
+    ),
+    (
+        "List.pop",
+        "List.pop() -> T?",
+        "Removes and returns the last item, if any.",
+        None,
+    ),
+    (
+        "List.get",
+        "List.get(i: Int) -> T?",
+        "The item at index i, if in bounds.",
+        None,
+    ),
+    (
+        "List.first",
+        "List.first() -> T?",
+        "The first item, if any.",
+        None,
+    ),
+    (
+        "List.last",
+        "List.last() -> T?",
+        "The last item, if any.",
+        None,
+    ),
+    (
+        "List.contains",
+        "List.contains(item: T) -> Bool",
+        "True when item appears in the list.",
+        None,
+    ),
+    (
+        "List.index_of",
+        "List.index_of(item: T) -> Int?",
+        "Index of the first matching item, if any.",
+        None,
+    ),
+    (
+        "List.join",
+        "List.join(sep: String) -> String",
+        "Joins string items with sep.",
+        None,
+    ),
     ("List.sum", "List.sum() -> T", "Sum of all items.", None),
-    ("List.product", "List.product() -> T", "Product of all items.", None),
-    ("List.min", "List.min() -> T?", "The smallest item, if any.", None),
-    ("List.max", "List.max() -> T?", "The largest item, if any.", None),
-    ("List.map", "List.map(f: fn(T) R) -> [R]", "Transforms each item with f.", None),
-    ("List.filter", "List.filter(f: fn(T) Bool) -> List<T>", "Keeps items where f(item) is true.", Some("items.filter(fn (item: T) Bool { return true })")),
-    ("List.filter_map", "List.filter_map(f: fn(T) V?) -> [V]", "Maps then drops failures — keeps only successes.", None),
-    ("List.each", "List.each(f: fn(T))", "Runs f once per item, for its side effects.", None),
-    ("List.find", "List.find(f: fn(T) Bool) -> T?", "The first item where f(item) is true, if any.", None),
-    ("List.any", "List.any(f: fn(T) Bool) -> Bool", "True if f is true for at least one item.", None),
-    ("List.all", "List.all(f: fn(T) Bool) -> Bool", "True if f is true for every item.", None),
-    ("List.sort_by", "List.sort_by(key: fn(T) K)", "Sorts in place by the key f extracts.", None),
-    ("List.sort_by_desc", "List.sort_by_desc(key: fn(T) K)", "Sorts in place by the key f extracts, descending.", None),
-    ("List.reduce", "List.reduce(init: R, f: fn(R, T) R) -> R", "Folds items into one value, starting from init.", None),
-    ("List.fold", "List.fold(init: R, f: fn(R, T) R) -> R", "Folds items into one value, starting from init.", None),
-    ("List.reverse", "List.reverse()", "Reverses the list in place.", None),
+    (
+        "List.product",
+        "List.product() -> T",
+        "Product of all items.",
+        None,
+    ),
+    (
+        "List.min",
+        "List.min() -> T?",
+        "The smallest item, if any.",
+        None,
+    ),
+    (
+        "List.max",
+        "List.max() -> T?",
+        "The largest item, if any.",
+        None,
+    ),
+    (
+        "List.map",
+        "List.map(f: fn(T) R) -> [R]",
+        "Transforms each item with f.",
+        None,
+    ),
+    (
+        "List.filter",
+        "List.filter(f: fn(T) Bool) -> List<T>",
+        "Keeps items where f(item) is true.",
+        Some("items.filter(fn (item: T) Bool { return true })"),
+    ),
+    (
+        "List.filter_map",
+        "List.filter_map(f: fn(T) V?) -> [V]",
+        "Maps then drops failures — keeps only successes.",
+        None,
+    ),
+    (
+        "List.each",
+        "List.each(f: fn(T))",
+        "Runs f once per item, for its side effects.",
+        None,
+    ),
+    (
+        "List.find",
+        "List.find(f: fn(T) Bool) -> T?",
+        "The first item where f(item) is true, if any.",
+        None,
+    ),
+    (
+        "List.any",
+        "List.any(f: fn(T) Bool) -> Bool",
+        "True if f is true for at least one item.",
+        None,
+    ),
+    (
+        "List.all",
+        "List.all(f: fn(T) Bool) -> Bool",
+        "True if f is true for every item.",
+        None,
+    ),
+    (
+        "List.sort_by",
+        "List.sort_by(key: fn(T) K)",
+        "Sorts in place by the key f extracts.",
+        None,
+    ),
+    (
+        "List.sort_by_desc",
+        "List.sort_by_desc(key: fn(T) K)",
+        "Sorts in place by the key f extracts, descending.",
+        None,
+    ),
+    (
+        "List.reduce",
+        "List.reduce(init: R, f: fn(R, T) R) -> R",
+        "Folds items into one value, starting from init.",
+        None,
+    ),
+    (
+        "List.fold",
+        "List.fold(init: R, f: fn(R, T) R) -> R",
+        "Folds items into one value, starting from init.",
+        None,
+    ),
+    (
+        "List.reverse",
+        "List.reverse()",
+        "Reverses the list in place.",
+        None,
+    ),
     ("List.sort", "List.sort()", "Sorts the list in place.", None),
-    ("List.sort_desc", "List.sort_desc()", "Sorts the list in place, descending.", None),
+    (
+        "List.sort_desc",
+        "List.sort_desc()",
+        "Sorts the list in place, descending.",
+        None,
+    ),
     ("List.clear", "List.clear()", "Removes every item.", None),
-    ("List.insert", "List.insert(i: Int, item: T)", "Inserts item at index i.", None),
-    ("List.remove", "List.remove(value: T, by: RemoveBy{.Val}) -> T?", "Removes the first equal value; `.Slot` selects positional removal.", None),
-    ("List.count", "List.count(value: T) -> Int", "Counts items equal to value.", None),
-    ("List.extend", "List.extend(other: [T])", "Appends every item from other in order.", None),
-    ("List.concat", "List.concat(other: [T]) -> [T]", "Returns this list followed by other.", None),
-    ("List.enumerate", "List.enumerate() -> [(idx: Int, item: T)]", "Pairs each item with its index.", None),
-    ("List.zip", "List.zip(other: [U]) -> [(a: T, b: U)]", "Pairs items from two lists positionally.", None),
+    (
+        "List.insert",
+        "List.insert(i: Int, item: T)",
+        "Inserts item at index i.",
+        None,
+    ),
+    (
+        "List.remove",
+        "List.remove(value: T, by: RemoveBy{.Val}) -> T?",
+        "Removes the first equal value; `.Slot` selects positional removal.",
+        None,
+    ),
+    (
+        "List.count",
+        "List.count(value: T) -> Int",
+        "Counts items equal to value.",
+        None,
+    ),
+    (
+        "List.extend",
+        "List.extend(other: [T])",
+        "Appends every item from other in order.",
+        None,
+    ),
+    (
+        "List.concat",
+        "List.concat(other: [T]) -> [T]",
+        "Returns this list followed by other.",
+        None,
+    ),
+    (
+        "List.enumerate",
+        "List.enumerate() -> [(idx: Int, item: T)]",
+        "Pairs each item with its index.",
+        None,
+    ),
+    (
+        "List.zip",
+        "List.zip(other: [U]) -> [(a: T, b: U)]",
+        "Pairs items from two lists positionally.",
+        None,
+    ),
     ("Map.len", "Map.len() -> Int", "Number of entries.", None),
-    ("Map.is_empty", "Map.is_empty() -> Bool", "True when there are no entries.", None),
-    ("Map.get", "Map.get(key: K) -> V?", "Value for key, if present.", None),
-    ("Map.insert", "Map.insert(key: K, value: V)", "Inserts or overwrites the value for key.", None),
-    ("Map.remove", "Map.remove(key: K) -> V?", "Removes and returns the value for key, if present.", None),
-    ("Map.contains_key", "Map.contains_key(key: K) -> Bool", "True when key has an entry.", None),
-    ("Map.keys", "Map.keys() -> Iter<K>", "Lazily yields every key in map order.", None),
-    ("Map.values", "Map.values() -> Iter<V>", "Lazily yields every value in map order.", None),
-    ("Map.each", "Map.each(f: fn(K, V))", "Runs f once per entry.", None),
-    ("String.len", "String.len() -> Int", "Number of characters.", None),
-    ("String.is_empty", "String.is_empty() -> Bool", "True when the string is empty.", None),
-    ("String.contains", "String.contains(s: String) -> Bool", "True when s appears in the string.", None),
-    ("String.starts_with", "String.starts_with(s: String) -> Bool", "True when the string starts with s.", None),
-    ("String.ends_with", "String.ends_with(s: String) -> Bool", "True when the string ends with s.", None),
-    ("String.trim", "String.trim() -> String", "Removes leading/trailing whitespace.", None),
-    ("String.to_upper", "String.to_upper() -> String", "Uppercased copy.", None),
-    ("String.to_lower", "String.to_lower() -> String", "Lowercased copy.", None),
-    ("String.split", "String.split(sep: String) -> [String]", "Splits on every occurrence of sep.", None),
-    ("String.lines", "String.lines() -> [String]", "Splits into lines.", None),
-    ("String.chars", "String.chars() -> [Char]", "Every character, in order.", None),
-    ("String.replace", "String.replace(from: String, to: String) -> String", "Replaces every occurrence of from with to.", None),
-    ("String.repeat", "String.repeat(n: Int) -> String", "Concatenates n copies of the string.", None),
+    (
+        "Map.is_empty",
+        "Map.is_empty() -> Bool",
+        "True when there are no entries.",
+        None,
+    ),
+    (
+        "Map.get",
+        "Map.get(key: K) -> V?",
+        "Value for key, if present.",
+        None,
+    ),
+    (
+        "Map.insert",
+        "Map.insert(key: K, value: V)",
+        "Inserts or overwrites the value for key.",
+        None,
+    ),
+    (
+        "Map.remove",
+        "Map.remove(key: K) -> V?",
+        "Removes and returns the value for key, if present.",
+        None,
+    ),
+    (
+        "Map.contains_key",
+        "Map.contains_key(key: K) -> Bool",
+        "True when key has an entry.",
+        None,
+    ),
+    (
+        "Map.keys",
+        "Map.keys() -> Iter<K>",
+        "Lazily yields every key in map order.",
+        None,
+    ),
+    (
+        "Map.values",
+        "Map.values() -> Iter<V>",
+        "Lazily yields every value in map order.",
+        None,
+    ),
+    (
+        "Map.each",
+        "Map.each(f: fn(K, V))",
+        "Runs f once per entry.",
+        None,
+    ),
+    (
+        "String.len",
+        "String.len() -> Int",
+        "Number of characters.",
+        None,
+    ),
+    (
+        "String.is_empty",
+        "String.is_empty() -> Bool",
+        "True when the string is empty.",
+        None,
+    ),
+    (
+        "String.contains",
+        "String.contains(s: String) -> Bool",
+        "True when s appears in the string.",
+        None,
+    ),
+    (
+        "String.starts_with",
+        "String.starts_with(s: String) -> Bool",
+        "True when the string starts with s.",
+        None,
+    ),
+    (
+        "String.ends_with",
+        "String.ends_with(s: String) -> Bool",
+        "True when the string ends with s.",
+        None,
+    ),
+    (
+        "String.trim",
+        "String.trim() -> String",
+        "Removes leading/trailing whitespace.",
+        None,
+    ),
+    (
+        "String.to_upper",
+        "String.to_upper() -> String",
+        "Uppercased copy.",
+        None,
+    ),
+    (
+        "String.to_lower",
+        "String.to_lower() -> String",
+        "Lowercased copy.",
+        None,
+    ),
+    (
+        "String.split",
+        "String.split(sep: String) -> [String]",
+        "Splits on every occurrence of sep.",
+        None,
+    ),
+    (
+        "String.lines",
+        "String.lines() -> [String]",
+        "Splits into lines.",
+        None,
+    ),
+    (
+        "String.chars",
+        "String.chars() -> [Char]",
+        "Every character, in order.",
+        None,
+    ),
+    (
+        "String.replace",
+        "String.replace(from: String, to: String) -> String",
+        "Replaces every occurrence of from with to.",
+        None,
+    ),
+    (
+        "String.repeat",
+        "String.repeat(n: Int) -> String",
+        "Concatenates n copies of the string.",
+        None,
+    ),
 ];

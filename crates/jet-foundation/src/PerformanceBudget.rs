@@ -1797,7 +1797,13 @@ fn validate_compile_metadata(
     let mut aggregate = BTreeMap::<String, BigInt>::new();
     let mut peak_rss_bytes = BigInt::zero();
     for record in records {
-        validate_compile_record(record, fields, &mut aggregate, &mut elapsed, &mut peak_rss_bytes)?;
+        validate_compile_record(
+            record,
+            fields,
+            &mut aggregate,
+            &mut elapsed,
+            &mut peak_rss_bytes,
+        )?;
     }
     if peak_rss_bytes != unsigned(&fields["peak_rss_bytes"], "compile.peak_rss_bytes")? {
         return Err("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS".into());

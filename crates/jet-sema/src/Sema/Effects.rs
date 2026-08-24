@@ -79,7 +79,15 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
     if let Some((base, args)) = name.split_once('(') {
         let args = args.strip_suffix(')')?;
         let base = jet_foundation::Authority::parse_right(base)?;
-        if base != "Mem.Alloc" || !args.trim().strip_prefix("above:")?.trim().parse::<u64>().ok().is_some_and(|n| n > 0) {
+        if base != "Mem.Alloc"
+            || !args
+                .trim()
+                .strip_prefix("above:")?
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .is_some_and(|n| n > 0)
+        {
             return None;
         }
         return Some(base);
@@ -141,12 +149,13 @@ pub fn resolve_effect_name(
     let name = jet_foundation::Authority::parse_right(name).ok_or(None)?;
     let root = effect_root(&name);
     Effect::parse(root).ok_or(None)?;
-    let Some(member) = name.strip_prefix(root).and_then(|suffix| suffix.strip_prefix('.')) else {
+    let Some(member) = name
+        .strip_prefix(root)
+        .and_then(|suffix| suffix.strip_prefix('.'))
+    else {
         return Ok(name.to_string());
     };
-    let Some(declaration) =
-        facts.get(jet_foundation::Facts::FactKind::Effect, root)
-    else {
+    let Some(declaration) = facts.get(jet_foundation::Facts::FactKind::Effect, root) else {
         return Ok(name.to_string());
     };
     if declaration.members.is_empty() || declaration.members.contains(member) {
@@ -308,12 +317,7 @@ impl<'a> super::Checker<'a> {
         self.record_edge_with_executions(name, span, self.memory_control_multiplier);
     }
 
-    fn record_edge_with_executions(
-        &mut self,
-        name: String,
-        span: Span,
-        executions: Option<u64>,
-    ) {
+    fn record_edge_with_executions(&mut self, name: String, span: Span, executions: Option<u64>) {
         for r in &mut self.region_stack {
             r.edges.insert(name.clone());
         }
@@ -454,15 +458,16 @@ impl<'a> super::Checker<'a> {
             .map(|region| region.declarations.clone())
             .unwrap_or_default();
         inherited.extend(declarations);
-        self.memory_policy_stack.push(super::MemoryFacts::MemoryPolicyRegion {
-            declarations: inherited,
-            span,
-            events: Vec::new(),
-            edges: BTreeSet::new(),
-            open_dispatches: Vec::new(),
-            unbounded_control: Vec::new(),
-            calls: Vec::new(),
-        });
+        self.memory_policy_stack
+            .push(super::MemoryFacts::MemoryPolicyRegion {
+                declarations: inherited,
+                span,
+                events: Vec::new(),
+                edges: BTreeSet::new(),
+                open_dispatches: Vec::new(),
+                unbounded_control: Vec::new(),
+                calls: Vec::new(),
+            });
     }
 
     pub(crate) fn exit_memory_policy_region(&mut self) {
@@ -510,7 +515,6 @@ pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
         Some(span),
     )
 }
-
 
 /// Per-function summary the checker accumulates during its walk: the effects the
 /// body reaches directly, the user functions it calls (edges for transitivity),
@@ -598,8 +602,8 @@ pub fn check_autodiff_purity(
             return false;
         };
         let local_panic = summary.autodiff_safe_panic || summary.autodiff_unsafe_panic;
-        let mut safe = !local_panic
-            || (summary.autodiff_safe_panic && !summary.autodiff_unsafe_panic);
+        let mut safe =
+            !local_panic || (summary.autodiff_safe_panic && !summary.autodiff_unsafe_panic);
         if summary.edges.contains("__jet_panic__") && !local_panic {
             safe = false;
         }
@@ -755,7 +759,7 @@ pub struct CallbackObligation {
     pub span: Span,
 }
 
-    /// D-EFF1: an open `#Abilities(…)` region's running accumulator while the checker
+/// D-EFF1: an open `#Abilities(…)` region's running accumulator while the checker
 /// walks its body. Sealed into a `RegionSummary` when the region closes.
 #[derive(Debug, Clone)]
 pub struct RegionAccum {
@@ -786,10 +790,7 @@ fn add_seed(seeds: &mut BTreeMap<String, BTreeSet<String>>, node: &str, fact: &s
         .insert(fact.to_string());
 }
 
-fn resolve_seed_nodes(
-    graph: &BTreeMap<String, BTreeSet<String>>,
-    name: &str,
-) -> Vec<String> {
+fn resolve_seed_nodes(graph: &BTreeMap<String, BTreeSet<String>>, name: &str) -> Vec<String> {
     let suffix = format!("::{name}");
     graph
         .keys()
@@ -838,7 +839,10 @@ pub fn solve_reachability(
     let mut taint = BTreeMap::new();
     for (name, facts) in taint_seeds {
         for node in resolve_seed_nodes(&graph, name) {
-            taint.entry(node).or_insert_with(BTreeSet::new).extend(facts.clone());
+            taint
+                .entry(node)
+                .or_insert_with(BTreeSet::new)
+                .extend(facts.clone());
         }
     }
 
@@ -864,7 +868,9 @@ pub(crate) fn seed_trait_dispatch_effects(
     use crate::AST::Item;
 
     for item in items {
-        let Item::Trait(trait_def) = item else { continue };
+        let Item::Trait(trait_def) = item else {
+            continue;
+        };
         for method in &trait_def.methods {
             let mut summary = EffectSummary::default();
             match &method.declared_effects {
@@ -953,10 +959,7 @@ mod reachability_tests {
             (
                 "leaf".to_string(),
                 EffectSummary {
-                    direct: BTreeSet::from([
-                        "Exec".to_string(),
-                        "Secret".to_string(),
-                    ]),
+                    direct: BTreeSet::from(["Exec".to_string(), "Secret".to_string()]),
                     edges: BTreeSet::from(["__jet_panic__".to_string()]),
                     ..Default::default()
                 },
@@ -1023,7 +1026,13 @@ pub fn check_inferred_purity(
         let Some(first) = chain.first() else { return };
         let summary = summaries.get(&key);
         let span = summary
-            .and_then(|summary| summary.memory.calls.iter().find(|call| &call.callee == first))
+            .and_then(|summary| {
+                summary
+                    .memory
+                    .calls
+                    .iter()
+                    .find(|call| &call.callee == first)
+            })
             .map(|call| call.span)
             .unwrap_or(f.name_span);
         let call_name = chain.last().expect("non-empty chain");
@@ -1057,15 +1066,72 @@ pub fn check_inferred_purity(
     use crate::AST::Item;
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, reachability, diags),
-            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, reachability, diags); },
-            Item::Struct(s) => {
-                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, reachability, diags); }
-                for block in &s.trait_impls {
-                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, reachability, diags); }
+            Item::Func(f) => check_one(
+                f,
+                None,
+                None,
+                module_alias,
+                summaries,
+                solved,
+                reachability,
+                diags,
+            ),
+            Item::Impl(i) => {
+                for f in &i.methods {
+                    check_one(
+                        f,
+                        Some(&i.type_name),
+                        None,
+                        module_alias,
+                        summaries,
+                        solved,
+                        reachability,
+                        diags,
+                    );
                 }
             }
-            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, reachability, diags); },
+            Item::Struct(s) => {
+                for f in &s.methods {
+                    check_one(
+                        f,
+                        Some(&s.name),
+                        None,
+                        module_alias,
+                        summaries,
+                        solved,
+                        reachability,
+                        diags,
+                    );
+                }
+                for block in &s.trait_impls {
+                    for f in &block.methods {
+                        check_one(
+                            f,
+                            Some(&s.name),
+                            None,
+                            module_alias,
+                            summaries,
+                            solved,
+                            reachability,
+                            diags,
+                        );
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for f in &e.methods {
+                    check_one(
+                        f,
+                        Some(&e.name),
+                        None,
+                        module_alias,
+                        summaries,
+                        solved,
+                        reachability,
+                        diags,
+                    );
+                }
+            }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     for item in body {
@@ -1509,17 +1575,22 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
     use crate::AST::{ForKind, Stmt};
     let block = |b: &[Stmt]| b.iter().find_map(|s| stmt_handle_escape(s, handle));
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => expr_handle_escape(e, handle),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+            expr_handle_escape(e, handle)
+        }
         Stmt::Val(b) => expr_handle_escape(&b.init, handle),
         Stmt::Assign { value, .. } => expr_handle_escape(value, handle),
         Stmt::Return(Some(e), _) => expr_handle_escape(e, handle),
-        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
-            expr_handle_escape(e, handle)
-        }
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => expr_handle_escape(e, handle),
         Stmt::While { cond, body, .. } => expr_handle_escape(cond, handle).or_else(|| block(body)),
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => expr_handle_escape(start, handle)
+                ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => expr_handle_escape(start, handle)
                     .or_else(|| expr_handle_escape(end, handle))
                     .or_else(|| step.as_ref().and_then(|s| expr_handle_escape(s, handle))),
                 ForKind::In { collection, step } => expr_handle_escape(collection, handle)
@@ -1553,7 +1624,10 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         } => expr_handle_escape(&init.init, handle)
             .or_else(|| expr_handle_escape(cond, handle))
             .or_else(|| block(body))
-            .or_else(|| step.as_ref().and_then(|step| stmt_handle_escape(step, handle))),
+            .or_else(|| {
+                step.as_ref()
+                    .and_then(|step| stmt_handle_escape(step, handle))
+            }),
         // D-CANVASSTATE1=D: an `#Off` body never runs, so nothing escapes it.
         Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => None,
         Stmt::Loop { body, .. }
@@ -1824,7 +1898,10 @@ pub fn e0742(
 ) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
-        format!("`{}` bounds `{}` to `-[]>`, so impls must be pure", trait_name, method)
+        format!(
+            "`{}` bounds `{}` to `-[]>`, so impls must be pure",
+            trait_name, method
+        )
     } else {
         format!(
             "`{}` bounds `{}` to `-[{}]>`, so impls may use only those",

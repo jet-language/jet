@@ -58,13 +58,18 @@ mod tests {
 
     #[test]
     fn no_policy_block_never_denies() {
-        let manifest =
-            Package::PackageFacts::parse(r#"name: "x"
+        let manifest = Package::PackageFacts::parse(
+            r#"name: "x"
 version: "1"
-"#, "test")
-                .unwrap();
+"#,
+            "test",
+        )
+        .unwrap();
         let out = enforce(&[money_lint()], &manifest);
-        assert!(out.is_empty(), "warn-never-block is the default (I1/D-LINTPOLICY1)");
+        assert!(
+            out.is_empty(),
+            "warn-never-block is the default (I1/D-LINTPOLICY1)"
+        );
     }
 
     #[test]

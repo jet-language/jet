@@ -7,7 +7,9 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi};
+use tir_support::{
+    assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi,
+};
 
 #[test]
 fn grouped_nested_core_import_binds_dotted_leaf() {
@@ -23,10 +25,7 @@ fn run() {
 
 #[test]
 fn soft_public_imports_warn_once_per_outside_use() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_soft_public_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_soft_public_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -58,10 +57,7 @@ fn soft_public_imports_warn_once_per_outside_use() {
 
 #[test]
 fn soft_public_reexports_warn_on_the_exported_spelling_once() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_soft_public_reexport_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_soft_public_reexport_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("api")).unwrap();
     fs::write(
@@ -93,10 +89,7 @@ fn soft_public_reexports_warn_on_the_exported_spelling_once() {
 
 #[test]
 fn imported_soft_public_declared_types_warn_once_per_occurrence() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_soft_public_types_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_soft_public_types_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -300,27 +293,23 @@ fn run() {
         assert_eq!(code, 0);
         assert_eq!(stdout, "8\n10\n");
     }
-    let (code, stdout, stderr) = run_default_multi(
-        "inline_use_list",
-        "main.jet",
-        &[("main.jet", src)],
-    );
+    let (code, stdout, stderr) =
+        run_default_multi("inline_use_list", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "8\n10\n");
     assert!(stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_inline_use_interp_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_inline_use_interp_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
     match outcome {
-        jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout, exit_code, ..
+        } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout, "8\n10\n");
         }
@@ -362,27 +351,24 @@ fn run() {
         assert_eq!(code, 0);
         assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
     }
-    let (code, stdout, stderr) = run_default_multi(
-        "inline_core_use_list",
-        "main.jet",
-        &[("main.jet", src)],
-    );
+    let (code, stdout, stderr) =
+        run_default_multi("inline_core_use_list", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
     assert!(stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_inline_core_use_interp_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet_inline_core_use_interp_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
     match outcome {
-        jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout, exit_code, ..
+        } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
         }
@@ -426,21 +412,17 @@ pub fn label(prefix: String, n: Int) => String {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "x:7\ny:8\n");
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_inline_file_interp_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_inline_file_interp_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("main.jet"), main_src).unwrap();
     fs::write(dir.join("math.jet"), math_src).unwrap();
-    let outcome = jet::Interpreter::dev_iteration(
-        dir.join("main.jet").to_str().unwrap(),
-        false,
-        true,
-    );
+    let outcome =
+        jet::Interpreter::dev_iteration(dir.join("main.jet").to_str().unwrap(), false, true);
     match outcome {
-        jet::Interpreter::RunOutcome::Ran { stdout, exit_code, .. } => {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout, exit_code, ..
+        } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout, "x:7\ny:8\n");
         }
@@ -967,7 +949,8 @@ fn run() {
     });
     // HTTPResponse: the shared server constructor helper.
     assert!(
-        out.rust.contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
+        out.rust
+            .contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
         "HTTPResponse constructor helper missing:\n{}",
         out.rust
     );

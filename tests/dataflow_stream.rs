@@ -139,8 +139,7 @@ fn rolling_mean_nonfinite_matches_aot_and_default_dev() {
         eprintln!("note: skipping rolling_mean parity test (need rustc)");
         return;
     }
-    let dir =
-        std::env::temp_dir().join(format!("jet_dataflow_rolling_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dataflow_rolling_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source = r#"
@@ -175,7 +174,10 @@ fn run() {
             stdout: dev_stdout,
             stderr: dev_stderr,
             exit_code,
-        } => assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new())),
+        } => assert_eq!(
+            (exit_code, dev_stdout, dev_stderr),
+            (0, stdout, String::new())
+        ),
         other => panic!("rolling_mean default-dev failed: {other:?}"),
     }
     let _ = fs::remove_dir_all(&dir);

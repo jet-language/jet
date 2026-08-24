@@ -3,16 +3,16 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Generics::{DECODE, ENCODE};
 use crate::Syntax::{self, WebBucket, WebPartitionMarker};
-use jet_foundation::WebPartition::{partition_effect_key, partition_key};
 use crate::AST::{EnumDef, Item, ProgramBundle, StructDef, Type, VariantPayload};
+use jet_foundation::WebPartition::{partition_effect_key, partition_key};
 use std::collections::HashMap;
 
 use super::effect_key;
 use super::effect_set_has_root;
+use super::inline_effect_key;
 use super::Effect;
 use super::EffectSet;
 use super::EffectSummary;
-use super::inline_effect_key;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FuncWebMeta {
@@ -266,9 +266,7 @@ fn type_show(ty: &Type) -> String {
             ret,
             effect_bound,
             ..
-        } => format!(
-            "Fn {{ params: {params:?}, ret: {ret:?}, effect_bound: {effect_bound:?} }}"
-        ),
+        } => format!("Fn {{ params: {params:?}, ret: {ret:?}, effect_bound: {effect_bound:?} }}"),
         other => format!("{other:?}"),
     }
 }
@@ -411,7 +409,10 @@ pub fn check_web_partition(
             else {
                 continue;
             };
-            let caller_bucket = partitions.get(&caller_meta.key).copied().unwrap_or(WebBucket::Wasm);
+            let caller_bucket = partitions
+                .get(&caller_meta.key)
+                .copied()
+                .unwrap_or(WebBucket::Wasm);
             for callee_key in &summary.edges {
                 let Some(callee_meta) = metas
                     .iter()
@@ -419,13 +420,18 @@ pub fn check_web_partition(
                 else {
                     continue;
                 };
-                let callee_bucket = partitions.get(&callee_meta.key).copied().unwrap_or(WebBucket::Wasm);
+                let callee_bucket = partitions
+                    .get(&callee_meta.key)
+                    .copied()
+                    .unwrap_or(WebBucket::Wasm);
                 if caller_bucket == WebBucket::Wasm
                     && callee_bucket == WebBucket::JS
                     && caller_meta.marker.is_none()
                     && caller_meta.ceiling.is_none()
                 {
-                    if partitions.insert(caller_meta.key.clone(), WebBucket::JS) != Some(WebBucket::JS) {
+                    if partitions.insert(caller_meta.key.clone(), WebBucket::JS)
+                        != Some(WebBucket::JS)
+                    {
                         changed = true;
                     }
                 } else if caller_bucket == WebBucket::JS
@@ -433,7 +439,9 @@ pub fn check_web_partition(
                     && callee_meta.marker.is_none()
                     && callee_meta.ceiling.is_none()
                 {
-                    if partitions.insert(callee_meta.key.clone(), WebBucket::JS) != Some(WebBucket::JS) {
+                    if partitions.insert(callee_meta.key.clone(), WebBucket::JS)
+                        != Some(WebBucket::JS)
+                    {
                         changed = true;
                     }
                 }
@@ -463,10 +471,8 @@ pub fn check_web_partition(
         check_target_browser(f, bucket, &effects, &mut diags);
     }
 
-    let meta_by_effect_key: HashMap<&str, &FuncWebMeta> = metas
-        .iter()
-        .map(|m| (m.effect_key.as_str(), m))
-        .collect();
+    let meta_by_effect_key: HashMap<&str, &FuncWebMeta> =
+        metas.iter().map(|m| (m.effect_key.as_str(), m)).collect();
 
     for (caller_key, summary) in summaries {
         let Some(caller_meta) = meta_by_effect_key.get(caller_key.as_str()) else {

@@ -48,7 +48,12 @@ fn e3003_why_text_lives_only_in_the_one_renderer() {
     for file in &files {
         let text = fs::read_to_string(file).unwrap_or_default();
         if text.contains(E3003_WHY) {
-            homes.push(file.strip_prefix(&root).unwrap_or(file).display().to_string());
+            homes.push(
+                file.strip_prefix(&root)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string(),
+            );
         }
     }
 
@@ -69,7 +74,8 @@ fn e3003_spacing_survives_and_entry_crypto_arm_is_gone() {
         "E3003 renderer must use ' Why: … / Fix: …' spacing (one leading space): {task_group}"
     );
 
-    let items_rs = fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/Items.rs")).unwrap();
+    let items_rs =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/Items.rs")).unwrap();
     assert!(
         !items_rs.contains("handle the CryptoError")
             && !items_rs.contains("unhandled cryptographic error"),

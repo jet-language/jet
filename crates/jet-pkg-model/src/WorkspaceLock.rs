@@ -73,9 +73,10 @@ pub fn load_checked_file(
         .map(|source| crate::SHA256::sha256_hex(source.source.as_bytes()))
         .unwrap_or_else(|| "no-workspace-source".to_string());
     if !workspace_source_present
-        && lock.workspace_source_digest.as_deref().is_some_and(|digest| {
-            digest != "no-workspace-source"
-        })
+        && lock
+            .workspace_source_digest
+            .as_deref()
+            .is_some_and(|digest| digest != "no-workspace-source")
     {
         return None;
     }
@@ -84,8 +85,7 @@ pub fn load_checked_file(
     {
         return None;
     }
-    let is_index = workspace_source_role
-        == Some(crate::WorkspacePlan::WorkspaceSourceRole::Index);
+    let is_index = workspace_source_role == Some(crate::WorkspacePlan::WorkspaceSourceRole::Index);
     if !is_index && !lock.workspace_members.is_empty() {
         // Only a checked workspace index may persist member-index facts.
         return None;
@@ -128,7 +128,9 @@ pub fn load_checked_file(
             {
                 return None;
             }
-            if physical_paths.iter().any(|existing| existing == &physical_path)
+            if physical_paths
+                .iter()
+                .any(|existing| existing == &physical_path)
                 || names.iter().any(|existing| existing == &member.name)
             {
                 return None;

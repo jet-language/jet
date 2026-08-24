@@ -268,7 +268,9 @@ fn loadable_incompatible_defaults_stop_before_rustc() {
             "loadable_default.jet",
             jet::Sema::CompileMode::Run,
         ) else {
-            panic!("{name} incompatible fallback reached codegen and would be an I2 rustc rejection");
+            panic!(
+                "{name} incompatible fallback reached codegen and would be an I2 rustc rejection"
+            );
         };
         assert!(
             diags.iter().any(|diag| diag.code == "E0112"),
@@ -291,16 +293,13 @@ fn comptime_matches_runtime() {
     for _ in 0..workers {
         let next = Arc::clone(&next);
         let failures = Arc::clone(&failures);
-        handles.push(std::thread::spawn(move || {
-            loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= CASES.len() {
-                    break;
-                }
-                if let Err(payload) = std::panic::catch_unwind(|| check_comptime_case(i, CASES[i]))
-                {
-                    failures.lock().unwrap().push(panic_message(payload));
-                }
+        handles.push(std::thread::spawn(move || loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            if i >= CASES.len() {
+                break;
+            }
+            if let Err(payload) = std::panic::catch_unwind(|| check_comptime_case(i, CASES[i])) {
+                failures.lock().unwrap().push(panic_message(payload));
             }
         }));
     }
@@ -581,7 +580,10 @@ fn run() {
 /// cases, which need a full program — a bare `use` isn't an expression).
 fn check_comptime_src(i: usize, label: &str, src: &str) {
     let (_, user_diags) = jet::Lexer::lex(src);
-    assert!(user_diags.is_empty(), "invalid differential fixture: {user_diags:?}");
+    assert!(
+        user_diags.is_empty(),
+        "invalid differential fixture: {user_diags:?}"
+    );
     let src = framed_comptime_src(src);
     // The comptime interpreter and sema both recurse over typed expressions.
     // Libtest workers have much smaller stacks than the compiler process, so
@@ -629,8 +631,18 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     // the artifacts per run instead.
     static ARTIFACT: AtomicUsize = AtomicUsize::new(0);
     let unique = ARTIFACT.fetch_add(1, Ordering::Relaxed);
-    let rs = dir.join(format!("jet_ctdiff_{}_{}_{}.rs", std::process::id(), i, unique));
-    let bin = dir.join(format!("jet_ctdiff_{}_{}_{}", std::process::id(), i, unique));
+    let rs = dir.join(format!(
+        "jet_ctdiff_{}_{}_{}.rs",
+        std::process::id(),
+        i,
+        unique
+    ));
+    let bin = dir.join(format!(
+        "jet_ctdiff_{}_{}_{}",
+        std::process::id(),
+        i,
+        unique
+    ));
     fs::write(&rs, &compiled.rust).unwrap();
     let mut rustc = Command::new("rustc");
     rustc
@@ -643,7 +655,9 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+            rustc
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
         }
     }
     let out = rustc.output().unwrap();
@@ -694,8 +708,9 @@ fn print_argument(line: &str) -> &str {
 }
 
 fn assert_parity_output(label: &str, stdout: &[u8]) {
-    let (comptime, runtime) = parse_parity_output(stdout)
-        .unwrap_or_else(|reason| panic!("case `{label}` emitted an invalid parity frame: {reason}"));
+    let (comptime, runtime) = parse_parity_output(stdout).unwrap_or_else(|reason| {
+        panic!("case `{label}` emitted an invalid parity frame: {reason}")
+    });
     assert_eq!(
         comptime,
         runtime,
@@ -774,8 +789,14 @@ fn parity_frame_rejects_unequal_same_length_multiline_values() {
     let failure = std::panic::catch_unwind(|| assert_parity_output("adversarial", &frame))
         .expect_err("unequal parity values must fail");
     let message = panic_message(failure);
-    assert!(message.contains("DIVERGENCE for `adversarial`"), "{message}");
-    assert!(message.contains("beta") && message.contains("zeta"), "{message}");
+    assert!(
+        message.contains("DIVERGENCE for `adversarial`"),
+        "{message}"
+    );
+    assert!(
+        message.contains("beta") && message.contains("zeta"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -1132,7 +1153,6 @@ fn run() {
         vec!["10", "10", "20", "20"]
     );
 }
-
 
 #[test]
 fn ordinary_bindings_fold_when_possible_and_silently_fall_back() {

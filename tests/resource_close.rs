@@ -42,13 +42,19 @@ fn codes(src: &str) -> Vec<String> {
 }
 
 fn compile_and_run(src: &str, tag: &str) -> Output {
-    assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
+    assert!(
+        common::have_rustc(),
+        "resource-close runtime proof needs rustc"
+    );
     let compiled = compile(src);
     run_compiled(compiled.rust, tag)
 }
 
 fn compile_and_run_with_scheduler_unwind(src: &str, tag: &str) -> Output {
-    assert!(common::have_rustc(), "resource-close runtime proof needs rustc");
+    assert!(
+        common::have_rustc(),
+        "resource-close runtime proof needs rustc"
+    );
     let compiled = compile(src);
     let entry_init = "fn main() {\n    jet_std_env_init();";
     let rust = compiled.rust.replacen(
@@ -56,7 +62,10 @@ fn compile_and_run_with_scheduler_unwind(src: &str, tag: &str) -> Output {
         "fn main() {\n    jet_std_env_init();\n    jet_scheduler_task_panic_enter();",
         1,
     );
-    assert_ne!(rust, compiled.rust, "scheduler unwind probe did not attach to entry init");
+    assert_ne!(
+        rust, compiled.rust,
+        "scheduler unwind probe did not attach to entry init"
+    );
     run_compiled(rust, tag)
 }
 
@@ -86,7 +95,8 @@ fn defer_close_has_explicit_tir_codegen_and_stable_formatting() {
     let out = compile(SIMPLE);
     assert!(out.rust.contains("JetDeferredClose"), "{}", out.rust);
     assert!(
-        out.rust.contains("__jet_Close::close(__jet___resource_resource_")
+        out.rust
+            .contains("__jet_Close::close(__jet___resource_resource_")
             && out.rust.contains(".take())"),
         "{}",
         out.rust
@@ -139,7 +149,11 @@ fn scoped() {
 fn run() { scoped() }
 "#;
     let ran = compile_and_run(src, "jet_resource_close_automatic");
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(ran.stdout, b"body scope\nauto scope\n");
 }
 
@@ -225,8 +239,15 @@ fn run() {
         assert_eq!(ran.status.code(), Some(70), "{code}: {ran:?}");
         assert_eq!(ran.stdout, format!("body\nauto {name}\n").as_bytes());
         let stderr = String::from_utf8_lossy(&ran.stderr);
-        assert!(stderr.contains(&format!("Stop [{code}]")), "{code}: {stderr}");
-        assert_eq!(stderr.matches(&format!("Stop [{code}]")).count(), 1, "{code}: {stderr}");
+        assert!(
+            stderr.contains(&format!("Stop [{code}]")),
+            "{code}: {stderr}"
+        );
+        assert_eq!(
+            stderr.matches(&format!("Stop [{code}]")).count(),
+            1,
+            "{code}: {stderr}"
+        );
     }
 }
 
@@ -251,9 +272,9 @@ fn run() {
 "#;
     let compiled = compile(src);
     assert!(
-        compiled.rust.contains(
-            ": JetResource<__jet_Resource> = JetResource::new(__jet_resource);"
-        ),
+        compiled
+            .rust
+            .contains(": JetResource<__jet_Resource> = JetResource::new(__jet_resource);"),
         "{}",
         compiled.rust
     );
@@ -265,7 +286,10 @@ fn run() {
         compiled.rust
     );
     let out = compile_and_run(src, "jet_resource_close_transfer");
-    assert_eq!(String::from_utf8_lossy(&out.stdout), "consume transfer\nclose transfer\n");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "consume transfer\nclose transfer\n"
+    );
 }
 
 #[test]
@@ -415,7 +439,11 @@ fn run() {
 }
 "#;
     let ran = compile_and_run(src, "jet_resource_close_allocators");
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(ran.stdout, b"closed\n");
 }
 
@@ -475,7 +503,10 @@ fn default_dev_runs_deferred_close_with_native_parity() {
 
     if jet_jit::cranelift_host_supported() {
         let result = jet_jit::try_compile_bundle(&bundle);
-        assert!(result.is_ok(), "JIT must compile typed deferred cleanup: {result:?}");
+        assert!(
+            result.is_ok(),
+            "JIT must compile typed deferred cleanup: {result:?}"
+        );
     }
 
     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");

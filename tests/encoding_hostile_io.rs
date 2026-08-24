@@ -65,11 +65,7 @@ fn build_and_run(
 
 fn hostile_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
     let mut env = vec![("JET_ENC_HOSTILE_IO".to_string(), "1".to_string())];
-    env.extend(
-        extra
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string())),
-    );
+    env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     env
 }
 
@@ -412,15 +408,36 @@ fn encoding_hostile_one_byte_reads_match_baseline_for_all_codecs() {
     fs::write(&cbor_in, [0x82, 0x01, 0x02]).unwrap();
 
     let cases: [(&str, String, &str); 4] = [
-        ("json", json_reader_fixture(&json_in.to_string_lossy().replace('\\', "\\\\")), "7\neof\n"),
-        ("jsonl", jsonl_reader_fixture(&jsonl_in.to_string_lossy().replace('\\', "\\\\")), "one\n7\neof\n"),
-        ("csv", csv_reader_fixture(&csv_in.to_string_lossy().replace('\\', "\\\\")), "p\nq\neof\n"),
-        ("cbor", cbor_reader_fixture(&cbor_in.to_string_lossy().replace('\\', "\\\\")), "4\neof\n"),
+        (
+            "json",
+            json_reader_fixture(&json_in.to_string_lossy().replace('\\', "\\\\")),
+            "7\neof\n",
+        ),
+        (
+            "jsonl",
+            jsonl_reader_fixture(&jsonl_in.to_string_lossy().replace('\\', "\\\\")),
+            "one\n7\neof\n",
+        ),
+        (
+            "csv",
+            csv_reader_fixture(&csv_in.to_string_lossy().replace('\\', "\\\\")),
+            "p\nq\neof\n",
+        ),
+        (
+            "cbor",
+            cbor_reader_fixture(&cbor_in.to_string_lossy().replace('\\', "\\\\")),
+            "4\neof\n",
+        ),
     ];
 
     for (name, source, expected) in cases {
-        let (base_code, base_out, base_err) = build_and_run(&dir, &format!("{name}_base"), &source, &[]);
-        assert_eq!((base_code, base_err.as_str()), (0, ""), "{name} baseline stderr");
+        let (base_code, base_out, base_err) =
+            build_and_run(&dir, &format!("{name}_base"), &source, &[]);
+        assert_eq!(
+            (base_code, base_err.as_str()),
+            (0, ""),
+            "{name} baseline stderr"
+        );
         assert_eq!(base_out, expected, "{name} baseline stdout");
 
         let (host_code, host_out, host_err) = run_with_env(
@@ -429,7 +446,11 @@ fn encoding_hostile_one_byte_reads_match_baseline_for_all_codecs() {
             &source,
             &hostile_env(&[("JET_ENC_HOSTILE_READ_ONE", "1")]),
         );
-        assert_eq!((host_code, host_err.as_str()), (0, ""), "{name} hostile stderr");
+        assert_eq!(
+            (host_code, host_err.as_str()),
+            (0, ""),
+            "{name} hostile stderr"
+        );
         assert_eq!(host_out, expected, "{name} one-byte read drift");
     }
     let _ = fs::remove_dir_all(&dir);
@@ -474,7 +495,8 @@ fn encoding_hostile_short_writes_match_baseline_for_all_codecs() {
     ];
 
     for (name, source, expected) in cases {
-        let (base_code, base_out, base_err) = build_and_run(&dir, &format!("{name}_base"), &source, &[]);
+        let (base_code, base_out, base_err) =
+            build_and_run(&dir, &format!("{name}_base"), &source, &[]);
         assert_eq!((base_code, base_err.as_str()), (0, ""), "{name} baseline");
         assert_eq!(base_out, expected, "{name} baseline stdout");
 
@@ -484,7 +506,11 @@ fn encoding_hostile_short_writes_match_baseline_for_all_codecs() {
             &source,
             &hostile_env(&[("JET_ENC_HOSTILE_WRITE_MAX", "1")]),
         );
-        assert_eq!((host_code, host_err.as_str()), (0, ""), "{name} hostile stderr");
+        assert_eq!(
+            (host_code, host_err.as_str()),
+            (0, ""),
+            "{name} hostile stderr"
+        );
         assert_eq!(host_out, expected, "{name} short-write drift");
     }
     let _ = fs::remove_dir_all(&dir);
@@ -529,12 +555,8 @@ fn run() {{
     );
     let json_out = dir.join("json.out");
     let _ = json_out;
-    let (code, stdout, stderr) = run_with_env(
-        &dir,
-        "json_intr_read",
-        &source_read,
-        &hostile_env(&[]),
-    );
+    let (code, stdout, stderr) =
+        run_with_env(&dir, "json_intr_read", &source_read, &hostile_env(&[]));
     assert_eq!((code, stderr.as_str()), (0, ""));
     assert!(stdout.contains("true"), "expected IO error, got: {stdout}");
 
@@ -584,7 +606,10 @@ fn run() {{
         &hostile_env(&[("JET_ENC_HOSTILE_WRITE_MAX", "1")]),
     );
     assert_eq!((code, stderr.as_str()), (0, ""));
-    assert!(stdout.contains("true"), "expected IO on write, got: {stdout}");
+    assert!(
+        stdout.contains("true"),
+        "expected IO on write, got: {stdout}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -651,12 +676,22 @@ fn encoding_hostile_malformed_and_truncated_corpora_latch_under_chunked_io() {
     let corpora: [(&str, &str, Vec<u8>, &str); 8] = [
         ("json_trunc", "json", b"{\"a\":\"".to_vec(), "Truncated"),
         ("json_bad", "json", b"{\"a\":}".to_vec(), "Syntax"),
-        ("jsonl_bad", "jsonl", b"{\"a\":1}\n[2,]\n".to_vec(), "Syntax"),
+        (
+            "jsonl_bad",
+            "jsonl",
+            b"{\"a\":1}\n[2,]\n".to_vec(),
+            "Syntax",
+        ),
         ("csv_bad", "csv", b"\"unclosed\r\n".to_vec(), "Truncated"),
         ("csv_utf8", "csv", vec![b'a', b',', 0xff], "Syntax"),
         ("cbor_trunc", "cbor", vec![0x81], "Truncated"),
         ("cbor_tag", "cbor", vec![0xC0, 0x00], "Unsupported"),
-        ("cbor_dup", "cbor", vec![0xA2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02], "Unsupported"),
+        (
+            "cbor_dup",
+            "cbor",
+            vec![0xA2, 0x61, 0x61, 0x01, 0x61, 0x61, 0x02],
+            "Unsupported",
+        ),
     ];
 
     for (label, codec, bytes, _kind) in corpora {
@@ -785,7 +820,10 @@ fn run() {{
 "#
     );
     let (code, stdout, stderr) = build_and_run(&dir, "full_probe", &source, &[]);
-    assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
+    assert_eq!(
+        (code, stdout.as_str(), stderr.as_str()),
+        (0, "true\ntrue\n", "")
+    );
     let (host_code, host_stdout, host_stderr) = run_with_env(
         &dir,
         "full_probe_hostile",

@@ -9,14 +9,14 @@ pub use schema_api::*;
 // D-ARCH-SOURCE1=A: browser projection assets stay dependency-free in
 // jet-canvas; semantic/edit APIs live with their dev-server host.
 pub use jet_canvas::{canvas_html, canvas_html_for, canvas_html_query, canvas_js};
-mod source_model;
-mod project_scan;
-mod project_transactions;
-mod graph_projection;
-mod graph_json;
-mod query_actions;
+mod debug_source_git;
 mod edit_actions;
 mod graph_helpers;
-mod debug_source_git;
+mod graph_json;
+mod graph_projection;
+mod project_scan;
+mod project_transactions;
+mod query_actions;
+mod source_model;
 pub use debug_source_git::DebugSessions;
 mod validation_json;

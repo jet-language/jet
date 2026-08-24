@@ -2,28 +2,23 @@ use super::*;
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Numeric::{allows_float_money, is_money_like_name};
-use crate::Syntax;
 use crate::Sema::CheckerTaskGroup::TaskGroupOrigin;
-use crate::AST::{
-    AccessConvention, DistinctDef, EnumDef, Expr, Func, Item, Stmt, StructDef, Type,
-};
+use crate::Syntax;
+use crate::AST::{AccessConvention, DistinctDef, EnumDef, Expr, Func, Item, Stmt, StructDef, Type};
 use std::collections::{HashMap, HashSet};
 
+mod Derives;
 mod Items;
 mod Serde;
-mod Derives;
 
+pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_items_with_auto};
 pub(crate) use Items::{
     check_strong_shared_cycles, comptime_context_from_items, eval_comptime_items, name_defined,
     register_const, register_distinct, register_enum, register_impl_methods, register_struct,
     register_type_alias, register_type_methods, resolve_comptime_declaration_values,
 };
-pub(super) use Derives::{
-    expand_builtin_derive_items, expand_builtin_derive_items_with_auto,
-};
 pub(crate) use Serde::{
-    expand_builtin_serde_items, expand_builtin_serde_items_with_auto,
-    inject_anonymous_union_items,
+    expand_builtin_serde_items, expand_builtin_serde_items_with_auto, inject_anonymous_union_items,
 };
 
 fn is_void_named(ty: &Type) -> bool {
@@ -34,8 +29,7 @@ fn is_void_named(ty: &Type) -> bool {
 /// or fallible void (`() E!`). Same void-named match used by asm return
 /// checks in this file.
 fn is_void_like_return(ty: &Type) -> bool {
-    is_void_named(ty)
-        || matches!(ty, Type::Result { ok, .. } if is_void_named(ok))
+    is_void_named(ty) || matches!(ty, Type::Result { ok, .. } if is_void_named(ok))
 }
 
 fn is_fallible_void_return(ty: &Type) -> bool {
@@ -89,7 +83,9 @@ impl<'a> Checker<'a> {
         }
         if !f.type_params.is_empty()
             || f.params.iter().any(|p| !inline_ffi_scalar(&p.ty))
-            || f.return_type.as_ref().is_some_and(|ty| !inline_ffi_scalar(ty))
+            || f.return_type
+                .as_ref()
+                .is_some_and(|ty| !inline_ffi_scalar(ty))
         {
             self.diags.push(Diagnostic::error(
                 "E3222",
@@ -107,7 +103,9 @@ impl<'a> Checker<'a> {
 
     fn check_inline_asm(&mut self, f: &Func, inl: &crate::AST::InlineForeign) {
         if f.params.iter().any(|p| !inline_asm_integer(&p.ty))
-            || f.return_type.as_ref().is_some_and(|ty| !inline_asm_integer_or_void(ty))
+            || f.return_type
+                .as_ref()
+                .is_some_and(|ty| !inline_asm_integer_or_void(ty))
         {
             self.diags.push(Diagnostic::error(
                 "E3222",
@@ -118,7 +116,11 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
-        if !self.core_imports.values().any(|path| path == Syntax::CORE_MEM_MODULE) {
+        if !self
+            .core_imports
+            .values()
+            .any(|path| path == Syntax::CORE_MEM_MODULE)
+        {
             self.diags.push(Diagnostic::error(
                 "E3102",
                 "inline assembly is part of the low-level memory tier".to_string(),
@@ -135,28 +137,48 @@ impl<'a> Checker<'a> {
         for line in inl.source.lines() {
             let line = line.trim();
             if let Some(rest) = line.strip_prefix("; clobbers ") {
-                for reg in rest.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()) {
+                for reg in rest
+                    .split(|c: char| c == ',' || c.is_whitespace())
+                    .filter(|s| !s.is_empty())
+                {
                     if !asm_register_known(reg) {
                         bad = Some(format!("`{reg}` isn't an audited register on this target"));
                     }
                 }
                 continue;
             }
-            if line.contains("; -> return") { return_anchors += 1; }
+            if line.contains("; -> return") {
+                return_anchors += 1;
+            }
             let mut rest = line;
             while let Some(open) = rest.find('{') {
-                let Some(close) = rest[open + 1..].find('}') else { bad = Some("an assembly operand has an unmatched `{`".to_string()); break; };
+                let Some(close) = rest[open + 1..].find('}') else {
+                    bad = Some("an assembly operand has an unmatched `{`".to_string());
+                    break;
+                };
                 let name = &rest[open + 1..open + 1 + close];
-                if !params.contains(name) { bad = Some(format!("`{{{name}}}` doesn't name a Jet parameter")); } else { used.insert(name); }
+                if !params.contains(name) {
+                    bad = Some(format!("`{{{name}}}` doesn't name a Jet parameter"));
+                } else {
+                    used.insert(name);
+                }
                 rest = &rest[open + close + 2..];
             }
         }
         if let Some(name) = params.iter().find(|name| !used.contains(**name)) {
-            bad = Some(format!("parameter `{name}` has no named `{{{name}}}` operand"));
+            bad = Some(format!(
+                "parameter `{name}` has no named `{{{name}}}` operand"
+            ));
         }
-        let returns_value = f.return_type.as_ref().is_some_and(|ty| !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE));
+        let returns_value = f.return_type.as_ref().is_some_and(
+            |ty| !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE),
+        );
         if return_anchors != usize::from(returns_value) {
-            bad = Some(if returns_value { "a value-returning assembly body needs exactly one `; -> return` anchor".to_string() } else { "a void assembly body can't declare a `; -> return` anchor".to_string() });
+            bad = Some(if returns_value {
+                "a value-returning assembly body needs exactly one `; -> return` anchor".to_string()
+            } else {
+                "a void assembly body can't declare a `; -> return` anchor".to_string()
+            });
         }
         if let Some(problem) = bad {
             self.diags.push(Diagnostic::error(
@@ -181,8 +203,7 @@ impl<'a> Checker<'a> {
                 "`#Undo` only applies to a foreign binding".to_string(),
                 "an undo contract names the Jet function that compensates a foreign call"
                     .to_string(),
-                "attach `#Undo(inverse)` to `#FFI(...) fn` or an extern declaration"
-                    .to_string(),
+                "attach `#Undo(inverse)` to `#FFI(...) fn` or an extern declaration".to_string(),
                 Some(*span),
             ));
             return;
@@ -199,7 +220,10 @@ impl<'a> Checker<'a> {
         // force value-context inference (E0116). Lower after parsing so
         // source-preserving formatter paths keep the written expression
         // instead of printing an explicit `return`.
-        if f.return_type.as_ref().is_some_and(|ty| !is_void_like_return(ty)) {
+        if f.return_type
+            .as_ref()
+            .is_some_and(|ty| !is_void_like_return(ty))
+        {
             if let Some(Stmt::Expr(expr)) = f.body.last().cloned() {
                 let span = expr.span();
                 *f.body.last_mut().expect("body has a final expression") =
@@ -330,9 +354,7 @@ impl<'a> Checker<'a> {
                 } else {
                     p.ty.clone()
                 });
-                let pty = if f.is_pure
-                    && crate::Sema::Diagnostics::is_clock_type(&pty)
-                {
+                let pty = if f.is_pure && crate::Sema::Diagnostics::is_clock_type(&pty) {
                     crate::Sema::Diagnostics::deterministic_clock_type(pty)
                 } else {
                     pty
@@ -426,7 +448,8 @@ impl<'a> Checker<'a> {
                     "`#Reactive fn` can't also declare `-[]>`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
-                    "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`".to_string(),
+                    "drop the `-[]>` bound or use `reactive.effect` inside a plain `fn`"
+                        .to_string(),
                     Some(f.name_span),
                 ));
             }
@@ -496,10 +519,11 @@ impl<'a> Checker<'a> {
         // D-CONC-GROUP1=A: a method's group parameter is spawn authority in the
         // same way a free function's is — `self` holds the receiver, never the
         // group, so admitting methods opens no new escape.
-        self.taskgroup_stack.extend(f.params.iter().filter_map(|param| {
-            matches!(&param.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
-                .then(|| TaskGroupCtx::parameter(param.name.clone()))
-        }));
+        self.taskgroup_stack
+            .extend(f.params.iter().filter_map(|param| {
+                matches!(&param.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
+                    .then(|| TaskGroupCtx::parameter(param.name.clone()))
+            }));
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);
@@ -523,9 +547,9 @@ impl<'a> Checker<'a> {
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
         let is_entry_fallible_void = f.name == "run"
-            && f.return_type.as_ref().is_some_and(|ty| {
-                is_fallible_void_return(ty)
-            });
+            && f.return_type
+                .as_ref()
+                .is_some_and(|ty| is_fallible_void_return(ty));
         if !is_generator
             && !is_entry_fallible_void
             && f.return_type.is_some()
@@ -588,21 +612,54 @@ impl<'a> Checker<'a> {
 }
 
 fn inline_ffi_scalar(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::Float | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::InlineRange { .. } | Type::Float32 | Type::Bool)
-        || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+    matches!(
+        ty,
+        Type::Int
+            | Type::Float
+            | Type::IntN {
+                bits: 8 | 16 | 32 | 64,
+                ..
+            }
+            | Type::InlineRange { .. }
+            | Type::Float32
+            | Type::Bool
+    ) || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
 fn inline_asm_integer(ty: &Type) -> bool {
-    matches!(ty, Type::Int | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::InlineRange { .. })
+    matches!(
+        ty,
+        Type::Int
+            | Type::IntN {
+                bits: 8 | 16 | 32 | 64,
+                ..
+            }
+            | Type::InlineRange { .. }
+    )
 }
 
 fn inline_asm_integer_or_void(ty: &Type) -> bool {
-    inline_asm_integer(ty)
-        || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+    inline_asm_integer(ty) || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
 fn asm_register_known(reg: &str) -> bool {
-    matches!(reg.to_ascii_lowercase().as_str(), "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15")
+    matches!(
+        reg.to_ascii_lowercase().as_str(),
+        "rax"
+            | "rbx"
+            | "rcx"
+            | "rdx"
+            | "rsi"
+            | "rdi"
+            | "r8"
+            | "r9"
+            | "r10"
+            | "r11"
+            | "r12"
+            | "r13"
+            | "r14"
+            | "r15"
+    )
 }
 
 /// D-ANY-JAI1: E1314 — a trait-bounded variadic parameter used outside the
@@ -636,7 +693,11 @@ fn scan_stmt_for_variadic_uses(
     match s {
         Stmt::For {
             var2: None,
-            kind: crate::AST::ForKind::In { collection, step: None },
+            kind:
+                crate::AST::ForKind::In {
+                    collection,
+                    step: None,
+                },
             body,
             label: None,
             ..
@@ -646,9 +707,9 @@ fn scan_stmt_for_variadic_uses(
                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
             }
         }
-        Stmt::Expr(e)
-        | Stmt::DeferClose { close: e, .. }
-        | Stmt::Return(Some(e), _) => expr_uses(e, name, other),
+        Stmt::Expr(e) | Stmt::DeferClose { close: e, .. } | Stmt::Return(Some(e), _) => {
+            expr_uses(e, name, other)
+        }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => {}
         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => {}
         Stmt::Val(b) => expr_uses(&b.init, name, other),
@@ -677,7 +738,12 @@ fn scan_stmt_for_variadic_uses(
             kind, body, span, ..
         } => {
             match kind {
-                crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
+                crate::AST::ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     expr_uses(start, name, other);
                     expr_uses(end, name, other);
                     if let Some(s) = step {
@@ -801,7 +867,11 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
             expr_uses(index, name, other);
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             expr_uses(base, name, other);
             if let Some(range) = range {
@@ -854,7 +924,6 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
         _ => {}
     }
 }
-
 
 /// D-EFF1/D-SHAPE8: enforce declared effect-arrow bounds against inferred sets.
 /// For each function (and method) carrying a row, the inferred set must be a
@@ -932,8 +1001,7 @@ pub(crate) fn check_effect_boundaries(
         let key = identity
             .map(str::to_owned)
             .unwrap_or_else(|| effect_key(owner, &f.name));
-        if let Some((trait_method, span)) =
-            unbounded_dispatch(&key, summaries, &mut HashSet::new())
+        if let Some((trait_method, span)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
         {
             diags.push(e0743(&trait_method, span));
             return;
@@ -985,10 +1053,7 @@ pub(crate) fn check_effect_boundaries(
         if bad_name {
             return;
         }
-        let inferred = solved
-            .get(&key)
-            .cloned()
-            .unwrap_or_default();
+        let inferred = solved.get(&key).cloned().unwrap_or_default();
         // E0740: only check positive bounds — prohibition-only annotations (`#(!Net)`)
         // have no upper-bound constraint; only the prohibition check applies.
         // D-EFFTREE1: `declared` may name ancestor roots — an ancestor entry
@@ -1054,14 +1119,7 @@ pub(crate) fn check_effect_boundaries(
                     for item in body {
                         if let Item::Func(f) = item {
                             let identity = super::inline_effect_key(&module.name, &f.name);
-                            check_one(
-                                f,
-                                None,
-                                Some(&identity),
-                                solved,
-                                summaries,
-                                diags,
-                            );
+                            check_one(f, None, Some(&identity), solved, summaries, diags);
                         }
                     }
                 }
@@ -1082,7 +1140,10 @@ pub(crate) fn check_effect_boundaries(
         (Syntax::TRAIT_EQUATABLE, "equal"),
         (Syntax::TRAIT_COMPARABLE, "compare"),
     ] {
-        trait_bounds.insert((trait_name.to_string(), method.to_string()), EffectSet::new());
+        trait_bounds.insert(
+            (trait_name.to_string(), method.to_string()),
+            EffectSet::new(),
+        );
     }
     let mut impls: Vec<(String, String, String, Span)> = Vec::new();
     for item in items {
@@ -1163,7 +1224,6 @@ pub(crate) fn check_effect_boundaries(
     check_trait_obligations(&impls, &trait_bounds, solved, diags);
 }
 
-
 /// D-EFF1: the key a function is recorded under in the effect-summary map.
 /// `Type::method` for methods (disambiguates same-named methods across types),
 /// the bare name for top-level functions (so bare-call edges resolve).
@@ -1173,7 +1233,6 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
         None => name.to_string(),
     }
 }
-
 
 /// D-ERR-CONV: canonical Rust function name for the `impl From -> To` conversion.
 /// Used by sema (to stamp into `TryConvert::Typed`) and codegen (to define + call it).
@@ -1441,7 +1500,10 @@ pub(crate) fn synthesize_delegation_method(
         ty_span: zero,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
     };
 
     let mut params = vec![self_param];
@@ -1460,21 +1522,21 @@ pub(crate) fn synthesize_delegation_method(
         name: sig.name.clone(),
         name_span: sig.name_span,
         meta: None,
-                    type_params: vec![],
+        type_params: vec![],
         head_pattern: None,
         params,
         return_type: sig.return_type.clone(),
         return_type_span: None,
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,
@@ -1524,7 +1586,10 @@ pub(crate) fn synthesize_default_method(
         ty_span: zero,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
     };
     let mut params = vec![self_param];
     params.extend(
@@ -1542,21 +1607,21 @@ pub(crate) fn synthesize_default_method(
         name: sig.name.clone(),
         name_span: sig.name_span,
         meta: None,
-                    type_params: vec![],
+        type_params: vec![],
         head_pattern: None,
         params,
         return_type: sig.return_type.clone(),
         return_type_span: None,
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,

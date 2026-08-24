@@ -7,8 +7,7 @@ use std::fs;
 
 #[test]
 fn web_driver_validates_before_emit() {
-    let driver = fs::read_to_string("crates/jet-driver/src/Driver/mod.rs")
-        .expect("driver sources");
+    let driver = fs::read_to_string("crates/jet-driver/src/Driver/mod.rs").expect("driver sources");
     assert!(
         driver.contains("validate_web_tir_support"),
         "web compile must preflight TIR support"

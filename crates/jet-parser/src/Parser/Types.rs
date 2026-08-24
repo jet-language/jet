@@ -25,10 +25,7 @@ impl<'a> Parser<'a> {
         // D-TYPE2-MEASURE1=A: `Vec<N>` and `Matrix<M, N>` use the shared
         // declared-measure parser, not a private shape representation.
         if matches!(label.rsplit('.').next(), Some("Vec" | "Matrix")) {
-            return Ok((
-                Type::Measure(self.parse_declared_measure("shape")?),
-                span,
-            ));
+            return Ok((Type::Measure(self.parse_declared_measure("shape")?), span));
         }
         if !self.enter_generic_type_layer(label, span) {
             self.sync_type_arg();
@@ -71,7 +68,7 @@ impl<'a> Parser<'a> {
                 let span = self.bump().span;
                 return Err(Diagnostic::error(
                     "E0963",
-                    "a fixed-size list length must be an integer, got Float (a decimal number)"
+                    "a fixed-size list length must be an integer, got Float (an approximate binary number)"
                         .to_string(),
                     "a fixed-size list needs one known number of elements".to_string(),
                     "use an integer literal or a compile-time expression that produces Int"
@@ -164,14 +161,9 @@ impl<'a> Parser<'a> {
             Type::Named(Syntax::TYPE_ERR.to_string())
         };
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
-        if old_sigil
-            || !matches!(&err, Type::Named(name) if name == Syntax::TYPE_ERR)
-        {
-            self.diags.push(Diagnostic::from_row(
-                "E-ERR-SIGIL",
-                &[],
-                Some(sigil),
-            ));
+        if old_sigil || !matches!(&err, Type::Named(name) if name == Syntax::TYPE_ERR) {
+            self.diags
+                .push(Diagnostic::from_row("E-ERR-SIGIL", &[], Some(sigil)));
         }
         Ok(Some((
             Type::Result {
@@ -242,7 +234,8 @@ impl<'a> Parser<'a> {
         self.diags.truncate(saved_diags);
         self.pending_type_gt = saved_pending_type_gt;
         self.type_generic_depth = saved_type_generic_depth;
-        self.type_generic_chain.truncate(saved_type_generic_chain_len);
+        self.type_generic_chain
+            .truncate(saved_type_generic_chain_len);
         self.type_generic_truncated = saved_type_generic_truncated;
         Ok(success)
     }
@@ -583,8 +576,7 @@ impl<'a> Parser<'a> {
             TokKind::KwFn => self.fn_type(None)?,
             // Retired pre-D-SHAPE8 callback bounds remain recognized only so a
             // teaching diagnostic can be emitted; they are not accepted aliases.
-            TokKind::Hash if matches!(self.peek2().kind, TokKind::LParen) =>
-            {
+            TokKind::Hash if matches!(self.peek2().kind, TokKind::LParen) => {
                 let bound = self.parse_fn_type_effect_bound()?;
                 self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
@@ -778,11 +770,8 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                             self.expect_type_args_open(Syntax::TYPE_SHARED_WEAK)?;
-                            let (inner, _) =
-                                self.type_generic_arg(Syntax::TYPE_SHARED_WEAK)?;
-                            self.maybe_close_type_args(
-                                "after a shared weak element type",
-                            )?;
+                            let (inner, _) = self.type_generic_arg(Syntax::TYPE_SHARED_WEAK)?;
+                            self.maybe_close_type_args("after a shared weak element type")?;
                             Type::Apply {
                                 name: Syntax::TYPE_SHARED_WEAK.to_string(),
                                 args: vec![inner],
@@ -960,11 +949,8 @@ impl<'a> Parser<'a> {
                         let bang = self.bump().span;
                         if self.type_starts_here() && !self.next_field_starts_here() {
                             let err = self.type_()?.0;
-                            self.diags.push(Diagnostic::from_row(
-                                "E-ERR-SIGIL",
-                                &[],
-                                Some(bang),
-                            ));
+                            self.diags
+                                .push(Diagnostic::from_row("E-ERR-SIGIL", &[], Some(bang)));
                             Type::Result {
                                 ok: Box::new(success),
                                 err: Box::new(err),
@@ -984,11 +970,8 @@ impl<'a> Parser<'a> {
                     } else {
                         Type::Named(Syntax::TYPE_ERR.to_string())
                     };
-                    self.diags.push(Diagnostic::from_row(
-                        "E-ERR-SIGIL",
-                        &[],
-                        Some(question),
-                    ));
+                    self.diags
+                        .push(Diagnostic::from_row("E-ERR-SIGIL", &[], Some(question)));
                     Type::Result {
                         ok: Box::new(base),
                         err: Box::new(err),
@@ -1004,11 +987,8 @@ impl<'a> Parser<'a> {
                     }
                 } else if self.type_starts_here() && !self.next_field_starts_here() {
                     let err = self.type_()?.0;
-                    self.diags.push(Diagnostic::from_row(
-                        "E-ERR-SIGIL",
-                        &[],
-                        Some(bang),
-                    ));
+                    self.diags
+                        .push(Diagnostic::from_row("E-ERR-SIGIL", &[], Some(bang)));
                     Type::Result {
                         ok: Box::new(base),
                         err: Box::new(err),
@@ -1027,10 +1007,7 @@ impl<'a> Parser<'a> {
         if matches!(self.peek().kind, TokKind::Pipe) {
             self.bump();
             let (right, _) = self.type_()?;
-            return Ok((
-                crate::AST::canonicalize_union(vec![member, right]),
-                start,
-            ));
+            return Ok((crate::AST::canonicalize_union(vec![member, right]), start));
         }
         Ok((member, start))
     }
@@ -1047,7 +1024,10 @@ impl<'a> Parser<'a> {
     /// D-MEMPROVENANCE3=A: optional `name: Type` params and a trailing `from`
     /// after the return type populate `return_view_provenance` (names resolve
     /// here and are not stored on the type).
-    fn fn_type(&mut self, mut effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
+    fn fn_type(
+        &mut self,
+        mut effect_bound: Option<Vec<(String, Span)>>,
+    ) -> Result<Type, Diagnostic> {
         self.expect(TokKind::KwFn, "to start a function type")?;
         self.expect(TokKind::LParen, "after `fn` in a function type")?;
         let mut params = Vec::new();
@@ -1129,16 +1109,14 @@ impl<'a> Parser<'a> {
         }
         // Identity only exists when the type actually declares one; an
         // unannotated `fn(Int) Int` keeps its bare structural meaning.
-        let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> = (saw_slash
-            || saw_star
-            || param_names.iter().any(Option::is_some))
-        .then(|| {
-            param_names
-                .iter()
-                .zip(param_zones.iter())
-                .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
-                .collect()
-        });
+        let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> =
+            (saw_slash || saw_star || param_names.iter().any(Option::is_some)).then(|| {
+                param_names
+                    .iter()
+                    .zip(param_zones.iter())
+                    .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
+                    .collect()
+            });
         let canonical_effect = matches!(self.peek().kind, TokKind::Minus)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_colon = matches!(self.peek().kind, TokKind::Colon)
@@ -1146,11 +1124,11 @@ impl<'a> Parser<'a> {
         let retired_eq = matches!(self.peek().kind, TokKind::Eq)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
-        let prefix_effect_span = (canonical_effect || retired_colon)
-            .then(|| self.peek().span);
+        let prefix_effect_span = (canonical_effect || retired_colon).then(|| self.peek().span);
         if canonical_effect || retired_colon || retired_eq || retired_double {
             if retired_colon || retired_eq || retired_double {
-                self.diags.push(Self::retired_effect_syntax(self.peek().span));
+                self.diags
+                    .push(Self::retired_effect_syntax(self.peek().span));
             }
             effect_bound = Some(self.parse_effect_arrow_row(
                 canonical_effect,
@@ -1179,10 +1157,7 @@ impl<'a> Parser<'a> {
             } else {
                 None
             }
-        } else if retired_eq
-            || retired_double
-            || self.at_unified_arrow()
-        {
+        } else if retired_eq || retired_double || self.at_unified_arrow() {
             let arrow = self.at_unified_arrow().then(|| self.bump());
             arrow_return = arrow.is_some() || retired_eq || retired_double;
             if !retired_eq && !retired_double {
@@ -1243,7 +1218,10 @@ impl<'a> Parser<'a> {
                 ty_span: crate::Diagnostics::Span::new(0, 0),
                 default: None,
                 variadic: false,
-                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                variadic_bound_list: None,
+                declared_view_from_names: None,
+                public_label: None,
+                zone: crate::AST::ParamZone::Either,
             })
             .collect();
         let return_view_provenance = self.parse_opt_declared_view_from(&from_params);
@@ -1256,7 +1234,8 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek2().kind, TokKind::LBracket);
             let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
             if retired_colon || retired_eq || retired_double {
-                self.diags.push(Self::retired_effect_syntax(self.peek().span));
+                self.diags
+                    .push(Self::retired_effect_syntax(self.peek().span));
             }
             effect_bound = Some(self.parse_effect_arrow_row(
                 canonical,

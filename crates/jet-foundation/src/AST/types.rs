@@ -2110,7 +2110,11 @@ impl Type {
             if default_error {
                 crate::Syntax::TYPE_FALLIBLE_SEP.to_string()
             } else {
-                format!("{}{}", Self::error_suffix_name(err), crate::Syntax::TYPE_FALLIBLE_SEP)
+                format!(
+                    "{}{}",
+                    Self::error_suffix_name(err),
+                    crate::Syntax::TYPE_FALLIBLE_SEP
+                )
             }
         } else if default_error {
             format!("{} {}", ok.name(), crate::Syntax::TYPE_FALLIBLE_SEP)
@@ -2128,7 +2132,7 @@ impl Type {
     pub fn show(&self) -> String {
         match self {
             Type::Int => "Int (a whole number)".to_string(),
-            Type::Float => "Float (a decimal number)".to_string(),
+            Type::Float => "Float (an approximate binary number)".to_string(),
             Type::Bool => "Bool (true or false)".to_string(),
             Type::String => "String (text)".to_string(),
             Type::Char => "Char (one character)".to_string(),
@@ -2156,6 +2160,9 @@ impl Type {
                     signature.push_str("]>");
                 }
                 signature
+            }
+            Type::Named(n) if n == crate::Syntax::TYPE_DECIMAL => {
+                "Decimal (an exact base-10 number)".to_string()
             }
             Type::Named(n) => format!("`{}`", n),
             Type::Measure(measure) => format!("{} (a compile-time measure)", measure.expression()),
@@ -2211,7 +2218,7 @@ impl Type {
             Type::InlineRange { base, lo, hi } => {
                 format!("{} (a whole number from {} to {})", base.name(), lo, hi)
             }
-            Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
+            Type::Float32 => "F32 (a 32-bit approximate binary number)".to_string(),
             Type::Tagged {
                 marker: TagMarker::Internal(_),
                 inner,

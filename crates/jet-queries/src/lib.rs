@@ -33,7 +33,6 @@ impl InputKey {
     pub fn file(file: FileKey) -> Self {
         Self(Subject::File(file))
     }
-
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -56,7 +55,6 @@ impl QueryKey {
             subject: Subject::File(file),
         }
     }
-
 }
 
 struct InputCell {
@@ -472,15 +470,11 @@ mod tests {
         let input = InputKey::new("late.jet");
         let query = QueryKey::new("tokens", "late.jet");
         let mut db = QueryEngine::new();
-        let first: String = db.query(query.clone(), |q| {
-            q.input_text(&input).unwrap_or_default()
-        });
+        let first: String = db.query(query.clone(), |q| q.input_text(&input).unwrap_or_default());
         assert!(first.is_empty());
 
         db.set_input(input.clone(), "now present".into());
-        let second: String = db.query(query.clone(), |q| {
-            q.input_text(&input).unwrap_or_default()
-        });
+        let second: String = db.query(query.clone(), |q| q.input_text(&input).unwrap_or_default());
         assert_eq!(second, "now present");
         assert_eq!(db.recompute_count(&query), 2);
     }

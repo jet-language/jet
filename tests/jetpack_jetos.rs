@@ -69,7 +69,9 @@ fn lifecycle_roots(root: &Path) -> Vec<LifecycleRootProof> {
                 }
                 ["commit", id, _incarnation, witness, _at] => {
                     let id = decode_hex(id);
-                    let root = roots.get_mut(&id).expect("commit must follow durable prepare");
+                    let root = roots
+                        .get_mut(&id)
+                        .expect("commit must follow durable prepare");
                     assert_eq!(root.witness, decode_hex(witness));
                     root.phase = "committed".to_string();
                     current = None;
@@ -150,17 +152,25 @@ fn os_import_writes_semantic_nixos_facts_with_audit() {
     );
     let config = fs::read_to_string(out_dir.join("config.jet")).unwrap();
     assert!(config.contains("system.halcyon"), "{config}");
-    assert!(config.contains("nixpkgs: NixOS/nixpkgs/nixos-24.05@github"), "{config}");
-    assert!(config.contains("packages: [nixpkgs.git, nixpkgs.ripgrep]"), "{config}");
+    assert!(
+        config.contains("nixpkgs: NixOS/nixpkgs/nixos-24.05@github"),
+        "{config}"
+    );
+    assert!(
+        config.contains("packages: [nixpkgs.git, nixpkgs.ripgrep]"),
+        "{config}"
+    );
     assert!(config.contains("openssh: { enable: true"), "{config}");
-    assert!(config.contains("user.nate.packages: [nixpkgs.neovim, nixpkgs.ghostty]"), "{config}");
+    assert!(
+        config.contains("user.nate.packages: [nixpkgs.neovim, nixpkgs.ghostty]"),
+        "{config}"
+    );
     assert!(config.contains("user.nate.homeManager: true"), "{config}");
     let audit = fs::read_to_string(out_dir.join("jetos-import-audit.json")).unwrap();
     assert!(audit.contains("\"mode\":\"semantic-facts\""), "{audit}");
     assert!(audit.contains("jetbrains.idea-ultimate"), "{audit}");
     assert!(audit.contains("programs.firefox.profiles"), "{audit}");
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -240,7 +250,6 @@ exit 0
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_live_semantic_eval_maps_real_options() {
@@ -265,33 +274,74 @@ fn os_import_live_semantic_eval_maps_real_options() {
         String::from_utf8_lossy(&out.stderr)
     );
     let config = String::from_utf8_lossy(&out.stdout);
-    assert!(config.contains("nixpkgs: NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51@github"), "{config}");
+    assert!(
+        config.contains("nixpkgs: NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51@github"),
+        "{config}"
+    );
     assert!(config.contains("network.hostName: \"halcyon\""), "{config}");
-    assert!(config.contains("network.networkmanager.enable: true"), "{config}");
-    assert!(config.contains("network.firewall.allowedTcpPorts: [22, 443]"), "{config}");
-    assert!(config.contains("filesystem.timeZone: \"America/New_York\""), "{config}");
+    assert!(
+        config.contains("network.networkmanager.enable: true"),
+        "{config}"
+    );
+    assert!(
+        config.contains("network.firewall.allowedTcpPorts: [22, 443]"),
+        "{config}"
+    );
+    assert!(
+        config.contains("filesystem.timeZone: \"America/New_York\""),
+        "{config}"
+    );
     assert!(config.contains("boot.loader: .Limine"), "{config}");
     assert!(config.contains("boot.kernel: .CachyOS"), "{config}");
-    assert!(config.contains("services.desktop.plasma.enable: true"), "{config}");
-    assert!(config.contains("services.displayManager: \"sddm\""), "{config}");
-    assert!(config.contains("services.audio.pipewire.enable: true"), "{config}");
-    assert!(config.contains("services.virtualization.libvirtd.enable: true"), "{config}");
-    assert!(config.contains("services.gaming.steam.enable: true"), "{config}");
-    assert!(config.contains("performance.sysctl.vm.swappiness: 10"), "{config}");
-    assert!(config.contains("performance.zram.memoryPercent: 25"), "{config}");
-    assert!(config.contains("users.nate.shell: nixpkgs.fish"), "{config}");
+    assert!(
+        config.contains("services.desktop.plasma.enable: true"),
+        "{config}"
+    );
+    assert!(
+        config.contains("services.displayManager: \"sddm\""),
+        "{config}"
+    );
+    assert!(
+        config.contains("services.audio.pipewire.enable: true"),
+        "{config}"
+    );
+    assert!(
+        config.contains("services.virtualization.libvirtd.enable: true"),
+        "{config}"
+    );
+    assert!(
+        config.contains("services.gaming.steam.enable: true"),
+        "{config}"
+    );
+    assert!(
+        config.contains("performance.sysctl.vm.swappiness: 10"),
+        "{config}"
+    );
+    assert!(
+        config.contains("performance.zram.memoryPercent: 25"),
+        "{config}"
+    );
+    assert!(
+        config.contains("users.nate.shell: nixpkgs.fish"),
+        "{config}"
+    );
     assert!(config.contains("user.nate.homeManager: true"), "{config}");
     assert!(config.contains("apps.program.git.enable: true"), "{config}");
-    assert!(config.contains("apps.program.starship.enable: true"), "{config}");
+    assert!(
+        config.contains("apps.program.starship.enable: true"),
+        "{config}"
+    );
     assert!(
         config.contains("services.virtualization.docker.enable: true"),
         "{config}"
     );
-    assert!(config.contains("packages: [nixpkgs.git, nixpkgs.ripgrep]"), "{config}");
+    assert!(
+        config.contains("packages: [nixpkgs.git, nixpkgs.ripgrep]"),
+        "{config}"
+    );
     assert!(config.contains("openssh: { enable: true"), "{config}");
     assert!(config.contains("tailscale: { enable: true"), "{config}");
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -323,10 +373,7 @@ fn os_import_live_semantic_eval_reports_omissions() {
     let audit = fs::read_to_string(out_dir.join("jetos-import-audit.json")).unwrap();
     assert!(audit.contains("\"mode\":\"semantic-eval\""), "{audit}");
     assert!(audit.contains("jetbrains.idea-ultimate"), "{audit}");
-    assert!(
-        audit.contains("no `nix-cachyos-kernel` pin"),
-        "{audit}"
-    );
+    assert!(audit.contains("no `nix-cachyos-kernel` pin"), "{audit}");
     assert!(
         audit.contains("stylix theming is enabled upstream"),
         "{audit}"
@@ -340,7 +387,6 @@ fn os_import_live_semantic_eval_reports_omissions() {
         "known HM programs must map to apps.program.*, not omit: {audit}"
     );
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -367,7 +413,6 @@ fn os_import_live_eval_failure_is_loud() {
     assert!(stderr.contains("--facts-only"), "{stderr}");
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_missing_source_has_snapshot() {
@@ -388,7 +433,6 @@ fn os_import_missing_source_has_snapshot() {
         &String::from_utf8_lossy(&out.stderr),
     );
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -426,7 +470,6 @@ fn os_lift_is_audited_facts_only_import_draft() {
     assert!(stdout.contains("system.laptop"), "{stdout}");
     assert!(stderr.contains("facts-only"), "{stderr}");
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -532,8 +575,15 @@ fn os_build_realizes_selected_system_offline() {
         .map(|value| value.as_str().unwrap().to_string())
         .collect::<Vec<_>>();
     let fields = ledger.trim_end().split('\t').collect::<Vec<_>>();
-    assert_eq!(fields.len(), 5, "ledger must contain witness field: {ledger}");
-    assert_eq!(fields[4], witness, "ledger witness must equal generation root");
+    assert_eq!(
+        fields.len(),
+        5,
+        "ledger must contain witness field: {ledger}"
+    );
+    assert_eq!(
+        fields[4], witness,
+        "ledger witness must equal generation root"
+    );
     assert_eq!(
         lifecycle_roots(&root.path),
         vec![LifecycleRootProof {
@@ -557,7 +607,9 @@ fn os_build_realizes_selected_system_offline() {
         "initrd should come from source/build.sh: {initrd}"
     );
     assert_no_ephemeral_links(&generation);
-    let hello = Command::new(generation.join("sw/bin/hello")).output().unwrap();
+    let hello = Command::new(generation.join("sw/bin/hello"))
+        .output()
+        .unwrap();
     assert!(hello.status.success());
     assert!(
         String::from_utf8_lossy(&hello.stdout).contains("hello"),
@@ -650,17 +702,18 @@ fn os_zero_hangar_generation_has_ledger_without_external_root() {
     let generation = root.join("systems/generations/zero-hangar");
     let root_text = fs::read_to_string(generation.join("generation-root.json")).unwrap();
     let root_json = jetpack::JSON::parse(&root_text).unwrap();
-    assert!(
-        root_json
-            .get("output_digests")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(root_json
+        .get("output_digests")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
     let witness = root_json.get("witness").unwrap().as_str().unwrap();
     let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
-    assert_eq!(ledger.trim_end().split('\t').collect::<Vec<_>>()[4], witness);
+    assert_eq!(
+        ledger.trim_end().split('\t').collect::<Vec<_>>()[4],
+        witness
+    );
     assert!(
         !root.join("hangar/lifecycle-db").exists(),
         "zero-Hangar publication must leave provider roots separate"
@@ -671,7 +724,10 @@ fn os_zero_hangar_generation_has_ledger_without_external_root() {
         "stderr: {}",
         String::from_utf8_lossy(&retry.stderr)
     );
-    assert_eq!(fs::read_to_string(root.join("systems/generations.log")).unwrap(), ledger);
+    assert_eq!(
+        fs::read_to_string(root.join("systems/generations.log")).unwrap(),
+        ledger
+    );
     assert!(!root.join("hangar/lifecycle-db").exists());
 }
 
@@ -731,7 +787,11 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
         String::from_utf8_lossy(&recovered.stderr)
     );
     let ledger = fs::read_to_string(root.join("systems/generations.log")).unwrap();
-    assert_eq!(ledger.lines().count(), 1, "recovery must reuse exact ledger row");
+    assert_eq!(
+        ledger.lines().count(),
+        1,
+        "recovery must reuse exact ledger row"
+    );
     assert_eq!(
         ledger.split('\t').count(),
         5,
@@ -809,7 +869,6 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
         "exact committed retry must change zero lifecycle bytes"
     );
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -1032,7 +1091,9 @@ fn os_switch_activates_and_sets_current() {
             && generation
                 .join("usr/lib/systemd/system/rescue.target")
                 .exists()
-            && generation.join("etc/systemd/system/default.target").exists(),
+            && generation
+                .join("etc/systemd/system/default.target")
+                .exists(),
         "expected base systemd target units in bootable generation"
     );
     assert!(
@@ -1177,10 +1238,8 @@ fn os_switch_activates_and_sets_current() {
             && generation.join("sw/bin/jetos-hardware-doctor").is_file(),
         "expected hardware scan/profile/specialisation artifacts"
     );
-    let specialisation = fs::read_to_string(
-        generation.join("boot/specialisations/plasmaBeta.conf"),
-    )
-    .unwrap();
+    let specialisation =
+        fs::read_to_string(generation.join("boot/specialisations/plasmaBeta.conf")).unwrap();
     assert!(
         specialisation.contains("title jetos 26.10 (Apex) — halcyon (plasmaBeta)"),
         "specialisation title: {specialisation}"
@@ -1901,10 +1960,8 @@ fn os_switch_activates_and_sets_current() {
         installed_limine.contains("/jetos 26.10 (Apex) — halcyon"),
         "installed Limine title: {installed_limine}"
     );
-    let wallpaper = fs::read_to_string(
-        generation.join("share/backgrounds/jetos/apex.svg"),
-    )
-    .unwrap();
+    let wallpaper =
+        fs::read_to_string(generation.join("share/backgrounds/jetos/apex.svg")).unwrap();
     assert!(
         wallpaper.starts_with("<svg ")
             && wallpaper.contains("jetos 26.10 Apex")
@@ -1925,7 +1982,9 @@ fn os_switch_activates_and_sets_current() {
         );
     }
     assert!(
-        generation.join("acceptance/owner-jetos-coverage.md").is_file()
+        generation
+            .join("acceptance/owner-jetos-coverage.md")
+            .is_file()
             && generation.join("sw/bin/jetos-acceptance-prove").is_file(),
         "expected acceptance artifacts"
     );
@@ -2073,7 +2132,8 @@ fn os_switch_activates_and_sets_current() {
         "studio data: {studio_data}"
     );
     assert!(
-        studio_data.contains("\"dashboard\"") && studio_data.contains("\"selected_host\":\"halcyon\""),
+        studio_data.contains("\"dashboard\"")
+            && studio_data.contains("\"selected_host\":\"halcyon\""),
         "studio data: {studio_data}"
     );
     assert!(
@@ -2115,9 +2175,7 @@ fn os_switch_activates_and_sets_current() {
         "studio data: {studio_data}"
     );
     assert!(
-        generation
-            .join("studio/first-boot.json")
-            .is_file(),
+        generation.join("studio/first-boot.json").is_file(),
         "expected Studio first-boot control-center projection"
     );
     let first_boot = fs::read_to_string(generation.join("studio/first-boot.json")).unwrap();
@@ -2261,7 +2319,6 @@ fn os_switch_activates_and_sets_current() {
     assert!(proof_json.contains("\"vm_proof\":"), "proof: {proof_json}");
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_plan_prints_checked_system_contract_without_building() {
@@ -2291,7 +2348,6 @@ fn os_plan_prints_checked_system_contract_without_building() {
         "plan must not create a generation"
     );
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2362,7 +2418,6 @@ fn jetos_user_commands_use_same_generation_engine() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_build_bare_host_uses_current_repo_config() {
@@ -2408,7 +2463,6 @@ fn os_build_bare_host_uses_current_repo_config() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("box"), "stderr: {stderr}");
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2478,7 +2532,6 @@ fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
@@ -2523,7 +2576,6 @@ fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
     assert_jetos_stderr_snapshot("cachyos_source_build_failed", diagnostic);
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_requires_first_party_source() {
@@ -2545,7 +2597,6 @@ fn os_cachyos_kernel_requires_first_party_source() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_jetos_stderr_snapshot("missing_cachyos_kernel", &stderr);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2586,7 +2637,6 @@ fn os_systemd_init_requires_first_party_source() {
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot("missing_systemd_init", diagnostic);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2632,7 +2682,6 @@ fn os_default_gnome_desktop_requires_first_party_packages() {
     assert_jetos_stderr_snapshot("missing_gnome_desktop", diagnostic);
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_requires_boot_artifacts() {
@@ -2674,7 +2723,6 @@ fn os_cachyos_kernel_requires_boot_artifacts() {
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2721,7 +2769,6 @@ fn os_cachyos_kernel_rejects_text_boot_artifacts() {
     assert_jetos_stderr_snapshot_trimmed("missing_cachyos_boot_artifacts", diagnostic);
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_requires_source_recipe() {
@@ -2764,7 +2811,6 @@ fn os_cachyos_kernel_requires_source_recipe() {
         .unwrap_or(&stderr);
     assert_jetos_stderr_snapshot_trimmed("missing_cachyos_source_recipe", diagnostic);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2809,7 +2855,6 @@ fn os_systemd_init_requires_init_artifact() {
     assert_jetos_stderr_snapshot("missing_systemd_init_artifact", diagnostic);
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_missing_host_is_friendly_and_exits_2() {
@@ -2823,7 +2868,6 @@ fn os_missing_host_is_friendly_and_exits_2() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_jetos_stderr_snapshot("missing_host", &stderr);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2841,7 +2885,6 @@ fn os_missing_external_root_is_friendly_and_exits_2() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_unknown_host_lists_available_systems() {
@@ -2857,7 +2900,6 @@ fn os_unknown_host_lists_available_systems() {
     assert_jetos_stderr_snapshot("unknown_host", &stderr);
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_missing_config_file_is_friendly() {
@@ -2871,7 +2913,6 @@ fn os_missing_config_file_is_friendly() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_jetos_stderr_snapshot("missing_config", &stderr);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -2893,7 +2934,6 @@ fn os_retired_option_namespace_is_snapshot_pinned() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_jetos_stderr_snapshot("retired_namespace", &stderr);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -3037,7 +3077,6 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_run_never_reaches_nixos_migration_backend() {
@@ -3050,7 +3089,14 @@ fn os_vm_run_never_reaches_nixos_migration_backend() {
     .unwrap();
     let out = jet()
         .args([
-            "os", "vm", "run", "halcyon", "--disk", "halcyon.qcow2", "--no-color", "--offline",
+            "os",
+            "vm",
+            "run",
+            "halcyon",
+            "--disk",
+            "halcyon.qcow2",
+            "--no-color",
+            "--offline",
         ])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
@@ -3059,10 +3105,12 @@ fn os_vm_run_never_reaches_nixos_migration_backend() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(!stderr.contains("E1291"), "product VM path reached NixOS backend: {stderr}");
+    assert!(
+        !stderr.contains("E1291"),
+        "product VM path reached NixOS backend: {stderr}"
+    );
     assert!(!root.join("systems/backend").exists());
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -3094,7 +3142,6 @@ fn os_vm_prove_requires_pinned_media_tools() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_run_requires_proved_installed_disk() {
@@ -3121,7 +3168,6 @@ fn os_vm_run_requires_proved_installed_disk() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_jetos_stderr_snapshot("vm_run_unproven", &stderr);
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -3150,7 +3196,10 @@ fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("`--real` is not a jetos VM option"), "{stderr}");
+    assert!(
+        stderr.contains("`--real` is not a jetos VM option"),
+        "{stderr}"
+    );
     assert!(
         stderr.contains("jet os migrate compare-nixos <host> --out <dir>"),
         "{stderr}"
@@ -3227,7 +3276,11 @@ fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
         .args(["-i", "-c", "printf '%s' \"$PS1\""])
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
         "NixOS comparison $ "
@@ -3456,11 +3509,9 @@ int main(int argc, char **argv) {
     for name in ["nix", "qemu-system-x86_64", "qemu-img"] {
         fs::hard_link(&binary, tools.join(name)).unwrap();
     }
-    let path = std::env::join_paths(
-        std::iter::once(tools).chain(std::env::split_paths(
-            &std::env::var_os("PATH").unwrap_or_default(),
-        )),
-    )
+    let path = std::env::join_paths(std::iter::once(tools).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
     .unwrap();
     (path, outputs)
 }
@@ -3552,8 +3603,7 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
     let first_output = lines
         .iter()
         .position(|line| {
-            line.contains(marker)
-                && line.contains("/nixos/halcyon-gnome/system.qcow2")
+            line.contains(marker) && line.contains("/nixos/halcyon-gnome/system.qcow2")
         })
         .unwrap_or_else(|| panic!("private publish output missing:\n{trace}"));
     assert!(mkdir < protected && protected < first_output, "{trace}");
@@ -3572,16 +3622,12 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
     assert!(image.is_file());
     assert!(proof.is_file());
     assert!(receipt.is_file());
-    assert!(
-        fs::read_to_string(&proof)
-            .unwrap()
-            .contains("\"image\":\"system.qcow2\"")
-    );
-    assert!(
-        fs::read_to_string(&receipt)
-            .unwrap()
-            .contains("\"boot_proof\":\"proof.json\"")
-    );
+    assert!(fs::read_to_string(&proof)
+        .unwrap()
+        .contains("\"image\":\"system.qcow2\""));
+    assert!(fs::read_to_string(&receipt)
+        .unwrap()
+        .contains("\"boot_proof\":\"proof.json\""));
     let plan = fs::read_to_string(host.join("build-boot-plan.json")).unwrap();
     assert_eq!(plan.matches("\"--offline\"").count(), 2, "{plan}");
     let stdout = String::from_utf8(out.stdout).unwrap();
@@ -3672,10 +3718,7 @@ fn nixos_migration_rejects_direct_engine_front_doors() {
             stderr.contains("available only through root `jet`"),
             "{name}: {stderr}"
         );
-        assert!(
-            !out_dir.exists(),
-            "{name} reached migration publication"
-        );
+        assert!(!out_dir.exists(), "{name} reached migration publication");
     }
 }
 
@@ -3709,8 +3752,7 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
     let generation = fs::read_to_string("crates/jetpack/src/JetOS/generation.rs").unwrap();
     let backend = fs::read_to_string("crates/jetpack/src/JetOS/nixos_backend.rs").unwrap();
     let files = fs::read_to_string("crates/jetpack/src/JetOS/generation_files.rs").unwrap();
-    let syntax =
-        fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs").unwrap();
+    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs").unwrap();
     assert!(!vm.contains("nixos_backend"), "{vm}");
     assert!(!generation.contains("nixos_backend"), "{generation}");
     assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
@@ -3724,9 +3766,7 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
         .unwrap();
     assert!(service.contains("--rcfile /etc/bashrc -i"));
     assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
-    assert!(syntax.contains(
-        "pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"
-    ));
+    assert!(syntax.contains("pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"));
     assert!(syntax.contains("pub const OS_MIGRATION_FLAG_OUT: &str = \"--out\";"));
     assert!(syntax.contains("OS_VERB_MIGRATE,"));
     for pattern in [
@@ -3734,10 +3774,12 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
         "replace_bytes_in_place",
         "b\"NixOS\".as_slice(), b\"JetOS\"",
     ] {
-        assert!(!files.contains(pattern), "rebranding rewrite remains: {pattern}");
+        assert!(
+            !files.contains(pattern),
+            "rebranding rewrite remains: {pattern}"
+        );
     }
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -3887,7 +3929,6 @@ fn os_vm_prove_writes_media_bound_harness() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_runs_qemu_and_records_guest_proof() {
@@ -3992,7 +4033,6 @@ fn os_vm_prove_runs_qemu_and_records_guest_proof() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_test_runs_declared_scenario_and_records_proof() {
@@ -4073,7 +4113,6 @@ module vmtest.ssh-smoke {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_accepts_matching_guest_proof() {
@@ -4145,7 +4184,6 @@ fn os_vm_prove_accepts_matching_guest_proof() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_rejects_incomplete_guest_proof() {
@@ -4214,7 +4252,6 @@ fn os_vm_prove_rejects_incomplete_guest_proof() {
     );
 }
 
-
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_rejects_stale_guest_generation() {
@@ -4275,7 +4312,6 @@ fn os_vm_prove_rejects_stale_guest_generation() {
         "stderr: {stderr}"
     );
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
@@ -4502,29 +4538,23 @@ fn os_image_writes_jetos_installer_media_proof() {
             && limine.contains("jetos.disk=/dev/sda"),
         "limine: {limine}"
     );
-    let installed_limine =
-        fs::read_to_string(staging.join("boot/installed-limine.conf")).unwrap();
+    let installed_limine = fs::read_to_string(staging.join("boot/installed-limine.conf")).unwrap();
     assert!(
         installed_limine.contains("/jetos 26.10 (Apex) — halcyon verify"),
         "installed limine: {installed_limine}"
     );
-    let installer_os_release = fs::read_to_string(
-        staging.join("jetos/current-system/etc/os-release"),
-    )
-    .unwrap();
-    let installer_usr_os_release = fs::read_to_string(
-        staging.join("jetos/current-system/usr/lib/os-release"),
-    )
-    .unwrap();
+    let installer_os_release =
+        fs::read_to_string(staging.join("jetos/current-system/etc/os-release")).unwrap();
+    let installer_usr_os_release =
+        fs::read_to_string(staging.join("jetos/current-system/usr/lib/os-release")).unwrap();
     assert_eq!(installer_os_release, installer_usr_os_release);
     assert!(
         installer_os_release.contains("PRETTY_NAME=\"jetos 26.10 (Apex)\"")
             && installer_os_release.contains("VERSION_CODENAME=apex")
     );
-    let installer_wallpaper = fs::read_to_string(
-        staging.join("jetos/current-system/share/backgrounds/jetos/apex.svg"),
-    )
-    .unwrap();
+    let installer_wallpaper =
+        fs::read_to_string(staging.join("jetos/current-system/share/backgrounds/jetos/apex.svg"))
+            .unwrap();
     assert!(
         installer_wallpaper.contains("jetos 26.10 Apex")
             && installer_wallpaper.contains("linearGradient")
@@ -4578,7 +4608,6 @@ fn os_image_writes_jetos_installer_media_proof() {
         "installer media must not point back to the host root"
     );
 }
-
 
 #[test]
 #[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]

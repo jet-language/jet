@@ -14,11 +14,8 @@ mod uninit_semantics {
 }
 #[doc(hidden)]
 pub(crate) mod jet_mem {
-    pub(crate) use jet_foundation::MemSentry::{
-        jet_memory_ledger_record, MemoryLedgerWitness,
-    };
+    pub(crate) use jet_foundation::MemSentry::{jet_memory_ledger_record, MemoryLedgerWitness};
 }
-
 
 /// Compiler/runtime-only traced heap. Jet source reaches this through codegen.
 #[doc(hidden)]
@@ -141,11 +138,7 @@ impl JetArena {
     pub fn alloc_string_view(&mut self, owner: i64, start: usize, end: usize) -> Option<i64> {
         let (owner, base, len) = match self.values.get(owner as usize)? {
             JetVal::String(value) => (owner, 0, value.len()),
-            JetVal::StringView {
-                owner,
-                start,
-                end,
-            } => (*owner, *start, end.checked_sub(*start)?),
+            JetVal::StringView { owner, start, end } => (*owner, *start, end.checked_sub(*start)?),
             _ => return None,
         };
         if start > end || end > len {
@@ -346,7 +339,10 @@ impl JetArena {
             return None;
         }
         match self.values.get(map as usize) {
-            Some(JetVal::Map(entries)) => entries.values().nth(index as usize).map(|(_, value)| *value),
+            Some(JetVal::Map(entries)) => entries
+                .values()
+                .nth(index as usize)
+                .map(|(_, value)| *value),
             _ => None,
         }
     }
@@ -448,9 +444,7 @@ impl JetArena {
                 JetVal::IntList(values) => std::mem::take(values),
                 _ => unreachable!(),
             };
-            self.values[list as usize] = JetVal::List(
-                dense.into_iter().map(JetVal::Int).collect(),
-            );
+            self.values[list as usize] = JetVal::List(dense.into_iter().map(JetVal::Int).collect());
         }
         match self.values.get_mut(list as usize)? {
             JetVal::List(values) => Some(values),
@@ -472,8 +466,7 @@ impl JetArena {
                 values,
                 initialized,
             }) => {
-                let index =
-                    uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
+                let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
                 match values.get(index) {
                     Some(JetVal::Int(value)) => Some(*value),
                     _ => None,
@@ -538,8 +531,7 @@ impl JetArena {
                 values,
                 initialized,
             }) => {
-                let index =
-                    uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
+                let index = uninit_semantics::jet_uninit_read(initialized, index as usize).ok()?;
                 match values.get(index) {
                     Some(JetVal::Float(value)) => Some(*value),
                     _ => None,
@@ -834,10 +826,12 @@ impl JetArena {
             .map(|value| match value {
                 // A struct element is an arena record reached through its
                 // handle; `Record` in place is the same row already inline.
-                JetVal::Int(handle) | JetVal::RecordRef(handle) => match self.values.get(*handle as usize) {
-                    Some(JetVal::Record(fields)) => Some(fields.clone()),
-                    _ => None,
-                },
+                JetVal::Int(handle) | JetVal::RecordRef(handle) => {
+                    match self.values.get(*handle as usize) {
+                        Some(JetVal::Record(fields)) => Some(fields.clone()),
+                        _ => None,
+                    }
+                }
                 JetVal::Record(fields) => Some(fields.clone()),
                 _ => None,
             })
@@ -989,13 +983,15 @@ impl JetArena {
     }
 
     pub fn int_to_f64(&self, value: i64) -> f64 {
-        self.int_to_string(value).parse::<f64>().unwrap_or_else(|_| {
-            if self.int_is_negative(value) {
-                f64::NEG_INFINITY
-            } else {
-                f64::INFINITY
-            }
-        })
+        self.int_to_string(value)
+            .parse::<f64>()
+            .unwrap_or_else(|_| {
+                if self.int_is_negative(value) {
+                    f64::NEG_INFINITY
+                } else {
+                    f64::INFINITY
+                }
+            })
     }
 
     pub fn int_checked_widen(&self, value: i64, target_f32: bool) -> Option<f64> {
@@ -1209,8 +1205,7 @@ impl JetArena {
     pub fn int_binomial(&mut self, n: i64, k: i64) -> Option<i64> {
         let n = self.int_value(n);
         let k = self.int_value(k);
-        jet_foundation::Numeric::CtBigInt::binomial(&n, &k)
-            .map(|result| self.int_pack(result))
+        jet_foundation::Numeric::CtBigInt::binomial(&n, &k).map(|result| self.int_pack(result))
     }
 
     pub fn int_digits(&self, value: i64) -> i64 {

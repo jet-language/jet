@@ -5,8 +5,8 @@
 //! opened object and its identity in the returned snapshot, and checks the
 //! pathname again before a caller uses the snapshot.
 
-use crate::Package::PackageFacts;
 use crate::Diagnostics::Diagnostic;
+use crate::Package::PackageFacts;
 use crate::Syntax;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read};
@@ -163,8 +163,14 @@ pub enum AuthorityError {
     RetiredManifest(PathBuf),
     WorkspaceAmbiguous(Vec<PathBuf>),
     WorkspaceNoModule,
-    NestedMembers { root: PathBuf, member: PathBuf },
-    Invalid { path: PathBuf, detail: String },
+    NestedMembers {
+        root: PathBuf,
+        member: PathBuf,
+    },
+    Invalid {
+        path: PathBuf,
+        detail: String,
+    },
     Changed(PathBuf),
     Unsupported(String),
 }
@@ -324,12 +330,18 @@ impl std::fmt::Display for AuthorityError {
                 detail,
             } => write!(f, "couldn't {operation} `{}`: {detail}", path.display()),
             Self::Symlink(path) => write!(f, "authority path `{}` is a symlink", path.display()),
-            Self::WrongKind { path, expected, actual } => write!(
+            Self::WrongKind {
+                path,
+                expected,
+                actual,
+            } => write!(
                 f,
                 "authority path `{}` is a {actual}, expected a {expected}",
                 path.display()
             ),
-            Self::Escapes(path) => write!(f, "authority path `{}` escapes its root", path.display()),
+            Self::Escapes(path) => {
+                write!(f, "authority path `{}` escapes its root", path.display())
+            }
             Self::AmbiguousManifest(path) => write!(
                 f,
                 "both `{}` and `{}` exist in `{}`",
@@ -345,18 +357,26 @@ impl std::fmt::Display for AuthorityError {
                 "workspace authority is declared in {} files",
                 paths.len()
             ),
-            Self::WorkspaceNoModule => f.write_str("canonical workspace source has no workspace module"),
+            Self::WorkspaceNoModule => {
+                f.write_str("canonical workspace source has no workspace module")
+            }
             Self::NestedMembers { root, member } => write!(
                 f,
                 "Package root `{}` cannot contain member Package `{}` with its own members",
                 root.display(),
                 member.display()
             ),
-            Self::Invalid { path, detail } => write!(f, "invalid authority `{}`: {detail}", path.display()),
+            Self::Invalid { path, detail } => {
+                write!(f, "invalid authority `{}`: {detail}", path.display())
+            }
             Self::ManifestParse { path, error } => {
                 write!(f, "invalid manifest `{}`: {error}", path.display())
             }
-            Self::Changed(path) => write!(f, "authority object `{}` changed during resolution", path.display()),
+            Self::Changed(path) => write!(
+                f,
+                "authority object `{}` changed during resolution",
+                path.display()
+            ),
             Self::Unsupported(detail) => f.write_str(detail),
         }
     }
@@ -414,7 +434,8 @@ impl AuthorityResolver {
     pub fn open(root: &Path) -> Result<Self, AuthorityError> {
         let root = Self::effective_root(root);
         let metadata = Self::inspect_root(root)?;
-        let expected_root_identity = FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
+        let expected_root_identity =
+            FileIdentity::from_metadata(&metadata, AuthorityKind::Directory);
         let canonical = Self::canonicalize_root(root)?;
         let final_metadata = fs::symlink_metadata(root).map_err(|error| AuthorityError::Io {
             path: root.to_path_buf(),
@@ -430,9 +451,8 @@ impl AuthorityResolver {
         {
             return Err(AuthorityError::Changed(root.to_path_buf()));
         }
-        let handle = platform::open_root(&canonical).map_err(|error| {
-            Self::map_io(&canonical, error, true)
-        })?;
+        let handle = platform::open_root(&canonical)
+            .map_err(|error| Self::map_io(&canonical, error, true))?;
         let metadata = handle.metadata().map_err(|error| AuthorityError::Io {
             path: canonical.clone(),
             operation: "inspect",
@@ -461,7 +481,11 @@ impl AuthorityResolver {
     /// current directory; normalize once here so every authority entry point
     /// agrees.
     fn effective_root(root: &Path) -> &Path {
-        if root.as_os_str().is_empty() { Path::new(".") } else { root }
+        if root.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            root
+        }
     }
 
     fn inspect_root(root: &Path) -> Result<Metadata, AuthorityError> {
@@ -603,7 +627,9 @@ impl AuthorityResolver {
         let canonical = self.probe_file(&directory.join(Syntax::PACKAGE_FILE))?;
         let retired = self.probe_file(&directory.join(Syntax::PAYLOAD_FILE))?;
         if canonical.is_some() && retired.is_some() {
-            return Err(AuthorityError::AmbiguousManifest(self.root.join(&directory)));
+            return Err(AuthorityError::AmbiguousManifest(
+                self.root.join(&directory),
+            ));
         }
         let Some(file) = canonical else {
             if let Some(file) = retired {
@@ -676,15 +702,18 @@ impl AuthorityResolver {
     /// rejected, even when their target would otherwise be inside the root.
     pub fn discover_members(&self, path: &Path) -> Result<Vec<CheckedMember>, AuthorityError> {
         let scan = self.checked_directory(path)?;
-        let mut entries = fs::read_dir(&scan.path).map_err(|error| AuthorityError::Io {
-            path: scan.path.clone(),
-            operation: "read",
-            detail: error.to_string(),
-        })?.collect::<Result<Vec<_>, _>>().map_err(|error| AuthorityError::Io {
-            path: scan.path.clone(),
-            operation: "inspect",
-            detail: error.to_string(),
-        })?;
+        let mut entries = fs::read_dir(&scan.path)
+            .map_err(|error| AuthorityError::Io {
+                path: scan.path.clone(),
+                operation: "read",
+                detail: error.to_string(),
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| AuthorityError::Io {
+                path: scan.path.clone(),
+                operation: "inspect",
+                detail: error.to_string(),
+            })?;
         entries.sort_by_key(|entry| entry.file_name());
         let mut members = Vec::new();
         for entry in entries {
@@ -783,10 +812,7 @@ impl AuthorityResolver {
 
     /// Hash every checked `.jet` file below one checked directory using the
     /// same path/content shape as the package tree identity.
-    pub fn source_tree_hash(
-        &self,
-        directory: &CheckedDirectory,
-    ) -> Result<String, AuthorityError> {
+    pub fn source_tree_hash(&self, directory: &CheckedDirectory) -> Result<String, AuthorityError> {
         self.revalidate_directory(directory)?;
         let mut files = Vec::new();
         self.discover_source_files_from(&directory.relative, &mut files)?;
@@ -809,10 +835,7 @@ impl AuthorityResolver {
             self.revalidate_file(&file)?;
         }
         self.revalidate_directory(directory)?;
-        Ok(format!(
-            "sha256-{}",
-            crate::SHA256::sha256_hex(&input)
-        ))
+        Ok(format!("sha256-{}", crate::SHA256::sha256_hex(&input)))
     }
 
     /// Resolve workspace authority from checked top-level source snapshots.
@@ -839,13 +862,14 @@ impl AuthorityResolver {
                 }
             }
             Err(error)
-                if error.is_missing() || matches!(&error, AuthorityError::RetiredManifest(_)) =>
-            {}
+                if error.is_missing() || matches!(&error, AuthorityError::RetiredManifest(_)) => {}
             Err(error) => return Err(error),
         }
 
-        let mut entries = fs::read_dir(&self.root).map_err(|error| Self::map_io(&self.root, error, true))?
-            .collect::<Result<Vec<_>, _>>().map_err(|error| AuthorityError::Io {
+        let mut entries = fs::read_dir(&self.root)
+            .map_err(|error| Self::map_io(&self.root, error, true))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| AuthorityError::Io {
                 path: self.root.clone(),
                 operation: "inspect",
                 detail: error.to_string(),
@@ -857,7 +881,9 @@ impl AuthorityResolver {
         let mut malformed_canonical = false;
         for entry in entries {
             let name = entry.file_name();
-            if Path::new(&name).extension().and_then(|extension| extension.to_str())
+            if Path::new(&name)
+                .extension()
+                .and_then(|extension| extension.to_str())
                 != Some(crate::Syntax::FILE_EXT)
             {
                 continue;
@@ -914,15 +940,17 @@ impl AuthorityResolver {
     pub fn revalidate_file(&self, file: &CheckedFile) -> Result<(), AuthorityError> {
         self.validate_checked_path(&file.path, &file.relative)?;
         self.revalidate_root()?;
-        self.revalidate_handle(&file.path, AuthorityKind::File, &file.identity, &file.handle)?;
+        self.revalidate_handle(
+            &file.path,
+            AuthorityKind::File,
+            &file.identity,
+            &file.handle,
+        )?;
         Ok(())
     }
 
     /// Revalidate the root and one checked directory before using it.
-    pub fn revalidate_directory(
-        &self,
-        directory: &CheckedDirectory,
-    ) -> Result<(), AuthorityError> {
+    pub fn revalidate_directory(&self, directory: &CheckedDirectory) -> Result<(), AuthorityError> {
         self.validate_checked_path(&directory.path, &directory.relative)?;
         self.revalidate_root()?;
         self.revalidate_handle(
@@ -965,7 +993,9 @@ impl AuthorityResolver {
             return Err(AuthorityError::Escapes(directory.path.clone()));
         }
         let relative = match canonical.strip_prefix(&self.root) {
-            Ok(relative) => relative.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"),
+            Ok(relative) => relative
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/"),
             Err(_) => return Err(AuthorityError::Escapes(canonical)),
         };
         Ok(if relative.is_empty() {
@@ -1007,7 +1037,10 @@ impl AuthorityResolver {
             }
             let name_text = name.to_string_lossy();
             if name_text.starts_with('.')
-                || matches!(name_text.as_ref(), "target" | "build" | "node_modules" | "bin")
+                || matches!(
+                    name_text.as_ref(),
+                    "target" | "build" | "node_modules" | "bin"
+                )
             {
                 continue;
             }
@@ -1094,9 +1127,7 @@ impl AuthorityResolver {
                 actual: kind_name(&metadata),
             });
         };
-        if actual_kind != kind
-            || FileIdentity::from_metadata(&metadata, actual_kind) != *expected
-        {
+        if actual_kind != kind || FileIdentity::from_metadata(&metadata, actual_kind) != *expected {
             return Err(AuthorityError::Changed(path.to_path_buf()));
         }
         Ok(())
@@ -1126,15 +1157,19 @@ impl AuthorityResolver {
         }
         AuthorityError::Io {
             path: path.to_path_buf(),
-            operation: if directory { "open directory" } else { "open file" },
+            operation: if directory {
+                "open directory"
+            } else {
+                "open file"
+            },
             detail: error.to_string(),
         }
     }
 }
 
 fn has_authority_candidate(root: &Path) -> Result<bool, AuthorityError> {
-    let entries = fs::read_dir(root)
-        .map_err(|error| AuthorityResolver::map_io(root, error, true))?;
+    let entries =
+        fs::read_dir(root).map_err(|error| AuthorityResolver::map_io(root, error, true))?;
     for entry in entries {
         let entry = entry.map_err(|error| AuthorityError::Io {
             path: root.to_path_buf(),
@@ -1204,7 +1239,12 @@ fn kind_name_for(kind: AuthorityKind) -> &'static str {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
 mod platform {
     use super::*;
     use std::ffi::{c_char, CString};
@@ -1277,7 +1317,12 @@ mod platform {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios")))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
 mod platform {
     use super::*;
 
@@ -1323,10 +1368,7 @@ mod authority_walk_tests {
     use std::fs;
 
     fn temp_root(tag: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "jet-authority-walk-{tag}-{}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("jet-authority-walk-{tag}-{}", std::process::id()))
     }
 
     #[test]
@@ -1374,11 +1416,9 @@ mod authority_walk_tests {
         fs::write(root.join("workspace.jet"), "module workspace {}\n").unwrap();
         fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
 
-        assert!(
-            AuthorityResolver::open_for_authority_walk(&root)
-                .unwrap()
-                .is_none()
-        );
+        assert!(AuthorityResolver::open_for_authority_walk(&root)
+            .unwrap()
+            .is_none());
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir_all(root).unwrap();
     }

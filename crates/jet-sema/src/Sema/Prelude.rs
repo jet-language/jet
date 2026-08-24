@@ -1,10 +1,10 @@
 //! One compiler-owned opening of the readable Core prelude.
 
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
     ErrorConvDef, Expr, Func, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle, Stmt,
     TryConvert,
 };
-use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -144,9 +144,7 @@ pub(crate) fn inject(bundle: &mut ProgramBundle) {
                 Target::Core {
                     module: core_module,
                     ..
-                } if source_mentions_identifier(&module.source, entry.name) => {
-                    Some(core_module)
-                }
+                } if source_mentions_identifier(&module.source, entry.name) => Some(core_module),
                 _ => None,
             })
             .collect();

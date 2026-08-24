@@ -28,7 +28,9 @@ fn lsp_process_lock() -> &'static Mutex<()> {
 }
 
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn lock_lsp_process() -> MutexGuard<'static, ()> {
@@ -101,7 +103,10 @@ fn json_array<'a>(value: &'a JSONValue, context: &str) -> &'a [JSONValue] {
 }
 
 fn json_array_field<'a>(value: &'a JSONValue, key: &str) -> &'a [JSONValue] {
-    json_array(json_object_field(value, key), &format!("JSON field `{key}`"))
+    json_array(
+        json_object_field(value, key),
+        &format!("JSON field `{key}`"),
+    )
 }
 
 fn json_values_equal(left: &JSONValue, right: &JSONValue) -> bool {
@@ -272,10 +277,7 @@ const LSP_CAPABILITY_COVERAGE: &[(&str, &str)] = &[
         "executeCommandProvider",
         "lsp_execute_command_impact_returns_report",
     ),
-    (
-        "resources",
-        "lsp_mcp_environment_resources_are_read_only",
-    ),
+    ("resources", "lsp_mcp_environment_resources_are_read_only"),
 ];
 
 fn advertised_capabilities(init: &str) -> Vec<String> {
@@ -861,7 +863,10 @@ fn lsp_mcp_environment_resources_are_read_only() {
     assert!(read.contains("generated.txt"), "read: {read}");
     assert!(read.contains("HOME"), "read: {read}");
     assert!(read.contains("lint"), "read: {read}");
-    assert!(!read.contains("/test/home"), "resource leaked a variable value: {read}");
+    assert!(
+        !read.contains("/test/home"),
+        "resource leaked a variable value: {read}"
+    );
     let resource = parse_json(&read).expect("MCP resource response must be JSON");
     let contents = json_array_field(json_object_field(&resource, "result"), "contents");
     let resource_text = json_str(json_object_field(&contents[0], "text"))
@@ -888,13 +893,20 @@ fn lsp_mcp_environment_resources_are_read_only() {
         "resource discovery must not start services"
     );
 
-    fs::write(project.join("env.jet"), "module env.dev {\n    packages: [\n").unwrap();
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev {\n    packages: [\n",
+    )
+    .unwrap();
     send_msg(
         &mut stdin,
         r#"{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"jet://environment"}}"#,
     );
     let unavailable = read_msg(&mut stdout);
-    assert!(unavailable.contains("\"error\""), "unavailable: {unavailable}");
+    assert!(
+        unavailable.contains("\"error\""),
+        "unavailable: {unavailable}"
+    );
     assert!(unavailable.contains("-32002"), "unavailable: {unavailable}");
 
     send_msg(
@@ -1129,7 +1141,10 @@ fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
     );
     send_msg(
         &mut stdin,
-        &format!(r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, uri),
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            uri
+        ),
     );
     let first_diagnostics = read_msg(&mut stdout);
     assert!(
@@ -1137,15 +1152,24 @@ fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
         "diagnostics must identify the document revision: {first_diagnostics}"
     );
     let first = read_msg(&mut stdout);
-    assert!(first.contains("fn fresh"), "valid edit was not applied: {first}");
+    assert!(
+        first.contains("fn fresh"),
+        "valid edit was not applied: {first}"
+    );
 
     send_msg(
         &mut stdin,
-        &change(11, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":5,"text":"stale"}"#),
+        &change(
+            11,
+            r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":5,"text":"stale"}"#,
+        ),
     );
     send_msg(
         &mut stdin,
-        &format!(r#"{{"jsonrpc":"2.0","id":20,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, uri),
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":20,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            uri
+        ),
     );
     let stale_probe = read_msg(&mut stdout);
     assert!(
@@ -1156,16 +1180,43 @@ fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
     );
 
     for invalid in [
-        change(12, r#"{"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":5}},"rangeLength":1,"text":"X"}"#),
-        change(12, r#"{"range":{"start":{"line":1,"character":8},"end":{"line":1,"character":3}},"rangeLength":5,"text":"backward"}"#),
-        change(12, r#"{"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":0}},"rangeLength":0,"text":"outside"}"#),
+        change(
+            12,
+            r#"{"range":{"start":{"line":0,"character":4},"end":{"line":0,"character":5}},"rangeLength":1,"text":"X"}"#,
+        ),
+        change(
+            12,
+            r#"{"range":{"start":{"line":1,"character":8},"end":{"line":1,"character":3}},"rangeLength":5,"text":"backward"}"#,
+        ),
+        change(
+            12,
+            r#"{"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":0}},"rangeLength":0,"text":"outside"}"#,
+        ),
         change(12, "1"),
-        format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":12.5}},"contentChanges":[{{"text":"float"}}]}}}}"#, uri),
-        format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2147483648}},"contentChanges":[{{"text":"wide"}}]}}}}"#, uri),
-        change(12, r#"{"range":{"start":{"line":1,"character":2147483648},"end":{"line":1,"character":2147483648}},"rangeLength":0,"text":"wide_position"}"#),
-        change(12, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":2147483648,"text":"wide_length"}"#),
-        change(12, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":"5","text":"bad_type"}"#),
-        change(12, r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":4,"text":"bad_length"}"#),
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":12.5}},"contentChanges":[{{"text":"float"}}]}}}}"#,
+            uri
+        ),
+        format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didChange","params":{{"textDocument":{{"uri":"{}","version":2147483648}},"contentChanges":[{{"text":"wide"}}]}}}}"#,
+            uri
+        ),
+        change(
+            12,
+            r#"{"range":{"start":{"line":1,"character":2147483648},"end":{"line":1,"character":2147483648}},"rangeLength":0,"text":"wide_position"}"#,
+        ),
+        change(
+            12,
+            r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":2147483648,"text":"wide_length"}"#,
+        ),
+        change(
+            12,
+            r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":"5","text":"bad_type"}"#,
+        ),
+        change(
+            12,
+            r#"{"range":{"start":{"line":1,"character":3},"end":{"line":1,"character":8}},"rangeLength":4,"text":"bad_length"}"#,
+        ),
     ] {
         send_msg(&mut stdin, &invalid);
     }
@@ -1178,7 +1229,10 @@ fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
     );
     send_msg(
         &mut stdin,
-        &format!(r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#, uri),
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}}}}}}"#,
+            uri
+        ),
     );
     let final_diagnostics = read_msg(&mut stdout);
     assert!(
@@ -1202,7 +1256,10 @@ fn lsp_incremental_sync_rejects_stale_and_malformed_edits() {
         "bad_type",
         "bad_length",
     ] {
-        assert!(!final_text.contains(rejected), "rejected edit leaked into document: {final_text}");
+        assert!(
+            !final_text.contains(rejected),
+            "rejected edit leaked into document: {final_text}"
+        );
     }
 
     send_msg(
@@ -1264,7 +1321,10 @@ fn lsp_workspace_symbols_follow_all_roots_and_folder_changes() {
         r#"{"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":""}}"#,
     );
     let before = read_msg(&mut stdout);
-    assert!(before.contains("ClosedFirst") && before.contains("OpenSecond"), "all initial roots and overlays must be indexed: {before}");
+    assert!(
+        before.contains("ClosedFirst") && before.contains("OpenSecond"),
+        "all initial roots and overlays must be indexed: {before}"
+    );
     assert!(!before.contains("DiskSecond") && !before.contains("AddedThird"), "closed disk text must not replace an overlay and unconfigured roots must stay out: {before}");
 
     send_msg(
@@ -1279,8 +1339,14 @@ fn lsp_workspace_symbols_follow_all_roots_and_folder_changes() {
         r#"{"jsonrpc":"2.0","id":3,"method":"workspace/symbol","params":{"query":""}}"#,
     );
     let after = read_msg(&mut stdout);
-    assert!(after.contains("OpenSecond") && after.contains("AddedThird"), "kept and added roots must be indexed: {after}");
-    assert!(!after.contains("ClosedFirst"), "removed closed root remained indexed: {after}");
+    assert!(
+        after.contains("OpenSecond") && after.contains("AddedThird"),
+        "kept and added roots must be indexed: {after}"
+    );
+    assert!(
+        !after.contains("ClosedFirst"),
+        "removed closed root remained indexed: {after}"
+    );
 
     send_msg(
         &mut stdin,
@@ -1294,8 +1360,14 @@ fn lsp_workspace_symbols_follow_all_roots_and_folder_changes() {
         r#"{"jsonrpc":"2.0","id":4,"method":"workspace/symbol","params":{"query":""}}"#,
     );
     let removed_open = read_msg(&mut stdout);
-    assert!(removed_open.contains("AddedThird"), "remaining root disappeared: {removed_open}");
-    assert!(!removed_open.contains("OpenSecond"), "open overlay from removed root remained indexed: {removed_open}");
+    assert!(
+        removed_open.contains("AddedThird"),
+        "remaining root disappeared: {removed_open}"
+    );
+    assert!(
+        !removed_open.contains("OpenSecond"),
+        "open overlay from removed root remained indexed: {removed_open}"
+    );
 
     send_msg(
         &mut stdin,
@@ -1309,7 +1381,10 @@ fn lsp_workspace_symbols_follow_all_roots_and_folder_changes() {
         r#"{"jsonrpc":"2.0","id":5,"method":"workspace/symbol","params":{"query":""}}"#,
     );
     let empty_workspace = read_msg(&mut stdout);
-    assert!(empty_workspace.contains(r#""result":[]"#), "removing the final workspace root must not expose open overlays: {empty_workspace}");
+    assert!(
+        empty_workspace.contains(r#""result":[]"#),
+        "removing the final workspace root must not expose open overlays: {empty_workspace}"
+    );
 
     send_msg(
         &mut stdin,
@@ -1392,7 +1467,11 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         ("interpreter", interpreter.as_slice()),
     ];
     for (tier, diags) in tiers.iter().copied() {
-        assert_eq!(diags.len(), 1, "{tier} must produce one canonical diagnostic");
+        assert_eq!(
+            diags.len(),
+            1,
+            "{tier} must produce one canonical diagnostic"
+        );
         assert_eq!(diags[0].code, "E0311", "{tier} diagnostic code drifted");
     }
     let report_path = jet::Diagnostics::ReportPath::from_path(&path);
@@ -1429,7 +1508,11 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     let notification = parse_json(&diagnostics).expect("parse publishDiagnostics notification");
     let editor_params = json_object_field(&notification, "params");
     let editor_diagnostics = json_array_field(editor_params, "diagnostics");
-    assert_eq!(editor_diagnostics.len(), 1, "editor must receive one canonical diagnostic");
+    assert_eq!(
+        editor_diagnostics.len(),
+        1,
+        "editor must receive one canonical diagnostic"
+    );
     let editor_diagnostic = &editor_diagnostics[0];
     let editor_report = json_object_field(editor_diagnostic, "data");
     assert!(
@@ -1470,10 +1553,22 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         diagnostics.contains(r#""fix":"did you mean `get`?""#),
         "{diagnostics}"
     );
-    assert!(diagnostics.contains(r#""applicability":"suggested""#), "{diagnostics}");
-    assert!(diagnostics.contains(r##""new_text":"get""##), "{diagnostics}");
-    assert!(diagnostics.contains(r#""moment":"compile""#), "{diagnostics}");
-    assert!(diagnostics.contains(r#""severity":"error""#), "{diagnostics}");
+    assert!(
+        diagnostics.contains(r#""applicability":"suggested""#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r##""new_text":"get""##),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""moment":"compile""#),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains(r#""severity":"error""#),
+        "{diagnostics}"
+    );
     assert!(diagnostics.contains(r#""code":"E0311""#), "{diagnostics}");
     assert!(
         diagnostics.contains(
@@ -1481,7 +1576,10 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         ),
         "{diagnostics}"
     );
-    assert!(diagnostics.contains(r#""cause":[],"clears":0"#), "{diagnostics}");
+    assert!(
+        diagnostics.contains(r#""cause":[],"clears":0"#),
+        "{diagnostics}"
+    );
 
     send_msg(
         &mut stdin,
@@ -1498,7 +1596,10 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     );
     assert!(actions.contains(r##""newText":"get""##), "{actions}");
     let actions_value = parse_json(&actions).expect("parse code-action response");
-    let actions = json_array(json_object_field(&actions_value, "result"), "code-action result");
+    let actions = json_array(
+        json_object_field(&actions_value, "result"),
+        "code-action result",
+    );
     let quickfix = actions
         .iter()
         .find(|action| json_str(json_object_field(action, "kind")) == Some("quickfix"))
@@ -1509,18 +1610,27 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
     );
     let action_edits = json_array(
         json_object_field(
-            document_changes.first().expect("code-action document change"),
+            document_changes
+                .first()
+                .expect("code-action document change"),
             "edits",
         ),
         "code-action edits",
     );
     let report_edits = json_array_field(editor_report, "fix_edits");
-    assert_eq!(report_edits.len(), 1, "canonical report must carry one recovery edit");
-    assert_eq!(action_edits.len(), 1, "canonical code action must carry one recovery edit");
-    let expected_action_range = parse_json(
-        r#"{"start":{"line":2,"character":11},"end":{"line":2,"character":15}}"#,
-    )
-    .expect("parse expected suggested-edit range");
+    assert_eq!(
+        report_edits.len(),
+        1,
+        "canonical report must carry one recovery edit"
+    );
+    assert_eq!(
+        action_edits.len(),
+        1,
+        "canonical code action must carry one recovery edit"
+    );
+    let expected_action_range =
+        parse_json(r#"{"start":{"line":2,"character":11},"end":{"line":2,"character":15}}"#)
+            .expect("parse expected suggested-edit range");
     assert_json_values_equal(
         "code action range drifted from source span",
         json_object_field(&action_edits[0], "range"),
@@ -1603,7 +1713,8 @@ fn lsp_execute_command_impact_returns_report() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
+    let source =
+        "fn add(a: Int, b: Int) Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
     let uri = "file:///tmp/lsp_execute_impact_test.jet";
 
     run_transcript(
@@ -1645,12 +1756,18 @@ fn lsp_execute_command_impact_returns_report() {
 #[test]
 fn lsp_budget_reports_projects_canonical_report_without_measuring() {
     let jet = jet_bin();
-    if !jet.exists() { return; }
+    if !jet.exists() {
+        return;
+    }
     let _guard = lock_lsp_process();
     let root = std::env::temp_dir().join(format!("lsp_budget_projection_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap();
-    std::fs::write(root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
     let source = r#"module perf.package {
     budgets: [Budget{ name: "api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(10) }]
 }
@@ -1661,25 +1778,88 @@ fn run() {}
     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
     let path = root.join("src/run.jet");
     std::fs::write(&path, source).unwrap();
-    let measured = Command::new(&jet).args(["budget", "check", "--json"]).current_dir(&root).output().unwrap();
-    assert_eq!(measured.status.code(), Some(0), "{}", String::from_utf8_lossy(&measured.stderr));
+    let measured = Command::new(&jet)
+        .args(["budget", "check", "--json"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert_eq!(
+        measured.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&measured.stderr)
+    );
     let reports = root.join(".jet/perf/reports");
-    let before = std::fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),std::fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
+    let before = std::fs::read_dir(&reports)
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            (
+                path.clone(),
+                std::fs::metadata(&path).unwrap().modified().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
 
     let uri = format!("file://{}", path.display());
-    let mut child = Command::new(&jet).args(["self", "lsp"]).current_dir(&root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
-    let mut stdin = child.stdin.take().unwrap();let mut stdout = child.stdout.take().unwrap();
-    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#);
+    let mut child = Command::new(&jet)
+        .args(["self", "lsp"])
+        .current_dir(&root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#,
+    );
     assert!(read_msg(&mut stdout).contains("jet.budgetReports"));
-    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#);
-    send_msg(&mut stdin, &format!(r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,uri,json_string(source)));
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+    );
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":"{}","languageId":"jet","version":1,"text":{}}}}}}}"#,
+            uri,
+            json_string(source)
+        ),
+    );
     assert!(read_msg(&mut stdout).contains("publishDiagnostics"));
-    send_msg(&mut stdin, &format!(r#"{{"jsonrpc":"2.0","id":2,"method":"workspace/executeCommand","params":{{"command":"jet.budgetReports","arguments":["{}"]}}}}"#,uri));
+    send_msg(
+        &mut stdin,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"workspace/executeCommand","params":{{"command":"jet.budgetReports","arguments":["{}"]}}}}"#,
+            uri
+        ),
+    );
     let response = read_msg(&mut stdout);
     assert!(response.contains("\"mode\":\"read_only\""), "{response}");
-    assert!(response.contains("\"budget_id\":\"package:api\""), "{response}");
-    send_msg(&mut stdin, r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#);let _=read_msg(&mut stdout);drop(stdin);let _=child.wait();
-    let after = std::fs::read_dir(&reports).unwrap().map(|entry| { let path=entry.unwrap().path();(path.clone(),std::fs::metadata(&path).unwrap().modified().unwrap()) }).collect::<Vec<_>>();
+    assert!(
+        response.contains("\"budget_id\":\"package:api\""),
+        "{response}"
+    );
+    send_msg(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#,
+    );
+    let _ = read_msg(&mut stdout);
+    drop(stdin);
+    let _ = child.wait();
+    let after = std::fs::read_dir(&reports)
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            (
+                path.clone(),
+                std::fs::metadata(&path).unwrap().modified().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(before, after, "LSP projection must not rewrite reports");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1831,8 +2011,7 @@ fn lsp_completion_returns_items() {
                     "items".to_string(),
                     "greet".to_string(),
                     "connect".to_string(),
-                    "fn connect(host: String, /, *, timeout seconds: Int) String -[]>"
-                        .to_string(),
+                    "fn connect(host: String, /, *, timeout seconds: Int) String -[]>".to_string(),
                 ]),
             },
             TranscriptStep::Send {
@@ -1847,21 +2026,36 @@ fn lsp_completion_returns_items() {
 fn lsp_builtin_member_completion_uses_shared_semantic_symbol_docs() {
     let src = "fn run() {\n    items :: [1, 2, 3]\n    items.f\n}\n";
     let uri = "file:///tmp/lsp_shared_symbols.jet";
-    run_transcript(src, &[
-        TranscriptStep::Send {
-            msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#.to_string(),
-            expect_contains: Some(vec!["completionProvider".to_string()]),
-        },
-        TranscriptStep::Open { uri: uri.to_string(), expect_notification: true },
-        TranscriptStep::Send {
-            msg: format!(r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":2,"character":11}}}}}}"#, uri),
-            expect_contains: Some(vec!["\"label\":\"filter\"".to_string(), "Keeps items where f(item) is true.".to_string(), "core.collections".to_string()]),
-        },
-        TranscriptStep::Send {
-            msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
-            expect_contains: Some(vec!["result".to_string()]),
-        },
-    ]);
+    run_transcript(
+        src,
+        &[
+            TranscriptStep::Send {
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
+                expect_contains: Some(vec!["completionProvider".to_string()]),
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":2,"character":11}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec![
+                    "\"label\":\"filter\"".to_string(),
+                    "Keeps items where f(item) is true.".to_string(),
+                    "core.collections".to_string(),
+                ]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
 }
 
 #[test]
@@ -2154,7 +2348,9 @@ fn lsp_signature_help_returns_active_parameter() {
     }
     let source = "fn connect(host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) String {\n    return host;\n}\nfn run() {\n    r :: connect(\"db\", tls: true, timeout: 5)\n}\n";
     let uri = "file:///tmp/lsp_signature_help_test.jet";
-    let call_start = source.find("connect(\"db\", tls: true, timeout: 5)").unwrap();
+    let call_start = source
+        .find("connect(\"db\", tls: true, timeout: 5)")
+        .unwrap();
     let tls_end = call_start + "connect(\"db\", tls: true".len();
     let timeout_end = call_start + "connect(\"db\", tls: true, timeout: 5".len();
     let tls_position = jet::LSP::byte_offset_to_lsp(source, tls_end);
@@ -2602,7 +2798,8 @@ fn lsp_hover_returns_signature() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
+    let source =
+        "fn add(a: Int, b: Int) Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
     let uri = "file:///tmp/lsp_hover_test.jet";
 
     run_transcript(
@@ -2645,8 +2842,9 @@ fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-                    .to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["hoverProvider".to_string()]),
             },
             TranscriptStep::Open {
@@ -2689,8 +2887,9 @@ fn lsp_accepts_hidden_generic_constructor_arguments() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-                    .to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["hoverProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -2725,8 +2924,9 @@ fn lsp_hover_preserves_via_effect_row() {
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-                    .to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["hoverProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -2854,14 +3054,18 @@ fn lsp_definition_uses_build_graph_generated_source() {
 }
 fn run() { print(generated_value()) }
 "#;
-    let uri = format!("file:///tmp/lsp_generated_def_{}/main.jet", std::process::id());
+    let uri = format!(
+        "file:///tmp/lsp_generated_def_{}/main.jet",
+        std::process::id()
+    );
 
     run_transcript(
         source,
         &[
             TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-                    .to_string(),
+                msg:
+                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                        .to_string(),
                 expect_contains: Some(vec!["definitionProvider".to_string()]),
             },
             TranscriptStep::Send {
@@ -3679,9 +3883,24 @@ fn c44_prelude_idents_canonical() {
     assert_eq!(
         names,
         [
-            "print", "input", "panic", "assert", "assert_eq", "eprint", "Clock",
-            "Instant", "Date", "Duration", "Path", "read_file", "write_file", "file_exists",
-            "embed_file", "embed_bytes", "find", "fetch",
+            "print",
+            "input",
+            "panic",
+            "assert",
+            "assert_eq",
+            "eprint",
+            "Clock",
+            "Instant",
+            "Date",
+            "Duration",
+            "Path",
+            "read_file",
+            "write_file",
+            "file_exists",
+            "embed_file",
+            "embed_bytes",
+            "find",
+            "fetch",
         ]
     );
     for name in ["print", "input", "panic"] {
@@ -3706,15 +3925,30 @@ fn lsp_bench_reports_deterministic_cache_and_memory() {
     let src = include_str!("../examples/features/collections/wordcount.jet");
     let report = jet::LSP::measure_bench(src, 10);
     assert_eq!(report.hits, 1, "unchanged warm request must hit once");
-    assert_eq!(report.recomputes, 11, "cold check plus ten changed revisions");
-    assert_eq!(report.live_inputs, 2, "source and external-closure fingerprints");
+    assert_eq!(
+        report.recomputes, 11,
+        "cold check plus ten changed revisions"
+    );
+    assert_eq!(
+        report.live_inputs, 2,
+        "source and external-closure fingerprints"
+    );
     assert_eq!(
         report.live_input_bytes,
         src.len() + "\n// lsp-bench-edit:1\n".len() + 16
     );
-    assert_eq!(report.live_memos, 1, "only current checked revision stays live");
-    assert_eq!(report.item_hits, 10, "comment edits must reuse the checked item");
-    assert_eq!(report.item_recomputes, 1, "only the cold item check may recompute");
+    assert_eq!(
+        report.live_memos, 1,
+        "only current checked revision stays live"
+    );
+    assert_eq!(
+        report.item_hits, 10,
+        "comment edits must reuse the checked item"
+    );
+    assert_eq!(
+        report.item_recomputes, 1,
+        "only the cold item check may recompute"
+    );
     assert!(report.live_items > 0);
     assert!(
         report.live_item_bytes >= src.len(),

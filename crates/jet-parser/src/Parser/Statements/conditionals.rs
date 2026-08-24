@@ -299,7 +299,8 @@ impl<'a> Parser<'a> {
                 TokKind::Eof => {
                     return Err(Diagnostic::error(
                         "E0003",
-                        "expected `}` to close this guard table, found the end of the file".to_string(),
+                        "expected `}` to close this guard table, found the end of the file"
+                            .to_string(),
                         "every `{` needs a matching `}`".to_string(),
                         "add a closing `}`".to_string(),
                         Some(self.peek().span),
@@ -320,7 +321,10 @@ impl<'a> Parser<'a> {
                     let cond = self.subjectless_arm_head()?;
                     self.expect_unified_arrow("after a guard condition")?;
                     let body = self.guard_arm_body()?;
-                    let end = body.last().map(Stmt::span).map_or(cond.span().end, |s| s.end);
+                    let end = body
+                        .last()
+                        .map(Stmt::span)
+                        .map_or(cond.span().end, |s| s.end);
                     arms.push(SwitchArm {
                         cond,
                         body,
@@ -342,19 +346,13 @@ impl<'a> Parser<'a> {
     /// source expression in the existing one-field tuple carrier; sema and
     /// TIR recognize this exact parser-created shape.
     fn subjectless_arm_head(&mut self) -> Result<Expr, Diagnostic> {
-        if let (TokKind::Ident(binding), TokKind::Comma) =
-            (&self.peek().kind, &self.peek2().kind)
-        {
+        if let (TokKind::Ident(binding), TokKind::Comma) = (&self.peek().kind, &self.peek2().kind) {
             let binding = binding.clone();
             let start = self.bump().span;
             self.bump();
             let source = self.expr_no_struct_lit()?;
             let span = Span::new(start.start, source.span().end);
-            return Ok(Expr::TupleLit(
-                vec![(binding, source)],
-                span,
-                None,
-            ));
+            return Ok(Expr::TupleLit(vec![(binding, source)], span, None));
         }
         if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::READINESS_AFTER) {
             let start = self.bump().span;
@@ -439,8 +437,7 @@ impl<'a> Parser<'a> {
         }
         let save = self.pos;
         let saved_diags = self.diags.len();
-        let is_arm = matches!(self.expr_no_struct_lit(), Ok(_))
-            && self.at_unified_arrow();
+        let is_arm = matches!(self.expr_no_struct_lit(), Ok(_)) && self.at_unified_arrow();
         self.pos = save;
         self.diags.truncate(saved_diags);
         is_arm
@@ -582,8 +579,7 @@ impl<'a> Parser<'a> {
             let pat_span = Span::new(range_start.start, range_end.end);
             // C25/E0319: `step` after a range arm is a loop modifier, not an arm construct.
             // Push the error and skip `step N` so the arm can still be parsed.
-            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::RETIRED_LOOP_STEP)
-            {
+            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::RETIRED_LOOP_STEP) {
                 self.diags.push(Diagnostic::error(
                     "E0319",
                     "`step` is not allowed in a range arm — range arms test a band, not a sequence".to_string(),
@@ -663,10 +659,7 @@ impl<'a> Parser<'a> {
                 if op != BinOp::Eq {
                     self.diags.push(Diagnostic::error(
                         "E0366",
-                        format!(
-                            "pattern arms need `==` — this table uses `{}`",
-                            op.spell()
-                        ),
+                        format!("pattern arms need `==` — this table uses `{}`", op.spell()),
                         "structural patterns compare by shape under `if subject == { … }` only"
                             .to_string(),
                         format!(
@@ -686,10 +679,7 @@ impl<'a> Parser<'a> {
                 if op != BinOp::Eq {
                     self.diags.push(Diagnostic::error(
                         "E0366",
-                        format!(
-                            "pattern arms need `==` — this table uses `{}`",
-                            op.spell()
-                        ),
+                        format!("pattern arms need `==` — this table uses `{}`", op.spell()),
                         "structural patterns compare by shape under `if subject == { … }` only"
                             .to_string(),
                         format!(
@@ -882,7 +872,7 @@ impl<'a> Parser<'a> {
             )
         {
             self.bump(); // consume `|`
-            // Values in a `|` union always distribute.
+                         // Values in a `|` union always distribute.
             alts.push(self.parse_arm_atom_cond(subject, op, false)?);
             group_end = self.toks[self.pos.saturating_sub(1)].span.end;
         }
@@ -918,7 +908,12 @@ impl<'a> Parser<'a> {
             return Ok(inner);
         }
         let raw = self.expr_cmp(false)?;
-        Ok(Self::arm_atom_to_cond(subject.clone(), raw, op, prefer_predicate))
+        Ok(Self::arm_atom_to_cond(
+            subject.clone(),
+            raw,
+            op,
+            prefer_predicate,
+        ))
     }
 
     /// Wrap a single value as a condition. Comparisons / PatternTest / Bool are
@@ -1072,7 +1067,7 @@ impl<'a> Parser<'a> {
             ));
         }
         self.bump(); // `else`
-        // `else if …` nests directly; a final selected value uses `else ->`.
+                     // `else if …` nests directly; a final selected value uses `else ->`.
         let chained = matches!(self.peek().kind, TokKind::KwIf);
         let (else_body, else_value) = if chained {
             (Vec::new(), self.parse_if_expr_inner(false)?)
@@ -1081,9 +1076,7 @@ impl<'a> Parser<'a> {
             self.parse_selected_value()?
         };
         let span = Span::new(start.start, else_value.span().end);
-        if lint_style
-            && (chained || self.span_has_authored_line_break(branch_start, self.pos))
-        {
+        if lint_style && (chained || self.span_has_authored_line_break(branch_start, self.pos)) {
             self.prefer_arm_table_lint(start);
         }
         Ok(Expr::If {
@@ -1223,7 +1216,8 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         "a guard table used as a value needs a final `else` arm".to_string(),
-                        "arbitrary Boolean guards cannot prove that one arm always matches".to_string(),
+                        "arbitrary Boolean guards cannot prove that one arm always matches"
+                            .to_string(),
                         "add `else -> value` so every path produces a value".to_string(),
                         Some(close),
                     ));
@@ -1436,9 +1430,12 @@ impl<'a> Parser<'a> {
                     // D-PATR: detect `Int .. Int ->` as a range-pattern arm head.
                     // C25: also detect `Int ..= Int ->` (E0318) and `Int .. Int step N ->` (E0319).
                     let cond = if matches!(&self.peek().kind, TokKind::Dot)
-                        && self.toks.get(self.pos + 1)
+                        && self
+                            .toks
+                            .get(self.pos + 1)
                             .and_then(|token| leading_dot_variant(&token.kind))
-                            .is_some() {
+                            .is_some()
+                    {
                         let dot_span = self.bump().span; // consume `.`
                         let variant_token = self.bump();
                         let variant = leading_dot_variant(&variant_token.kind)
@@ -1453,12 +1450,15 @@ impl<'a> Parser<'a> {
                                     {
                                         self.bump();
                                         crate::AST::PatSlot::Wildcard
-                                    } else if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
+                                    } else if let TokKind::Int(lo_val, _) =
+                                        &self.peek().kind.clone()
+                                    {
                                         let lo = *lo_val;
                                         self.bump();
                                         if matches!(self.peek().kind, TokKind::DotDot) {
                                             self.bump();
-                                            if let TokKind::Int(hi_val, _) = &self.peek().kind.clone()
+                                            if let TokKind::Int(hi_val, _) =
+                                                &self.peek().kind.clone()
                                             {
                                                 let hi = *hi_val;
                                                 self.bump();
@@ -1537,5 +1537,4 @@ impl<'a> Parser<'a> {
             span,
         })
     }
-
 }

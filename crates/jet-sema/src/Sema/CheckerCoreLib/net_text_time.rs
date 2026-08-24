@@ -1,10 +1,10 @@
-use crate::AST::{AccessConvention, CallArg, ParamZone, Type};
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Checker;
-use crate::Sema::Effects::Effect;
 use super::alloc_ptrs::result_ty;
 use super::core_types::{u8_ty, unit_ty};
 use super::serde_diags::wrong_core_arity;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Effects::Effect;
+use crate::AST::{AccessConvention, CallArg, ParamZone, Type};
 
 impl<'a> Checker<'a> {
     /// D-BROWSER-AUTO1=A: one argument checker for every Browser handle method.
@@ -20,23 +20,40 @@ impl<'a> Checker<'a> {
         let expected = match (type_name, method) {
             ("Browser", "abilities" | "context" | "close" | "trace" | "privacy" | "receipt")
             | ("BrowserContext", "page" | "tab" | "close" | "isolated" | "user_hash")
-            | ("BrowserPage", "close" | "main_frame" | "frames" | "screenshot" | "pdf"
-                | "clear_cookies")
+            | (
+                "BrowserPage",
+                "close" | "main_frame" | "frames" | "screenshot" | "pdf" | "clear_cookies",
+            )
             | ("BrowserFrame", "close")
             | ("BrowserLocator", "click" | "hover")
             | ("BrowserIntercept", "remove")
-            | ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
-                | "is_blocked" | "status_code" | "download_id" | "suggested_filename_hash")
+            | (
+                "BrowserEvent",
+                "kind"
+                | "request_id"
+                | "request_method"
+                | "url_hash"
+                | "is_blocked"
+                | "status_code"
+                | "download_id"
+                | "suggested_filename_hash",
+            )
             | ("BrowserAbilities", "bidi" | "cdp" | "profile")
             | ("BrowserTrace", "entry_count" | "redacted" | "summary")
             | ("BrowserReceipt", "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")
             | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
             ("BrowserLocked", "verify") => Vec::new(),
-            ("Browser", "subscribe" | "protocol" | "add_intercept" | "continue_request"
-                | "fail_request" | "allow_downloads")
-            | ("BrowserPage", "goto" | "get_by_text" | "get_by_label" | "get_by_placeholder"
-                | "get_by_test_id" | "get_by_css" | "cookie" | "storage_clear")
+            (
+                "Browser",
+                "subscribe" | "protocol" | "add_intercept" | "continue_request" | "fail_request"
+                | "allow_downloads",
+            )
+            | (
+                "BrowserPage",
+                "goto" | "get_by_text" | "get_by_label" | "get_by_placeholder" | "get_by_test_id"
+                | "get_by_css" | "cookie" | "storage_clear",
+            )
             | ("BrowserLocator", "fill" | "press" | "set_files") => {
                 vec![Type::String]
             }
@@ -58,17 +75,40 @@ impl<'a> Checker<'a> {
         };
         if matches!(
             (type_name, method),
-            ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol"
-                | "add_intercept" | "add_intercept_url" | "continue_request" | "fail_request"
-                | "fulfill_request" | "allow_downloads")
-                | ("BrowserContext", "page" | "tab" | "close")
-                | ("BrowserPage", "goto" | "close" | "frames" | "screenshot" | "pdf"
-                    | "set_cookie" | "cookie" | "clear_cookies" | "storage_get" | "storage_set"
-                    | "storage_clear")
+            (
+                "Browser",
+                "context"
+                    | "subscribe"
+                    | "close"
+                    | "next_event"
+                    | "protocol"
+                    | "add_intercept"
+                    | "add_intercept_url"
+                    | "continue_request"
+                    | "fail_request"
+                    | "fulfill_request"
+                    | "allow_downloads"
+            ) | ("BrowserContext", "page" | "tab" | "close")
+                | (
+                    "BrowserPage",
+                    "goto"
+                        | "close"
+                        | "frames"
+                        | "screenshot"
+                        | "pdf"
+                        | "set_cookie"
+                        | "cookie"
+                        | "clear_cookies"
+                        | "storage_get"
+                        | "storage_set"
+                        | "storage_clear"
+                )
                 | ("BrowserFrame", "close")
                 | ("BrowserIntercept", "remove")
-                | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press"
-                    | "set_files")
+                | (
+                    "BrowserLocator",
+                    "wait" | "wait_gone" | "click" | "hover" | "fill" | "press" | "set_files"
+                )
                 | ("BrowserProtocol", "send")
         ) {
             self.record_effect(Effect::Net.name(), span);
@@ -78,12 +118,8 @@ impl<'a> Checker<'a> {
         }
 
         if args.len() != expected.len() {
-            self.diags.push(wrong_core_arity(
-                method,
-                expected.len(),
-                args.len(),
-                span,
-            ));
+            self.diags
+                .push(wrong_core_arity(method, expected.len(), args.len(), span));
         }
         for (index, arg) in args.iter_mut().enumerate() {
             if let Some(param_ty) = expected.get(index) {
@@ -112,9 +148,13 @@ pub fn net_method_return(
         // D-HTTP-CORE2=A: one request/response model for both HTTP roles.
         ("HTTPResponse", "status") => Some(Some(Type::Int)),
         ("HTTPResponse", "body") => Some(Some(Type::Named("HTTPBody".to_string()))),
-        ("HTTPResponse", "header") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        ("HTTPResponse", "header") if n_args == 1 => {
+            Some(Some(Type::Option(Box::new(str_ty.clone()))))
+        }
         ("HTTPResponse", "cookies") => Some(Some(Type::List(Box::new(Type::String)))),
-        ("HTTPResponse", "header") if n_args == 2 => Some(Some(Type::Named("HTTPResponse".to_string()))),
+        ("HTTPResponse", "header") if n_args == 2 => {
+            Some(Some(Type::Named("HTTPResponse".to_string())))
+        }
         ("HTTPResponse", "trailers") if n_args == 1 => Some(Some(Type::Result {
             ok: Box::new(Type::Named("HTTPResponse".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
@@ -125,12 +165,15 @@ pub fn net_method_return(
             ok: Box::new(Type::Named("HTTPHeaders".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
-        ("HTTPRequest", "header") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
-        ("HTTPRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
-            | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
-            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text") => {
-                Some(Some(Type::Named("HTTPRequest".to_string())))
-            }
+        ("HTTPRequest", "header") if n_args == 1 => {
+            Some(Some(Type::Option(Box::new(str_ty.clone()))))
+        }
+        (
+            "HTTPRequest",
+            "header" | "body" | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
+            | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout" | "redirects"
+            | "proxy" | "cookie" | "form" | "multipart_text",
+        ) => Some(Some(Type::Named("HTTPRequest".to_string()))),
         ("HTTPRequest", "send") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("HTTPResponse".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
@@ -175,9 +218,7 @@ pub fn net_method_return(
             err: Box::new(Type::Named("WsError".to_string())),
         })),
         // D-BROWSER-AUTO1=A: native BiDi handles.
-        ("Browser", "abilities") => {
-            Some(Some(Type::Named("BrowserAbilities".to_string())))
-        }
+        ("Browser", "abilities") => Some(Some(Type::Named("BrowserAbilities".to_string()))),
         ("Browser", "context") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserContext".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -198,26 +239,20 @@ pub fn net_method_return(
             ok: Box::new(Type::Named("BrowserIntercept".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("Browser", "continue_request" | "fail_request" | "fulfill_request"
-            | "allow_downloads") => {
-            Some(Some(Type::Result {
-                ok: Box::new(unit.clone()),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            }))
-        }
+        (
+            "Browser",
+            "continue_request" | "fail_request" | "fulfill_request" | "allow_downloads",
+        ) => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
         ("Browser", "protocol") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserProtocol".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("Browser", "trace") => {
-            Some(Some(Type::Named("BrowserTrace".to_string())))
-        }
-        ("Browser", "privacy") => {
-            Some(Some(Type::Named("BrowserPrivacy".to_string())))
-        }
-        ("Browser", "receipt") => {
-            Some(Some(Type::Named("BrowserReceipt".to_string())))
-        }
+        ("Browser", "trace") => Some(Some(Type::Named("BrowserTrace".to_string()))),
+        ("Browser", "privacy") => Some(Some(Type::Named("BrowserPrivacy".to_string()))),
+        ("Browser", "receipt") => Some(Some(Type::Named("BrowserReceipt".to_string()))),
         ("BrowserContext", "page" | "tab") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserPage".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -255,32 +290,40 @@ pub fn net_method_return(
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
         ("BrowserPage", "frames") => Some(Some(Type::Result {
-            ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
+            ok: Box::new(Type::List(Box::new(Type::Named(
+                "BrowserFrame".to_string(),
+            )))),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserPage", "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
-            | "get_by_test_id" | "get_by_css") => {
-            Some(Some(Type::Named("BrowserLocator".to_string())))
-        }
+        (
+            "BrowserPage",
+            "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
+            | "get_by_test_id" | "get_by_css",
+        ) => Some(Some(Type::Named("BrowserLocator".to_string()))),
         ("BrowserFrame", "close") => Some(Some(Type::Result {
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press"
-            | "set_files") => {
-            Some(Some(Type::Result {
-                ok: Box::new(unit.clone()),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            }))
-        }
+        (
+            "BrowserLocator",
+            "wait" | "wait_gone" | "click" | "hover" | "fill" | "press" | "set_files",
+        ) => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
         ("BrowserIntercept", "remove") => Some(Some(Type::Result {
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
-            | "download_id" | "suggested_filename_hash") => {
-            Some(Some(Type::String))
-        }
+        (
+            "BrowserEvent",
+            "kind"
+            | "request_id"
+            | "request_method"
+            | "url_hash"
+            | "download_id"
+            | "suggested_filename_hash",
+        ) => Some(Some(Type::String)),
         ("BrowserEvent", "is_blocked") => Some(Some(Type::Bool)),
         ("BrowserEvent", "status_code") => Some(Some(Type::Int)),
         ("BrowserProtocol", "send") => Some(Some(Type::Result {
@@ -298,9 +341,7 @@ pub fn net_method_return(
         ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
             Some(Some(Type::Bool))
         }
-        ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => {
-            Some(Some(Type::String))
-        }
+        ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Some(Some(Type::String)),
         ("BrowserLocked", "verify") => Some(Some(Type::Result {
             ok: Box::new(unit_ty()),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -335,10 +376,9 @@ pub fn net_method_return(
             Type::Int,
             Type::Named("NetError".to_string()),
         ))),
-        ("TcpStream", "write_all" | "write_text") if n_args == 1 || n_args == 2 => Some(Some(result_ty(
-            unit.clone(),
-            Type::Named("NetError".to_string()),
-        ))),
+        ("TcpStream", "write_all" | "write_text") if n_args == 1 || n_args == 2 => Some(Some(
+            result_ty(unit.clone(), Type::Named("NetError".to_string())),
+        )),
         ("TcpStream", "shutdown") if n_args == 1 => Some(Some(result_ty(
             unit.clone(),
             Type::Named("NetError".to_string()),
@@ -412,28 +452,23 @@ pub fn net_method_return(
         ("TLSStream", "peer_identity") if n_args == 0 => {
             Some(Some(Type::Named("TLSPeerIdentity".to_string())))
         }
-        ("UnixStream", "set_timeout") if n_args == 1 => Some(Some(result_ty(
-            unit,
-            Type::Named("NetError".to_string()),
-        ))),
-        ("TLSClientConfig", "with_alpn") if n_args == 1 => {
-            Some(Some(result_ty(
-                Type::Named("TLSClientConfig".to_string()),
-                Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
-            )))
+        ("UnixStream", "set_timeout") if n_args == 1 => {
+            Some(Some(result_ty(unit, Type::Named("NetError".to_string()))))
         }
+        ("TLSClientConfig", "with_alpn") if n_args == 1 => Some(Some(result_ty(
+            Type::Named("TLSClientConfig".to_string()),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+        ))),
         ("TLSClientConfig", "with_trust" | "with_client_identity") if n_args == 1 => {
             Some(Some(result_ty(
                 Type::Named("TLSClientConfig".to_string()),
                 Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
             )))
         }
-        ("TLSClientConfig", "with_version_bounds") if n_args == 2 => {
-            Some(Some(result_ty(
-                Type::Named("TLSClientConfig".to_string()),
-                Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
-            )))
-        }
+        ("TLSClientConfig", "with_version_bounds") if n_args == 2 => Some(Some(result_ty(
+            Type::Named("TLSClientConfig".to_string()),
+            Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()),
+        ))),
         _ => None,
     }
 }
@@ -456,7 +491,13 @@ pub fn require_net_method_labels(
         ("TLSClientConfig", "with_version_bounds", 2) => &[(0, "min"), (1, "max")][..],
         _ => &[],
     };
-    require_exact_labels(&format!("{type_name}.{method}"), args, required, span, diags);
+    require_exact_labels(
+        &format!("{type_name}.{method}"),
+        args,
+        required,
+        span,
+        diags,
+    );
 }
 
 /// Ratified named forms are syntax, not arity-only overloads. These parameters
@@ -468,7 +509,11 @@ pub fn require_exact_labels(
     span: Span,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let slot_count = required.iter().map(|(index, _)| *index).max().map_or(0, |index| index + 1);
+    let slot_count = required
+        .iter()
+        .map(|(index, _)| *index)
+        .max()
+        .map_or(0, |index| index + 1);
     let params = (0..slot_count)
         .map(|index| {
             let label = required
@@ -551,9 +596,7 @@ pub fn loadable_method_return(
         _ => return None,
     };
     match (method, n_args) {
-        ("is_loading" | "is_loaded" | "is_failed" | "is_idle", 0) => {
-            Some(Some(Type::Bool))
-        }
+        ("is_loading" | "is_loaded" | "is_failed" | "is_idle", 0) => Some(Some(Type::Bool)),
         // loaded() → T? — returns the value if in Loaded state, null otherwise.
         ("loaded", 0) => Some(Some(Type::Option(Box::new(val_ty)))),
         // or_else(default: T) → T
@@ -614,9 +657,8 @@ pub fn http_type_method_return(
             "param" | "header" if _args.len() == 1 => mk_opt_str(),
             "body" | "header" | "timeout" | "connect_timeout" | "read_timeout"
             | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
-            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
-                mk("HTTPRequest")
-            }
+            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form"
+            | "multipart_text" => mk("HTTPRequest"),
             "body_len" => mk_int(),
             "under_limit" => Some(Some(Type::Bool)),
             "send" => Some(Some(Type::Result {
@@ -626,7 +668,18 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HTTPClient" => match (method, _args.len()) {
-            ("cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries", _) => mk("HTTPClient"),
+            (
+                "cookies"
+                | "redirects"
+                | "protocols"
+                | "timeouts"
+                | "raw_encoding"
+                | "proxy"
+                | "tls"
+                | "allow_http_downgrade"
+                | "retries",
+                _,
+            ) => mk("HTTPClient"),
             ("send", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HTTPResponse".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
@@ -656,7 +709,9 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HTTPMux" => match method {
-            "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware" => Some(None),
+            "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware" => {
+                Some(None)
+            }
             _ => None,
         },
         Type::Named(n) if n == "HTTPHandler" => match method {
@@ -695,7 +750,8 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::Named("BrowserContext".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
-            ("subscribe", 1) | ("close", 0)
+            ("subscribe", 1)
+            | ("close", 0)
             | ("continue_request" | "fail_request" | "allow_downloads", 1)
             | ("fulfill_request", 3) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
@@ -732,7 +788,9 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "BrowserPage" => match (method, _args.len()) {
-            ("goto", 1) | ("close", 0) | ("clear_cookies", 0)
+            ("goto", 1)
+            | ("close", 0)
+            | ("clear_cookies", 0)
             | ("set_cookie" | "storage_set", 3)
             | ("storage_clear", 1) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
@@ -751,12 +809,17 @@ pub fn http_type_method_return(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("frames", 0) => Some(Some(Type::Result {
-                ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
+                ok: Box::new(Type::List(Box::new(Type::Named(
+                    "BrowserFrame".to_string(),
+                )))),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("get_by_role", 2)
-            | ("get_by_text" | "get_by_label" | "get_by_placeholder" | "get_by_test_id"
-                | "get_by_css", 1) => mk("BrowserLocator"),
+            | (
+                "get_by_text" | "get_by_label" | "get_by_placeholder" | "get_by_test_id"
+                | "get_by_css",
+                1,
+            ) => mk("BrowserLocator"),
             _ => None,
         },
         Type::Named(n) if n == "BrowserFrame" => match (method, _args.len()) {
@@ -783,8 +846,15 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "BrowserEvent" => match (method, _args.len()) {
-            ("kind" | "request_id" | "request_method" | "url_hash" | "download_id"
-                | "suggested_filename_hash", 0) => mk_str(),
+            (
+                "kind"
+                | "request_id"
+                | "request_method"
+                | "url_hash"
+                | "download_id"
+                | "suggested_filename_hash",
+                0,
+            ) => mk_str(),
             ("is_blocked", 0) => Some(Some(Type::Bool)),
             ("status_code", 0) => mk_int(),
             _ => None,
@@ -848,7 +918,10 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HTTPServer" => match method {
-            "local_addr" => Some(Some(Type::Result { ok: Box::new(Type::String), err: Box::new(Type::Named("HTTPError".to_string())) })),
+            "local_addr" => Some(Some(Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("HTTPError".to_string())),
+            })),
             "serve" | "shutdown" => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HTTPShutdownReport".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
@@ -875,9 +948,7 @@ pub fn url_mime_method_return(
                 Some(Some(Type::String))
             }
             "host" | "fragment" if argc == 0 => Some(Some(Type::Option(Box::new(Type::String)))),
-            "port" | "default_port" if argc == 0 => {
-                Some(Some(Type::Option(Box::new(Type::Int))))
-            }
+            "port" | "default_port" if argc == 0 => Some(Some(Type::Option(Box::new(Type::Int)))),
             "path_segments" if argc == 0 => Some(Some(Type::List(Box::new(Type::String)))),
             "query_pairs" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,

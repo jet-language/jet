@@ -1,14 +1,15 @@
 //! Headless notebook protocol — proves Jupyter adapter + first-party parity.
 
-use super::document::{
-    export_ipynb, export_jet, import_ipynb, CellKind, JetNotebook,
-};
+use super::document::{export_ipynb, export_jet, import_ipynb, CellKind, JetNotebook};
 use super::kernel::{ClientKind, Kernel, RerunDecision};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub enum ProtocolMessage {
-    Execute { client: ClientKind, cell_id: String },
+    Execute {
+        client: ClientKind,
+        cell_id: String,
+    },
     Rerun {
         client: ClientKind,
         from_id: usize,
@@ -16,26 +17,59 @@ pub enum ProtocolMessage {
         decisions: Vec<RerunDecision>,
     },
     Interrupt,
-    Stdin { line: String },
+    Stdin {
+        line: String,
+    },
     DebugAttach,
     PerfAttach,
-    Inspect { cell_id: String },
-    Complete { prefix: String },
-    ImportIpynb { text: String },
-    Open { path: PathBuf },
+    Inspect {
+        cell_id: String,
+    },
+    Complete {
+        prefix: String,
+    },
+    ImportIpynb {
+        text: String,
+    },
+    Open {
+        path: PathBuf,
+    },
     Reopen,
-    Edit { cell_id: String, source: String },
-    MergePath { path: PathBuf },
-    Profile { client: ClientKind, cell_id: String },
-    Debug { cell_id: String },
+    Edit {
+        cell_id: String,
+        source: String,
+    },
+    MergePath {
+        path: PathBuf,
+    },
+    Profile {
+        client: ClientKind,
+        cell_id: String,
+    },
+    Debug {
+        cell_id: String,
+    },
     State,
     ExportIpynb,
     ExportJet,
-    Merge { theirs_json: String },
-    Save { path: PathBuf },
-    AddCell { kind: CellKind, source: String },
-    Grant { cell_id: String, renderer: String },
-    VisibleOutput { client: ClientKind, cell_id: String },
+    Merge {
+        theirs_json: String,
+    },
+    Save {
+        path: PathBuf,
+    },
+    AddCell {
+        kind: CellKind,
+        source: String,
+    },
+    Grant {
+        cell_id: String,
+        renderer: String,
+    },
+    VisibleOutput {
+        client: ClientKind,
+        cell_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -172,7 +206,13 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
             ProtocolReply::ok(format!(
                 "debug cell={cell_id}; source={}; bindings={}",
                 cell.source.replace('\n', "\\n"),
-                kernel.session.scope.keys().cloned().collect::<Vec<_>>().join(",")
+                kernel
+                    .session
+                    .scope
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(",")
             ))
         }
         ProtocolMessage::State => ProtocolReply::ok(kernel.state_json()),

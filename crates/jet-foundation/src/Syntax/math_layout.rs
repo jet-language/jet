@@ -201,13 +201,8 @@ pub const IO_ERROR_VARIANTS: &[&str] = &[
     "Other",
     "ResourceLimit",
 ];
-pub const PROCESS_RESOURCE_LIMIT_VARIANTS: &[&str] = &[
-    "WallTime",
-    "CpuTime",
-    "Memory",
-    "OpenFiles",
-    "Output",
-];
+pub const PROCESS_RESOURCE_LIMIT_VARIANTS: &[&str] =
+    &["WallTime", "CpuTime", "Memory", "OpenFiles", "Output"];
 pub const IO_OPERATION_VARIANTS: &[&str] = &[
     "Read", "Write", "Flush", "Connect", "Accept", "Close", "Resolve", "Codec",
 ];
@@ -456,8 +451,8 @@ pub const CORE_CANONICAL: &str = "core";
 /// S51 (ratified M10): first-party short names reserved before packages land.
 pub const FIRST_PARTY_RESERVED: &[&str] = &[
     "core", "jet", "c", "rust", "py", "js", "swift", "go", "java", "cs", "tcl", "lua", "fortran",
-    "cobol", "ada", "pascal", "dart", "pwsh", "perl", "r", "octave", "com", "http", "regex", "csv", "toml",
-    "crypto", "archive",
+    "cobol", "ada", "pascal", "dart", "pwsh", "perl", "r", "octave", "com", "http", "regex", "csv",
+    "toml", "crypto", "archive",
 ];
 
 /// S50 (ratified M7): Rust FFI block introducers — `extern rust "…" { … }`.

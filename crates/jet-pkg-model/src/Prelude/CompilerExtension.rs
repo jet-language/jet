@@ -220,9 +220,7 @@ pub fn jet_compiler_extension_analyze_with_limits(
             let _ = interrupter.join();
             return format!("E:compiler-extension has no exported `{ANALYZE_EXPORT}`");
         };
-        let args = [Val::List(
-            snapshot.iter().copied().map(Val::U8).collect(),
-        )];
+        let args = [Val::List(snapshot.iter().copied().map(Val::U8).collect())];
         let mut results = [Val::List(Vec::new())];
         let call_result = func.call(&mut ext.store, &args, &mut results);
         cancel.store(true, Ordering::Relaxed);
@@ -239,9 +237,7 @@ pub fn jet_compiler_extension_analyze_with_limits(
                 let mut bytes = Vec::with_capacity(vals.len());
                 for v in vals {
                     let Val::U8(b) = v else {
-                        return format!(
-                            "E:`{ANALYZE_EXPORT}` returned a non-byte list element"
-                        );
+                        return format!("E:`{ANALYZE_EXPORT}` returned a non-byte list element");
                     };
                     bytes.push(*b);
                 }

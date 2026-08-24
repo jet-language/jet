@@ -268,10 +268,10 @@ fn fuzz_sema_rustc_agreement() {
                 check_fuzz_variant(i, &shown, &mutated, &file_str)
             }));
             if let Err(payload) = result {
-                failures
-                    .lock()
-                    .unwrap()
-                    .push(format!("variant {i} from {shown}: {}", panic_message(payload)));
+                failures.lock().unwrap().push(format!(
+                    "variant {i} from {shown}: {}",
+                    panic_message(payload)
+                ));
             }
         }));
     }

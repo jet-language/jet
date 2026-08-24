@@ -3,8 +3,8 @@
 pub mod AST;
 pub mod Authority;
 mod BuildEffects;
-pub mod CanonicalAST;
 pub mod CLISchema;
+pub mod CanonicalAST;
 pub mod Collections;
 pub mod CompilerStack;
 /// Canonical, dependency-free `core.archive` ABI kernel. The same source is
@@ -13,39 +13,30 @@ pub mod CompilerStack;
 pub mod CoreArchive;
 pub mod CoreModuleExports;
 pub mod Diagnostics;
-mod ExactUnitConversion;
 pub mod Effects;
+mod ExactUnitConversion;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;
-pub mod generated;
-pub mod JitBackend;
 pub mod JSON;
 pub mod JSONNumber;
+pub mod JitBackend;
+pub mod generated;
 #[allow(unused_imports)]
 pub(crate) use JSONNumber as jet_json_number;
 pub mod EncodingErrors;
 pub mod EncodingJson;
 #[allow(unused_imports)]
 pub(crate) use EncodingErrors as jet_encoding_errors;
-pub mod LintPolicy;
-pub mod Layout;
-pub mod Numeric;
-pub mod OSTarget;
-pub mod Outcome;
-pub mod Prelude;
+pub mod App;
+#[path = "CborBudget.rs"]
+pub mod CborBudget;
+#[path = "CborKernel.rs"]
+pub mod CborKernel;
 pub mod JetTrace;
-pub mod PerformanceBudget;
-pub mod Persist;
-pub mod Policy;
-pub mod RingLayer;
-pub mod RegexSyntax;
-pub mod Registry;
-pub mod Report;
+pub mod Layout;
+pub mod LintPolicy;
 pub mod MachineOutput;
-pub mod Reflection;
-pub mod ServiceTree;
-pub mod SHA256;
 pub mod MatchScan;
 pub mod MemSentry;
 /// One monotonic epoch for every in-process adapter. AOT embeds the same
@@ -53,6 +44,22 @@ pub mod MemSentry;
 /// creating textual copies of the state.
 pub mod Monotonic;
 pub mod Names;
+pub mod Numeric;
+pub mod OSTarget;
+pub mod Outcome;
+#[path = "PackageEdition.rs"]
+pub mod PackageEdition;
+pub mod PerformanceBudget;
+pub mod Persist;
+pub mod Policy;
+pub mod Prelude;
+pub mod Reflection;
+pub mod RegexSyntax;
+pub mod Registry;
+pub mod Report;
+pub mod RingLayer;
+pub mod SHA256;
+pub mod ServiceTree;
 pub mod StreamCursor;
 pub mod StructuralDebug;
 pub mod Syntax;
@@ -60,22 +67,15 @@ pub mod TargetMachine;
 pub mod Terminal;
 pub mod Traits;
 pub mod WasmDebug;
-pub mod App;
 pub mod WebPartition;
-pub mod XmlPull;
 pub mod XmlKernel;
-#[path = "CborBudget.rs"]
-pub mod CborBudget;
-#[path = "CborKernel.rs"]
-pub mod CborKernel;
-#[path = "BaseEncodingStrict.rs"]
-pub mod base_encoding_strict;
+pub mod XmlPull;
 #[path = "BaseEncodingDispatch.rs"]
 pub mod base_encoding_dispatch;
-#[path = "PackageEdition.rs"]
-pub mod PackageEdition;
+#[path = "BaseEncodingStrict.rs"]
+pub mod base_encoding_strict;
 pub use BuildEffects::BuildEffect;
 pub use ExactUnitConversion::{
-    UnitRoundingMode, UNIT_ROUNDING_NEGATIVE_DIGITS, UNIT_ROUNDING_UNREPRESENTABLE,
-    jet_unit_conversion_exact, jet_unit_conversion_rounded,
+    jet_unit_conversion_exact, jet_unit_conversion_rounded, UnitRoundingMode,
+    UNIT_ROUNDING_NEGATIVE_DIGITS, UNIT_ROUNDING_UNREPRESENTABLE,
 };

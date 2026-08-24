@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::Diagnostics::ReportEnvelope;
+use jet_driver::Diagnostics::{Diagnostic, Severity};
 use jet_driver::FixEngine;
 use jet_semindex::{DefinitionAnchor, SourceSpan, SymbolDef, SymbolRef};
 
@@ -162,10 +162,7 @@ pub(super) fn prepare_project_rename(
             .iter()
             .find(|source| source.source_id == source_id)
             .expect("rename edit source came from project source set");
-        let text_edits = edits
-            .iter()
-            .map(|span| edit(*span, to))
-            .collect::<Vec<_>>();
+        let text_edits = edits.iter().map(|span| edit(*span, to)).collect::<Vec<_>>();
         let after = FixEngine::apply_edits(&source.source, &text_edits).map_err(|_| {
             ProjectRenameError::new("overlap", "Canvas project rename edits overlapped")
         })?;
@@ -219,7 +216,9 @@ pub(super) fn apply_project_rename(
     finish_project_changes(ctx, request, &op, plan.changes)
 }
 
-fn project_rename_sources(ctx: &ProjectContext) -> Result<Vec<ProjectRenameSource>, ProjectRenameError> {
+fn project_rename_sources(
+    ctx: &ProjectContext,
+) -> Result<Vec<ProjectRenameSource>, ProjectRenameError> {
     let mut sources = Vec::new();
     for file in ctx.files.iter().filter(|file| file.kind == "source") {
         let path = ctx.project_root.join(&file.path);
@@ -1344,7 +1343,10 @@ fn record_project_rename(
         .iter()
         .filter(|change| {
             change.before != change.after
-                && change.path.extension().and_then(|extension| extension.to_str())
+                && change
+                    .path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
                     == Some(jet_driver::Syntax::FILE_EXT)
         })
         .collect::<Vec<_>>();
@@ -1362,9 +1364,9 @@ fn record_project_rename(
         .iter()
         .filter(|fact| fact.name == from)
         .filter(|fact| {
-            source_changes.iter().any(|change| {
-                module_belongs_to(&ctx.project_root, &change.path, &fact.module_path)
-            })
+            source_changes
+                .iter()
+                .any(|change| module_belongs_to(&ctx.project_root, &change.path, &fact.module_path))
         })
         .map(|fact| {
             format!(
@@ -1398,10 +1400,9 @@ fn record_project_rename(
         files,
     );
     let directory = ctx.project_root.join(".jet/codemods");
-    fs::create_dir_all(&directory)
-        .map_err(|error| {
-            project_edit_error("io", &format!("could not record project rename: {error}"))
-        })?;
+    fs::create_dir_all(&directory).map_err(|error| {
+        project_edit_error("io", &format!("could not record project rename: {error}"))
+    })?;
     let digest = jet_driver::SHA256::sha256_hex(
         source_changes
             .iter()
@@ -1500,7 +1501,11 @@ pub(super) fn diagnostic_json(d: &Diagnostic) -> String {
     .json()
 }
 
-pub(super) fn module_belongs_to(project_root: &Path, source_path: &Path, module_path: &str) -> bool {
+pub(super) fn module_belongs_to(
+    project_root: &Path,
+    source_path: &Path,
+    module_path: &str,
+) -> bool {
     let source_id = rel_path(project_root, source_path);
     let source_id = source_id.trim_start_matches("./");
     let module_path = module_path.replace('\\', "/");

@@ -28,7 +28,11 @@ fn run(dir: &Path, interpret: bool) -> Output {
         .env("JET_COMPILER_EXTENSION", compiler_extension())
         .env(
             "JET_RUN_CACHE_DIR",
-            dir.join(if interpret { "cache-interpreter" } else { "cache-default" }),
+            dir.join(if interpret {
+                "cache-interpreter"
+            } else {
+                "cache-default"
+            }),
         )
         .env("NO_COLOR", "1")
         .output()

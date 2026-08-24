@@ -3,14 +3,11 @@
 //! Foundation — no public semantic or engine-specific fallback.
 
 use super::Concurrency;
+use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string};
 use jet_foundation::CoreArchive as runtime;
-use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list};
 
 fn jet_jit_zip_compress(name: i64, bytes: i64) -> i64 {
-    let out = runtime::jet_archive_zip_compress(
-        &clone_string(name),
-        &clone_bytes(bytes),
-    );
+    let out = runtime::jet_archive_zip_compress(&clone_string(name), &clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 
@@ -50,7 +47,10 @@ fn jet_jit_archive_zip_next(reader: i64, index: i64) -> i64 {
 }
 
 fn jet_jit_archive_zip_read(reader: i64, name: i64) -> i64 {
-    alloc_byte_list(&runtime::jet_archive_zip_read(&clone_bytes(reader), &clone_string(name)))
+    alloc_byte_list(&runtime::jet_archive_zip_read(
+        &clone_bytes(reader),
+        &clone_string(name),
+    ))
 }
 
 fn jet_jit_archive_zip_write(writer: i64, name: i64, bytes: i64) -> i64 {
@@ -66,11 +66,17 @@ fn jet_jit_archive_zip_close(writer: i64) -> i64 {
 }
 
 fn jet_jit_archive_zip_extract(archive: i64, name: i64) -> i64 {
-    alloc_byte_list(&runtime::jet_archive_zip_extract(&clone_bytes(archive), &clone_string(name)))
+    alloc_byte_list(&runtime::jet_archive_zip_extract(
+        &clone_bytes(archive),
+        &clone_string(name),
+    ))
 }
 
 fn jet_jit_archive_unzip(archive: i64, name: i64) -> i64 {
-    alloc_byte_list(&runtime::jet_archive_unzip(&clone_bytes(archive), &clone_string(name)))
+    alloc_byte_list(&runtime::jet_archive_unzip(
+        &clone_bytes(archive),
+        &clone_string(name),
+    ))
 }
 
 fn jet_jit_tar_add(archive: i64, name: i64, bytes: i64) -> i64 {
@@ -83,8 +89,7 @@ fn jet_jit_tar_add(archive: i64, name: i64, bytes: i64) -> i64 {
 }
 
 fn jet_jit_tar_get(archive: i64, name: i64) -> i64 {
-    let out =
-        runtime::jet_archive_tar_get(&clone_bytes(archive), &clone_string(name));
+    let out = runtime::jet_archive_tar_get(&clone_bytes(archive), &clone_string(name));
     alloc_byte_list(&out)
 }
 
@@ -133,7 +138,3 @@ host_fns! {
     tar_get: "jet_jit_tar_get" => jet_jit_tar_get: sig_bin;
     tar_names_json: "jet_jit_tar_names_json" => jet_jit_tar_names_json: sig_unary;
 }
-
-
-
-

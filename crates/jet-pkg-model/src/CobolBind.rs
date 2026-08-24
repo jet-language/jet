@@ -23,7 +23,11 @@ pub struct BindResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordLayout { pub name: String, pub width: usize, pub fields: Vec<FieldLayout> }
+pub struct RecordLayout {
+    pub name: String,
+    pub width: usize,
+    pub fields: Vec<FieldLayout>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldLayout {
@@ -35,14 +39,27 @@ pub struct FieldLayout {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldKind {
-    FixedText { characters: usize },
-    NativeInt { digits: usize, signed: bool },
-    PackedDecimal { digits: usize, scale: usize, signed: bool },
+    FixedText {
+        characters: usize,
+    },
+    NativeInt {
+        digits: usize,
+        signed: bool,
+    },
+    PackedDecimal {
+        digits: usize,
+        scale: usize,
+        signed: bool,
+    },
 }
 
 impl FieldKind {
     pub fn jet_type(&self) -> &'static str {
-        match self { Self::FixedText { .. } => "String", Self::NativeInt { .. } => "Int", Self::PackedDecimal { .. } => "Decimal" }
+        match self {
+            Self::FixedText { .. } => "String",
+            Self::NativeInt { .. } => "Int",
+            Self::PackedDecimal { .. } => "Decimal",
+        }
     }
 }
 
@@ -59,21 +76,49 @@ impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Source(s) | Self::IO(s) => f.write_str(s),
-            Self::AbiMismatch(s) => write!(f, "the generated COBOL C-ABI bridge failed its link proof: {s}"),
+            Self::AbiMismatch(s) => write!(
+                f,
+                "the generated COBOL C-ABI bridge failed its link proof: {s}"
+            ),
             Self::ToolMissing(t) => write!(f, "the provisioned `{t}` tool was not found"),
-            Self::ToolFailed { tool, detail } => write!(f, "`{tool}` rejected the COBOL binding: {detail}"),
+            Self::ToolFailed { tool, detail } => {
+                write!(f, "`{tool}` rejected the COBOL binding: {detail}")
+            }
         }
     }
 }
 
-pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &str, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
-    if !is_ident(lib) { return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name"))); }
+pub fn bind(
+    source_path: &Path,
+    source: &str,
+    copybook_path: &Path,
+    copybook: &str,
+    lib: &str,
+    cache: &Path,
+) -> Result<BindResult, BindError> {
+    if !is_ident(lib) {
+        return Err(BindError::Source(format!(
+            "`{lib}` is not a valid Jet library name"
+        )));
+    }
     let program = parse_program_id(source)?;
     let layout = parse_copybook(copybook)?;
-    let packed = layout.fields.iter().filter(|f| matches!(f.kind, FieldKind::PackedDecimal { .. })).collect::<Vec<_>>();
-    if packed.len() != 1 { return Err(BindError::Source("the callable v1 bridge requires exactly one COMP-3 field".into())); }
-    let input = layout.fields.iter().find(|f| matches!(f.kind, FieldKind::NativeInt { .. }));
-    std::fs::create_dir_all(cache).map_err(|e| BindError::IO(format!("could not create binding cache: {e}")))?;
+    let packed = layout
+        .fields
+        .iter()
+        .filter(|f| matches!(f.kind, FieldKind::PackedDecimal { .. }))
+        .collect::<Vec<_>>();
+    if packed.len() != 1 {
+        return Err(BindError::Source(
+            "the callable v1 bridge requires exactly one COMP-3 field".into(),
+        ));
+    }
+    let input = layout
+        .fields
+        .iter()
+        .find(|f| matches!(f.kind, FieldKind::NativeInt { .. }));
+    std::fs::create_dir_all(cache)
+        .map_err(|e| BindError::IO(format!("could not create binding cache: {e}")))?;
     let stem = format!("jet_cobol_{lib}");
     let object = cache.join(format!("{stem}_program.o"));
     let bridge_c = cache.join(format!("{stem}_bridge.c"));
@@ -82,21 +127,48 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
     let probe_c = cache.join(format!("{stem}_probe.c"));
     let probe = cache.join(format!("{stem}_probe"));
     let copy_dir = copybook_path.parent().unwrap_or_else(|| Path::new("."));
-    run(Command::new("cobc").args(["-c", "-I"]).arg(copy_dir).arg(source_path).arg("-o").arg(&object), "cobc")?;
+    run(
+        Command::new("cobc")
+            .args(["-c", "-I"])
+            .arg(copy_dir)
+            .arg(source_path)
+            .arg("-o")
+            .arg(&object),
+        "cobc",
+    )?;
     let config = checked_output(Command::new("cob-config").arg("--cflags"), "cob-config")?;
-    let cflags = String::from_utf8_lossy(&config.stdout).split_whitespace().map(str::to_string).collect::<Vec<_>>();
+    let cflags = String::from_utf8_lossy(&config.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
     let libs = checked_output(Command::new("cob-config").arg("--libs"), "cob-config")?;
-    let runtime_flags = String::from_utf8_lossy(&libs.stdout).split_whitespace().map(str::to_string).collect::<Vec<_>>();
-    let runtime_dir = runtime_dir_from_flags(&runtime_flags)
-        .ok_or_else(|| BindError::Source("cob-config did not report an absolute libcob directory".into()))?;
-    std::fs::write(&bridge_c, render_bridge(&program, &layout, packed[0], input, lib))
-        .map_err(|e| BindError::IO(format!("could not write the COBOL C bridge: {e}")))?;
-    let mut cc = Command::new("cc"); cc.arg("-c").arg("-fPIC"); cc.args(&cflags).arg(&bridge_c).arg("-o").arg(&bridge_o);
+    let runtime_flags = String::from_utf8_lossy(&libs.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let runtime_dir = runtime_dir_from_flags(&runtime_flags).ok_or_else(|| {
+        BindError::Source("cob-config did not report an absolute libcob directory".into())
+    })?;
+    std::fs::write(
+        &bridge_c,
+        render_bridge(&program, &layout, packed[0], input, lib),
+    )
+    .map_err(|e| BindError::IO(format!("could not write the COBOL C bridge: {e}")))?;
+    let mut cc = Command::new("cc");
+    cc.arg("-c").arg("-fPIC");
+    cc.args(&cflags).arg(&bridge_c).arg("-o").arg(&bridge_o);
     run(&mut cc, "cc")?;
     std::fs::write(&probe_c, "int main(void) { return 0; }\n")
         .map_err(|e| BindError::IO(format!("could not write the COBOL link probe: {e}")))?;
     let mut link = Command::new("cc");
-    link.arg("-Wl,--no-undefined").arg(&object).arg(&bridge_o).arg(&probe_c).args(&runtime_flags).args(["-pthread", "-ldl", "-lm"]).arg("-o").arg(&probe);
+    link.arg("-Wl,--no-undefined")
+        .arg(&object)
+        .arg(&bridge_o)
+        .arg(&probe_c)
+        .args(&runtime_flags)
+        .args(["-pthread", "-ldl", "-lm"])
+        .arg("-o")
+        .arg(&probe);
     if let Err(error) = prove_link(&mut link) {
         let _ = std::fs::remove_file(&object);
         let _ = std::fs::remove_file(&bridge_o);
@@ -105,7 +177,14 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
         let _ = std::fs::remove_file(&probe);
         return Err(error);
     }
-    run(Command::new("ar").arg("rcs").arg(&archive).arg(&object).arg(&bridge_o), "ar")?;
+    run(
+        Command::new("ar")
+            .arg("rcs")
+            .arg(&archive)
+            .arg(&object)
+            .arg(&bridge_o),
+        "ar",
+    )?;
     let _ = std::fs::remove_file(&object);
     let _ = std::fs::remove_file(&bridge_o);
     let _ = std::fs::remove_file(&bridge_c);
@@ -123,26 +202,57 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
         &runtime_dir,
         &archive,
     )?;
-    Ok(BindResult { source: generated_source, archive, runtime_dir, program, layout, provenance })
+    Ok(BindResult {
+        source: generated_source,
+        archive,
+        runtime_dir,
+        program,
+        layout,
+        provenance,
+    })
 }
 
 pub fn parse_copybook(source: &str) -> Result<RecordLayout, BindError> {
-    let mut record = None; let mut fields = Vec::new(); let mut names = HashSet::new(); let mut offset: usize = 0;
+    let mut record = None;
+    let mut fields = Vec::new();
+    let mut names = HashSet::new();
+    let mut offset: usize = 0;
     for raw in source.lines() {
-        let Some(line) = copybook_line(raw) else { continue };
+        let Some(line) = copybook_line(raw) else {
+            continue;
+        };
         let words = line.split_whitespace().collect::<Vec<_>>();
-        if words.len() < 2 { return Err(BindError::Source(format!("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))); }
+        if words.len() < 2 {
+            return Err(BindError::Source(format!(
+                "unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"
+            )));
+        }
         if words[0] == "01" {
-            if record.is_some() { return Err(BindError::Source("copybook must contain exactly one level 01 record".into())); }
-            if words.len() != 2 { return Err(BindError::Source(format!("unsupported level 01 declaration `{line}`; use one record name only"))); }
+            if record.is_some() {
+                return Err(BindError::Source(
+                    "copybook must contain exactly one level 01 record".into(),
+                ));
+            }
+            if words.len() != 2 {
+                return Err(BindError::Source(format!(
+                    "unsupported level 01 declaration `{line}`; use one record name only"
+                )));
+            }
             let name = jet_name(words[1]);
             if !is_ident(&name) || name == "_" || name.starts_with("__") {
-                return Err(BindError::Source(format!("copybook record name `{}` is not a valid Jet identifier", words[1])));
+                return Err(BindError::Source(format!(
+                    "copybook record name `{}` is not a valid Jet identifier",
+                    words[1]
+                )));
             }
             record = Some(name);
             continue;
         }
-        if words[0] != "05" || record.is_none() { return Err(BindError::Source(format!("unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"))); }
+        if words[0] != "05" || record.is_none() {
+            return Err(BindError::Source(format!(
+                "unsupported copybook declaration `{line}`; use level 01 with level 05 PIC fields"
+            )));
+        }
         let name = jet_name(words[1]);
         if !is_ident(&name)
             || name == "_"
@@ -150,46 +260,108 @@ pub fn parse_copybook(source: &str) -> Result<RecordLayout, BindError> {
             || crate::Syntax::is_reserved_generated_name(&name)
             || !names.insert(name.clone())
         {
-            return Err(BindError::Source(format!("copybook field name `{}` is not a unique, usable Jet identifier", words[1])));
+            return Err(BindError::Source(format!(
+                "copybook field name `{}` is not a unique, usable Jet identifier",
+                words[1]
+            )));
         }
-        if words.get(2).is_none_or(|word| !word.eq_ignore_ascii_case("PIC")) {
-            return Err(BindError::Source(format!("copybook field `{}` must use a PIC clause", words[1])));
+        if words
+            .get(2)
+            .is_none_or(|word| !word.eq_ignore_ascii_case("PIC"))
+        {
+            return Err(BindError::Source(format!(
+                "copybook field `{}` must use a PIC clause",
+                words[1]
+            )));
         }
-        let pic = words.get(3).ok_or_else(|| BindError::Source(format!("copybook field `{}` has no PIC shape", words[1])))?.to_ascii_uppercase();
-        let clauses = words[4..].iter().map(|w| w.to_ascii_uppercase()).collect::<Vec<_>>();
+        let pic = words
+            .get(3)
+            .ok_or_else(|| {
+                BindError::Source(format!("copybook field `{}` has no PIC shape", words[1]))
+            })?
+            .to_ascii_uppercase();
+        let clauses = words[4..]
+            .iter()
+            .map(|w| w.to_ascii_uppercase())
+            .collect::<Vec<_>>();
         let kind = parse_pic(&pic, &clauses)?;
         let width = field_width(&kind)?;
-        let next_offset = offset.checked_add(width).ok_or_else(|| BindError::Source("copybook record width overflows the supported ABI".into()))?;
-        fields.push(FieldLayout { name, offset, width, kind }); offset = next_offset;
+        let next_offset = offset.checked_add(width).ok_or_else(|| {
+            BindError::Source("copybook record width overflows the supported ABI".into())
+        })?;
+        fields.push(FieldLayout {
+            name,
+            offset,
+            width,
+            kind,
+        });
+        offset = next_offset;
     }
     let name = record.ok_or_else(|| BindError::Source("copybook has no level 01 record".into()))?;
-    if fields.is_empty() { return Err(BindError::Source("copybook record has no level 05 fields".into())); }
-    if crate::Syntax::is_reserved_generated_name(&upper_camel(&name)) {
-        return Err(BindError::Source(format!("copybook record name `{name}` projects to a reserved Jet type")));
+    if fields.is_empty() {
+        return Err(BindError::Source(
+            "copybook record has no level 05 fields".into(),
+        ));
     }
-    Ok(RecordLayout { name, width: offset, fields })
+    if crate::Syntax::is_reserved_generated_name(&upper_camel(&name)) {
+        return Err(BindError::Source(format!(
+            "copybook record name `{name}` projects to a reserved Jet type"
+        )));
+    }
+    Ok(RecordLayout {
+        name,
+        width: offset,
+        fields,
+    })
 }
 
 fn parse_pic(pic: &str, clauses: &[String]) -> Result<FieldKind, BindError> {
-    if let Some(n) = pic.strip_prefix("X(").and_then(|v| v.strip_suffix(')')).and_then(|v| v.parse().ok()) {
-        if clauses.is_empty() && n > 0 { return Ok(FieldKind::FixedText { characters: n }); }
+    if let Some(n) = pic
+        .strip_prefix("X(")
+        .and_then(|v| v.strip_suffix(')'))
+        .and_then(|v| v.parse().ok())
+    {
+        if clauses.is_empty() && n > 0 {
+            return Ok(FieldKind::FixedText { characters: n });
+        }
     }
-    let signed = pic.starts_with('S'); let numeric = pic.strip_prefix('S').unwrap_or(pic);
-    let (whole, frac) = numeric.split_once('V').map_or((numeric, None), |(a,b)| (a,Some(b)));
+    let signed = pic.starts_with('S');
+    let numeric = pic.strip_prefix('S').unwrap_or(pic);
+    let (whole, frac) = numeric
+        .split_once('V')
+        .map_or((numeric, None), |(a, b)| (a, Some(b)));
     let whole_digits = pic_digits(whole);
     let fraction_digits = pic_digits(frac.unwrap_or(""));
-    let digits = whole_digits.and_then(|whole| fraction_digits.and_then(|fraction| whole.checked_add(fraction)));
+    let digits = whole_digits
+        .and_then(|whole| fraction_digits.and_then(|fraction| whole.checked_add(fraction)));
     let scale = frac.and_then(pic_digits).unwrap_or(0);
-    let Some(digits) = digits else { return Err(BindError::Source(format!("unsupported PIC shape `{pic}`"))); };
+    let Some(digits) = digits else {
+        return Err(BindError::Source(format!("unsupported PIC shape `{pic}`")));
+    };
     if clauses.len() == 1 && clauses[0] == "COMP-3" {
-        if digits == 0 || digits > 18 { return Err(BindError::Source("COMP-3 fields may contain 1 to 18 digits for the Int minor-unit bridge".into())); }
-        return Ok(FieldKind::PackedDecimal { digits, scale, signed });
+        if digits == 0 || digits > 18 {
+            return Err(BindError::Source(
+                "COMP-3 fields may contain 1 to 18 digits for the Int minor-unit bridge".into(),
+            ));
+        }
+        return Ok(FieldKind::PackedDecimal {
+            digits,
+            scale,
+            signed,
+        });
     }
     if clauses.len() == 1 && clauses[0] == "COMP-5" && scale == 0 {
-        if digits == 0 || digits > 18 { return Err(BindError::Source("COMP-5 fields may contain 1 to 18 digits for the Int bridge".into())); }
+        if digits == 0 || digits > 18 {
+            return Err(BindError::Source(
+                "COMP-5 fields may contain 1 to 18 digits for the Int bridge".into(),
+            ));
+        }
         return Ok(FieldKind::NativeInt { digits, signed });
     }
-    Err(BindError::Source(format!("unsupported PIC/usage `{pic} {}`; use X(n), COMP-5, or COMP-3", clauses.join(" "))))
+    Err(BindError::Source(format!(
+        "unsupported PIC/usage `{pic} {}`; use X(n), COMP-5, or COMP-3",
+        clauses.join(" ")
+    )))
 }
 
 fn field_width(kind: &FieldKind) -> Result<usize, BindError> {
@@ -203,13 +375,16 @@ fn field_width(kind: &FieldKind) -> Result<usize, BindError> {
             } else if *digits <= 18 {
                 Ok(8)
             } else {
-                Err(BindError::Source("COMP-5 fields may contain at most 18 digits".into()))
+                Err(BindError::Source(
+                    "COMP-5 fields may contain at most 18 digits".into(),
+                ))
             }
         }
-        FieldKind::PackedDecimal { digits, .. } => digits
-            .checked_add(2)
-            .map(|value| value / 2)
-            .ok_or_else(|| BindError::Source("packed-decimal width overflows the supported ABI".into())),
+        FieldKind::PackedDecimal { digits, .. } => {
+            digits.checked_add(2).map(|value| value / 2).ok_or_else(|| {
+                BindError::Source("packed-decimal width overflows the supported ABI".into())
+            })
+        }
     }
 }
 
@@ -225,21 +400,46 @@ fn copybook_line(raw: &str) -> Option<String> {
         }
         let fixed = raw.get(6..).unwrap_or_default().trim();
         if matches!(fixed.split_whitespace().next(), Some("01" | "05")) {
-            return Some(fixed.split("*>").next().unwrap_or_default().trim().trim_end_matches('.').trim().to_string());
+            return Some(
+                fixed
+                    .split("*>")
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .trim_end_matches('.')
+                    .trim()
+                    .to_string(),
+            );
         }
     }
-    Some(trimmed.split("*>").next().unwrap_or_default().trim().trim_end_matches('.').trim().to_string())
+    Some(
+        trimmed
+            .split("*>")
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .trim_end_matches('.')
+            .trim()
+            .to_string(),
+    )
 }
 
 fn runtime_dir_from_flags(flags: &[String]) -> Option<PathBuf> {
-    flags.iter().enumerate().find_map(|(index, flag)| {
-        flag.strip_prefix("-L").filter(|path| !path.is_empty()).map(PathBuf::from).or_else(|| {
-            (flag == "-L")
-                .then(|| flags.get(index + 1))
-                .flatten()
-                .map(|path| PathBuf::from(path.as_str()))
+    flags
+        .iter()
+        .enumerate()
+        .find_map(|(index, flag)| {
+            flag.strip_prefix("-L")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| {
+                    (flag == "-L")
+                        .then(|| flags.get(index + 1))
+                        .flatten()
+                        .map(|path| PathBuf::from(path.as_str()))
+                })
         })
-    }).filter(|path| path.is_absolute())
+        .filter(|path| path.is_absolute())
 }
 
 fn prove_link(command: &mut Command) -> Result<(), BindError> {
@@ -263,7 +463,17 @@ fn render_provenance(
 ) -> Result<String, BindError> {
     let descriptor = descriptor_stamp();
     let program_symbol = cobol_c_symbol(program);
-    let layout_facts = layout.fields.iter().map(|field| format!("{}:{}:{}:{:?}", field.name, field.offset, field.width, field.kind)).collect::<Vec<_>>().join(",");
+    let layout_facts = layout
+        .fields
+        .iter()
+        .map(|field| {
+            format!(
+                "{}:{}:{}:{:?}",
+                field.name, field.offset, field.width, field.kind
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let mut identity = crate::ForeignBridge::IdentityBuilder::new("jet-cobol-bind-v1");
     identity.field("descriptor", descriptor.as_bytes());
     identity.field("source", foreign_source.as_bytes());
@@ -273,7 +483,11 @@ fn render_provenance(
     identity.field("program_symbol", program_symbol.as_bytes());
     identity.field("layout", layout_facts.as_bytes());
     identity.field("runtime", runtime_dir.to_string_lossy().as_bytes());
-    let archive_bytes = std::fs::read(archive).map_err(|error| BindError::IO(format!("could not read the COBOL archive for provenance: {error}")))?;
+    let archive_bytes = std::fs::read(archive).map_err(|error| {
+        BindError::IO(format!(
+            "could not read the COBOL archive for provenance: {error}"
+        ))
+    })?;
     Ok(format!(
         "schema=jet-cobol-bind-v1\nidentity={}\ndescriptor={}\nabi=C\nprogram={}\nprogram_symbol={}\nsource_path={}\nsource_sha256={}\ngenerated_sha256={}\ncopybook_path={}\ncopybook_sha256={}\nrecord={}\nrecord_width={}\nfields={}\nruntime={}\narchive_sha256={}\n",
         identity.finish(),
@@ -294,50 +508,139 @@ fn render_provenance(
 }
 
 fn pic_digits(s: &str) -> Option<usize> {
-    if s.is_empty() { return Some(0); }
-    if s.bytes().all(|b| b == b'9') { return Some(s.len()); }
+    if s.is_empty() {
+        return Some(0);
+    }
+    if s.bytes().all(|b| b == b'9') {
+        return Some(s.len());
+    }
     s.strip_prefix("9(")?.strip_suffix(')')?.parse().ok()
 }
 
 fn parse_program_id(source: &str) -> Result<String, BindError> {
-    source.lines().find_map(|raw| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() || trimmed.starts_with('*') || trimmed.starts_with("*>") {
-            return None;
-        }
-        if raw.len() > 6 && matches!(raw.as_bytes()[6], b'*' | b'/') {
-            return None;
-        }
-        let code = trimmed.split("*>").next()?.trim();
-        let upper = code.to_ascii_uppercase();
-        let rest = upper.strip_prefix("PROGRAM-ID.")?;
-        let name = rest.split_whitespace().next()?.trim_end_matches('.');
-        (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    source
+        .lines()
+        .find_map(|raw| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() || trimmed.starts_with('*') || trimmed.starts_with("*>") {
+                return None;
+            }
+            if raw.len() > 6 && matches!(raw.as_bytes()[6], b'*' | b'/') {
+                return None;
+            }
+            let code = trimmed.split("*>").next()?.trim();
+            let upper = code.to_ascii_uppercase();
+            let rest = upper.strip_prefix("PROGRAM-ID.")?;
+            let name = rest.split_whitespace().next()?.trim_end_matches('.');
+            (!name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
             .then(|| name.to_string())
-    })
-    .ok_or_else(|| BindError::Source("source has no valid PROGRAM-ID".into()))
+        })
+        .ok_or_else(|| BindError::Source("source has no valid PROGRAM-ID".into()))
 }
 
-fn render_jet(lib: &str, layout: &RecordLayout, packed: &FieldLayout, input: Option<&FieldLayout>) -> String {
-    let abi = format!("jet_cobol_{lib}"); let descriptor = descriptor_stamp(); let mut out = format!("// jet-ffi-descriptor={descriptor}\n// cobol-layout {}: {} bytes\n", layout.name, layout.width);
-    for f in &layout.fields { out.push_str(&format!("// cobol-field {}: offset={} width={} type={}{}\n", f.name, f.offset, f.width, f.kind.jet_type(), match f.kind { FieldKind::PackedDecimal { scale, .. } => format!(" scale={scale} encoding=COMP-3"), FieldKind::NativeInt { .. } => " encoding=COMP-5".into(), FieldKind::FixedText { .. } => " encoding=fixed-text".into() })); }
-    out.push_str(&format!("#Codable\npub struct {} {{\n", upper_camel(&layout.name)));
-    for f in &layout.fields { out.push_str(&format!("    {}: {}\n", f.name, f.kind.jet_type())); } out.push_str("}\n\n");
+fn render_jet(
+    lib: &str,
+    layout: &RecordLayout,
+    packed: &FieldLayout,
+    input: Option<&FieldLayout>,
+) -> String {
+    let abi = format!("jet_cobol_{lib}");
+    let descriptor = descriptor_stamp();
+    let mut out = format!(
+        "// jet-ffi-descriptor={descriptor}\n// cobol-layout {}: {} bytes\n",
+        layout.name, layout.width
+    );
+    for f in &layout.fields {
+        out.push_str(&format!(
+            "// cobol-field {}: offset={} width={} type={}{}\n",
+            f.name,
+            f.offset,
+            f.width,
+            f.kind.jet_type(),
+            match f.kind {
+                FieldKind::PackedDecimal { scale, .. } => format!(" scale={scale} encoding=COMP-3"),
+                FieldKind::NativeInt { .. } => " encoding=COMP-5".into(),
+                FieldKind::FixedText { .. } => " encoding=fixed-text".into(),
+            }
+        ));
+    }
+    out.push_str(&format!(
+        "#Codable\npub struct {} {{\n",
+        upper_camel(&layout.name)
+    ));
+    for f in &layout.fields {
+        out.push_str(&format!("    {}: {}\n", f.name, f.kind.jet_type()));
+    }
+    out.push_str("}\n\n");
     out.push_str(&format!("#Extern module c.{abi} {{\n    fn apply_minor("));
-    if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\npub enum CobolError {{ Range ProgramFailed }}\n\n", packed.name));
-    out.push_str("pub fn apply_minor("); if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) Int CobolError! -[FFI.Cobol]> {{\n", packed.name));
-    if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) { let max=10_i128.pow(*digits as u32)-1; let min=if *signed{-max}else{0}; out.push_str(&format!("    if {}_minor < {min} || {}_minor > {max} -> return Err(CobolError.Range)\n",packed.name,packed.name)); }
-    if let Some(field)=input { if let FieldKind::NativeInt{digits,signed}=&field.kind {let max=10_i128.pow(*digits as u32)-1;let min=if *signed{-max}else{0};out.push_str(&format!("    if record_id < {min} || record_id > {max} -> return Err(CobolError.Range)\n"));}}
-    out.push_str("    result :: abi.apply_minor("); if input.is_some() { out.push_str("record_id, "); } out.push_str(&format!("{}_minor)\n", packed.name));
-    out.push_str("    if result == -9223372036854775808 -> return Err(CobolError.ProgramFailed)\n    return Ok(result)\n}\n"); out
+    if input.is_some() {
+        out.push_str("record_id: Int, ");
+    }
+    out.push_str(&format!("{}_minor: Int) Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\npub enum CobolError {{ Range ProgramFailed }}\n\n", packed.name));
+    out.push_str("pub fn apply_minor(");
+    if input.is_some() {
+        out.push_str("record_id: Int, ");
+    }
+    out.push_str(&format!(
+        "{}_minor: Int) Int CobolError! -[FFI.Cobol]> {{\n",
+        packed.name
+    ));
+    if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) {
+        let max = 10_i128.pow(*digits as u32) - 1;
+        let min = if *signed { -max } else { 0 };
+        out.push_str(&format!(
+            "    if {}_minor < {min} || {}_minor > {max} -> return Err(CobolError.Range)\n",
+            packed.name, packed.name
+        ));
+    }
+    if let Some(field) = input {
+        if let FieldKind::NativeInt { digits, signed } = &field.kind {
+            let max = 10_i128.pow(*digits as u32) - 1;
+            let min = if *signed { -max } else { 0 };
+            out.push_str(&format!(
+                "    if record_id < {min} || record_id > {max} -> return Err(CobolError.Range)\n"
+            ));
+        }
+    }
+    out.push_str("    result :: abi.apply_minor(");
+    if input.is_some() {
+        out.push_str("record_id, ");
+    }
+    out.push_str(&format!("{}_minor)\n", packed.name));
+    out.push_str("    if result == -9223372036854775808 -> return Err(CobolError.ProgramFailed)\n    return Ok(result)\n}\n");
+    out
 }
 
-fn render_bridge(program: &str, layout: &RecordLayout, packed: &FieldLayout, input: Option<&FieldLayout>, lib: &str) -> String {
-    let args = if input.is_some() { "int64_t record_id, int64_t minor" } else { "int64_t minor" };
+fn render_bridge(
+    program: &str,
+    layout: &RecordLayout,
+    packed: &FieldLayout,
+    input: Option<&FieldLayout>,
+    lib: &str,
+) -> String {
+    let args = if input.is_some() {
+        "int64_t record_id, int64_t minor"
+    } else {
+        "int64_t minor"
+    };
     let program_symbol = cobol_c_symbol(program);
     let mut pre = String::new();
-    if let Some(f) = input { let cty=match f.width {2=>"int16_t",4=>"int32_t",_=>"int64_t"}; pre=format!("  {cty} id = ({cty})record_id; memcpy(record + {}, &id, {});\n",f.offset,f.width); }
-    format!(r#"#include <stdint.h>
+    if let Some(f) = input {
+        let cty = match f.width {
+            2 => "int16_t",
+            4 => "int32_t",
+            _ => "int64_t",
+        };
+        pre = format!(
+            "  {cty} id = ({cty})record_id; memcpy(record + {}, &id, {});\n",
+            f.offset, f.width
+        );
+    }
+    format!(
+        r#"#include <stdint.h>
 #include <string.h>
 #include <libcob.h>
 #include <pthread.h>
@@ -359,46 +662,222 @@ int64_t jet_cobol_{lib}_apply_minor({args}) {{
   if({program_symbol}(record)!=0) return INT64_MIN;
   return unpack(record + {packed_offset}, {packed_width});
 }}
-"#, record_width=layout.width, packed_offset=packed.offset, packed_width=packed.width)
+"#,
+        record_width = layout.width,
+        packed_offset = packed.offset,
+        packed_width = packed.width
+    )
 }
 
-struct ToolOutput { status: std::process::ExitStatus, stdout: Vec<u8>, stderr: Vec<u8> }
-fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> { let o=output(command,tool)?; if o.status.success(){Ok(())}else{Err(BindError::ToolFailed{tool,detail:launder(&o.stderr)})} }
-fn checked_output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> { let o=output(command,tool)?; if o.status.success(){Ok(o)}else{Err(BindError::ToolFailed{tool,detail:launder(&o.stderr)})} }
-fn output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> {
-    const LIMIT:usize=64*1024; command.stdout(Stdio::piped()).stderr(Stdio::piped()); let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;
-    let stdout=child.stdout.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stdout")))?; let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;
-    let out=std::thread::spawn(move||bounded(stdout,LIMIT)); let err=std::thread::spawn(move||bounded(stderr,LIMIT)); let deadline=Instant::now()+Duration::from_secs(60);
-    let status=loop{match child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{Some(s)=>break s,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed{tool,detail:"the tool exceeded the 60 second limit".into()})},None=>std::thread::sleep(Duration::from_millis(10))}};
-    let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??; let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??; Ok(ToolOutput{status,stdout,stderr})
+struct ToolOutput {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
 }
-fn bounded(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=limit.saturating_sub(out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
-fn launder(stderr:&[u8])->String{
-    let text=String::from_utf8_lossy(stderr);
-    for line in text.lines().map(str::trim).filter(|line|!line.is_empty()) {
-        if let Some((_, detail))=line.split_once("error:") {
-            let detail=detail.trim();
-            if !detail.is_empty() { return format!("the foreign tool reported: {}", detail.chars().take(160).collect::<String>()); }
+fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
+    let o = output(command, tool)?;
+    if o.status.success() {
+        Ok(())
+    } else {
+        Err(BindError::ToolFailed {
+            tool,
+            detail: launder(&o.stderr),
+        })
+    }
+}
+fn checked_output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> {
+    let o = output(command, tool)?;
+    if o.status.success() {
+        Ok(o)
+    } else {
+        Err(BindError::ToolFailed {
+            tool,
+            detail: launder(&o.stderr),
+        })
+    }
+}
+fn output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> {
+    const LIMIT: usize = 64 * 1024;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
         }
-        if let Some(index)=line.find("undefined reference to") {
-            return format!("the linker reported: {}", line[index..].chars().take(160).collect::<String>());
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let out = std::thread::spawn(move || bounded(stdout, LIMIT));
+    let err = std::thread::spawn(move || bounded(stderr, LIMIT));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
+            Some(s) => break s,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out.join();
+                let _ = err.join();
+                return Err(BindError::ToolFailed {
+                    tool,
+                    detail: "the tool exceeded the 60 second limit".into(),
+                });
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    };
+    let stdout = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    Ok(ToolOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+fn bounded(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
+    let mut out = Vec::new();
+    let mut buf = [0; 8192];
+    loop {
+        let n = input
+            .read(&mut buf)
+            .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        let keep = limit.saturating_sub(out.len()).min(n);
+        out.extend_from_slice(&buf[..keep]);
+    }
+    Ok(out)
+}
+fn launder(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if let Some((_, detail)) = line.split_once("error:") {
+            let detail = detail.trim();
+            if !detail.is_empty() {
+                return format!(
+                    "the foreign tool reported: {}",
+                    detail.chars().take(160).collect::<String>()
+                );
+            }
+        }
+        if let Some(index) = line.find("undefined reference to") {
+            return format!(
+                "the linker reported: {}",
+                line[index..].chars().take(160).collect::<String>()
+            );
         }
     }
     "the foreign tool returned a failure status".into()
 }
-fn cobol_c_symbol(program:&str)->String{program.replace('-',"__")}
-fn jet_name(s:&str)->String{s.trim_end_matches('.').to_ascii_lowercase().replace('-',"_")}
-fn upper_camel(s:&str)->String{s.split('_').map(|p|{let mut c=p.chars();c.next().map(|h|h.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default()}).collect()}
-fn is_ident(s:&str)->bool{let mut c=s.chars();matches!(c.next(),Some(v)if v.is_ascii_alphabetic()||v=='_')&&c.all(|v|v.is_ascii_alphanumeric()||v=='_')}
-fn descriptor_stamp()->String{crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Cobol).expect("COBOL binder descriptor").stamp()}
+fn cobol_c_symbol(program: &str) -> String {
+    program.replace('-', "__")
+}
+fn jet_name(s: &str) -> String {
+    s.trim_end_matches('.')
+        .to_ascii_lowercase()
+        .replace('-', "_")
+}
+fn upper_camel(s: &str) -> String {
+    s.split('_')
+        .map(|p| {
+            let mut c = p.chars();
+            c.next()
+                .map(|h| h.to_ascii_uppercase().to_string() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+fn is_ident(s: &str) -> bool {
+    let mut c = s.chars();
+    matches!(c.next(),Some(v)if v.is_ascii_alphabetic()||v=='_')
+        && c.all(|v| v.is_ascii_alphanumeric() || v == '_')
+}
+fn descriptor_stamp() -> String {
+    crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Cobol)
+        .expect("COBOL binder descriptor")
+        .stamp()
+}
 
-#[cfg(test)] mod tests {
+#[cfg(test)]
+mod tests {
     use super::*;
-    #[test] fn copybook_layout_keeps_packed_decimal_exact(){let l=parse_copybook("       01 PAYROLL-RECORD.\n          05 EMPLOYEE-ID PIC 9(6) COMP-5.\n          05 NAME PIC X(20).\n          05 GROSS-PAY PIC S9(7)V99 COMP-3.\n").unwrap();assert_eq!(l.width,29);assert_eq!(l.fields[2],FieldLayout{name:"gross_pay".into(),offset:24,width:5,kind:FieldKind::PackedDecimal{digits:9,scale:2,signed:true}});assert_eq!(l.fields[2].kind.jet_type(),"Decimal");}
-    #[test] fn unsupported_layout_fails_instead_of_guessing(){assert!(parse_copybook("01 X.\n05 RATE PIC 9(4)V99 COMP-1.\n").is_err());}
-    #[test] fn generated_surface_uses_current_arrows_and_typed_failure(){let l=parse_copybook("       01 X.\n          05 ID PIC 9(6) COMP-5.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();let source=render_jet("payroll",&l,&l.fields[1],Some(&l.fields[0]));assert!(source.contains("jet-ffi-descriptor="));assert!(source.contains("Int CobolError! -[FFI.Cobol]>"));assert!(source.contains("-> return Err(CobolError.Range)"));assert!(!source.contains("=>"));assert!(!source.contains(":[FFI.Cobol]"));}
-    #[test] fn oversized_packed_decimal_fails_before_abi_codegen(){assert!(parse_copybook("01 X.\n05 AMOUNT PIC 9(19) COMP-3.\n").is_err());}
-    #[test] fn free_format_and_closed_usage_parse_without_guessing(){let l=parse_copybook("01 record.\n  05 id PIC 9(4) COMP-5.\n  05 amount PIC S9(5)V99 COMP-3.\n").unwrap();assert_eq!(l.width,6);assert!(parse_copybook("01 record.\n05 amount PIC 9(4) BINARY.\n").is_err());assert!(parse_copybook("01 record.\n05 amount PIC 9(4) COMP-3 VALUE 1.\n").is_err());}
-    #[test] fn program_id_and_c_symbol_keep_gnucobol_spelling(){assert_eq!(parse_program_id("*> comment\n       PROGRAM-ID. JET-PAY IS INITIAL.\n").unwrap(),"JET-PAY");assert_eq!(cobol_c_symbol("JET-PAY"),"JET__PAY");let l=parse_copybook("01 X.\n05 AMOUNT PIC S9(3)V99 COMP-3.\n").unwrap();let bridge=render_bridge("JET-PAY",&l,&l.fields[0],None,"payroll");assert!(bridge.contains("extern int JET__PAY(cob_u8_t *record);"));assert!(!bridge.contains("JET-PAY"));}
-    #[test] fn reserved_copybook_names_fail_before_codegen(){assert!(parse_copybook("01 STRING.\n05 run PIC 9(4) COMP-5.\n").is_err());assert!(parse_copybook("01 X.\n05 __field PIC 9(4) COMP-5.\n").is_err());}
+    #[test]
+    fn copybook_layout_keeps_packed_decimal_exact() {
+        let l=parse_copybook("       01 PAYROLL-RECORD.\n          05 EMPLOYEE-ID PIC 9(6) COMP-5.\n          05 NAME PIC X(20).\n          05 GROSS-PAY PIC S9(7)V99 COMP-3.\n").unwrap();
+        assert_eq!(l.width, 29);
+        assert_eq!(
+            l.fields[2],
+            FieldLayout {
+                name: "gross_pay".into(),
+                offset: 24,
+                width: 5,
+                kind: FieldKind::PackedDecimal {
+                    digits: 9,
+                    scale: 2,
+                    signed: true
+                }
+            }
+        );
+        assert_eq!(l.fields[2].kind.jet_type(), "Decimal");
+    }
+    #[test]
+    fn unsupported_layout_fails_instead_of_guessing() {
+        assert!(parse_copybook("01 X.\n05 RATE PIC 9(4)V99 COMP-1.\n").is_err());
+    }
+    #[test]
+    fn generated_surface_uses_current_arrows_and_typed_failure() {
+        let l=parse_copybook("       01 X.\n          05 ID PIC 9(6) COMP-5.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();
+        let source = render_jet("payroll", &l, &l.fields[1], Some(&l.fields[0]));
+        assert!(source.contains("jet-ffi-descriptor="));
+        assert!(source.contains("Int CobolError! -[FFI.Cobol]>"));
+        assert!(source.contains("-> return Err(CobolError.Range)"));
+        assert!(!source.contains("=>"));
+        assert!(!source.contains(":[FFI.Cobol]"));
+    }
+    #[test]
+    fn oversized_packed_decimal_fails_before_abi_codegen() {
+        assert!(parse_copybook("01 X.\n05 AMOUNT PIC 9(19) COMP-3.\n").is_err());
+    }
+    #[test]
+    fn free_format_and_closed_usage_parse_without_guessing() {
+        let l = parse_copybook(
+            "01 record.\n  05 id PIC 9(4) COMP-5.\n  05 amount PIC S9(5)V99 COMP-3.\n",
+        )
+        .unwrap();
+        assert_eq!(l.width, 6);
+        assert!(parse_copybook("01 record.\n05 amount PIC 9(4) BINARY.\n").is_err());
+        assert!(parse_copybook("01 record.\n05 amount PIC 9(4) COMP-3 VALUE 1.\n").is_err());
+    }
+    #[test]
+    fn program_id_and_c_symbol_keep_gnucobol_spelling() {
+        assert_eq!(
+            parse_program_id("*> comment\n       PROGRAM-ID. JET-PAY IS INITIAL.\n").unwrap(),
+            "JET-PAY"
+        );
+        assert_eq!(cobol_c_symbol("JET-PAY"), "JET__PAY");
+        let l = parse_copybook("01 X.\n05 AMOUNT PIC S9(3)V99 COMP-3.\n").unwrap();
+        let bridge = render_bridge("JET-PAY", &l, &l.fields[0], None, "payroll");
+        assert!(bridge.contains("extern int JET__PAY(cob_u8_t *record);"));
+        assert!(!bridge.contains("JET-PAY"));
+    }
+    #[test]
+    fn reserved_copybook_names_fail_before_codegen() {
+        assert!(parse_copybook("01 STRING.\n05 run PIC 9(4) COMP-5.\n").is_err());
+        assert!(parse_copybook("01 X.\n05 __field PIC 9(4) COMP-5.\n").is_err());
+    }
 }

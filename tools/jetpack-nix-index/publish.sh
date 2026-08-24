@@ -37,18 +37,49 @@ manifest_request=${manifest_request:-"$manifest.sig.request"}
     exit 1
 }
 
+sign_immutable() {
+    signer=$1
+    request=$2
+    output=$3
+    temporary="$output.partial.$$"
+    if ! "$signer" "$request" "$temporary"; then
+        rm -f "$temporary"
+        return 1
+    fi
+    if [ -L "$temporary" ] || [ ! -f "$temporary" ]; then
+        echo "signer did not create a regular file: $temporary" >&2
+        rm -f "$temporary"
+        return 1
+    fi
+    if [ -L "$output" ] || { [ -e "$output" ] && [ ! -f "$output" ]; }; then
+        echo "signature output is not a regular file: $output" >&2
+        rm -f "$temporary"
+        exit 1
+    fi
+    if [ -e "$output" ]; then
+        cmp -s "$temporary" "$output" || {
+            echo "immutable signature changed: $output" >&2
+            rm -f "$temporary"
+            exit 1
+        }
+        rm -f "$temporary"
+    else
+        mv "$temporary" "$output"
+    fi
+}
+
 find "$target_root" -type f -name '*.json.zst' -print | sort | while IFS= read -r target; do
     request="$target.sig.request"
     signature="$target.sig.json"
     [ -f "$request" ] || { echo "missing signing request: $request" >&2; exit 1; }
-    "$sign_index" "$request" "$signature"
+    sign_immutable "$sign_index" "$request" "$signature"
     relative=${target#"$target_root"/}
     "$upload" "$target" "$destination/$relative"
     "$upload" "$signature" "$destination/$relative.sig.json"
 done
 
 manifest_signature="$manifest.sig.json"
-"$sign_manifest" "$manifest_request" "$manifest_signature"
+sign_immutable "$sign_manifest" "$manifest_request" "$manifest_signature"
 "$upload" "$manifest" "$destination/manifest.json"
 "$upload" "$manifest_signature" "$destination/manifest.json.sig.json"
 echo "published immutable targets, then manifest"

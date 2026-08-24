@@ -143,10 +143,7 @@ pub fn reject_casefold_collisions(names: &[Vec<u8>]) -> Result<(), PathLawError>
                 return Err(PathLawError {
                     code: "case-fold",
                     path: lossy(name),
-                    detail: format!(
-                        "collides with `{}` under ASCII case-folding",
-                        lossy(prior)
-                    ),
+                    detail: format!("collides with `{}` under ASCII case-folding", lossy(prior)),
                 });
             }
         } else {
@@ -323,12 +320,25 @@ fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
     let name_c = std::ffi::CString::new(name).map_err(|_| "xattr name contains NUL".to_string())?;
     let size = unsafe { lgetxattr(path.as_ptr(), name_c.as_ptr(), std::ptr::null_mut(), 0) };
     if size < 0 {
-        return Err(format!("lgetxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "lgetxattr `{name}` failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     let mut value = vec![0; size as usize];
-    let wrote = unsafe { lgetxattr(path.as_ptr(), name_c.as_ptr(), value.as_mut_ptr(), value.len()) };
+    let wrote = unsafe {
+        lgetxattr(
+            path.as_ptr(),
+            name_c.as_ptr(),
+            value.as_mut_ptr(),
+            value.len(),
+        )
+    };
     if wrote < 0 {
-        return Err(format!("lgetxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "lgetxattr `{name}` failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     value.truncate(wrote as usize);
     Ok(value)
@@ -338,20 +348,51 @@ fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
 fn xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, String> {
     use std::os::unix::ffi::OsStrExt as _;
     unsafe extern "C" {
-        fn getxattr(path: *const i8, name: *const i8, value: *mut u8, size: usize, position: u32, options: i32) -> isize;
+        fn getxattr(
+            path: *const i8,
+            name: *const i8,
+            value: *mut u8,
+            size: usize,
+            position: u32,
+            options: i32,
+        ) -> isize;
     }
     const XATTR_NOFOLLOW: i32 = 0x0001;
     let path = std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|_| "xattr path contains NUL".to_string())?;
     let name_c = std::ffi::CString::new(name).map_err(|_| "xattr name contains NUL".to_string())?;
-    let size = unsafe { getxattr(path.as_ptr(), name_c.as_ptr(), std::ptr::null_mut(), 0, 0, XATTR_NOFOLLOW) };
+    let size = unsafe {
+        getxattr(
+            path.as_ptr(),
+            name_c.as_ptr(),
+            std::ptr::null_mut(),
+            0,
+            0,
+            XATTR_NOFOLLOW,
+        )
+    };
     if size < 0 {
-        return Err(format!("getxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "getxattr `{name}` failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     let mut value = vec![0; size as usize];
-    let wrote = unsafe { getxattr(path.as_ptr(), name_c.as_ptr(), value.as_mut_ptr(), value.len(), 0, XATTR_NOFOLLOW) };
+    let wrote = unsafe {
+        getxattr(
+            path.as_ptr(),
+            name_c.as_ptr(),
+            value.as_mut_ptr(),
+            value.len(),
+            0,
+            XATTR_NOFOLLOW,
+        )
+    };
     if wrote < 0 {
-        return Err(format!("getxattr `{name}` failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "getxattr `{name}` failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     value.truncate(wrote as usize);
     Ok(value)
@@ -419,12 +460,25 @@ fn list_xattr_names_apple(path: &Path) -> Result<Vec<String>, String> {
         .map_err(|_| format!("path `{}` contains NUL", path.display()))?;
     let size = unsafe { listxattr(path.as_ptr(), std::ptr::null_mut(), 0, XATTR_NOFOLLOW) };
     if size < 0 {
-        return Err(format!("listxattr failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "listxattr failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     let mut names = vec![0i8; size as usize];
-    let wrote = unsafe { listxattr(path.as_ptr(), names.as_mut_ptr(), names.len(), XATTR_NOFOLLOW) };
+    let wrote = unsafe {
+        listxattr(
+            path.as_ptr(),
+            names.as_mut_ptr(),
+            names.len(),
+            XATTR_NOFOLLOW,
+        )
+    };
     if wrote < 0 {
-        return Err(format!("listxattr failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "listxattr failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
     let bytes = unsafe { std::slice::from_raw_parts(names.as_ptr().cast::<u8>(), wrote as usize) };
     Ok(bytes
@@ -703,7 +757,10 @@ fn encode_node(
         let resolved = fs::canonicalize(path)
             .map_err(|e| format!("cannot resolve directory `{}`: {e}", path.display()))?;
         if !resolved.starts_with(root) {
-            return Err(format!("directory `{}` escapes output root", path.display()));
+            return Err(format!(
+                "directory `{}` escapes output root",
+                path.display()
+            ));
         }
         record_header(archive, b'D', &rel_bytes, mode_of(&meta));
         encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
@@ -729,7 +786,10 @@ fn encode_node(
             .map_err(|e| format!("directory `{}` changed while hashing: {e}", path.display()))?;
         let after_entries = directory_snapshot(path)?;
         if before != stable_file_identity(&after) || before_entries != after_entries {
-            return Err(format!("directory `{}` changed while hashing", path.display()));
+            return Err(format!(
+                "directory `{}` changed while hashing",
+                path.display()
+            ));
         }
     } else if kind.is_symlink() {
         let target = fs::read_link(path)
@@ -788,9 +848,12 @@ fn read_file_stable(
         use std::os::unix::fs::OpenOptionsExt as _;
         options.custom_flags(nofollow_open_flag()?);
     }
-    let mut file = options
-        .open(path)
-        .map_err(|e| format!("cannot open `{}` without following links: {e}", path.display()))?;
+    let mut file = options.open(path).map_err(|e| {
+        format!(
+            "cannot open `{}` without following links: {e}",
+            path.display()
+        )
+    })?;
     let before = file
         .metadata()
         .map_err(|e| format!("cannot inspect open file `{}`: {e}", path.display()))?;
@@ -1047,10 +1110,10 @@ mod tests {
     fn canonical_archive_rejects_hardlinks_outside_output() {
         let dir = scratch("outside-hardlink");
         let file = dir.join("payload");
-        let outside = dir.parent().unwrap().join(format!(
-            "outside-hardlink-{}",
-            std::process::id()
-        ));
+        let outside = dir
+            .parent()
+            .unwrap()
+            .join(format!("outside-hardlink-{}", std::process::id()));
         fs::write(&file, "trusted").unwrap();
         fs::hard_link(&file, &outside).unwrap();
         let error = try_output_hash_of(&dir.to_string_lossy()).unwrap_err();
@@ -1279,7 +1342,13 @@ mod tests {
     fn semantic_xattr_name_and_value_are_canonical_digest_bytes() {
         use std::os::unix::ffi::OsStrExt as _;
         unsafe extern "C" {
-            fn lsetxattr(path: *const i8, name: *const i8, value: *const u8, size: usize, flags: i32) -> i32;
+            fn lsetxattr(
+                path: *const i8,
+                name: *const i8,
+                value: *const u8,
+                size: usize,
+                flags: i32,
+            ) -> i32;
         }
         let dir = scratch("xattr-digest");
         let file = dir.join("payload");
@@ -1291,9 +1360,11 @@ mod tests {
         };
         assert_eq!(set(b"first"), 0);
         assert!(try_output_hash_of(&dir.to_string_lossy()).is_err());
-        let first = try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
+        let first =
+            try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
         assert_eq!(set(b"second"), 0);
-        let second = try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
+        let second =
+            try_output_hash_of_with_policy(&dir.to_string_lossy(), true, &mut |_, _| {}).unwrap();
         assert_ne!(first, second);
         fs::remove_dir_all(dir).ok();
     }

@@ -1,20 +1,22 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Bundle::fn_types_compatible;
 use crate::Syntax;
+use crate::Traits::TraitRegistry;
 use crate::AST::{
     AccessConvention, CModule, ExternFn, ExternRustBlock, FuncSig, Item, Param, Type,
     VariantPayload,
 };
-use crate::Sema::Bundle::fn_types_compatible;
-use crate::Traits::TraitRegistry;
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
 
 pub(crate) fn cpp_callback_abi_type(ty: &Type) -> Option<&Type> {
     match ty {
         Type::Tagged { marker, inner }
-            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi))
-                && matches!(inner.as_ref(), Type::Fn { .. }) =>
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)
+            ) && matches!(inner.as_ref(), Type::Fn { .. }) =>
         {
             Some(inner)
         }
@@ -58,7 +60,14 @@ pub(crate) fn check_extern_block(
     }
     for ef in &block.functions {
         if let Some((_, span)) = &ef.abi {
-            diags.push(Diagnostic::error("E3212", "`#ABI` only applies to C declarations".to_string(), "Rust FFI uses its declared Rust ABI and cannot select a C calling convention".to_string(), "remove `#ABI` from the `extern rust` function".to_string(), Some(*span)));
+            diags.push(Diagnostic::error(
+                "E3212",
+                "`#ABI` only applies to C declarations".to_string(),
+                "Rust FFI uses its declared Rust ABI and cannot select a C calling convention"
+                    .to_string(),
+                "remove `#ABI` from the `extern rust` function".to_string(),
+                Some(*span),
+            ));
             ok = false;
         }
         if !check_extern_fn(ef, registry, diags) {
@@ -106,10 +115,7 @@ pub(crate) fn check_extern_fn(
 /// nominal `Close` protocol as every other resource. The call checker sees
 /// this registry fact before it checks the function body; codegen emits the
 /// matching bridge-backed implementation.
-pub(crate) fn register_foreign_close_impls(
-    functions: &[ExternFn],
-    traits: &mut TraitRegistry,
-) {
+pub(crate) fn register_foreign_close_impls(functions: &[ExternFn], traits: &mut TraitRegistry) {
     for function in functions {
         let Some(return_type) = function.return_type.as_ref() else {
             continue;
@@ -152,7 +158,10 @@ fn check_close_contract(
         ));
         return false;
     };
-    let Some(close_fn) = functions.iter().find(|candidate| candidate.name == *close_name) else {
+    let Some(close_fn) = functions
+        .iter()
+        .find(|candidate| candidate.name == *close_name)
+    else {
         diags.push(ffi_type_error(
             &format!("foreign close function `{close_name}` is not declared"),
             "the close protocol must name a function in the same foreign binding",
@@ -199,9 +208,20 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Named(name) => {
             matches!(
                 name.as_str(),
-                "Int" | "Float" | "Bool" | "Char" | "String"
-                    | "I8" | "I16" | "I32" | "I64"
-                    | "U8" | "U16" | "U32" | "U64" | "F32"
+                "Int"
+                    | "Float"
+                    | "Bool"
+                    | "Char"
+                    | "String"
+                    | "I8"
+                    | "I16"
+                    | "I32"
+                    | "I64"
+                    | "U8"
+                    | "U16"
+                    | "U32"
+                    | "U64"
+                    | "F32"
             ) || c_named_type_ok(name, registry)
         }
         // No stable C ABI for these by value:
@@ -214,7 +234,12 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         | Type::TraitObject(_)
         | Type::Tuple(_)
         | Type::FixedList { .. } => false,
-        Type::Fn { params, ret, effect_bound, .. } => {
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            ..
+        } => {
             matches!(effect_bound, Some(b) if b.is_empty())
                 && params.iter().all(|p| is_c_abi_type(p, registry))
                 && ret.as_deref().is_none_or(|r| is_c_abi_type(r, registry))
@@ -239,23 +264,25 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
             fields,
             is_c_layout,
             ..
-        }) => {
-            *is_c_layout
-                && fields
-                    .iter()
-                    .all(|(_, _, ty)| is_c_abi_type(ty, registry))
-        }
+        }) => *is_c_layout && fields.iter().all(|(_, _, ty)| is_c_abi_type(ty, registry)),
         // No ratified C-safe enum representation exists yet (tag placement,
         // discriminant width, payload union layout are all undecided — see
         // card #436 report). Reject every enum at the C boundary rather than
         // let sema accept a shape CModule codegen can't lower (I2/I3); a
         // future `#Layout(c) enum` design needs an owner ballot first.
-        Some(TypeDef::Enum { variants, c_layout_tag, .. }) => {
-            c_layout_tag.is_some() && variants.values().all(|(_, payload)| match payload {
-                VariantPayload::Unit => true,
-                VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
-                VariantPayload::Named(fields) => fields.iter().all(|f| is_c_abi_type(&f.ty, registry)),
-            })
+        Some(TypeDef::Enum {
+            variants,
+            c_layout_tag,
+            ..
+        }) => {
+            c_layout_tag.is_some()
+                && variants.values().all(|(_, payload)| match payload {
+                    VariantPayload::Unit => true,
+                    VariantPayload::Single(ty, _) => is_c_abi_type(ty, registry),
+                    VariantPayload::Named(fields) => {
+                        fields.iter().all(|f| is_c_abi_type(&f.ty, registry))
+                    }
+                })
         }
         // D-DIST1: distinct types are repr(transparent) over their base, so
         // they share the base's C ABI exactly — treat as C-compatible iff
@@ -369,14 +396,26 @@ pub(crate) fn check_c_module(
     let mut ok = true;
     for ef in &cm.functions {
         if let Some((abi, span)) = &ef.abi {
-            let known = matches!(abi.as_str(), "system" | "cdecl" | "stdcall" | "fastcall" | "win64" | "sysv64");
+            let known = matches!(
+                abi.as_str(),
+                "system" | "cdecl" | "stdcall" | "fastcall" | "win64" | "sysv64"
+            );
             if !known {
-                diags.push(Diagnostic::error("E3212", format!("`{abi}` is not a known C calling convention"), "`#ABI` accepts only the ratified native ABI names".to_string(), "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`".to_string(), Some(*span)));
+                diags.push(Diagnostic::error(
+                    "E3212",
+                    format!("`{abi}` is not a known C calling convention"),
+                    "`#ABI` accepts only the ratified native ABI names".to_string(),
+                    "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`"
+                        .to_string(),
+                    Some(*span),
+                ));
                 ok = false;
             } else {
                 let available = match abi.as_str() {
                     "system" => true,
-                    "cdecl" | "stdcall" | "fastcall" => cfg!(all(target_os = "windows", target_arch = "x86")),
+                    "cdecl" | "stdcall" | "fastcall" => {
+                        cfg!(all(target_os = "windows", target_arch = "x86"))
+                    }
                     "win64" => cfg!(all(target_os = "windows", target_arch = "x86_64")),
                     "sysv64" => cfg!(all(not(target_os = "windows"), target_arch = "x86_64")),
                     _ => false,
@@ -388,7 +427,14 @@ pub(crate) fn check_c_module(
                 if ef.params.iter().any(|p| p.variadic)
                     && !(abi == "cdecl" && cfg!(all(target_os = "windows", target_arch = "x86")))
                 {
-                    diags.push(Diagnostic::error("E3214", format!("variadic C function `{}` cannot use `{abi}`", ef.name), "variadics allow only the default C ABI, or cdecl on Windows x86".to_string(), "remove `#ABI`, or use `#ABI(cdecl)` on Windows x86".to_string(), Some(*span)));
+                    diags.push(Diagnostic::error(
+                        "E3214",
+                        format!("variadic C function `{}` cannot use `{abi}`", ef.name),
+                        "variadics allow only the default C ABI, or cdecl on Windows x86"
+                            .to_string(),
+                        "remove `#ABI`, or use `#ABI(cdecl)` on Windows x86".to_string(),
+                        Some(*span),
+                    ));
                     ok = false;
                 }
             }
@@ -396,13 +442,13 @@ pub(crate) fn check_c_module(
         for p in &ef.params {
             if let Type::Apply { name, args } = &p.ty {
                 if name == Syntax::TYPE_PTR {
-                // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C
-                // header exactly. The call is marked unsafe by `extern_to_sig`;
-                // only a single C-safe pointee is admitted.
-                if args.len() != 1 || !is_c_abi_type(&args[0], registry) {
-                    diags.push(e3203(&p.ty, p.ty_span));
-                    ok = false;
-                }
+                    // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C
+                    // header exactly. The call is marked unsafe by `extern_to_sig`;
+                    // only a single C-safe pointee is admitted.
+                    if args.len() != 1 || !is_c_abi_type(&args[0], registry) {
+                        diags.push(e3203(&p.ty, p.ty_span));
+                        ok = false;
+                    }
                 } else if !is_c_abi_type(&p.ty, registry) {
                     diags.push(e3203(&p.ty, p.ty_span));
                     ok = false;
@@ -414,7 +460,10 @@ pub(crate) fn check_c_module(
         }
         if let Some(rt) = &ef.return_type {
             if matches!(rt, Type::Apply { name, .. } if name == Syntax::TYPE_PTR) {
-                diags.push(e3202(&rt.name(), ef.return_type_span.unwrap_or(ef.name_span)));
+                diags.push(e3202(
+                    &rt.name(),
+                    ef.return_type_span.unwrap_or(ef.name_span),
+                ));
                 ok = false;
             } else if !is_c_abi_type(rt, registry) {
                 diags.push(e3203(rt, ef.return_type_span.unwrap_or(ef.name_span)));
@@ -490,11 +539,13 @@ pub(crate) fn foreign_call_boundary_error(
 /// retains declaration order, so this is stable even when a later descriptor
 /// grows more capability metadata.
 pub(crate) fn ffi_capability(sig: &FuncSig) -> Option<&'static str> {
-    sig.params.iter().find_map(|(convention, _)| match convention {
-        AccessConvention::Read => None,
-        AccessConvention::Write => Some(Syntax::SIGIL_WRITE),
-        AccessConvention::Move => Some(Syntax::SIGIL_MOVE),
-    })
+    sig.params
+        .iter()
+        .find_map(|(convention, _)| match convention {
+            AccessConvention::Read => None,
+            AccessConvention::Write => Some(Syntax::SIGIL_WRITE),
+            AccessConvention::Move => Some(Syntax::SIGIL_MOVE),
+        })
 }
 
 pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
@@ -519,7 +570,7 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
 pub(crate) fn ffi_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
     match registry.types.get(name) {
         Some(TypeDef::Struct { fields, .. }) => {
-                    fields.iter().all(|(_, _, ty)| is_ffi_type(ty, registry))
+            fields.iter().all(|(_, _, ty)| is_ffi_type(ty, registry))
         }
         Some(TypeDef::Enum { variants, .. }) => {
             variants.values().all(|(_, payload)| match payload {
@@ -691,7 +742,11 @@ fn validate_undo_target_parts(
             format!(
                 "undo function `{inverse}` expects {} argument{}, but `{forward_name}` has {}",
                 inverse_sig.params.len(),
-                if inverse_sig.params.len() == 1 { "" } else { "s" },
+                if inverse_sig.params.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
                 forward_params.len(),
             ),
             "the compensating call receives the same captured arguments as the foreign call"
@@ -740,7 +795,11 @@ fn validate_undo_target_parts(
         }
     }
 
-    if let Some(return_type) = inverse_sig.return_type.as_ref().filter(|ty| !is_unit_return(ty)) {
+    if let Some(return_type) = inverse_sig
+        .return_type
+        .as_ref()
+        .filter(|ty| !is_unit_return(ty))
+    {
         diags.push(Diagnostic::error(
             "E0113",
             format!(
@@ -749,7 +808,10 @@ fn validate_undo_target_parts(
             ),
             "rollback invokes the inverse for its side effect and cannot use a returned value"
                 .to_string(),
-            format!("remove `{}` from `{inverse}` so it returns Unit", return_type.name()),
+            format!(
+                "remove `{}` from `{inverse}` so it returns Unit",
+                return_type.name()
+            ),
             Some(span),
         ));
     }

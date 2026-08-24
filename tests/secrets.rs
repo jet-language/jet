@@ -54,10 +54,16 @@ fn setup_vault(proj: &Scratch, keys: &Scratch) {
     let keygen_text = strip_ansi(&String::from_utf8_lossy(&keygen_out.stderr));
     let recipient = keygen_text
         .lines()
-        .find_map(|line| line.split_once("recipient: ").map(|(_, value)| value.trim()))
+        .find_map(|line| {
+            line.split_once("recipient: ")
+                .map(|(_, value)| value.trim())
+        })
         .expect("keygen must print a recipient line")
         .to_string();
-    assert!(recipient.starts_with("age1"), "recipient should be age-formatted");
+    assert!(
+        recipient.starts_with("age1"),
+        "recipient should be age-formatted"
+    );
     let add_out = jetpack()
         .current_dir(&proj.path)
         .args(["secrets", "recipients", "add", &recipient])
@@ -82,7 +88,9 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
         .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
         .output()
         .expect("run jetpack secrets recipients list");
-    assert!(String::from_utf8_lossy(&list_out.stdout).trim().starts_with("age1"));
+    assert!(String::from_utf8_lossy(&list_out.stdout)
+        .trim()
+        .starts_with("age1"));
 
     const PLAINTEXT: &str = "hunter2-super-secret-value";
     let set_out = jetpack()
@@ -167,8 +175,16 @@ fn secrets_keygen_set_get_roundtrip_no_plaintext_on_disk() {
     for entry in walk(&proj.path) {
         let bytes = fs::read(&entry).unwrap_or_default();
         let text = String::from_utf8_lossy(&bytes);
-        assert!(!text.contains(PLAINTEXT), "old plaintext leaked into `{}`", entry.display());
-        assert!(!text.contains(UPDATED), "updated plaintext leaked into `{}`", entry.display());
+        assert!(
+            !text.contains(PLAINTEXT),
+            "old plaintext leaked into `{}`",
+            entry.display()
+        );
+        assert!(
+            !text.contains(UPDATED),
+            "updated plaintext leaked into `{}`",
+            entry.display()
+        );
     }
 }
 
@@ -207,7 +223,10 @@ fn secrets_unset_reencrypts_store_and_removes_value() {
             && !String::from_utf8_lossy(&unset.stderr).contains(REMOVED),
         "unset output leaked a secret value"
     );
-    assert!(before != fs::read(&store).unwrap(), "unset must re-encrypt the store");
+    assert!(
+        before != fs::read(&store).unwrap(),
+        "unset must re-encrypt the store"
+    );
     assert!(!String::from_utf8_lossy(&fs::read(&store).unwrap()).contains(REMOVED));
 
     let missing = jetpack()
@@ -216,7 +235,10 @@ fn secrets_unset_reencrypts_store_and_removes_value() {
         .env("JET_KEYS_DIR", keys.path.to_str().unwrap())
         .output()
         .expect("read removed secret");
-    assert!(!missing.status.success(), "removed secret was still readable");
+    assert!(
+        !missing.status.success(),
+        "removed secret was still readable"
+    );
     assert!(
         strip_ansi(&String::from_utf8_lossy(&missing.stderr)).contains("E1263"),
         "removed secret must return not-found"
@@ -248,7 +270,9 @@ fn secrets_list_prints_names_without_values() {
         .expect("list secrets");
     assert!(list.status.success(), "list failed");
     assert!(
-        String::from_utf8_lossy(&list.stdout).lines().collect::<Vec<_>>()
+        String::from_utf8_lossy(&list.stdout)
+            .lines()
+            .collect::<Vec<_>>()
             == ["first_name", "second_name"],
         "list must print declared names only"
     );
@@ -257,8 +281,14 @@ fn secrets_list_prints_names_without_values() {
         String::from_utf8_lossy(&list.stdout),
         String::from_utf8_lossy(&list.stderr)
     );
-    assert!(!output.contains(FIRST_VALUE), "list output leaked a secret value");
-    assert!(!output.contains(SECOND_VALUE), "list output leaked a secret value");
+    assert!(
+        !output.contains(FIRST_VALUE),
+        "list output leaked a secret value"
+    );
+    assert!(
+        !output.contains(SECOND_VALUE),
+        "list output leaked a secret value"
+    );
 }
 
 #[test]
@@ -291,12 +321,30 @@ fn secrets_import_dotenv_preserves_source_and_reports_names() {
     for name in ["API_URL", "IMPORTED_TOKEN", "SESSION_KEY"] {
         assert!(output.contains(name), "import output omitted a secret name");
     }
-    assert!(output.contains("left `.env` untouched"), "import omitted source advice");
-    assert!(output.contains("remove it"), "import omitted cleanup advice");
-    assert!(!output.contains(API_VALUE), "import output leaked a secret value");
-    assert!(!output.contains(TOKEN_VALUE), "import output leaked a secret value");
-    assert!(!output.contains(SESSION_VALUE), "import output leaked a secret value");
-    assert!(fs::read(&env_file).unwrap() == before, "import changed the source file");
+    assert!(
+        output.contains("left `.env` untouched"),
+        "import omitted source advice"
+    );
+    assert!(
+        output.contains("remove it"),
+        "import omitted cleanup advice"
+    );
+    assert!(
+        !output.contains(API_VALUE),
+        "import output leaked a secret value"
+    );
+    assert!(
+        !output.contains(TOKEN_VALUE),
+        "import output leaked a secret value"
+    );
+    assert!(
+        !output.contains(SESSION_VALUE),
+        "import output leaked a secret value"
+    );
+    assert!(
+        fs::read(&env_file).unwrap() == before,
+        "import changed the source file"
+    );
 
     let get = jetpack()
         .current_dir(&proj.path)

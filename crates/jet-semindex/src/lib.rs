@@ -5,35 +5,34 @@
 
 mod Build;
 mod JSON;
-mod Symbols;
 mod SemanticOps;
+mod Symbols;
 mod Types;
 
-pub use JSON::{package_facts_json, workspace_overlay_policy_json};
+pub use jet_pkg_model::Package::PackageFacts;
 pub use jet_sema::SemIndexEffectFacts;
 pub use Build::{
     binder_active_parameter, build_index, build_symbol_db, function_parameter_parts,
-    structural_nodes_from_parsed,
-    HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
-};
-pub use Types::{
-    CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionAnchor, DefinitionFact, EffectFact, EffectProvenance,
-    ExpandLens, ExpandProjection, ExpandValue, InstanceApplicationFact, InstanceFact, MemberFact,
-    MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode,
-    StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
-    ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
-    SCHEMA_VERSION,
-};
-pub use Symbols::{
-    build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
-    SemanticSymbolKind, SemanticVisibilityAnchor,
+    structural_nodes_from_parsed, HoverEntry, InlayHint, SymDef, SymKind, SymRef, SymbolDB,
 };
 pub use SemanticOps::{
     review_semantic_ops, review_semantic_ops_with_receipts, semantic_blame,
     semantic_blame_for_file, semantic_ops_for_file, semantic_rename_ops, ReviewOpKind,
     ReviewSemanticOp, SemanticBlameEntry, SemanticOp, SemanticOpFile, SemanticOpTarget,
 };
-pub use jet_pkg_model::Package::PackageFacts;
+pub use Symbols::{
+    build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
+    SemanticSymbolKind, SemanticVisibilityAnchor,
+};
+pub use Types::{
+    CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionAnchor, DefinitionFact,
+    EffectFact, EffectProvenance, ExpandLens, ExpandProjection, ExpandValue,
+    InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact,
+    OutputFact, SemIndex, SourceSpan, StructuralAudit, StructuralNode, StructuralSlotBoundary,
+    StructuralSlotKind, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
+    ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, SCHEMA_VERSION,
+};
+pub use JSON::{package_facts_json, workspace_overlay_policy_json};
 
 use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::AST::ProgramBundle;
@@ -69,7 +68,10 @@ pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, Str
     let dir = match jet_pkg_model::Authority::AuthorityResolver::open(entry) {
         Ok(resolver) => resolver.root().to_path_buf(),
         Err(jet_pkg_model::Authority::AuthorityError::WrongKind { .. }) => {
-            let parent = entry.parent().filter(|path| !path.as_os_str().is_empty()).unwrap_or(Path::new("."));
+            let parent = entry
+                .parent()
+                .filter(|path| !path.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
             jet_pkg_model::Authority::AuthorityResolver::open(parent)
                 .map_err(|error| error.to_string())?
                 .root()
@@ -78,8 +80,8 @@ pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, Str
         Err(error) if error.is_missing() => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
-    let Some(root) = jet_driver::Loader::find_manifest_root_checked(&dir)
-        .map_err(|diagnostic| {
+    let Some(root) =
+        jet_driver::Loader::find_manifest_root_checked(&dir).map_err(|diagnostic| {
             format!(
                 "{}: {} — {}",
                 diagnostic.code, diagnostic.what, diagnostic.why
@@ -88,8 +90,7 @@ pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, Str
     else {
         return Ok(None);
     };
-    PackageFacts::load_checked(&root)
-        .map_err(|error| error.to_string())
+    PackageFacts::load_checked(&root).map_err(|error| error.to_string())
 }
 
 /// Render the registered package-shape diagnostic shared by semantic-index
@@ -98,10 +99,9 @@ pub fn package_facts_diagnostic(entry: &Path, error: &str) -> Diagnostic {
     Diagnostic::error(
         "E1206",
         format!("package facts for `{}` have a shape error", entry.display()),
-        format!(
-            "one typed Package fact graph must own this projection; {error}"
-        ),
-        "fix package.jet or its declared Config files before tooling uses package facts".to_string(),
+        format!("one typed Package fact graph must own this projection; {error}"),
+        "fix package.jet or its declared Config files before tooling uses package facts"
+            .to_string(),
         None,
     )
 }
@@ -126,8 +126,9 @@ pub fn workspace_overlay_policy_for_entry(
         match resolver.resolve_workspace_source() {
             Err(error) => return Err(error.workspace_diagnostic()),
             Ok(Some(_)) => {
-                return Ok(workspace_lock_at(&resolver)?
-                    .and_then(|plan| (!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy)))
+                return Ok(workspace_lock_at(&resolver)?.and_then(|plan| {
+                    (!plan.overlay_policy.is_empty()).then_some(plan.overlay_policy)
+                }))
             }
             Ok(None) => {}
         }
@@ -147,8 +148,7 @@ pub fn workspace_overlay_policy_for_entry(
 fn workspace_lock_at(
     resolver: &jet_pkg_model::Authority::AuthorityResolver,
 ) -> Result<Option<jet_pkg_model::WorkspacePlan::WorkspacePlan>, Diagnostic> {
-    let lock_file = match resolver
-        .checked_file(Path::new(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE))
+    let lock_file = match resolver.checked_file(Path::new(jet_pkg_model::Syntax::UNIFIED_LOCK_FILE))
     {
         Ok(file) => file,
         Err(error) if error.is_missing() => return Ok(None),
@@ -374,10 +374,8 @@ mod tests {
 
     #[test]
     fn package_config_facts_are_shared_with_the_index_json() {
-        let root = std::env::temp_dir().join(format!(
-            "jet_semindex_package_facts_{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet_semindex_package_facts_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
@@ -414,7 +412,10 @@ mod tests {
             "\"inline_configs\":{\"dev\"",
             "\"kind\":\"executable\"",
         ] {
-            assert!(json.contains(field), "package projection omitted {field}: {json}");
+            assert!(
+                json.contains(field),
+                "package projection omitted {field}: {json}"
+            );
         }
         assert!(json.contains("release.jet"));
         let _ = std::fs::remove_dir_all(root);
@@ -443,7 +444,10 @@ mod tests {
 
         let error = package_facts_for_entry(&entry)
             .expect_err("ambiguous package roots must remain an error");
-        assert!(error.contains("both `package.jet` and migration-era `pkg.jet`"), "{error}");
+        assert!(
+            error.contains("both `package.jet` and migration-era `pkg.jet`"),
+            "{error}"
+        );
         let diagnostic = package_facts_diagnostic(&entry, &error);
         assert_eq!(diagnostic.code, "E1206");
         let _ = std::fs::remove_dir_all(root);
@@ -457,9 +461,15 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(".jet")).unwrap();
-        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            root.join("workspace.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
         let workspace_digest = jet_pkg_model::SHA256::sha256_hex(
-            std::fs::read(root.join("workspace.jet")).unwrap().as_slice(),
+            std::fs::read(root.join("workspace.jet"))
+                .unwrap()
+                .as_slice(),
         );
         std::fs::write(
             root.join(".jet/lock"),
@@ -481,7 +491,10 @@ mod tests {
         assert!(json.contains("\"workspace_overlays\""));
         assert!(json.contains("plasma-beta"));
         assert!(json.contains("discord"));
-        assert!(json.contains("\"field_priorities\":{\"version\":7}"), "{json}");
+        assert!(
+            json.contains("\"field_priorities\":{\"version\":7}"),
+            "{json}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -493,7 +506,11 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(".jet")).unwrap();
-        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            root.join("workspace.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
         std::fs::write(
             root.join(".jet/lock"),
             "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
@@ -518,17 +535,27 @@ mod tests {
         let child = root.join("child");
         std::fs::create_dir_all(root.join(".jet")).unwrap();
         std::fs::create_dir_all(&child).unwrap();
-        std::fs::write(root.join("workspace.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            root.join("workspace.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
         std::fs::write(
             root.join(".jet/lock"),
             "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
         )
         .unwrap();
-        std::fs::write(child.join("inner-authority.jet"), "module workspace { members: [] }\n").unwrap();
+        std::fs::write(
+            child.join("inner-authority.jet"),
+            "module workspace { members: [] }\n",
+        )
+        .unwrap();
         let entry = child.join("run.jet");
         std::fs::write(&entry, "fn run() {}\n").unwrap();
 
-        assert!(workspace_overlay_policy_for_entry(&entry).unwrap().is_none());
+        assert!(workspace_overlay_policy_for_entry(&entry)
+            .unwrap()
+            .is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -606,11 +633,22 @@ mod tests {
         ).unwrap();
 
         let index = open(&main).expect("generic module should index");
-        assert_eq!(index.instances().len(), 1, "equivalent aliases share one instance");
+        assert_eq!(
+            index.instances().len(),
+            1,
+            "equivalent aliases share one instance"
+        );
         let instance = &index.instances()[0];
         assert_eq!(instance.fingerprint.len(), 64);
         assert!(!instance.full_key_hex.is_empty());
-        assert_eq!(instance.applications.iter().map(|application| application.name.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
+        assert_eq!(
+            instance
+                .applications
+                .iter()
+                .map(|application| application.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
         assert!(instance.applications.iter().all(|application| {
             application.module_path == main.to_string_lossy()
                 && application.semantic_identity == format!("instance:{}", instance.fingerprint)
@@ -618,8 +656,12 @@ mod tests {
         assert_eq!(instance.arguments.len(), 2);
         assert_eq!(instance.exported_members, vec!["value"]);
         assert_eq!(instance.template_definition_id.len(), 64);
-        let alias_defs: Vec<_> = index.definitions().iter()
-            .filter(|definition| definition.identity == format!("instance:{}", instance.fingerprint))
+        let alias_defs: Vec<_> = index
+            .definitions()
+            .iter()
+            .filter(|definition| {
+                definition.identity == format!("instance:{}", instance.fingerprint)
+            })
             .map(|definition| definition.name.as_str())
             .collect();
         assert_eq!(alias_defs, vec!["a", "b"]);
@@ -637,9 +679,10 @@ mod tests {
     fn every_structural_child_has_explicit_slot() {
         let path = fixture("basics/default_refs.jet");
         let index = open(&path).expect("default-ref example should index");
-        assert!(index.structural_nodes().iter().all(|node| {
-            node.parent.is_none() || node.slot != "root"
-        }));
+        assert!(index
+            .structural_nodes()
+            .iter()
+            .all(|node| { node.parent.is_none() || node.slot != "root" }));
     }
 
     #[test]
@@ -665,19 +708,33 @@ mod tests {
                 .references()
                 .iter()
                 .filter(|reference| reference.name == name)
-                .filter_map(|reference| reference.target.as_ref().map(|target| target.kind.as_str()))
+                .filter_map(|reference| {
+                    reference.target.as_ref().map(|target| target.kind.as_str())
+                })
                 .collect::<Vec<_>>()
         };
         assert!(target_kind("api").contains(&"import_alias"));
         assert!(target_kind("report").contains(&"function"));
         assert!(target_kind("alias_report").contains(&"function"));
         assert!(target_kind("step").contains(&"function"));
-        let step_targets = index.references().iter()
+        let step_targets = index
+            .references()
+            .iter()
             .filter(|reference| reference.name == "step")
             .filter_map(|reference| reference.target.as_ref())
-            .map(|target| (target.module_path.clone(), target.def_span.start, target.def_span.end))
+            .map(|target| {
+                (
+                    target.module_path.clone(),
+                    target.def_span.start,
+                    target.def_span.end,
+                )
+            })
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(step_targets.len(), 2, "receiver type must select exact method definition");
+        assert_eq!(
+            step_targets.len(),
+            2,
+            "receiver type must select exact method definition"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -77,6 +77,9 @@ fn run() ! {
     assert!(
         !found.iter().any(|d| d.code == "E2402"),
         "core JSONError should convert into Err, got {:?}",
-        found.iter().map(|d| format!("{}: {}", d.code, d.what)).collect::<Vec<_>>()
+        found
+            .iter()
+            .map(|d| format!("{}: {}", d.code, d.what))
+            .collect::<Vec<_>>()
     );
 }

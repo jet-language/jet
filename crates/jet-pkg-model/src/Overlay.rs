@@ -52,11 +52,10 @@ impl OverlayPolicy {
     /// conflicting equal-priority scalar is rejected by the checked method;
     /// callers that need the diagnostic should use
     /// `resolve_package_override_checked`.
-    pub fn resolve_package_override(
-        &self,
-        package: &str,
-    ) -> Option<ResolvedPackageOverride> {
-        self.resolve_package_override_checked(package).ok().flatten()
+    pub fn resolve_package_override(&self, package: &str) -> Option<ResolvedPackageOverride> {
+        self.resolve_package_override_checked(package)
+            .ok()
+            .flatten()
     }
 
     /// Resolve one package and retain the precise equal-priority conflict.
@@ -173,23 +172,14 @@ impl OverlayPolicy {
                     .iter()
                     .find(|(name, _)| name == key)
                     .map(|(_, value)| value.as_str());
-                if keyed_override_wins(
-                    &winners,
-                    &field,
-                    priority,
-                    order,
-                    current,
-                    value,
-                )? {
+                if keyed_override_wins(&winners, &field, priority, order, current, value)? {
                     if let Some(existing) = resolved.env.iter_mut().find(|(name, _)| name == key) {
                         existing.1 = value.clone();
                     } else {
                         resolved.env.push((key.clone(), value.clone()));
                     }
                     winners.insert(field.clone(), (priority, order));
-                    resolved
-                        .field_priorities
-                        .insert(field, priority);
+                    resolved.field_priorities.insert(field, priority);
                 }
             }
             for patch in &candidate.patches {
@@ -384,8 +374,7 @@ impl PackageOverride {
             ),
             self.source.as_deref().unwrap_or("source:unchanged"),
             self.flags.join("+"),
-            env
-                .iter()
+            env.iter()
                 .map(|(key, value)| format!("{key}={value}"))
                 .collect::<Vec<_>>()
                 .join("+"),
@@ -458,22 +447,42 @@ pub fn parse_workspace_policy(src: &str) -> Result<OverlayPolicy, OverlayError> 
     let mut pos = 0;
     while let Some(at) = find_word_outside(&body, Syntax::WORKSPACE_OVERLAY, pos) {
         let mut cursor = at + Syntax::WORKSPACE_OVERLAY.len();
-        while body[cursor..].chars().next().is_some_and(char::is_whitespace) {
-            cursor += body[cursor..].chars().next().expect("peeked whitespace").len_utf8();
+        while body[cursor..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            cursor += body[cursor..]
+                .chars()
+                .next()
+                .expect("peeked whitespace")
+                .len_utf8();
         }
         let (name, after_name) = read_ident(&body[cursor..]).ok_or_else(|| {
             OverlayError::Malformed("`overlay` needs a name in `workspace.jet`".to_string())
         })?;
         cursor += body[cursor..].len() - after_name.len();
-        while body[cursor..].chars().next().is_some_and(char::is_whitespace) {
-            cursor += body[cursor..].chars().next().expect("peeked whitespace").len_utf8();
+        while body[cursor..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
+            cursor += body[cursor..]
+                .chars()
+                .next()
+                .expect("peeked whitespace")
+                .len_utf8();
         }
         let block_src = body[cursor..].strip_prefix('{').ok_or_else(|| {
             OverlayError::Malformed(format!("`overlay {name}` needs a `{{ … }}` body"))
         })?;
         let (overlay_body, consumed) = balanced_with_len(block_src, '{', '}');
         let parsed = parse_overlay_set(name, &overlay_body)?;
-        if policy.overlays.iter().any(|overlay| overlay.name == parsed.name) {
+        if policy
+            .overlays
+            .iter()
+            .any(|overlay| overlay.name == parsed.name)
+        {
             return Err(OverlayError::Malformed(format!(
                 "overlay `{}` is declared more than once",
                 parsed.name
@@ -534,7 +543,10 @@ fn parse_overlay_set(name: String, body: &str) -> Result<OverlaySet, OverlayErro
             }
             saw_overrides = true;
             let record = value.trim();
-            let Some(record) = record.strip_prefix('{').or_else(|| record.strip_prefix(".{")) else {
+            let Some(record) = record
+                .strip_prefix('{')
+                .or_else(|| record.strip_prefix(".{"))
+            else {
                 return Err(OverlayError::Malformed(
                     "`overrides` must be a record".to_string(),
                 ));
@@ -632,19 +644,25 @@ fn parse_keyed_override_record(
                 let (source, priority) = parse_priority_value(value)?;
                 result.source = Some(source);
                 result.priority = result.priority.max(priority);
-                result.field_priorities.insert("source".to_string(), priority);
+                result
+                    .field_priorities
+                    .insert("source".to_string(), priority);
             }
             "version" => {
                 let (version, priority) = parse_priority_value(value)?;
                 result.version = Some(version);
                 result.priority = result.priority.max(priority);
-                result.field_priorities.insert("version".to_string(), priority);
+                result
+                    .field_priorities
+                    .insert("version".to_string(), priority);
             }
             "flags" => {
                 let (flags, priority) = parse_priority_flag_record(value)?;
                 result.flags = flags;
                 result.priority = result.priority.max(priority);
-                result.field_priorities.insert("flags".to_string(), priority);
+                result
+                    .field_priorities
+                    .insert("flags".to_string(), priority);
             }
             "env" => {
                 let (env, priority) = parse_priority_env_record(value)?;
@@ -663,7 +681,9 @@ fn parse_keyed_override_record(
                 let (patches, priority) = parse_priority_patch_list(value)?;
                 result.patches = patches;
                 result.priority = result.priority.max(priority);
-                result.field_priorities.insert("patches".to_string(), priority);
+                result
+                    .field_priorities
+                    .insert("patches".to_string(), priority);
             }
             "allowUnfree" => {
                 let (allow, priority) = parse_priority_bool(value)?;
@@ -708,7 +728,10 @@ fn priority_payload(raw: &str) -> Result<(String, i32), OverlayError> {
                     "Priority(n) override needs n: value".to_string(),
                 ));
             }
-            (parts[0].trim().to_string(), parts[1..].join(",").trim().to_string())
+            (
+                parts[0].trim().to_string(),
+                parts[1..].join(",").trim().to_string(),
+            )
         };
         let priority = weight.parse::<i32>().map_err(|_| {
             OverlayError::Malformed("Priority(n) needs an integer weight".to_string())
@@ -781,9 +804,9 @@ fn parse_env_record(raw: &str) -> Result<Vec<(String, String)>, OverlayError> {
         };
         let key = unquote(key.trim());
         if !valid_env_name(&key) {
-            return Err(OverlayError::Malformed(
-                format!("`env` variable name `{key}` is invalid"),
-            ));
+            return Err(OverlayError::Malformed(format!(
+                "`env` variable name `{key}` is invalid"
+            )));
         }
         let value = unquote(value);
         if let Some((_, previous)) = values.iter().find(|(existing, _)| existing == &key) {
@@ -1040,11 +1063,13 @@ fn parse_build_grants(body: &str) -> Result<Vec<(String, Vec<String>)>, OverlayE
     let inner = raw
         .strip_prefix(".{")
         .and_then(|value| value.strip_suffix('}'))
-        .or_else(|| raw.strip_prefix('{').and_then(|value| value.strip_suffix('}')))
+        .or_else(|| {
+            raw.strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+        })
         .ok_or_else(|| {
             OverlayError::Malformed(
-                "`policy.grants:` must be a package map like `.{ \"pkg\": #(Net) }`"
-                    .to_string(),
+                "`policy.grants:` must be a package map like `.{ \"pkg\": #(Net) }`".to_string(),
             )
         })?;
     let mut grants = Vec::new();
@@ -1151,22 +1176,34 @@ fn code_depth_at(source: &str, stop: usize) -> Option<i32> {
     let mut comment = false;
     let mut chars = source.char_indices().peekable();
     while let Some((index, ch)) = chars.next() {
-        if index >= stop { break; }
+        if index >= stop {
+            break;
+        }
         if comment {
-            if ch == '\n' { comment = false; }
+            if ch == '\n' {
+                comment = false;
+            }
             continue;
         }
         if quoted {
-            if escaped { escaped = false; }
-            else if ch == '\\' { escaped = true; }
-            else if ch == '"' { quoted = false; }
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
             continue;
         }
         if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
             comment = true;
-        } else if ch == '"' { quoted = true; }
-        else if matches!(ch, '(' | '[' | '{') { depth += 1; }
-        else if matches!(ch, ')' | ']' | '}') { depth -= 1; }
+        } else if ch == '"' {
+            quoted = true;
+        } else if matches!(ch, '(' | '[' | '{') {
+            depth += 1;
+        } else if matches!(ch, ')' | ']' | '}') {
+            depth -= 1;
+        }
     }
     (!quoted && !comment).then_some(depth)
 }
@@ -1179,24 +1216,37 @@ fn balanced_policy_body(source: &str) -> Result<String, OverlayError> {
     let mut chars = source.char_indices().peekable();
     while let Some((index, ch)) = chars.next() {
         if comment {
-            if ch == '\n' { comment = false; }
+            if ch == '\n' {
+                comment = false;
+            }
             continue;
         }
         if quoted {
-            if escaped { escaped = false; }
-            else if ch == '\\' { escaped = true; }
-            else if ch == '"' { quoted = false; }
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
             continue;
         }
-        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') { comment = true; }
-        else if ch == '"' { quoted = true; }
-        else if ch == '{' { depth += 1; }
-        else if ch == '}' {
+        if ch == '/' && chars.peek().is_some_and(|(_, next)| *next == '/') {
+            comment = true;
+        } else if ch == '"' {
+            quoted = true;
+        } else if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
             depth -= 1;
-            if depth == 0 { return Ok(source[..index].to_string()); }
+            if depth == 0 {
+                return Ok(source[..index].to_string());
+            }
         }
     }
-    Err(OverlayError::Malformed("unclosed `policy: .{ … }` block".to_string()))
+    Err(OverlayError::Malformed(
+        "unclosed `policy: .{ … }` block".to_string(),
+    ))
 }
 
 fn exact_field_value(body: &str, field: &str) -> Result<Option<String>, OverlayError> {
@@ -1209,7 +1259,9 @@ fn exact_field_value(body: &str, field: &str) -> Result<Option<String>, OverlayE
             if name.is_empty() {
                 continue;
             }
-            return Err(OverlayError::Malformed(format!("`policy.{name}` needs `:`")));
+            return Err(OverlayError::Malformed(format!(
+                "`policy.{name}` needs `:`"
+            )));
         };
         let name = name.trim();
         if !matches!(
@@ -1280,17 +1332,13 @@ fn merge_package_override(
                         .insert(field, existing_priority.max(incoming_priority));
                 } else if incoming_priority > existing_priority {
                     existing.env[index].1 = value.clone();
-                    existing
-                        .field_priorities
-                        .insert(field, incoming_priority);
+                    existing.field_priorities.insert(field, incoming_priority);
                 } else if incoming_priority == existing_priority {
                     // Within one overlay, declaration order is the final
                     // tie-breaker for keyed environment facts. Equal scalar
                     // declarations still fail closed below.
                     existing.env[index].1 = value.clone();
-                    existing
-                        .field_priorities
-                        .insert(field, incoming_priority);
+                    existing.field_priorities.insert(field, incoming_priority);
                 }
             } else {
                 existing.env.push((key.clone(), value.clone()));
@@ -1567,7 +1615,11 @@ pub fn find_workspace_body_start(src: &str) -> Option<usize> {
     let mut search = 0;
     while let Some(at) = find_word_outside(src, Syntax::KW_MODULE, search) {
         let mut cursor = at + Syntax::KW_MODULE.len();
-        while src[cursor..].chars().next().is_some_and(char::is_whitespace) {
+        while src[cursor..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
+        {
             cursor += src[cursor..].chars().next()?.len_utf8();
         }
         if src[cursor..].starts_with(Syntax::NS_WORKSPACE)
@@ -1951,31 +2003,39 @@ mod tests {
 
     #[test]
     fn build_deny_uses_exact_balanced_policy_fields() {
-        let policy = parse_workspace_policy(r#"
+        let policy = parse_workspace_policy(
+            r#"
 module workspace {
     policy_note: .{ deny: #(Exec) }
     policy: .{ deny: #(Exec, FS) }
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         assert_eq!(policy.build_deny, vec!["Exec", "FS"]);
     }
 
     #[test]
     fn build_grants_are_subject_scoped_and_quote_aware() {
-        let policy = parse_workspace_policy(r#"
+        let policy = parse_workspace_policy(
+            r#"
 module workspace {
     policy: .{
         grants: .{ "native:tools": #(Net, Exec), "app": #(FS) },
         deny: #(Time)
     }
 }
-"#)
+"#,
+        )
         .unwrap();
         assert_eq!(policy.build_deny, vec!["Time"]);
         assert_eq!(
             policy.build_grants,
             vec![
-                ("native:tools".to_string(), vec!["Net".to_string(), "Exec".to_string()]),
+                (
+                    "native:tools".to_string(),
+                    vec!["Net".to_string(), "Exec".to_string()]
+                ),
                 ("app".to_string(), vec!["FS".to_string()]),
             ]
         );
@@ -1983,10 +2043,9 @@ module workspace {
 
     #[test]
     fn malformed_build_grants_fail_closed() {
-        let error = parse_workspace_policy(
-            "module workspace { policy: .{ grants: .{ \"app\": [Net] } } }",
-        )
-        .unwrap_err();
+        let error =
+            parse_workspace_policy("module workspace { policy: .{ grants: .{ \"app\": [Net] } } }")
+                .unwrap_err();
         assert!(error.message().contains("policy.grants"));
     }
 
@@ -2020,10 +2079,8 @@ module workspace {
 
     #[test]
     fn unknown_build_effects_fail_closed() {
-        let error = parse_workspace_policy(
-            "module workspace { policy: .{ deny: #(Teleport) } }",
-        )
-        .unwrap_err();
+        let error = parse_workspace_policy("module workspace { policy: .{ deny: #(Teleport) } }")
+            .unwrap_err();
         assert!(error.message().contains("unknown build effect"));
     }
 
@@ -2071,10 +2128,7 @@ module workspace {
         )
         .unwrap();
         let package = policy.package_override("ordered", "app").unwrap();
-        assert_eq!(
-            package.patches,
-            vec!["b.patch", "a.patch", "c.patch"]
-        );
+        assert_eq!(package.patches, vec!["b.patch", "a.patch", "c.patch"]);
         let mut reversed = package.clone();
         reversed.patches.reverse();
         assert_ne!(
@@ -2143,7 +2197,10 @@ module workspace {
 "#,
         )
         .unwrap();
-        let app = policy.resolve_package_override_checked("app").unwrap().unwrap();
+        let app = policy
+            .resolve_package_override_checked("app")
+            .unwrap()
+            .unwrap();
         assert_eq!(app.version.as_deref(), Some("2"));
         assert_eq!(app.source.as_deref(), Some("local"));
         assert_eq!(app.field_priorities["version"], 100);

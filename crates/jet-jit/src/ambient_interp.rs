@@ -13,8 +13,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
-use jet_codegen::AST::{CtFloat, CtKey, CtValue, Type};
 use jet_codegen::Diagnostics::{Diagnostic, Span};
+use jet_codegen::AST::{CtFloat, CtKey, CtValue, Type};
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 use crate::Crypto;
@@ -46,8 +46,6 @@ trait JetShow {
 trait JetDebug {
     fn jet_debug(&self) -> String;
 }
-
-
 
 /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
 trait JetDisplay {
@@ -238,11 +236,7 @@ fn env_config_object(fields: Vec<(String, CtValue)>) -> CtValue {
     }
 }
 
-fn env_config_insert(
-    fields: &mut Vec<(String, CtValue)>,
-    segments: &[String],
-    value: String,
-) {
+fn env_config_insert(fields: &mut Vec<(String, CtValue)>, segments: &[String], value: String) {
     let Some(segment) = segments.first() else {
         return;
     };
@@ -437,17 +431,21 @@ pub(crate) mod mem_sentry_prelude {
     }
 
     fn address(fields: &[(String, CtValue)]) -> Option<usize> {
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("address", CtValue::Int(value)) if *value >= 0 => usize::try_from(*value).ok(),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("address", CtValue::Int(value)) if *value >= 0 => usize::try_from(*value).ok(),
+                _ => None,
+            })
     }
 
     fn name(fields: &[(String, CtValue)]) -> Option<String> {
-        fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
-            ("name", CtValue::Str(value)) => Some(value.clone()),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(field, value)| match (field.as_str(), value) {
+                ("name", CtValue::Str(value)) => Some(value.clone()),
+                _ => None,
+            })
     }
 
     pub(crate) fn ambient_core_call(
@@ -495,10 +493,12 @@ pub(crate) mod mem_sentry_prelude {
         }
         match method {
             "volatile_read" => {
-                let value = fields.iter().find_map(|(field, value)| {
-                    (field == "value").then(|| value.clone())
-                });
-                value.or_else(|| name(fields).map(|_| CtValue::Unit)).map(Ok)
+                let value = fields
+                    .iter()
+                    .find_map(|(field, value)| (field == "value").then(|| value.clone()));
+                value
+                    .or_else(|| name(fields).map(|_| CtValue::Unit))
+                    .map(Ok)
             }
             "volatile_write" => Some(Ok(CtValue::Unit)),
             _ => None,
@@ -513,13 +513,13 @@ pub(crate) mod mem_sentry_prelude {
 pub(crate) mod process_prelude {
     use std::ffi::{OsStr, OsString};
 
-    use jet_foundation::Outcome::{jet_outcome_of, JetAbsent, JetOutcome};
-    use jet_codegen::scheduler::{jet_scheduler_wait_without_unwind, JetSchedulerWait};
     #[cfg(unix)]
     use jet_codegen::scheduler::{
         jet_scheduler_raw_io_handle, jet_scheduler_raw_io_set_nonblocking,
         jet_scheduler_raw_io_write_wait,
     };
+    use jet_codegen::scheduler::{jet_scheduler_wait_without_unwind, JetSchedulerWait};
+    use jet_foundation::Outcome::{jet_outcome_of, JetAbsent, JetOutcome};
 
     mod terminal_default {
         include!("../../jet-codegen/src/Prelude/TerminalDefault.rs");
@@ -851,16 +851,16 @@ pub(crate) mod process_prelude {
             // shared Prelude wait path.
             pub cleanup_error: std::rc::Rc<std::cell::RefCell<Option<IOError>>>,
             pub stdin: std::rc::Rc<std::cell::RefCell<Option<ProcessStdin>>>,
-            pub stdout:
-                std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
-            pub stderr:
-                std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+            pub stdout: std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
+            pub stderr: std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
             pub stdout_state: Option<std::sync::Arc<ProcessOutputState>>,
             pub stderr_state: Option<std::sync::Arc<ProcessOutputState>>,
-            pub stdout_worker:
-                std::rc::Rc<std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>>,
-            pub stderr_worker:
-                std::rc::Rc<std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>>,
+            pub stdout_worker: std::rc::Rc<
+                std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>,
+            >,
+            pub stderr_worker: std::rc::Rc<
+                std::cell::RefCell<Option<std::thread::JoinHandle<std::io::Result<()>>>>,
+            >,
             pub output_limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
             pub output_read_error: std::sync::Arc<std::sync::atomic::AtomicBool>,
             pub terminal: JetOutcome<TerminalSession, JetAbsent>,
@@ -891,13 +891,11 @@ pub(crate) mod process_prelude {
     }
 
     fn jet_env_validate_name(name: &str) -> Result<(), jet_std::EnvError> {
-        crate::CoreHost::jit_env_validate_name(name)
-            .map_err(|_| jet_std::EnvError::InvalidName)
+        crate::CoreHost::jit_env_validate_name(name).map_err(|_| jet_std::EnvError::InvalidName)
     }
 
     fn jet_env_validate_value(value: &str) -> Result<(), jet_std::EnvError> {
-        crate::CoreHost::jit_env_validate_value(value)
-            .map_err(|_| jet_std::EnvError::InvalidValue)
+        crate::CoreHost::jit_env_validate_value(value).map_err(|_| jet_std::EnvError::InvalidValue)
     }
 
     fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
@@ -914,9 +912,9 @@ pub(crate) mod process_prelude {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Process.rs");
 
     pub(crate) use jet_std::{
-        Duration, IOError, IOContext, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
-        ProcessReceipt, ProcessResourceLimit, ProcessSpec, ProcessStreamMode, TerminalMode, TerminalPolicy,
-        TerminalSession, TerminalSize,
+        Duration, IOContext, IOError, IOOperation, ProcessChild, ProcessPlan, ProcessReader,
+        ProcessReceipt, ProcessResourceLimit, ProcessSpec, ProcessStreamMode, TerminalMode,
+        TerminalPolicy, TerminalSession, TerminalSize,
     };
 
     pub(crate) fn spec_new(cmd: Vec<String>) -> ProcessSpec {
@@ -1022,10 +1020,7 @@ pub(crate) mod process_prelude {
         jet_process_child_wait(child)
     }
 
-    pub(crate) fn child_stdin_write(
-        child: &ProcessChild,
-        text: &String,
-    ) -> Result<(), IOError> {
+    pub(crate) fn child_stdin_write(child: &ProcessChild, text: &String) -> Result<(), IOError> {
         jet_process_stdin_write(&child.stdin, text)
     }
 
@@ -1057,7 +1052,6 @@ pub(crate) mod process_prelude {
     ) -> Result<(), IOError> {
         jet_terminal_session_resize(session, size)
     }
-
 }
 
 fn interpreter_process_spec(cmd: Vec<CtValue>) -> CtValue {
@@ -1076,7 +1070,11 @@ fn process_spec_field<'a>(recv: &'a CtValue, wanted: &str) -> Option<&'a CtValue
         return None;
     };
     (type_name == "ProcessSpec")
-        .then(|| fields.iter().find_map(|(name, value)| (name == wanted).then_some(value)))
+        .then(|| {
+            fields
+                .iter()
+                .find_map(|(name, value)| (name == wanted).then_some(value))
+        })
         .flatten()
 }
 
@@ -1137,7 +1135,12 @@ fn process_int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnosti
     }
 }
 
-fn process_bool(value: Option<&CtValue>, default: bool, what: &str, span: Span) -> Result<bool, Diagnostic> {
+fn process_bool(
+    value: Option<&CtValue>,
+    default: bool,
+    what: &str,
+    span: Span,
+) -> Result<bool, Diagnostic> {
     match value {
         None => Ok(default),
         Some(CtValue::Bool(value)) => Ok(*value),
@@ -1174,7 +1177,11 @@ fn process_stream_mode_value(mode: &process_prelude::ProcessStreamMode) -> CtVal
     }
 }
 
-fn process_duration(value: &CtValue, what: &str, span: Span) -> Result<process_prelude::Duration, Diagnostic> {
+fn process_duration(
+    value: &CtValue,
+    what: &str,
+    span: Span,
+) -> Result<process_prelude::Duration, Diagnostic> {
     let CtValue::Struct { type_name, .. } = value else {
         return Err(unsupported(what, span));
     };
@@ -1289,20 +1296,26 @@ fn process_terminal_policy_value(policy: &process_prelude::TerminalPolicy) -> Ct
                     ],
                 },
             ),
-            ("mode".to_string(), process_terminal_mode_value(&policy.mode)),
+            (
+                "mode".to_string(),
+                process_terminal_mode_value(&policy.mode),
+            ),
         ],
     }
 }
 
-fn process_spec_from_value(recv: &CtValue, span: Span) -> Result<process_prelude::ProcessSpec, Diagnostic> {
+fn process_spec_from_value(
+    recv: &CtValue,
+    span: Span,
+) -> Result<process_prelude::ProcessSpec, Diagnostic> {
     let CtValue::Struct { type_name, .. } = recv else {
         return Err(unsupported("ProcessSpec receiver", span));
     };
     if type_name != "ProcessSpec" {
         return Err(unsupported("ProcessSpec receiver", span));
     }
-    let CtValue::List(command) = process_spec_field(recv, "cmd")
-        .ok_or_else(|| unsupported("ProcessSpec.cmd", span))?
+    let CtValue::List(command) =
+        process_spec_field(recv, "cmd").ok_or_else(|| unsupported("ProcessSpec.cmd", span))?
     else {
         return Err(unsupported("ProcessSpec.cmd", span));
     };
@@ -1357,9 +1370,15 @@ fn process_spec_from_value(recv: &CtValue, span: Span) -> Result<process_prelude
         Some(value) => process_stream_mode(value, "ProcessSpec.stderr", span)?,
         None => process_prelude::ProcessStreamMode::Capture,
     };
-    spec.timeout_ms = process_optional(process_spec_field(recv, "timeout"), "ProcessSpec.timeout", span)?
-        .map(|value| process_duration(&value, "ProcessSpec.timeout", span).map(|duration| duration.as_millis()))
-        .transpose()?;
+    spec.timeout_ms = process_optional(
+        process_spec_field(recv, "timeout"),
+        "ProcessSpec.timeout",
+        span,
+    )?
+    .map(|value| {
+        process_duration(&value, "ProcessSpec.timeout", span).map(|duration| duration.as_millis())
+    })
+    .transpose()?;
     spec.output_limit = process_optional(
         process_spec_field(recv, "output_limit"),
         "ProcessSpec.output_limit",
@@ -1372,7 +1391,10 @@ fn process_spec_from_value(recv: &CtValue, span: Span) -> Result<process_prelude
         "ProcessSpec.cpu_time_limit",
         span,
     )?
-    .map(|value| process_duration(&value, "ProcessSpec.cpu_time_limit", span).map(|duration| duration.as_millis()))
+    .map(|value| {
+        process_duration(&value, "ProcessSpec.cpu_time_limit", span)
+            .map(|duration| duration.as_millis())
+    })
     .transpose()?;
     spec.memory_limit_bytes = process_optional(
         process_spec_field(recv, "memory_limit"),
@@ -1420,7 +1442,10 @@ fn process_spec_value(spec: &process_prelude::ProcessSpec) -> CtValue {
         .env_set
         .iter()
         .map(|(name, value)| {
-            CtValue::List(vec![CtValue::Str(name.clone()), CtValue::Str(value.clone())])
+            CtValue::List(vec![
+                CtValue::Str(name.clone()),
+                CtValue::Str(value.clone()),
+            ])
         })
         .collect();
     CtValue::Struct {
@@ -1447,8 +1472,14 @@ fn process_spec_value(spec: &process_prelude::ProcessSpec) -> CtValue {
                     Type::Named("ProcessStreamMode".to_string()),
                 ),
             ),
-            ("stdout".to_string(), process_stream_mode_value(&spec.stdout)),
-            ("stderr".to_string(), process_stream_mode_value(&spec.stderr)),
+            (
+                "stdout".to_string(),
+                process_stream_mode_value(&spec.stdout),
+            ),
+            (
+                "stderr".to_string(),
+                process_stream_mode_value(&spec.stderr),
+            ),
             (
                 "timeout".to_string(),
                 optional(
@@ -1512,7 +1543,10 @@ fn process_plan_value(plan: process_prelude::ProcessPlan) -> CtValue {
                 CtValue::List(plan.argv.into_iter().map(CtValue::Str).collect()),
             ),
             ("input_digest".to_string(), CtValue::Str(plan.input_digest)),
-            ("policy_digest".to_string(), CtValue::Str(plan.policy_digest)),
+            (
+                "policy_digest".to_string(),
+                CtValue::Str(plan.policy_digest),
+            ),
             ("backend".to_string(), CtValue::Str(plan.backend)),
             (
                 "authority".to_string(),
@@ -1579,10 +1613,7 @@ fn process_result_value(result: process_prelude::ProcessReceipt) -> CtValue {
                 "authority".to_string(),
                 CtValue::List(result.authority.into_iter().map(CtValue::Str).collect()),
             ),
-            (
-                "descendants".to_string(),
-                CtValue::Str(result.descendants),
-            ),
+            ("descendants".to_string(), CtValue::Str(result.descendants)),
             (
                 "limits".to_string(),
                 CtValue::List(result.limits.into_iter().map(CtValue::Str).collect()),
@@ -1645,7 +1676,10 @@ fn process_io_context(context: process_prelude::IOContext) -> CtValue {
     CtValue::Struct {
         type_name: "IOContext".to_string(),
         fields: vec![
-            ("operation".to_string(), process_io_operation(context.operation)),
+            (
+                "operation".to_string(),
+                process_io_operation(context.operation),
+            ),
             ("resource".to_string(), outcome_string(context.resource)),
             ("os_code".to_string(), outcome_int(context.os_code)),
             ("cause".to_string(), outcome_string(context.cause)),
@@ -1782,7 +1816,10 @@ fn terminal_session_value(child: i64) -> CtValue {
     }
 }
 
-fn with_process_child<T>(value: &CtValue, f: impl FnOnce(&process_prelude::ProcessChild) -> T) -> Option<T> {
+fn with_process_child<T>(
+    value: &CtValue,
+    f: impl FnOnce(&process_prelude::ProcessChild) -> T,
+) -> Option<T> {
     let handle = match process_field(value, "handle") {
         Some(CtValue::Int(handle)) if *handle >= 0 => *handle as usize,
         _ => return None,
@@ -1826,57 +1863,141 @@ fn ambient_process_handle(
         let spec = process_spec_from_value(recv, span)?;
         match method {
             "cwd" => {
-                let cwd = process_string(args.first().ok_or_else(|| unsupported("ProcessSpec.cwd argument", span))?, "ProcessSpec.cwd argument", span)?;
+                let cwd = process_string(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.cwd argument", span))?,
+                    "ProcessSpec.cwd argument",
+                    span,
+                )?;
                 Ok(process_spec_value(&process_prelude::spec_cwd(spec, &cwd)))
             }
             "env" => {
-                let name = process_string(args.first().ok_or_else(|| unsupported("ProcessSpec.env name", span))?, "ProcessSpec.env name", span)?;
-                let value = process_string(args.get(1).ok_or_else(|| unsupported("ProcessSpec.env value", span))?, "ProcessSpec.env value", span)?;
-                Ok(process_spec_value(&process_prelude::spec_env(spec, &name, &value)))
+                let name = process_string(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.env name", span))?,
+                    "ProcessSpec.env name",
+                    span,
+                )?;
+                let value = process_string(
+                    args.get(1)
+                        .ok_or_else(|| unsupported("ProcessSpec.env value", span))?,
+                    "ProcessSpec.env value",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_env(
+                    spec, &name, &value,
+                )))
             }
             "env_remove" => {
-                let name = process_string(args.first().ok_or_else(|| unsupported("ProcessSpec.env_remove argument", span))?, "ProcessSpec.env_remove argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_env_remove(spec, &name)))
+                let name = process_string(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.env_remove argument", span))?,
+                    "ProcessSpec.env_remove argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_env_remove(
+                    spec, &name,
+                )))
             }
             "env_clear" => Ok(process_spec_value(&process_prelude::spec_env_clear(spec))),
             "stdin" => {
-                let mode = process_stream_mode(args.first().ok_or_else(|| unsupported("ProcessSpec.stdin argument", span))?, "ProcessSpec.stdin argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_stdin(spec, &mode)))
+                let mode = process_stream_mode(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.stdin argument", span))?,
+                    "ProcessSpec.stdin argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_stdin(
+                    spec, &mode,
+                )))
             }
             "stdout" => {
-                let mode = process_stream_mode(args.first().ok_or_else(|| unsupported("ProcessSpec.stdout argument", span))?, "ProcessSpec.stdout argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_stdout(spec, &mode)))
+                let mode = process_stream_mode(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.stdout argument", span))?,
+                    "ProcessSpec.stdout argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_stdout(
+                    spec, &mode,
+                )))
             }
             "stderr" => {
-                let mode = process_stream_mode(args.first().ok_or_else(|| unsupported("ProcessSpec.stderr argument", span))?, "ProcessSpec.stderr argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_stderr(spec, &mode)))
+                let mode = process_stream_mode(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.stderr argument", span))?,
+                    "ProcessSpec.stderr argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_stderr(
+                    spec, &mode,
+                )))
             }
             "timeout" => {
-                let timeout = process_duration(args.first().ok_or_else(|| unsupported("ProcessSpec.timeout argument", span))?, "ProcessSpec.timeout argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_timeout(spec, &timeout)))
+                let timeout = process_duration(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.timeout argument", span))?,
+                    "ProcessSpec.timeout argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_timeout(
+                    spec, &timeout,
+                )))
             }
             "output_limit" => {
-                let output_limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.output_limit argument", span))?, "ProcessSpec.output_limit argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_output_limit(spec, output_limit)))
+                let output_limit = process_int(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.output_limit argument", span))?,
+                    "ProcessSpec.output_limit argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_output_limit(
+                    spec,
+                    output_limit,
+                )))
             }
             "cpu_time_limit" => {
-                let timeout = process_duration(args.first().ok_or_else(|| unsupported("ProcessSpec.cpu_time_limit argument", span))?, "ProcessSpec.cpu_time_limit argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_cpu_time_limit(spec, &timeout)))
+                let timeout = process_duration(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.cpu_time_limit argument", span))?,
+                    "ProcessSpec.cpu_time_limit argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_cpu_time_limit(
+                    spec, &timeout,
+                )))
             }
             "memory_limit" => {
-                let limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.memory_limit argument", span))?, "ProcessSpec.memory_limit argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_memory_limit(spec, limit)))
+                let limit = process_int(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.memory_limit argument", span))?,
+                    "ProcessSpec.memory_limit argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_memory_limit(
+                    spec, limit,
+                )))
             }
             "open_file_limit" => {
-                let limit = process_int(args.first().ok_or_else(|| unsupported("ProcessSpec.open_file_limit argument", span))?, "ProcessSpec.open_file_limit argument", span)?;
-                Ok(process_spec_value(&process_prelude::spec_open_file_limit(spec, limit)))
+                let limit = process_int(
+                    args.first()
+                        .ok_or_else(|| unsupported("ProcessSpec.open_file_limit argument", span))?,
+                    "ProcessSpec.open_file_limit argument",
+                    span,
+                )?;
+                Ok(process_spec_value(&process_prelude::spec_open_file_limit(
+                    spec, limit,
+                )))
             }
             "detached" => Ok(process_spec_value(&process_prelude::spec_detached(spec))),
             "terminal" => match args {
                 [] => Ok(process_spec_value(&process_prelude::spec_terminal(spec))),
                 [policy] => {
-                    let policy = process_terminal_policy(policy, "ProcessSpec.terminal policy", span)?;
-                    Ok(process_spec_value(&process_prelude::spec_terminal_with_policy(spec, &policy)))
+                    let policy =
+                        process_terminal_policy(policy, "ProcessSpec.terminal policy", span)?;
+                    Ok(process_spec_value(
+                        &process_prelude::spec_terminal_with_policy(spec, &policy),
+                    ))
                 }
                 _ => Err(unsupported("ProcessSpec.terminal arguments", span)),
             },
@@ -1885,14 +2006,18 @@ fn ambient_process_handle(
                     .first()
                     .ok_or_else(|| unsupported("ProcessSpec.under authority", span))?;
                 let wire = process_authority_wire(authority, span)?;
-                Ok(process_spec_value(&process_prelude::spec_under_wire(spec, &wire)))
+                Ok(process_spec_value(&process_prelude::spec_under_wire(
+                    spec, &wire,
+                )))
             }
             "abilities" => Ok(process_set_value(
                 process_prelude::spec_abilities(&spec).into_iter().collect(),
             )),
             "plan" => Ok(process_plan_outcome(process_prelude::spec_plan(&spec))),
             "run" => Ok(process_result_outcome(process_prelude::spec_run(&spec))),
-            "run_checked" => Ok(process_result_outcome(process_prelude::spec_run_checked(&spec))),
+            "run_checked" => Ok(process_result_outcome(process_prelude::spec_run_checked(
+                &spec,
+            ))),
             "spawn" => match process_prelude::spec_spawn(&spec) {
                 Ok(child) => Ok(CtValue::Present(Box::new(process_child_value(child)))),
                 Err(error) => Ok(CtValue::failed(Box::new(process_io_error(error)))),
@@ -1909,26 +2034,37 @@ fn ambient_process_child_handle(
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     let method = op.strip_prefix("ProcessChild:")?;
-    if !matches!(method, "id" | "wait" | "exited" | "kill" | "terminate" | "interrupt") {
+    if !matches!(
+        method,
+        "id" | "wait" | "exited" | "kill" | "terminate" | "interrupt"
+    ) {
         return None;
     }
     let result = match method {
         "id" => with_process_child(recv, process_prelude::child_id)
             .map(CtValue::Int)
             .ok_or_else(|| unsupported("ProcessChild receiver", span)),
-        "wait" => with_process_child(recv, |child| process_result_outcome(process_prelude::child_wait(child)))
-            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "wait" => with_process_child(recv, |child| {
+            process_result_outcome(process_prelude::child_wait(child))
+        })
+        .ok_or_else(|| unsupported("ProcessChild receiver", span)),
         "exited" => with_process_child(recv, |child| match process_prelude::child_exited(child) {
             Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
             Err(error) => CtValue::failed(Box::new(process_io_error(error))),
         })
         .ok_or_else(|| unsupported("ProcessChild receiver", span)),
-        "kill" => with_process_child(recv, |child| process_unit_outcome(process_prelude::child_kill(child)))
-            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
-        "terminate" => with_process_child(recv, |child| process_unit_outcome(process_prelude::child_terminate(child)))
-            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
-        "interrupt" => with_process_child(recv, |child| process_unit_outcome(process_prelude::child_interrupt(child)))
-            .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "kill" => with_process_child(recv, |child| {
+            process_unit_outcome(process_prelude::child_kill(child))
+        })
+        .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "terminate" => with_process_child(recv, |child| {
+            process_unit_outcome(process_prelude::child_terminate(child))
+        })
+        .ok_or_else(|| unsupported("ProcessChild receiver", span)),
+        "interrupt" => with_process_child(recv, |child| {
+            process_unit_outcome(process_prelude::child_interrupt(child))
+        })
+        .ok_or_else(|| unsupported("ProcessChild receiver", span)),
         _ => unreachable!(),
     };
     Some(result)
@@ -1988,16 +2124,14 @@ fn ambient_terminal_session_handle(
             span,
         )?;
         with_process_child(recv, |child| match child.terminal.as_ref().ok() {
-            Some(session) => process_unit_outcome(process_prelude::terminal_session_resize(
-                session, &size,
-            )),
-            None => CtValue::failed(Box::new(process_io_error(
-                process_prelude::IOError::other(
-                    process_prelude::IOOperation::Resolve,
-                    Some("process terminal".to_string()),
-                    "this child has no terminal session",
-                ),
-            ))),
+            Some(session) => {
+                process_unit_outcome(process_prelude::terminal_session_resize(session, &size))
+            }
+            None => CtValue::failed(Box::new(process_io_error(process_prelude::IOError::other(
+                process_prelude::IOOperation::Resolve,
+                Some("process terminal".to_string()),
+                "this child has no terminal session",
+            )))),
         })
         .ok_or_else(|| unsupported("TerminalSession receiver", span))
     })())
@@ -2012,16 +2146,17 @@ fn crypto_err(msg: impl Into<String>) -> CtValue {
 
 fn clock_now(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     match value {
-        CtValue::Struct {
-            type_name,
-            fields,
-        } if type_name == "__JetTirClock" || type_name == "Clock" => fields
-            .iter()
-            .find_map(|(name, value)| match (name.as_str(), value) {
-                ("now", CtValue::Int(now)) => Some(*now),
-                _ => None,
-            })
-            .ok_or_else(|| unsupported("core.crypto.uuid.v7 clock state", span)),
+        CtValue::Struct { type_name, fields }
+            if type_name == "__JetTirClock" || type_name == "Clock" =>
+        {
+            fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("now", CtValue::Int(now)) => Some(*now),
+                    _ => None,
+                })
+                .ok_or_else(|| unsupported("core.crypto.uuid.v7 clock state", span))
+        }
         _ => Err(unsupported("core.crypto.uuid.v7 clock", span)),
     }
 }
@@ -2033,12 +2168,7 @@ fn db_err(msg: impl Into<String>) -> CtValue {
     }
 }
 
-fn io_error_at(
-    kind: &str,
-    operation: &str,
-    resource: &str,
-    cause: impl Into<String>,
-) -> CtValue {
+fn io_error_at(kind: &str, operation: &str, resource: &str, cause: impl Into<String>) -> CtValue {
     CtValue::Enum {
         type_name: "IOError".to_string(),
         variant: kind.to_string(),
@@ -2163,12 +2293,12 @@ fn hex_bytes(bytes: &[u8]) -> String {
 fn path_string(v: &CtValue) -> Option<String> {
     match v {
         CtValue::Str(s) => Some(s.clone()),
-        CtValue::Struct { type_name, fields } if type_name == "Path" => fields
-            .iter()
-            .find_map(|(n, val)| match (n.as_str(), val) {
+        CtValue::Struct { type_name, fields } if type_name == "Path" => {
+            fields.iter().find_map(|(n, val)| match (n.as_str(), val) {
                 ("inner", CtValue::Str(s)) => Some(s.clone()),
                 _ => None,
-            }),
+            })
+        }
         _ => None,
     }
 }
@@ -2200,8 +2330,14 @@ fn db_policy_value(table: String, compiled: wire::JetRowPolicyExpr) -> CtValue {
         type_name: "RowPolicy".to_string(),
         fields: vec![
             ("table".to_string(), CtValue::Str(table)),
-            ("expression".to_string(), CtValue::Str(compiled.canonical().to_string())),
-            ("compiled".to_string(), CtValue::Int(row_policy_code(compiled))),
+            (
+                "expression".to_string(),
+                CtValue::Str(compiled.canonical().to_string()),
+            ),
+            (
+                "compiled".to_string(),
+                CtValue::Int(row_policy_code(compiled)),
+            ),
         ],
     }
 }
@@ -2225,12 +2361,13 @@ fn db_scope_value(
 fn db_handle(recv: &CtValue) -> Option<u64> {
     match recv {
         CtValue::Struct { type_name, fields }
-            if matches!(type_name.as_str(), "DBConnection" | "DBScope") => fields
-            .iter()
-            .find_map(|(n, v)| match (n.as_str(), v) {
+            if matches!(type_name.as_str(), "DBConnection" | "DBScope") =>
+        {
+            fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
                 ("handle", CtValue::Int(h)) if *h > 0 => Some(*h as u64),
                 _ => None,
-            }),
+            })
+        }
         _ => None,
     }
 }
@@ -2262,10 +2399,12 @@ fn mod_handle(value: &CtValue) -> Option<i64> {
         return None;
     };
     (type_name == "Mod").then(|| {
-        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("handle", CtValue::Int(value)) if *value > 0 => Some(*value),
-            _ => None,
-        })
+        fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("handle", CtValue::Int(value)) if *value > 0 => Some(*value),
+                _ => None,
+            })
     })?
 }
 
@@ -2281,25 +2420,35 @@ fn db_scope_parts(recv: &CtValue) -> Option<(u64, String, wire::JetRowPolicyExpr
     let CtValue::Struct { fields, .. } = recv else {
         return None;
     };
-    let policy = fields.iter().find_map(|(name, value)| {
-        (name == "policy").then_some(value)
-    })?;
-    let CtValue::Struct { fields: policy_fields, .. } = policy else {
+    let policy = fields
+        .iter()
+        .find_map(|(name, value)| (name == "policy").then_some(value))?;
+    let CtValue::Struct {
+        fields: policy_fields,
+        ..
+    } = policy
+    else {
         return None;
     };
-    let table = policy_fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("table", CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    })?;
-    let compiled = policy_fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("compiled", CtValue::Int(value)) => row_policy_from_code(*value),
-        _ => None,
-    })?;
+    let table = policy_fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("table", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })?;
+    let compiled = policy_fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("compiled", CtValue::Int(value)) => row_policy_from_code(*value),
+            _ => None,
+        })?;
     let table = wire::jet_db_policy_validate_table(&table).ok()?;
-    let user = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("user", CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    })?;
+    let user = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("user", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })?;
     Some((handle, table, compiled, user))
 }
 
@@ -2310,15 +2459,22 @@ fn service_runtime_parts(recv: &CtValue) -> Option<service_prelude::JetServiceRu
     if type_name != "ServiceRuntime" {
         return None;
     }
-    let store = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("store", CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    })?;
-    let retention_ms = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("retention_ms", CtValue::Int(value)) => Some(*value),
-        _ => None,
-    })?;
-    Some(service_prelude::JetServiceRuntime { store, retention_ms })
+    let store = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("store", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })?;
+    let retention_ms = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("retention_ms", CtValue::Int(value)) => Some(*value),
+            _ => None,
+        })?;
+    Some(service_prelude::JetServiceRuntime {
+        store,
+        retention_ms,
+    })
 }
 
 fn service_endpoint_value(value: &CtValue) -> Option<service_prelude::JetServiceEndpoint> {
@@ -2328,22 +2484,30 @@ fn service_endpoint_value(value: &CtValue) -> Option<service_prelude::JetService
     if type_name != "ServiceEndpoint" {
         return None;
     }
-    let tree = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("tree", CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    })?;
-    let worker = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("worker", CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    })?;
-    let generation = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("generation", CtValue::Int(value)) => Some(*value),
-        _ => None,
-    })?;
-    let authority = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("authority", CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    })?;
+    let tree = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("tree", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })?;
+    let worker = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("worker", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })?;
+    let generation = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("generation", CtValue::Int(value)) => Some(*value),
+            _ => None,
+        })?;
+    let authority = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("authority", CtValue::Str(value)) => Some(value.clone()),
+            _ => None,
+        })?;
     service_prelude::jet_services_authority_endpoint(tree, worker, generation, authority).ok()
 }
 
@@ -2514,9 +2678,13 @@ fn ambient_db_scope_execute(
 ) -> Result<i64, wire::DBError> {
     let (handle, table, compiled, user) = scope;
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(
+            sql, params, table, *compiled, user,
+        )?
+        .into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?
+            .into_parts()?
     };
     let result = DB::runtime_execute(*handle, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_execute_result(&result)
@@ -2530,9 +2698,13 @@ fn ambient_db_scope_query(
 ) -> Result<Vec<wire::JetDBRow>, wire::DBError> {
     let (handle, table, compiled, user) = scope;
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(
+            sql, params, table, *compiled, user,
+        )?
+        .into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?.into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, table, *compiled, user)?
+            .into_parts()?
     };
     let result = DB::runtime_query(*handle, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_query_result(&result)
@@ -2610,7 +2782,10 @@ fn ambient_int_arg(
 ) -> Result<i64, Diagnostic> {
     match args.get(index) {
         Some(CtValue::Int(value)) => Ok(*value),
-        _ => Err(unsupported(&format!("{name} expects an Int argument"), span)),
+        _ => Err(unsupported(
+            &format!("{name} expects an Int argument"),
+            span,
+        )),
     }
 }
 
@@ -2623,7 +2798,10 @@ fn ambient_float_arg(
     match args.get(index) {
         Some(CtValue::Float(value)) => Ok(value.as_f64()),
         Some(CtValue::Int(value)) => Ok(*value as f64),
-        _ => Err(unsupported(&format!("{name} expects a numeric argument"), span)),
+        _ => Err(unsupported(
+            &format!("{name} expects a numeric argument"),
+            span,
+        )),
     }
 }
 
@@ -2688,9 +2866,10 @@ fn ambient_random_call(
             ambient_int_arg(&args, 0, "random.bytes", span)?,
         ))),
         "pick" => {
-            let CtValue::List(items) = args.first().ok_or_else(|| {
-                unsupported("random.pick needs a list", span)
-            })? else {
+            let CtValue::List(items) = args
+                .first()
+                .ok_or_else(|| unsupported("random.pick needs a list", span))?
+            else {
                 return Err(unsupported("random.pick needs a list", span));
             };
             match crate::Random::ambient_pick(items) {
@@ -2703,21 +2882,17 @@ fn ambient_random_call(
             }
         }
         "weighted_pick" => {
-            let CtValue::List(items) = args.first().ok_or_else(|| {
-                unsupported("random.weighted_pick needs a list", span)
-            })? else {
-                return Err(unsupported(
-                    "random.weighted_pick needs a list",
-                    span,
-                ));
+            let CtValue::List(items) = args
+                .first()
+                .ok_or_else(|| unsupported("random.weighted_pick needs a list", span))?
+            else {
+                return Err(unsupported("random.weighted_pick needs a list", span));
             };
-            let CtValue::List(weights) = args.get(1).ok_or_else(|| {
-                unsupported("random.weighted_pick needs weights", span)
-            })? else {
-                return Err(unsupported(
-                    "random.weighted_pick needs weights",
-                    span,
-                ));
+            let CtValue::List(weights) = args
+                .get(1)
+                .ok_or_else(|| unsupported("random.weighted_pick needs weights", span))?
+            else {
+                return Err(unsupported("random.weighted_pick needs weights", span));
             };
             let weights = weights
                 .iter()
@@ -2740,9 +2915,10 @@ fn ambient_random_call(
             }
         }
         "sample" => {
-            let CtValue::List(items) = args.first().ok_or_else(|| {
-                unsupported("random.sample needs a list", span)
-            })? else {
+            let CtValue::List(items) = args
+                .first()
+                .ok_or_else(|| unsupported("random.sample needs a list", span))?
+            else {
                 return Err(unsupported("random.sample needs a list", span));
             };
             Ok(CtValue::List(crate::Random::ambient_sample(
@@ -2751,9 +2927,11 @@ fn ambient_random_call(
             )))
         }
         "shuffle" => {
-            let CtValue::List(mut items) = args.first().cloned().ok_or_else(|| {
-                unsupported("random.shuffle needs a list", span)
-            })? else {
+            let CtValue::List(mut items) = args
+                .first()
+                .cloned()
+                .ok_or_else(|| unsupported("random.shuffle needs a list", span))?
+            else {
                 return Err(unsupported("random.shuffle needs a list", span));
             };
             crate::Random::ambient_shuffle(&mut items);
@@ -2785,7 +2963,10 @@ fn ambient_time_call(
 ) -> Option<Result<CtValue, Diagnostic>> {
     if !matches!(
         (module, method),
-        ("core.time", "now" | "now_utc" | "today" | "instant" | "sleep" | "start")
+        (
+            "core.time",
+            "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
+        )
     ) {
         return None;
     }
@@ -2873,8 +3054,12 @@ fn auth_error_value(error: Crypto::runtime::JetAuthError) -> CtValue {
     };
     let text = |value: String| vec![(None, CtValue::Str(value))];
     match error {
-        Crypto::runtime::JetAuthError::MalformedToken(value) => variant("MalformedToken", text(value)),
-        Crypto::runtime::JetAuthError::UnsupportedToken(value) => variant("UnsupportedToken", text(value)),
+        Crypto::runtime::JetAuthError::MalformedToken(value) => {
+            variant("MalformedToken", text(value))
+        }
+        Crypto::runtime::JetAuthError::UnsupportedToken(value) => {
+            variant("UnsupportedToken", text(value))
+        }
         Crypto::runtime::JetAuthError::InvalidSignature => variant("InvalidSignature", Vec::new()),
         Crypto::runtime::JetAuthError::WeakKey => variant("WeakKey", Vec::new()),
         Crypto::runtime::JetAuthError::MissingClaim(value) => variant("MissingClaim", text(value)),
@@ -2900,9 +3085,7 @@ fn auth_error_value(error: Crypto::runtime::JetAuthError) -> CtValue {
         ),
         Crypto::runtime::JetAuthError::TokenExpired => variant("TokenExpired", Vec::new()),
         Crypto::runtime::JetAuthError::DecodeError(value) => variant("DecodeError", text(value)),
-        Crypto::runtime::JetAuthError::TokenNotYetValid => {
-            variant("TokenNotYetValid", Vec::new())
-        }
+        Crypto::runtime::JetAuthError::TokenNotYetValid => variant("TokenNotYetValid", Vec::new()),
     }
 }
 
@@ -2911,7 +3094,11 @@ fn auth_struct_field<'a>(value: &'a CtValue, wanted: &str) -> Option<&'a CtValue
         return None;
     };
     (type_name == "Session" || type_name == "Auth")
-        .then(|| fields.iter().find_map(|(name, value)| (name == wanted).then_some(value)))
+        .then(|| {
+            fields
+                .iter()
+                .find_map(|(name, value)| (name == wanted).then_some(value))
+        })
         .flatten()
 }
 
@@ -2953,23 +3140,18 @@ fn vault_error_value(error: Crypto::runtime::JetVaultError) -> CtValue {
         Crypto::runtime::JetVaultError::WrongType => variant("WrongType", Vec::new()),
         Crypto::runtime::JetVaultError::Revoked => variant("Revoked", Vec::new()),
         Crypto::runtime::JetVaultError::Locked => variant("Locked", Vec::new()),
-        Crypto::runtime::JetVaultError::AuthorityDenied => {
-            variant("AuthorityDenied", Vec::new())
-        }
+        Crypto::runtime::JetVaultError::AuthorityDenied => variant("AuthorityDenied", Vec::new()),
         Crypto::runtime::JetVaultError::Conflict => variant("Conflict", Vec::new()),
         Crypto::runtime::JetVaultError::UnsupportedProvider => {
             variant("UnsupportedProvider", Vec::new())
         }
-        Crypto::runtime::JetVaultError::InvalidEncoding => {
-            variant("InvalidEncoding", Vec::new())
-        }
+        Crypto::runtime::JetVaultError::InvalidEncoding => variant("InvalidEncoding", Vec::new()),
         Crypto::runtime::JetVaultError::DurabilityUnknown => {
             variant("DurabilityUnknown", Vec::new())
         }
-        Crypto::runtime::JetVaultError::Crypto(inner) => variant(
-            "Crypto",
-            vec![(None, CtValue::Str(inner.to_string()))],
-        ),
+        Crypto::runtime::JetVaultError::Crypto(inner) => {
+            variant("Crypto", vec![(None, CtValue::Str(inner.to_string()))])
+        }
         Crypto::runtime::JetVaultError::IO {
             operation,
             redacted_path,
@@ -3046,7 +3228,12 @@ fn ambient_vault_call(
     })
 }
 
-fn auth_text_arg(args: &[CtValue], index: usize, what: &str, span: Span) -> Result<String, Diagnostic> {
+fn auth_text_arg(
+    args: &[CtValue],
+    index: usize,
+    what: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
     match args.get(index) {
         Some(CtValue::Str(value)) => Ok(value.clone()),
         _ => Err(unsupported(what, span)),
@@ -3233,9 +3420,9 @@ fn ambient_auth_session_call(
             "session_user" => CtValue::Str(Crypto::runtime::auth_session_user(&auth_session_arg(
                 args, 0, span,
             )?)),
-            "session_cookie" => CtValue::Str(Crypto::runtime::auth_session_cookie(&auth_session_arg(
-                args, 0, span,
-            )?)),
+            "session_cookie" => CtValue::Str(Crypto::runtime::auth_session_cookie(
+                &auth_session_arg(args, 0, span)?,
+            )),
             "session_id" => CtValue::Str(Crypto::runtime::auth_session_id(&auth_session_arg(
                 args, 0, span,
             )?)),
@@ -3314,8 +3501,7 @@ fn ambient_auth_call(
         let clock_skew_ns = args
             .get(4)
             .map(|value| {
-                service_duration_ns(value)
-                    .ok_or_else(|| unsupported("core.auth clock_skew", span))
+                service_duration_ns(value).ok_or_else(|| unsupported("core.auth clock_skew", span))
             })
             .transpose()?;
         let result = if method == "verify_jwt" {
@@ -3327,14 +3513,8 @@ fn ambient_auth_call(
                 clock_skew_ns,
             )
         } else {
-            let footer = args
-                .get(5)
-                .map(|value| as_bytes(value, span))
-                .transpose()?;
-            let implicit = args
-                .get(6)
-                .map(|value| as_bytes(value, span))
-                .transpose()?;
+            let footer = args.get(5).map(|value| as_bytes(value, span)).transpose()?;
+            let implicit = args.get(6).map(|value| as_bytes(value, span)).transpose()?;
             Crypto::runtime::auth_verify_paseto_defaulted(
                 &token,
                 &key,
@@ -3443,12 +3623,9 @@ pub fn ambient_core_call(
         return Some(ambient_fs_walk(&args, span));
     }
     if module == "core.mem" {
-        if let Some(result) = mem_sentry_prelude::ambient_core_call(
-            method,
-            &args,
-            span,
-            resolved_ret.as_ref(),
-        ) {
+        if let Some(result) =
+            mem_sentry_prelude::ambient_core_call(method, &args, span, resolved_ret.as_ref())
+        {
             return Some(result);
         }
     }
@@ -3537,7 +3714,9 @@ pub fn ambient_core_call(
                     let Some(data) = net_bytes_value(data) else {
                         return Some(Err(unsupported("core.net.tls.write bytes", span)));
                     };
-                    Ok(crate::net_http_rt::runtime_tls_stream_write_bytes(stream, data))
+                    Ok(crate::net_http_rt::runtime_tls_stream_write_bytes(
+                        stream, data,
+                    ))
                 }
                 _ => Err(unsupported("core.net.tls.write arguments", span)),
             },
@@ -3584,7 +3763,8 @@ pub fn ambient_core_call(
         return Some(result);
     }
     if module == "core.math.random" {
-        if let Some(result) = ambient_random_call(method, args.clone(), span, resolved_ret.as_ref()) {
+        if let Some(result) = ambient_random_call(method, args.clone(), span, resolved_ret.as_ref())
+        {
             return Some(result);
         }
     }
@@ -3712,8 +3892,7 @@ pub fn ambient_core_call(
             }))
         }
         ("core.sys", "set") => {
-            let (Some(CtValue::Str(name)), Some(CtValue::Str(value))) =
-                (args.first(), args.get(1))
+            let (Some(CtValue::Str(name)), Some(CtValue::Str(value))) = (args.first(), args.get(1))
             else {
                 return Some(Err(unsupported("core.sys.set arguments", span)));
             };
@@ -3737,8 +3916,7 @@ pub fn ambient_core_call(
             IO::term_prelude::jet_term_height(crate::CoreHost::jit_env_value),
         ))),
         ("core.term", "style") => {
-            let (Some(CtValue::Str(style)), Some(CtValue::Str(text))) =
-                (args.first(), args.get(1))
+            let (Some(CtValue::Str(style)), Some(CtValue::Str(text))) = (args.first(), args.get(1))
             else {
                 return Some(Err(unsupported("core.term.style arguments", span)));
             };
@@ -3752,8 +3930,7 @@ pub fn ambient_core_call(
             ))))
         }
         ("core.net", "socket_addr") => {
-            let (Some(CtValue::Str(host)), Some(CtValue::Int(port))) =
-                (args.first(), args.get(1))
+            let (Some(CtValue::Str(host)), Some(CtValue::Int(port))) = (args.first(), args.get(1))
             else {
                 return Some(Err(unsupported("core.net.socket_addr arguments", span)));
             };
@@ -3763,7 +3940,9 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "socket_to_string" | "socket_host" | "socket_port") => {
-            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
                 return Some(Err(unsupported("core.net socket address", span)));
             };
@@ -3781,14 +3960,18 @@ pub fn ambient_core_call(
             Some(Ok(crate::net_http_rt::runtime_tcp_listen(address.clone())))
         }
         ("core.net", "tcp_listen_addr") => {
-            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
                 return Some(Err(unsupported("core.net.tcp_listen_addr address", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_tcp_listen_addr(address)))
         }
         ("core.net", "tcp_accept") => {
-            let Some(listener) = args.first().and_then(|value| http_handle_id(value, "TcpListener"))
+            let Some(listener) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpListener"))
             else {
                 return Some(Err(unsupported("core.net.tcp_accept listener", span)));
             };
@@ -3803,19 +3986,29 @@ pub fn ambient_core_call(
             Some(Ok(crate::net_http_rt::runtime_tcp_connect(address.clone())))
         }
         ("core.net", "tcp_connect_addr") => {
-            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
                 return Some(Err(unsupported("core.net.tcp_connect_addr address", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_tcp_connect_addr(address)))
         }
         ("core.net", "tcp_connect_timeout") => {
-            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
-                return Some(Err(unsupported("core.net.tcp_connect_timeout address", span)));
+                return Some(Err(unsupported(
+                    "core.net.tcp_connect_timeout address",
+                    span,
+                )));
             };
             let Some(CtValue::Int(timeout_ms)) = args.get(1) else {
-                return Some(Err(unsupported("core.net.tcp_connect_timeout timeout", span)));
+                return Some(Err(unsupported(
+                    "core.net.tcp_connect_timeout timeout",
+                    span,
+                )));
             };
             Some(Ok(crate::net_http_rt::runtime_tcp_connect_timeout(
                 address,
@@ -3823,10 +4016,16 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "tcp_connect_happy") => {
-            let (Some(CtValue::Str(host)), Some(CtValue::Int(port)), Some(CtValue::Int(timeout_ms))) =
-                (args.first(), args.get(1), args.get(2))
+            let (
+                Some(CtValue::Str(host)),
+                Some(CtValue::Int(port)),
+                Some(CtValue::Int(timeout_ms)),
+            ) = (args.first(), args.get(1), args.get(2))
             else {
-                return Some(Err(unsupported("core.net.tcp_connect_happy arguments", span)));
+                return Some(Err(unsupported(
+                    "core.net.tcp_connect_happy arguments",
+                    span,
+                )));
             };
             Some(Ok(crate::net_http_rt::runtime_tcp_connect_happy(
                 host.clone(),
@@ -3835,7 +4034,9 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "listener_local_socket_addr") => {
-            let Some(listener) = args.first().and_then(|value| http_handle_id(value, "TcpListener"))
+            let Some(listener) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpListener"))
             else {
                 return Some(Err(unsupported(
                     "core.net.listener_local_socket_addr listener",
@@ -3847,7 +4048,9 @@ pub fn ambient_core_call(
             ))
         }
         ("core.net", "set_timeout" | "set_read_timeout" | "set_write_timeout") => {
-            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            let Some(stream) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpStream"))
             else {
                 return Some(Err(unsupported("core.net TCP timeout stream", span)));
             };
@@ -3858,23 +4061,22 @@ pub fn ambient_core_call(
                 return Some(Err(unsupported("core.net TCP timeout arguments", span)));
             }
             Some(Ok(match method {
-                "set_timeout" => crate::net_http_rt::runtime_tcp_stream_set_timeout(
-                    stream,
-                    *timeout_ms,
-                ),
-                "set_read_timeout" => crate::net_http_rt::runtime_tcp_stream_set_read_timeout(
-                    stream,
-                    *timeout_ms,
-                ),
-                "set_write_timeout" => crate::net_http_rt::runtime_tcp_stream_set_write_timeout(
-                    stream,
-                    *timeout_ms,
-                ),
+                "set_timeout" => {
+                    crate::net_http_rt::runtime_tcp_stream_set_timeout(stream, *timeout_ms)
+                }
+                "set_read_timeout" => {
+                    crate::net_http_rt::runtime_tcp_stream_set_read_timeout(stream, *timeout_ms)
+                }
+                "set_write_timeout" => {
+                    crate::net_http_rt::runtime_tcp_stream_set_write_timeout(stream, *timeout_ms)
+                }
                 _ => unreachable!(),
             }))
         }
         ("core.net", "nodelay" | "ttl") => {
-            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            let Some(stream) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpStream"))
             else {
                 return Some(Err(unsupported("core.net TCP stream", span)));
             };
@@ -3888,7 +4090,9 @@ pub fn ambient_core_call(
             }))
         }
         ("core.net", "set_nodelay") => {
-            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            let Some(stream) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpStream"))
             else {
                 return Some(Err(unsupported("core.net.set_nodelay stream", span)));
             };
@@ -3903,7 +4107,9 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "set_ttl") => {
-            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            let Some(stream) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpStream"))
             else {
                 return Some(Err(unsupported("core.net.set_ttl stream", span)));
             };
@@ -3918,7 +4124,9 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "socket_type") => {
-            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            let Some(stream) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpStream"))
             else {
                 return Some(Err(unsupported("core.net.socket_type stream", span)));
             };
@@ -3930,7 +4138,9 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "sendfile") => {
-            let Some(stream) = args.first().and_then(|value| http_handle_id(value, "TcpStream"))
+            let Some(stream) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "TcpStream"))
             else {
                 return Some(Err(unsupported("core.net.sendfile stream", span)));
             };
@@ -3952,21 +4162,27 @@ pub fn ambient_core_call(
             Some(Ok(crate::net_http_rt::runtime_udp_bind(address.clone())))
         }
         ("core.net", "udp_bind_addr") => {
-            let Some(address) = args.first().and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
                 return Some(Err(unsupported("core.net.udp_bind_addr address", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_udp_bind_addr(address)))
         }
         ("core.net", "udp_local_addr") => {
-            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            let Some(socket) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UdpSocket"))
             else {
                 return Some(Err(unsupported("core.net.udp_local_addr receiver", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_udp_local_addr(socket)))
         }
         ("core.net", "udp_set_timeout") => {
-            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            let Some(socket) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UdpSocket"))
             else {
                 return Some(Err(unsupported("core.net.udp_set_timeout receiver", span)));
             };
@@ -3979,14 +4195,18 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "udp_send_to") => {
-            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            let Some(socket) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UdpSocket"))
             else {
                 return Some(Err(unsupported("core.net.udp_send_to receiver", span)));
             };
             let Some(CtValue::Str(data)) = args.get(1) else {
                 return Some(Err(unsupported("core.net.udp_send_to data", span)));
             };
-            let Some(address) = args.get(2).and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .get(2)
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
                 return Some(Err(unsupported("core.net.udp_send_to address", span)));
             };
@@ -3997,35 +4217,46 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "udp_recv_from") => {
-            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            let Some(socket) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UdpSocket"))
             else {
                 return Some(Err(unsupported("core.net.udp_recv_from receiver", span)));
             };
             let Some(CtValue::Int(limit)) = args.get(1) else {
                 return Some(Err(unsupported("core.net.udp_recv_from limit", span)));
             };
-            Some(Ok(crate::net_http_rt::runtime_udp_recv_from(socket, *limit)))
+            Some(Ok(crate::net_http_rt::runtime_udp_recv_from(
+                socket, *limit,
+            )))
         }
         ("core.net", "udp_send_bytes_to") => {
-            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            let Some(socket) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UdpSocket"))
             else {
-                return Some(Err(unsupported("core.net.udp_send_bytes_to receiver", span)));
+                return Some(Err(unsupported(
+                    "core.net.udp_send_bytes_to receiver",
+                    span,
+                )));
             };
             let Some(data) = args.get(1).and_then(net_bytes_value) else {
                 return Some(Err(unsupported("core.net.udp_send_bytes_to data", span)));
             };
-            let Some(address) = args.get(2).and_then(|value| http_handle_id(value, "SocketAddr"))
+            let Some(address) = args
+                .get(2)
+                .and_then(|value| http_handle_id(value, "SocketAddr"))
             else {
                 return Some(Err(unsupported("core.net.udp_send_bytes_to address", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_udp_send_bytes_to(
-                socket,
-                data,
-                address,
+                socket, data, address,
             )))
         }
         ("core.net", "udp_receive") => {
-            let Some(socket) = args.first().and_then(|value| http_handle_id(value, "UdpSocket"))
+            let Some(socket) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UdpSocket"))
             else {
                 return Some(Err(unsupported("core.net.udp_receive receiver", span)));
             };
@@ -4035,28 +4266,36 @@ pub fn ambient_core_call(
             Some(Ok(crate::net_http_rt::runtime_udp_receive(socket, *limit)))
         }
         ("core.net", "udp_packet_data") => {
-            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            let Some(packet) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UDPPacket"))
             else {
                 return Some(Err(unsupported("core.net.udp_packet_data packet", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_udp_packet_data(packet)))
         }
         ("core.net", "udp_packet_addr") => {
-            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            let Some(packet) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UDPPacket"))
             else {
                 return Some(Err(unsupported("core.net.udp_packet_addr packet", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_udp_packet_addr(packet)))
         }
         ("core.net", "udp_packet_bytes") => {
-            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            let Some(packet) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UDPPacket"))
             else {
                 return Some(Err(unsupported("core.net.udp_packet_bytes packet", span)));
             };
             Some(Ok(crate::net_http_rt::runtime_udp_packet_bytes(packet)))
         }
         ("core.net", "udp_packet_original_len") => {
-            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            let Some(packet) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UDPPacket"))
             else {
                 return Some(Err(unsupported(
                     "core.net.udp_packet_original_len packet",
@@ -4068,7 +4307,9 @@ pub fn ambient_core_call(
             )))
         }
         ("core.net", "udp_packet_truncated") => {
-            let Some(packet) = args.first().and_then(|value| http_handle_id(value, "UDPPacket"))
+            let Some(packet) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "UDPPacket"))
             else {
                 return Some(Err(unsupported(
                     "core.net.udp_packet_truncated packet",
@@ -4078,7 +4319,9 @@ pub fn ambient_core_call(
             Some(Ok(crate::net_http_rt::runtime_udp_packet_truncated(packet)))
         }
         ("core.net", "ready_readable" | "ready_writable") => {
-            let Some(ready) = args.first().and_then(|value| http_handle_id(value, "NetReady"))
+            let Some(ready) = args
+                .first()
+                .and_then(|value| http_handle_id(value, "NetReady"))
             else {
                 return Some(Err(unsupported("core.net.ready receiver", span)));
             };
@@ -4089,20 +4332,18 @@ pub fn ambient_core_call(
             };
             Some(Ok(value))
         }
-        ("core.process", "workspace") => {
-            Some(Ok(CtValue::Struct {
-                type_name: "Abilities".to_string(),
-                fields: vec![(
-                    "rights".to_string(),
-                    CtValue::List(
-                        authority_semantics::jet_authority_workspace_rights()
-                            .into_iter()
-                            .map(CtValue::Str)
-                            .collect(),
-                    ),
-                )],
-            }))
-        }
+        ("core.process", "workspace") => Some(Ok(CtValue::Struct {
+            type_name: "Abilities".to_string(),
+            fields: vec![(
+                "rights".to_string(),
+                CtValue::List(
+                    authority_semantics::jet_authority_workspace_rights()
+                        .into_iter()
+                        .map(CtValue::Str)
+                        .collect(),
+                ),
+            )],
+        })),
         ("core.process", "run") => {
             let Some(CtValue::List(items)) = args.first() else {
                 return Some(Err(unsupported("core.process.run arguments", span)));
@@ -4150,7 +4391,9 @@ pub fn ambient_core_call(
                     Err(error) => return Some(Err(error)),
                 }
             }
-            Some(Ok(process_result_outcome(process_prelude::spec_pipeline(&specs))))
+            Some(Ok(process_result_outcome(process_prelude::spec_pipeline(
+                &specs,
+            ))))
         }
         ("core.testing", "temp_dir") => {
             let Some(CtValue::Str(prefix)) = args.first() else {
@@ -4196,15 +4439,16 @@ pub fn ambient_core_call(
                 service_prelude::apply(method, &args, span)
             }))
         }
-        ("core.service" | "core.services", "runtime") => Some(
-            service_prelude::with_workflow_wait(workflow_wait, || {
+        ("core.service" | "core.services", "runtime") => {
+            Some(service_prelude::with_workflow_wait(workflow_wait, || {
                 service_prelude::apply("runtime", &args, span)
-            }),
-        ),
-        ("core.services", method) => Some(service_prelude::with_workflow_wait(
-            workflow_wait,
-            || service_prelude::apply(method, &args, span),
-        )),
+            }))
+        }
+        ("core.services", method) => {
+            Some(service_prelude::with_workflow_wait(workflow_wait, || {
+                service_prelude::apply(method, &args, span)
+            }))
+        }
         ("core.db", "policy") => {
             let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
                 (args.first(), args.get(1))
@@ -4214,7 +4458,9 @@ pub fn ambient_core_call(
             // Carry the COMPILED policy forward, not the caller's raw text, so a
             // later scope operation reads exactly what AOT would have stored.
             Some(Ok(match wire::jet_db_policy_compile(table, expression) {
-                Ok((table, compiled)) => CtValue::Present(Box::new(db_policy_value(table, compiled))),
+                Ok((table, compiled)) => {
+                    CtValue::Present(Box::new(db_policy_value(table, compiled)))
+                }
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
         }
@@ -4258,7 +4504,9 @@ pub fn ambient_core_call(
             let Some(CtValue::Str(prompt)) = args.first() else {
                 return Some(Err(unsupported("core.term.confirm prompt", span)));
             };
-            Some(Ok(CtValue::Bool(IO::prompt_confirm_with_sink(prompt, sink))))
+            Some(Ok(CtValue::Bool(IO::prompt_confirm_with_sink(
+                prompt, sink,
+            ))))
         }
         ("core.term", "choose") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
@@ -4274,10 +4522,12 @@ pub fn ambient_core_call(
                 };
                 values.push(item.clone());
             }
-            Some(Ok(match IO::prompt_choose_with_sink(prompt, &values, sink) {
-                Ok(item) => CtValue::Present(Box::new(CtValue::Str(item))),
-                Err(error) => CtValue::failed(Box::new(io_error("InvalidInput", error))),
-            }))
+            Some(Ok(
+                match IO::prompt_choose_with_sink(prompt, &values, sink) {
+                    Ok(item) => CtValue::Present(Box::new(CtValue::Str(item))),
+                    Err(error) => CtValue::failed(Box::new(io_error("InvalidInput", error))),
+                },
+            ))
         }
         ("core.term", "input_secret") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
@@ -4316,17 +4566,15 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_std_crypto_random_bytes(*count),
             )))
         }
-        ("core.crypto.uuid", "v4") => Some(Ok(CtValue::Str(
-            Crypto::runtime::jet_crypto_uuid_v4(),
-        ))),
+        ("core.crypto.uuid", "v4") => Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_uuid_v4()))),
         ("core.crypto.uuid", "v7") => {
             let timestamp = match clock_now(args.first()?, span) {
                 Ok(timestamp) => timestamp,
                 Err(error) => return Some(Err(error)),
             };
-            Some(Ok(CtValue::Str(
-                Crypto::runtime::jet_crypto_uuid_v7(timestamp),
-            )))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_uuid_v7(
+                timestamp,
+            ))))
         }
         ("core.crypto", "sha256") => {
             let data = match as_bytes(args.first()?, span) {
@@ -4343,49 +4591,63 @@ pub fn ambient_core_call(
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha1_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha1_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "sha224") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha224_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha224_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "sha384") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha384_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha384_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "sha3_224") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_224_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_224_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "sha3_256") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_256_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_256_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "sha3_384") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_384_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_384_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "sha3_512") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
             };
-            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_512_hex(&data))))
+            Some(Ok(CtValue::Str(Crypto::runtime::jet_crypto_sha3_512_hex(
+                &data,
+            ))))
         }
         ("core.crypto", "pbkdf2_hmac") => {
             let password = match as_bytes(args.first()?, span) {
@@ -4405,10 +4667,7 @@ pub fn ambient_core_call(
                 _ => return Some(Err(unsupported("pbkdf2_hmac key length", span))),
             };
             Some(Ok(CtValue::Bytes(Crypto::runtime::jet_crypto_pbkdf2_hmac(
-                &password,
-                &salt,
-                iterations,
-                key_len,
+                &password, &salt, iterations, key_len,
             ))))
         }
         ("core.crypto", "__hasher_new") => Some(Ok(hasher_value(Vec::new()))),
@@ -4673,12 +4932,9 @@ pub fn ambient_core_call(
                 None => return Some(Err(unsupported("file_seal destination", span))),
             };
             Some(Ok(
-                match Crypto::runtime::jet_crypto_file_seal_impl(
-                    recipients,
-                    &source,
-                    &dest,
-                    || false,
-                ) {
+                match Crypto::runtime::jet_crypto_file_seal_impl(recipients, &source, &dest, || {
+                    false
+                }) {
                     Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
                     Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
                 },
@@ -4749,23 +5005,25 @@ fn interp_web_server(value: &CtValue) -> Option<Arc<InterpWebServer>> {
     if type_name != "__JetInterpWebServer" {
         return None;
     }
-    let index = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-        ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
-        _ => None,
-    })?;
+    let index = fields
+        .iter()
+        .find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })?;
     interp_web_servers().lock().ok()?.get(index).cloned()
 }
 
-fn interp_web_field<'a>(
-    fields: &'a [(String, CtValue)],
-    name: &str,
-) -> Option<&'a CtValue> {
+fn interp_web_field<'a>(fields: &'a [(String, CtValue)], name: &str) -> Option<&'a CtValue> {
     fields
         .iter()
         .find_map(|(field, value)| (field == name).then_some(value))
 }
 
-fn interp_web_steps(value: &CtValue, span: Span) -> Result<Vec<(String, Vec<CtValue>)>, Diagnostic> {
+fn interp_web_steps(
+    value: &CtValue,
+    span: Span,
+) -> Result<Vec<(String, Vec<CtValue>)>, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("App state", span));
     };
@@ -4897,15 +5155,18 @@ fn materialize_interp_app(
                     .cloned()
                     .ok_or_else(|| unsupported("App mount callback", span))?;
                 let callback_sender = sender.cloned();
-                app.mount(prefix, std::sync::Arc::new(move |path: &String| {
-                    if let Some(sender) = &callback_sender {
-                        let _ = interp_web_callback(
-                            sender,
-                            callable.clone(),
-                            vec![CtValue::Str(path.clone())],
-                        );
-                    }
-                }))
+                app.mount(
+                    prefix,
+                    std::sync::Arc::new(move |path: &String| {
+                        if let Some(sender) = &callback_sender {
+                            let _ = interp_web_callback(
+                                sender,
+                                callable.clone(),
+                                vec![CtValue::Str(path.clone())],
+                            );
+                        }
+                    }),
+                )
             }
             "routes" => app.routes(interp_web_string(&args, 0, span)?),
             "security" => app.security(interp_web_string(&args, 0, span)?),
@@ -4936,8 +5197,9 @@ fn ambient_app_handle(
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     let result = match op {
-        "AppFacts" => materialize_interp_app(recv, None, span)
-            .map(|app| CtValue::Str(app.facts_json())),
+        "AppFacts" => {
+            materialize_interp_app(recv, None, span).map(|app| CtValue::Str(app.facts_json()))
+        }
         "AppServe" => {
             let (requests, receiver) = mpsc::channel();
             let app = match materialize_interp_app(recv, Some(&requests), span) {
@@ -5034,12 +5296,8 @@ pub fn ambient_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    if let Some(result) = jet_codegen::Comptime::EmailAdapter::ambient_handle(
-        op,
-        recv,
-        args,
-        span,
-    ) {
+    if let Some(result) = jet_codegen::Comptime::EmailAdapter::ambient_handle(op, recv, args, span)
+    {
         return Some(result);
     }
     if let Some(result) = crate::enc_stream::ambient_handle(op, recv, args, span) {
@@ -5080,18 +5338,24 @@ pub fn ambient_handle(
         if type_name != expected {
             return Some(Err(unsupported("command suite receiver", span)));
         }
-        let iteration = fields.iter().find_map(|(name, value)| {
-            (name == "iteration").then_some(match value {
-                CtValue::Int(value) => *value,
-                _ => 0,
+        let iteration = fields
+            .iter()
+            .find_map(|(name, value)| {
+                (name == "iteration").then_some(match value {
+                    CtValue::Int(value) => *value,
+                    _ => 0,
+                })
             })
-        }).unwrap_or(0);
-        let result = fields.iter().find_map(|(name, value)| {
-            (name == "result").then_some(match value {
-                CtValue::Int(value) => *value,
-                _ => 0,
+            .unwrap_or(0);
+        let result = fields
+            .iter()
+            .find_map(|(name, value)| {
+                (name == "result").then_some(match value {
+                    CtValue::Int(value) => *value,
+                    _ => 0,
+                })
             })
-        }).unwrap_or(0);
+            .unwrap_or(0);
         let (status, iteration, result) = {
             let mut suite = jet_codegen::command_suite::JetTestSuite {
                 iteration,
@@ -5114,29 +5378,27 @@ pub fn ambient_handle(
     }
     if op == "DBWithPolicy" {
         let handle = db_handle(recv)?;
-        let (CtValue::Struct { fields, .. }, CtValue::Str(user)) =
-            (args.first()?, args.get(1)?)
+        let (CtValue::Struct { fields, .. }, CtValue::Str(user)) = (args.first()?, args.get(1)?)
         else {
             return Some(Err(unsupported("DBConnection.with_policy arguments", span)));
         };
-        let table = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("table", CtValue::Str(value)) => Some(value.clone()),
-            _ => None,
-        });
-        let expression = fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-            ("expression", CtValue::Str(value)) => Some(value.clone()),
-            _ => None,
-        });
+        let table = fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("table", CtValue::Str(value)) => Some(value.clone()),
+                _ => None,
+            });
+        let expression = fields
+            .iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("expression", CtValue::Str(value)) => Some(value.clone()),
+                _ => None,
+            });
         let (Some(table), Some(expression)) = (table, expression) else {
             return Some(Err(unsupported("DBConnection.with_policy policy", span)));
         };
         return Some(match wire::jet_db_policy_compile(&table, &expression) {
-            Ok((table, compiled)) => Ok(db_scope_value(
-                handle,
-                table,
-                compiled,
-                user.clone(),
-            )),
+            Ok((table, compiled)) => Ok(db_scope_value(handle, table, compiled, user.clone())),
             Err(error) => Err(unsupported(&format!("row policy: {error}"), span)),
         });
     }
@@ -5155,10 +5417,12 @@ pub fn ambient_handle(
             let Some(CtValue::Str(id)) = args.first() else {
                 return Some(Err(unsupported("ServiceRuntime.commit id", span)));
             };
-            return Some(Ok(match service_prelude::jet_services_runtime_commit(&runtime, id) {
-                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-                Err(error) => CtValue::failed(Box::new(service_error_value(error))),
-            }));
+            return Some(Ok(
+                match service_prelude::jet_services_runtime_commit(&runtime, id) {
+                    Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                    Err(error) => CtValue::failed(Box::new(service_error_value(error))),
+                },
+            ));
         }
         let result = match op {
             "ServiceRuntimeSend" => {
@@ -5226,20 +5490,26 @@ pub fn ambient_handle(
                 Err(e) => return Some(Err(e)),
             };
             let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy_with_proof(
-                    &sql, &values, &table, compiled, &user,
-                ) {
-                    Ok(application) => match application.into_parts() {
-                        Ok((sql, values)) => (handle, sql, values),
+                Some((handle, table, compiled, user)) => {
+                    match wire::jet_db_apply_compiled_policy_with_proof(
+                        &sql, &values, &table, compiled, &user,
+                    ) {
+                        Ok(application) => match application.into_parts() {
+                            Ok((sql, values)) => (handle, sql, values),
+                            Err(error) => {
+                                return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                            }
+                        },
                         Err(error) => {
-                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))))
                         }
-                    },
-                    Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
-                },
-                None => return Some(Ok(CtValue::failed(Box::new(db_err(
-                    "database row operations require a policy scope",
-                ))))),
+                    }
+                }
+                None => {
+                    return Some(Ok(CtValue::failed(Box::new(db_err(
+                        "database row operations require a policy scope",
+                    )))))
+                }
             };
             let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_execute(handle, &sql, &params);
@@ -5258,20 +5528,26 @@ pub fn ambient_handle(
                 Err(e) => return Some(Err(e)),
             };
             let (handle, sql, values) = match db_scope_parts(recv) {
-                Some((handle, table, compiled, user)) => match wire::jet_db_apply_compiled_policy_with_proof(
-                    &sql, &values, &table, compiled, &user,
-                ) {
-                    Ok(application) => match application.into_parts() {
-                        Ok((sql, values)) => (handle, sql, values),
+                Some((handle, table, compiled, user)) => {
+                    match wire::jet_db_apply_compiled_policy_with_proof(
+                        &sql, &values, &table, compiled, &user,
+                    ) {
+                        Ok(application) => match application.into_parts() {
+                            Ok((sql, values)) => (handle, sql, values),
+                            Err(error) => {
+                                return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                            }
+                        },
                         Err(error) => {
-                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))));
+                            return Some(Ok(CtValue::failed(Box::new(db_err(error.message)))))
                         }
-                    },
-                    Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
-                },
-                None => return Some(Ok(CtValue::failed(Box::new(db_err(
-                    "database row operations require a policy scope",
-                ))))),
+                    }
+                }
+                None => {
+                    return Some(Ok(CtValue::failed(Box::new(db_err(
+                        "database row operations require a policy scope",
+                    )))))
+                }
             };
             let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_query(handle, &sql, &params);
@@ -5293,24 +5569,28 @@ pub fn ambient_handle(
             };
             let scope = match db_scope_parts(recv) {
                 Some(scope) => scope,
-                None => return Some(Ok(CtValue::failed(Box::new(db_err(
-                    "database row operations require a policy scope",
-                ))))),
-            };
-            Some(Ok(match ambient_db_scope_query(&scope, &sql, &values, false) {
-                Ok(rows) => {
-                    let opt = match wire::jet_db_first_row(rows) {
-                        Ok(row) => CtValue::Present(Box::new(row_map(row))),
-                        Err(_) => CtValue::absent(Type::Map {
-                            key: Box::new(Type::String),
-                            key_span: None,
-                            value: Box::new(Type::Named("DBValue".into())),
-                        }),
-                    };
-                    CtValue::Present(Box::new(opt))
+                None => {
+                    return Some(Ok(CtValue::failed(Box::new(db_err(
+                        "database row operations require a policy scope",
+                    )))))
                 }
-                Err(e) => CtValue::failed(Box::new(db_err(e.message))),
-            }))
+            };
+            Some(Ok(
+                match ambient_db_scope_query(&scope, &sql, &values, false) {
+                    Ok(rows) => {
+                        let opt = match wire::jet_db_first_row(rows) {
+                            Ok(row) => CtValue::Present(Box::new(row_map(row))),
+                            Err(_) => CtValue::absent(Type::Map {
+                                key: Box::new(Type::String),
+                                key_span: None,
+                                value: Box::new(Type::Named("DBValue".into())),
+                            }),
+                        };
+                        CtValue::Present(Box::new(opt))
+                    }
+                    Err(e) => CtValue::failed(Box::new(db_err(e.message))),
+                },
+            ))
         }
         "DBLive" => {
             let raw_sql = match args.first() {
@@ -5402,12 +5682,16 @@ fn ambient_plugin_call(
     if type_name != "JetPlugin" {
         return Err(unsupported("Plugin receiver", span));
     }
-    let Some(handle) = fields.iter().find_map(|(name, value)| {
-        (name == "handle").then_some(match value {
-            CtValue::Int(value) if *value >= 0 => Some(*value as u64),
-            _ => None,
+    let Some(handle) = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "handle").then_some(match value {
+                CtValue::Int(value) if *value >= 0 => Some(*value as u64),
+                _ => None,
+            })
         })
-    }).flatten() else {
+        .flatten()
+    else {
         return Err(unsupported("Plugin handle", span));
     };
     let Some(CtValue::Str(name)) = args.first() else {
@@ -5598,15 +5882,14 @@ fn ambient_net_handle(
             }
             "TLSRootCertificatesFromPem" => {
                 let Some(bytes) = args.first().and_then(net_bytes_value) else {
-                    return Some(Err(unsupported(
-                        "RootCertificates.from_pem bytes",
-                        span,
-                    )));
+                    return Some(Err(unsupported("RootCertificates.from_pem bytes", span)));
                 };
                 if args.len() != 1 {
                     Err(unsupported("RootCertificates.from_pem arguments", span))
                 } else {
-                    Ok(crate::net_http_rt::runtime_tls_root_certificates_from_pem(bytes))
+                    Ok(crate::net_http_rt::runtime_tls_root_certificates_from_pem(
+                        bytes,
+                    ))
                 }
             }
             "TLSClientIdentityFromPem" => {
@@ -5614,10 +5897,7 @@ fn ambient_net_handle(
                     args.first().and_then(net_bytes_value),
                     args.get(1).and_then(net_bytes_value),
                 ) else {
-                    return Some(Err(unsupported(
-                        "ClientIdentity.from_pem bytes",
-                        span,
-                    )));
+                    return Some(Err(unsupported("ClientIdentity.from_pem bytes", span)));
                 };
                 if args.len() != 2 {
                     Err(unsupported("ClientIdentity.from_pem arguments", span))
@@ -5633,7 +5913,10 @@ fn ambient_net_handle(
                     return Some(Err(unsupported("TLSClientConfig receiver", span)));
                 };
                 let Some(protocols) = args.first().and_then(ct_string_list) else {
-                    return Some(Err(unsupported("TLSClientConfig.with_alpn protocols", span)));
+                    return Some(Err(unsupported(
+                        "TLSClientConfig.with_alpn protocols",
+                        span,
+                    )));
                 };
                 if args.len() != 1 {
                     Err(unsupported("TLSClientConfig.with_alpn arguments", span))
@@ -5701,9 +5984,11 @@ fn ambient_net_handle(
                         span,
                     ))
                 } else {
-                    Ok(crate::net_http_rt::runtime_tls_client_config_with_version_bounds(
-                        config, min, max,
-                    ))
+                    Ok(
+                        crate::net_http_rt::runtime_tls_client_config_with_version_bounds(
+                            config, min, max,
+                        ),
+                    )
                 }
             }
             "TLSStreamReadDeadline" => {
@@ -5843,7 +6128,9 @@ fn ambient_net_handle(
                     if !args.is_empty() {
                         Err(unsupported("TcpListener.local_addr arguments", span))
                     } else {
-                        Ok(crate::net_http_rt::runtime_tcp_listener_local_addr(listener))
+                        Ok(crate::net_http_rt::runtime_tcp_listener_local_addr(
+                            listener,
+                        ))
                     }
                 }
                 _ => unreachable!(),
@@ -5867,7 +6154,10 @@ fn ambient_net_handle(
                 if args.len() != 1 {
                     Err(unsupported("TcpStream.write arguments", span))
                 } else {
-                    Ok(crate::net_http_rt::runtime_tcp_stream_write(stream, data.clone()))
+                    Ok(crate::net_http_rt::runtime_tcp_stream_write(
+                        stream,
+                        data.clone(),
+                    ))
                 }
             }
             "TcpStreamPeerAddr" => {
@@ -5972,7 +6262,11 @@ fn ambient_net_handle(
                         .ok_or_else(|| unsupported("TcpStream.write_text deadline", span)),
                 };
                 deadline.map(|deadline| {
-                    crate::net_http_rt::runtime_tcp_stream_write_text(stream, data.clone(), deadline)
+                    crate::net_http_rt::runtime_tcp_stream_write_text(
+                        stream,
+                        data.clone(),
+                        deadline,
+                    )
                 })
             }
             "TcpStreamShutdown" => {
@@ -6096,14 +6390,10 @@ fn ct_tls_trust(v: &CtValue) -> Option<crate::net_http_rt::JetTLSTrust> {
         } if type_name == "TLSClientTrust" => match (variant.as_str(), args.as_slice()) {
             ("System", []) => Some(crate::net_http_rt::JetTLSTrust::System),
             ("SystemPlus", [(_, roots)]) => http_handle_id(roots, "TLSRootCertificates")
-                .and_then(|handle| {
-                    crate::net_http_rt::tls_root_certificates_for_ambient(handle)
-                })
+                .and_then(|handle| crate::net_http_rt::tls_root_certificates_for_ambient(handle))
                 .map(crate::net_http_rt::JetTLSTrust::SystemPlus),
             ("CustomOnly", [(_, roots)]) => http_handle_id(roots, "TLSRootCertificates")
-                .and_then(|handle| {
-                    crate::net_http_rt::tls_root_certificates_for_ambient(handle)
-                })
+                .and_then(|handle| crate::net_http_rt::tls_root_certificates_for_ambient(handle))
                 .map(crate::net_http_rt::JetTLSTrust::CustomOnly),
             _ => None,
         },
@@ -6216,7 +6506,12 @@ fn ambient_http_server_call(
             let credentials = match args.get(3) {
                 Some(CtValue::Bool(value)) => Some(*value),
                 None => None,
-                _ => return Err(unsupported("core.http.server.cors_policy credentials", span)),
+                _ => {
+                    return Err(unsupported(
+                        "core.http.server.cors_policy credentials",
+                        span,
+                    ))
+                }
             };
             let max_age = match args.get(4) {
                 Some(CtValue::Int(value)) => Some(*value),
@@ -6269,8 +6564,10 @@ fn ambient_http_handle(
         let Some((path, method)) = static_call.rsplit_once(':') else {
             return Some(Err(unsupported("HTTP nominal static adapter", span)));
         };
-        return Some(crate::net_http_rt::runtime_http_nominal_static(path, method, args)
-            .map_err(|error| unsupported(&error, span)));
+        return Some(
+            crate::net_http_rt::runtime_http_nominal_static(path, method, args)
+                .map_err(|error| unsupported(&error, span)),
+        );
     }
     if op == "HTTPNominalShow" {
         let handle = match recv {
@@ -6282,10 +6579,15 @@ fn ambient_http_handle(
                         | "HTTPVersion"
                         | "HTTPHeaderName"
                         | "HTTPHeaderValue"
-                ) => fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
-                    ("handle", CtValue::Int(handle)) if *handle > 0 => Some(*handle),
-                    _ => None,
-                }),
+                ) =>
+            {
+                fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("handle", CtValue::Int(handle)) if *handle > 0 => Some(*handle),
+                        _ => None,
+                    })
+            }
             _ => None,
         };
         let Some(handle) = handle else {
@@ -6349,9 +6651,8 @@ fn ambient_http_handle(
                 let Some(CtValue::Int(limit)) = args.first() else {
                     return Err(unsupported("HTTPBody.json limit", span));
                 };
-                let result =
-                    crate::net_http_rt::runtime_http_body_json_text(body, Some(*limit))
-                        .map_err(|error| unsupported(&error, span))?;
+                let result = crate::net_http_rt::runtime_http_body_json_text(body, Some(*limit))
+                    .map_err(|error| unsupported(&error, span))?;
                 Ok(http_json_text_result(result))
             })
         }

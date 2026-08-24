@@ -1,8 +1,8 @@
 //! D-CHOOSE-TEST1=A: subject-first refutable test-bind.
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 const EXAMPLE_OUTPUT: &str = "7\n7\ninvalid\ninvalid\n";
 
@@ -20,13 +20,17 @@ fn run() {
 #[test]
 fn parser_accepts_subject_first_test_bind_and_rejects_pattern_left_route() {
     let (tokens, lex_diags) = jet::Lexer::lex(VALID);
-    assert!(lex_diags.is_empty(), "valid test-bind lexed with diagnostics: {lex_diags:#?}");
+    assert!(
+        lex_diags.is_empty(),
+        "valid test-bind lexed with diagnostics: {lex_diags:#?}"
+    );
     jet::Parser::parse(&tokens).expect("subject-first test-bind should parse");
 
-    let (tokens, lex_diags) = jet::Lexer::lex(
-        "fn run() { .Ok(age) :: parse_age() ?? return }\n",
+    let (tokens, lex_diags) = jet::Lexer::lex("fn run() { .Ok(age) :: parse_age() ?? return }\n");
+    assert!(
+        lex_diags.is_empty(),
+        "retired spelling lexed with diagnostics: {lex_diags:#?}"
     );
-    assert!(lex_diags.is_empty(), "retired spelling lexed with diagnostics: {lex_diags:#?}");
     assert!(
         jet::Parser::parse(&tokens).is_err(),
         "retired pattern-left refutable bind must not gain a parser path"
@@ -36,7 +40,10 @@ fn parser_accepts_subject_first_test_bind_and_rejects_pattern_left_route() {
 #[test]
 fn sema_accepts_diverging_test_bind_and_keeps_the_name_afterward() {
     let output = jet::compile(VALID).expect("diverging test-bind should compile");
-    assert!(output.rust.contains("age"), "generated program lost the bound name");
+    assert!(
+        output.rust.contains("age"),
+        "generated program lost the bound name"
+    );
 }
 
 #[test]
@@ -49,7 +56,9 @@ fn run() {
 "#;
     let diagnostics = jet::check_for_eval(source, "refutable_test_bind.jet");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0405"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0405"),
         "non-diverging test-bind route must use registered E0405: {diagnostics:#?}"
     );
 }
@@ -65,7 +74,9 @@ fn run() {
 "#;
     let diagnostics = jet::check_for_eval(source, "refutable_test_bind_no_route.jet");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0107"),
         "a pattern test without `??` must not bind `age`: {diagnostics:#?}"
     );
 }
@@ -80,7 +91,9 @@ fn run() {
 "#;
     let diagnostics = jet::check_for_eval(source, "refutable_test_bind_optional.jet");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0408"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0408"),
         "optional shape miss must reject ambient err with E0408: {diagnostics:#?}"
     );
 }
@@ -108,8 +121,5 @@ fn run() {
 
 #[test]
 fn example_matches_aot_default_jit_and_interpreter() {
-    tir_support::assert_example_cli_tiers_agree(
-        "patterns/refutable_test_bind",
-        EXAMPLE_OUTPUT,
-    );
+    tir_support::assert_example_cli_tiers_agree("patterns/refutable_test_bind", EXAMPLE_OUTPUT);
 }

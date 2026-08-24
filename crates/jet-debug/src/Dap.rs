@@ -100,6 +100,7 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
         unmapped_steps: 0,
         references: ObjectReferences::default(),
         state: State::New,
+        terminal_failure: false,
         client_sequences: HashSet::new(),
         seq: 1,
     };
@@ -171,6 +172,10 @@ struct DapServer {
     unmapped_steps: usize,
     references: ObjectReferences,
     state: State,
+    /// Terminal diagnostics and failed closes are not proof of a clean session.
+    /// Keep that fact after the inferior is consumed so EOF cleanup cannot turn
+    /// them into a successful adapter exit.
+    terminal_failure: bool,
     client_sequences: HashSet<u32>,
     seq: i64,
 }
@@ -419,7 +424,8 @@ impl DapServer {
         self.invalidate_references();
         let terminate = self.target == Some(TargetKind::Launched);
         match self.close_target(terminate) {
-            Ok(()) => code,
+            Ok(()) if !self.terminal_failure => code,
+            Ok(()) => crate::ExitCodes::USER_ERROR,
             Err(error) => {
                 let (id, message) = cleanup_error_details(&error);
                 let diagnostic = match id {
@@ -449,6 +455,9 @@ impl DapServer {
         inf.quit();
         self.target = None;
         self.source_breakpoint_ids.clear();
+        if action.is_err() {
+            self.terminal_failure = true;
+        }
         action
     }
 
@@ -2264,7 +2273,8 @@ impl DapServer {
                     return;
                 }
             }
-            let reason = if self.last_signal.is_some()
+            let reason = if self.last_exception.is_some()
+                || self.last_signal.is_some()
                 || bt_text.contains("signal")
                 || bt_text.contains("exception")
             {
@@ -2430,7 +2440,10 @@ impl DapServer {
         let text = backtrace.to_ascii_lowercase();
         if text.contains("panic") || text.contains("unwind") {
             Some("panic")
-        } else if text.contains("exception") || text.contains("fatal error") {
+        } else if text.contains("exception")
+            || text.contains("fatal error")
+            || text.contains("exc_")
+        {
             Some("error")
         } else if self.last_signal.is_some() {
             Some("signal")
@@ -2450,6 +2463,7 @@ impl DapServer {
     }
 
     fn terminate_with_diagnostic(&mut self, out: &mut impl Write, diagnostic: &str, message: &str) {
+        self.terminal_failure = true;
         self.state = State::Terminated;
         self.invalidate_references();
         let cleanup_proven = self.cleanup_after_terminal_state(out);
@@ -3345,6 +3359,7 @@ mod tests {
             unmapped_steps: 0,
             references: ObjectReferences::default(),
             state,
+            terminal_failure: false,
             client_sequences: HashSet::new(),
             seq: 1,
         }
@@ -4116,6 +4131,26 @@ mod tests {
         );
         assert!(signal.contains("\"exceptionId\":\"SIGABRT\""), "{signal}");
         assert!(signal.contains("Jet target stopped on SIGABRT"), "{signal}");
+    }
+
+    #[test]
+    fn macos_exception_stops_use_the_error_filter() {
+        let server = test_server(State::Running);
+        assert_eq!(
+            server.exception_kind("* thread #1, stop reason = EXC_BAD_ACCESS (code=1)"),
+            Some("error")
+        );
+    }
+
+    #[test]
+    fn terminal_diagnostic_cannot_finish_as_success() {
+        let mut server = test_server(State::Running);
+        let mut output = Vec::new();
+        server.terminate_with_diagnostic(&mut output, "E2235", "stop storm");
+        assert_eq!(
+            server.finish(crate::ExitCodes::OK),
+            crate::ExitCodes::USER_ERROR
+        );
     }
 
     #[test]

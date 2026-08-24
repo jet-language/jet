@@ -45,7 +45,14 @@ fn positional_bare_form_fills_required_field() {
     let dir = scratch("bare");
     write_todo(&dir);
     let out = Command::new(jet())
-        .args(["run", "--profile=debug", "todo.jet", "--", "add", "buy-milk"])
+        .args([
+            "run",
+            "--profile=debug",
+            "todo.jet",
+            "--",
+            "add",
+            "buy-milk",
+        ])
         .current_dir(&dir)
         .output()
         .unwrap();

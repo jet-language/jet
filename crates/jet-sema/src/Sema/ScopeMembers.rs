@@ -34,22 +34,15 @@ use crate::AST::{
 /// check` / `jet run` should surface too, even though the members only *run*
 /// under `jet test`. The check reads the injected unit family declaration for
 /// `.timeout`, but does not duplicate its vocabulary.
-pub fn check(
-    items: &[Item],
-    vocabulary: &crate::Policy::MarkerVocabulary,
-) -> Vec<Diagnostic> {
+pub fn check(items: &[Item], vocabulary: &crate::Policy::MarkerVocabulary) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     check_dsl_items(items, vocabulary, &mut diags);
     check_assertionless_tests(items, &mut diags);
     for item in items {
         match item {
-            Item::Test(t) => check_marker_body(
-                Syntax::KW_TEST,
-                &t.body,
-                vocabulary,
-                items,
-                &mut diags,
-            ),
+            Item::Test(t) => {
+                check_marker_body(Syntax::KW_TEST, &t.body, vocabulary, items, &mut diags)
+            }
             Item::Func(f) => reject_all(&f.body, vocabulary, &mut diags),
             Item::Impl(i) => {
                 for m in &i.methods {
@@ -83,8 +76,7 @@ fn check_assertionless_tests(items: &[Item], diags: &mut Vec<Diagnostic>) {
             diags.push(Diagnostic::lint(
                 "L2901",
                 "This #Test block has no assertions.".to_string(),
-                "A test with no assertions cannot find bugs because it always passes."
-                    .to_string(),
+                "A test with no assertions cannot find bugs because it always passes.".to_string(),
                 "Add at least one assertion, or remove the test if it only exercises compilation."
                     .to_string(),
                 Some(test.span),
@@ -99,7 +91,9 @@ fn statements_have_assertion(statements: &[Stmt]) -> bool {
 
 fn statement_has_assertion(statement: &Stmt) -> bool {
     let direct = match statement {
-        Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => expr_has_assertion(expr),
+        Stmt::Expr(expr) | Stmt::Yield(expr, _) | Stmt::DeferClose { close: expr, .. } => {
+            expr_has_assertion(expr)
+        }
         Stmt::Val(binding) => expr_has_assertion(&binding.init),
         Stmt::Assign { value, .. } => expr_has_assertion(value),
         Stmt::Return(Some(expr), _)
@@ -107,12 +101,7 @@ fn statement_has_assertion(statement: &Stmt) -> bool {
         | Stmt::BreakLabelValue(_, _, expr, _) => expr_has_assertion(expr),
         Stmt::While { cond, .. } => expr_has_assertion(cond),
         Stmt::For { kind, .. } => for_kind_has_assertion(kind),
-        Stmt::Switch {
-            subject, arms, ..
-        }
-        | Stmt::ComptimeSwitch {
-            subject, arms, ..
-        } => {
+        Stmt::Switch { subject, arms, .. } | Stmt::ComptimeSwitch { subject, arms, .. } => {
             expr_has_assertion(subject)
                 || arms.iter().any(|arm| {
                     expr_has_assertion(&arm.cond) || statements_have_assertion(&arm.body)
@@ -123,21 +112,18 @@ fn statement_has_assertion(statement: &Stmt) -> bool {
         } => {
             expr_has_assertion(&init.init)
                 || expr_has_assertion(cond)
-                || step
-                    .as_deref()
-                    .is_some_and(statement_has_assertion)
+                || step.as_deref().is_some_and(statement_has_assertion)
         }
-        Stmt::Unsafe { audit_expr, .. } | Stmt::Impure {
+        Stmt::Unsafe { audit_expr, .. }
+        | Stmt::Impure {
             reason_expr: audit_expr,
             ..
-        } => audit_expr
-            .as_ref()
-            .is_some_and(expr_has_assertion),
+        } => audit_expr.as_ref().is_some_and(expr_has_assertion),
         Stmt::TaskGroup { limit, .. } => limit.as_ref().is_some_and(expr_has_assertion),
         Stmt::ComptimeIf { cond, .. } => expr_has_assertion(cond),
-        Stmt::ContextBlock { fields, .. } => fields
-            .iter()
-            .any(|(_, value, _)| expr_has_assertion(value)),
+        Stmt::ContextBlock { fields, .. } => {
+            fields.iter().any(|(_, value, _)| expr_has_assertion(value))
+        }
         Stmt::AssumeDet { reason_expr, .. } => expr_has_assertion(reason_expr),
         Stmt::ScopeMember { args, .. } => args.iter().any(expr_has_assertion),
         Stmt::Return(None, _)
@@ -155,12 +141,12 @@ fn statement_has_assertion(statement: &Stmt) -> bool {
         | Stmt::Caps { .. }
         | Stmt::ComptimeBlock { .. }
         | Stmt::Live { .. }
-        | Stmt::Transact { .. }
-        => false,
+        | Stmt::Transact { .. } => false,
     };
-    direct || statement_bodies(statement)
-        .iter()
-        .any(|body| statements_have_assertion(body))
+    direct
+        || statement_bodies(statement)
+            .iter()
+            .any(|body| statements_have_assertion(body))
 }
 
 pub(crate) fn statement_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
@@ -230,7 +216,8 @@ fn for_kind_has_assertion(kind: &ForKind) -> bool {
 fn expr_has_assertion(expr: &Expr) -> bool {
     match expr {
         Expr::Call(call) => {
-            is_assertion_name(&call.name) || call.args.iter().any(|arg| expr_has_assertion(&arg.expr))
+            is_assertion_name(&call.name)
+                || call.args.iter().any(|arg| expr_has_assertion(&arg.expr))
         }
         Expr::MethodCall {
             receiver,
@@ -247,9 +234,7 @@ fn expr_has_assertion(expr: &Expr) -> bool {
             StrPart::Lit(_) => false,
         }),
         Expr::ListLit(values, ..) => values.iter().any(expr_has_assertion),
-        Expr::TupleLit(fields, ..) => fields
-            .iter()
-            .any(|(_, value)| expr_has_assertion(value)),
+        Expr::TupleLit(fields, ..) => fields.iter().any(|(_, value)| expr_has_assertion(value)),
         Expr::MemberSpread { base, .. }
         | Expr::Spread(base, ..)
         | Expr::Deref(base, ..)
@@ -276,18 +261,18 @@ fn expr_has_assertion(expr: &Expr) -> bool {
             expr_has_assertion(base)
                 || expr_has_assertion(start)
                 || expr_has_assertion(end)
-                || range.as_ref().is_some_and(|value| expr_has_assertion(value))
+                || range
+                    .as_ref()
+                    .is_some_and(|value| expr_has_assertion(value))
         }
         Expr::Range { start, end, .. } => expr_has_assertion(start) || expr_has_assertion(end),
         Expr::Unary(_, value, ..) => expr_has_assertion(value),
-        Expr::Binary(_, left, right, ..) => {
-            expr_has_assertion(left) || expr_has_assertion(right)
-        }
+        Expr::Binary(_, left, right, ..) => expr_has_assertion(left) || expr_has_assertion(right),
         Expr::CompareChain { operands, .. } => operands.iter().any(expr_has_assertion),
         Expr::OptField { base, .. } => expr_has_assertion(base),
-        Expr::StructLit { fields, .. } => fields
-            .iter()
-            .any(|(_, _, value)| expr_has_assertion(value)),
+        Expr::StructLit { fields, .. } => {
+            fields.iter().any(|(_, _, value)| expr_has_assertion(value))
+        }
         Expr::TypedLit { body, .. } => {
             let mut found = false;
             body.for_each_expr(|value| found |= expr_has_assertion(value));
@@ -320,8 +305,7 @@ fn expr_has_assertion(expr: &Expr) -> bool {
             LambdaBody::Block(body) => statements_have_assertion(body),
         },
         Expr::CallValue { callee, args, .. } => {
-            expr_has_assertion(callee)
-                || args.iter().any(|arg| expr_has_assertion(&arg.expr))
+            expr_has_assertion(callee) || args.iter().any(|arg| expr_has_assertion(&arg.expr))
         }
         Expr::PtrFromAddr { addr, .. } => expr_has_assertion(addr),
         Expr::IncDec { operand, .. } => expr_has_assertion(operand),
@@ -366,12 +350,12 @@ fn enum_arg_has_assertion(arg: &EnumLitArg) -> bool {
 
 fn fallback_has_assertion(fallback: &OrFallback) -> bool {
     match fallback {
-        OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
-            expr_has_assertion(value)
-        }
+        OrFallback::Value(value) | OrFallback::Return(Some(value), _) => expr_has_assertion(value),
         OrFallback::Block { body, value, .. } => {
             statements_have_assertion(body)
-            || value.as_ref().is_some_and(|value| expr_has_assertion(value))
+                || value
+                    .as_ref()
+                    .is_some_and(|value| expr_has_assertion(value))
         }
         OrFallback::Panic { args, .. } => args.iter().any(|arg| expr_has_assertion(&arg.expr)),
         OrFallback::Return(None, _)
@@ -605,9 +589,9 @@ fn dsl_rule_allowed(name: &str, vocabulary: &crate::Policy::MarkerVocabulary) ->
     if crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block) {
         return true;
     }
-    vocabulary
-        .declaration(name)
-        .is_some_and(|declaration| declared_sites(declaration).contains(&crate::Policy::RuleSite::Block))
+    vocabulary.declaration(name).is_some_and(|declaration| {
+        declared_sites(declaration).contains(&crate::Policy::RuleSite::Block)
+    })
 }
 
 fn declared_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Policy::RuleSite> {
@@ -629,7 +613,12 @@ fn declared_sites(declaration: &crate::AST::MarkerDecl) -> Vec<crate::Policy::Ru
                     Expr::EnumLit { variant, .. } => Some(variant.as_str()),
                     _ => None,
                 })
-                .filter_map(|name| crate::Policy::RuleSite::ALL.iter().copied().find(|site| site.name() == name))
+                .filter_map(|name| {
+                    crate::Policy::RuleSite::ALL
+                        .iter()
+                        .copied()
+                        .find(|site| site.name() == name)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -660,7 +649,8 @@ fn validate_dsl_args(
         diags.push(Diagnostic::error(
             "E0617",
             format!("`#{name}` has an invalid DSL header"),
-            "a checked text block keeps its Jet boundary; only its declared header shape is legal".to_string(),
+            "a checked text block keeps its Jet boundary; only its declared header shape is legal"
+                .to_string(),
             format!("write {expected}"),
             Some(at),
         ));
@@ -811,10 +801,9 @@ fn is_duration(e: &Expr, items: &[Item]) -> bool {
     match e {
         Expr::Ident(..) => true,
         Expr::UnitLit { suffix, .. } => items.iter().any(|item| match item {
-            Item::UnitFamily(family) if family.is_canonical_time() => family
-                .members
-                .iter()
-                .any(|member| member.name == *suffix),
+            Item::UnitFamily(family) if family.is_canonical_time() => {
+                family.members.iter().any(|member| member.name == *suffix)
+            }
             _ => false,
         }),
         _ => false,

@@ -38,7 +38,10 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let json = String::from_utf8(output.stderr).unwrap();
-    assert!(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""), "{json}");
+    assert!(
+        json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""),
+        "{json}"
+    );
     for field in [
         "\"code\":\"E2702\"",
         "\"what\":\"crypto API misuse\"",
@@ -51,11 +54,21 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
     ] {
         assert!(json.contains(field), "missing {field}: {json}");
     }
-    for forbidden in ["password", "plaintext", "ciphertext", "backend", "rustc", "dependency"] {
+    for forbidden in [
+        "password",
+        "plaintext",
+        "ciphertext",
+        "backend",
+        "rustc",
+        "dependency",
+    ] {
         assert!(!json.contains(forbidden), "leaked `{forbidden}`: {json}");
     }
     assert!(!root.join(".jet").exists(), "check emitted .jet state");
-    assert!(!root.join("build").exists(), "check emitted a build artifact");
+    assert!(
+        !root.join("build").exists(),
+        "check emitted a build artifact"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -88,7 +101,10 @@ fn e2702_json_redacts_an_absolute_input_to_its_project_path() {
     assert_eq!(output.status.code(), Some(1));
     let json = String::from_utf8(output.stderr).unwrap();
     assert!(json.contains("\"file\":\"src/main.jet\""), "{json}");
-    assert!(!json.contains(&root.to_string_lossy().into_owned()), "absolute path leaked: {json}");
+    assert!(
+        !json.contains(&root.to_string_lossy().into_owned()),
+        "absolute path leaked: {json}"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -121,14 +137,20 @@ fn multiple_e2702_diagnostics_are_independent_json_lines() {
     let lines = json.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2, "{json}");
     for (line, actual) in lines.into_iter().zip([8161, 8162]) {
-        assert!(line.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""), "{line}");
+        assert!(
+            line.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""),
+            "{line}"
+        );
         assert!(line.contains("\"code\":\"E2702\""), "{line}");
         assert!(line.contains("\"reason\":\"output_length\""), "{line}");
         assert!(line.contains("\"operation\":\"hkdf_sha256\""), "{line}");
         assert!(line.contains(&format!("\"actual\":{actual}")), "{line}");
     }
     assert!(!root.join(".jet").exists(), "check emitted .jet state");
-    assert!(!root.join("build").exists(), "check emitted a build artifact");
+    assert!(
+        !root.join("build").exists(),
+        "check emitted a build artifact"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -158,7 +180,10 @@ fn safe_raw_nonce_json_omits_inapplicable_bounds() {
     assert!(!json.contains("\"expected\":"), "{json}");
     assert!(!json.contains("\"actual\":"), "{json}");
     assert!(!root.join(".jet").exists(), "check emitted .jet state");
-    assert!(!root.join("build").exists(), "check emitted a build artifact");
+    assert!(
+        !root.join("build").exists(),
+        "check emitted a build artifact"
+    );
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -171,7 +196,11 @@ fn explain_e2702_teaches_precedence_and_dynamic_values() {
         .unwrap();
     assert!(output.status.success());
     let text = String::from_utf8(output.stdout).unwrap();
-    for teaching in ["syntax, effects, and types", "compiler-known", "Dynamic values"] {
+    for teaching in [
+        "syntax, effects, and types",
+        "compiler-known",
+        "Dynamic values",
+    ] {
         assert!(text.contains(teaching), "missing `{teaching}`:\n{text}");
     }
 }

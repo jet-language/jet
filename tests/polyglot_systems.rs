@@ -118,13 +118,19 @@ int64_t apply(int64_t (*callback)(int64_t), int64_t input) {
     assert!(cache.join("libjet_cpp_counter.a").is_file());
     assert!(result.provenance.contains("schema=jet-cpp-bind-v3"));
     assert!(result.provenance.contains(&format!("target={target}")));
-    assert!(result.provenance.contains(&format!("clang={}", clang.display())));
+    assert!(result
+        .provenance
+        .contains(&format!("clang={}", clang.display())));
     assert!(result.provenance.contains("namespace=acme"));
     assert!(result.provenance.contains("library=counter_impl"));
-    assert!(result.provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
+    assert!(result
+        .provenance
+        .contains("descriptor=jet-ffi-descriptor-v1;"));
     assert!(!result.bound.iter().any(|name| name.contains("decoy")));
     assert!(result.source.contains("pub fn apply(callback:"));
-    assert!(result.source.contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
+    assert!(result
+        .source
+        .contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
     assert!(result.source.contains("-[FFI.Cpp]>"));
     assert!(!result.source.contains("=>"));
 
@@ -152,7 +158,10 @@ fn run() {
 "#;
     fs::write(&main, source).unwrap();
     let output = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_or_else(|diags| {
-        panic!("{}", jet::render_diagnostics(main.to_str().unwrap(), source, &diags))
+        panic!(
+            "{}",
+            jet::render_diagnostics(main.to_str().unwrap(), source, &diags)
+        )
     });
     let rust = root.join("main.rs");
     let binary = root.join("main_bin");
@@ -282,10 +291,8 @@ if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 1'; exit 0; fi
     include_options.include_dirs = vec![shared_input.clone()];
     let mut library_options = options.clone();
     library_options.library_dirs = vec![shared_input.clone()];
-    let include_identity =
-        jet::CppBind::cache_identity_for_test(&header, &include_options, target);
-    let library_identity =
-        jet::CppBind::cache_identity_for_test(&header, &library_options, target);
+    let include_identity = jet::CppBind::cache_identity_for_test(&header, &include_options, target);
+    let library_identity = jet::CppBind::cache_identity_for_test(&header, &library_options, target);
     assert_ne!(include_identity, library_identity);
 
     fs::write(&clang_log, "").unwrap();
@@ -299,7 +306,10 @@ if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 1'; exit 0; fi
 
     fs::write(&clang_log, "").unwrap();
     let library_result = jet::CppBind::bind(&header, &cache, &library_options).unwrap();
-    assert_ne!(include_result.archive.parent(), library_result.archive.parent());
+    assert_ne!(
+        include_result.archive.parent(),
+        library_result.archive.parent()
+    );
     let library_commands = fs::read_to_string(&clang_log).unwrap();
     let library_proof = library_commands
         .lines()

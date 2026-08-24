@@ -8,8 +8,8 @@ mod tir_support;
 use std::fs;
 
 use tir_support::{
-    build_and_run, build_and_run_full, build_and_run_full_with_cfg, build_and_run_multi,
-    compile, have_rustc, interpreter_run, jit_run,
+    build_and_run, build_and_run_full, build_and_run_full_with_cfg, build_and_run_multi, compile,
+    have_rustc, interpreter_run, jit_run,
 };
 
 /// D-BOUND-HEAD1=A: one typed-head hole law across AOT, `jet run`, and the
@@ -326,7 +326,9 @@ fn named_arg_diagnostic_covers_zero_parameter_calls() {
     let src = "fn nothing() {}\nfn run() { nothing(value: 1) }\n";
     let diagnostics = jet::compile(src).expect_err("a label on a zero-parameter call must fail");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0764"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0764"),
         "expected E0764 for a label on a zero-parameter call: {diagnostics:#?}"
     );
 }
@@ -337,9 +339,12 @@ fn named_arg_diagnostic_covers_unlabelled_function_values() {
 fn apply(action: fn(Int) Int) Int { return action(value: 1) }
 fn run() { _ :: apply((value: Int) -> value) }
 ";
-    let diagnostics = jet::compile(src).expect_err("an unlabelled function type must reject labels");
+    let diagnostics =
+        jet::compile(src).expect_err("an unlabelled function type must reject labels");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0764"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0764"),
         "expected E0764 for a label on an unlabelled function value: {diagnostics:#?}"
     );
 }
@@ -397,7 +402,8 @@ fn run() {\n\
 }\n";
     let out = jet::compile(src).expect("unit multiplication must compile");
     assert!(
-        out.rust.contains("__jet_Mul::__jet_mul_at(&(__jet_distance), &(__jet_distance),"),
+        out.rust
+            .contains("__jet_Mul::__jet_mul_at(&(__jet_distance), &(__jet_distance),"),
         "synthetic numeric operators must borrow both trait operands:\n{}",
         out.rust
     );
@@ -536,23 +542,18 @@ fn generated_run_function<'a>(rust: &'a str) -> &'a str {
 }
 
 fn assert_contract_breach_tiers(name: &str, src: &str, marker: &str, line: u32) {
-    let (aot_code, aot_stdout, aot_stderr) = build_and_run_full(
-        "jet_contract_tiers",
-        name,
-        src,
-    );
+    let (aot_code, aot_stdout, aot_stderr) = build_and_run_full("jet_contract_tiers", name, src);
     let (jit_code, jit_stdout, jit_stderr) = jit_run(name, src);
     let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(name, src);
-    let (release_code, release_stdout, release_stderr) = build_and_run_full_with_cfg(
-        "jet_contract_release",
-        name,
-        src,
-        "jet_release",
-    );
+    let (release_code, release_stdout, release_stderr) =
+        build_and_run_full_with_cfg("jet_contract_release", name, src, "jet_release");
 
     assert_eq!(aot_code, 70);
     assert_eq!(jit_code, aot_code, "default `jet run` exit drifted");
-    assert_eq!(interpreter_code, aot_code, "forced interpreter exit drifted");
+    assert_eq!(
+        interpreter_code, aot_code,
+        "forced interpreter exit drifted"
+    );
     assert_eq!(release_code, aot_code, "release AOT exit drifted");
     assert_eq!(aot_stdout, "");
     assert_eq!(jit_stdout, aot_stdout);
@@ -560,10 +561,16 @@ fn assert_contract_breach_tiers(name: &str, src: &str, marker: &str, line: u32) 
     assert_eq!(release_stdout, aot_stdout);
     let expected = normalize_contract_source_arrow(&aot_stderr);
     assert_eq!(normalize_contract_source_arrow(&jit_stderr), expected);
-    assert_eq!(normalize_contract_source_arrow(&interpreter_stderr), expected);
+    assert_eq!(
+        normalize_contract_source_arrow(&interpreter_stderr),
+        expected
+    );
     assert_eq!(normalize_contract_source_arrow(&release_stderr), expected);
     assert!(expected.contains(&format!("#{marker} contract failed")));
-    assert!(expected.contains(&format!("  --> <source>:{line}")), "wrong contract arrow: {expected}");
+    assert!(
+        expected.contains(&format!("  --> <source>:{line}")),
+        "wrong contract arrow: {expected}"
+    );
 }
 
 #[test]

@@ -1,9 +1,9 @@
-use crate::AST::Type;
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax;
 use super::alloc_ptrs::{io_error_ty, result_ty};
 use super::core_types::unit_ty;
 use super::serde_diags::wrong_core_arity;
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax;
+use crate::AST::Type;
 
 /// D-ARGS1: type-check a method call on `ArgsSpec` (the builder).
 /// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs String!`.
@@ -22,14 +22,12 @@ pub(crate) fn args_spec_method_return(
         ("flag_short", 3) => Some(Some(spec_ty)),
         // .option("name", "help text", "METAVAR") → ArgsSpec  (value option)
         ("option", 3) => Some(Some(spec_ty)),
-        ("option_short", 4)
-        | ("option_default", 4)
-        | ("option_env", 4)
-        | ("option_choice", 4) => Some(Some(spec_ty)),
-        ("option_int", 3)
-        | ("option_float", 3)
-        | ("repeat", 3)
-        | ("required_option", 3) => Some(Some(spec_ty)),
+        ("option_short", 4) | ("option_default", 4) | ("option_env", 4) | ("option_choice", 4) => {
+            Some(Some(spec_ty))
+        }
+        ("option_int", 3) | ("option_float", 3) | ("repeat", 3) | ("required_option", 3) => {
+            Some(Some(spec_ty))
+        }
         // .positional("name", "help text") → ArgsSpec  (positional argument)
         ("positional", 2) => Some(Some(spec_ty)),
         ("subcommand", 3) => Some(Some(spec_ty)),
@@ -78,14 +76,8 @@ pub(crate) fn args_spec_method_return(
             Some(None)
         }
         (
-            "option_short"
-            | "option_default"
-            | "option_env"
-            | "option_int"
-            | "option_float"
-            | "option_choice"
-            | "repeat"
-            | "required_option",
+            "option_short" | "option_default" | "option_env" | "option_int" | "option_float"
+            | "option_choice" | "repeat" | "required_option",
             _,
         ) => {
             diags.push(Diagnostic::error(
@@ -228,7 +220,10 @@ pub(crate) fn parsed_args_method_return(
         ("subcommand", _) => {
             diags.push(Diagnostic::error(
                 "E1303",
-                format!("`ParsedArgs.subcommand` expects 0 arguments, got {}", n_args),
+                format!(
+                    "`ParsedArgs.subcommand` expects 0 arguments, got {}",
+                    n_args
+                ),
                 "`ParsedArgs.subcommand()` returns the matched subcommand name, if any".to_string(),
                 "call it with no arguments".to_string(),
                 Some(span),
@@ -263,7 +258,9 @@ pub(crate) fn process_spec_method_return(
                 args: vec![Type::String],
             }),
         })),
-        ("timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit", 1) => Some(Some(spec_ty)),
+        ("timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit", 1) => {
+            Some(Some(spec_ty))
+        }
         ("under", 1) => Some(Some(spec_ty.clone())),
         ("plan", 0) => Some(Some(result_ty(
             Type::Named("ProcessPlan".to_string()),
@@ -475,7 +472,7 @@ pub(crate) fn app_method_return(
         ("routes", 1) => Some(Some(app)),
         (
             "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
-                | "hydration_release",
+            | "hydration_release",
             0,
         ) => Some(Some(app)),
         ("security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter", 1) => {

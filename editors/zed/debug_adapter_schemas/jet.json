@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jet native debugger",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "request": {
+      "enum": ["launch", "attach"]
+    },
+    "program": {
+      "type": "string",
+      "description": "Jet source for launch, or the matching native binary for attach."
+    },
+    "args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Arguments passed to the Jet program."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Working directory for the Jet program."
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Environment overrides for the Jet program."
+    },
+    "stopOnEntry": {
+      "type": "boolean",
+      "description": "Stop before the first Jet statement."
+    },
+    "showRawFrames": {
+      "type": "boolean",
+      "description": "Expert view: append generated Rust frames and scopes."
+    },
+    "map": {
+      "type": "string",
+      "description": "Verified .jetmap sidecar for local attach."
+    },
+    "processId": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Same-user process to attach to."
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["request", "program"],
+      "properties": {
+        "request": { "const": "launch" },
+        "program": { "type": "string", "pattern": "\\.jet$" }
+      }
+    },
+    {
+      "required": ["request", "program", "map", "processId"],
+      "properties": {
+        "request": { "const": "attach" },
+        "program": { "type": "string" },
+        "map": { "type": "string" },
+        "processId": { "type": "integer", "minimum": 1 }
+      }
+    }
+  ]
+}

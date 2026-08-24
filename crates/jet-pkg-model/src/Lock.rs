@@ -5,11 +5,11 @@
 //! `jet.lock`/`pack.lock`.
 
 use crate::Diagnostics::Diagnostic;
-use jet_foundation::Facts::BuildStamp;
 use crate::Manifest::{DepSpec, GitSelector, Manifest};
 use crate::Overlay::{OverlayPolicy, OverlaySet, PackageOverride, ProviderOverride};
 use crate::Syntax;
 use crate::SHA256::sha256_hex;
+use jet_foundation::Facts::BuildStamp;
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
@@ -116,7 +116,11 @@ impl LockedPackage {
         let locked_hash = self
             .content_hash
             .clone()
-            .or_else(|| self.locked.as_ref().map(|revision| revision.tree_hash.clone()))
+            .or_else(|| {
+                self.locked
+                    .as_ref()
+                    .map(|revision| revision.tree_hash.clone())
+            })
             .or_else(|| match &self.source {
                 LockSource::Cran { source_hash, .. }
                 | LockSource::LuaRocks { source_hash, .. }
@@ -125,7 +129,10 @@ impl LockedPackage {
                     .envelope
                     .as_ref()
                     .map(|envelope| envelope.output_hash.clone()),
-                LockSource::Root | LockSource::Path(_) | LockSource::Git { .. } | LockSource::Foreign { .. } => None,
+                LockSource::Root
+                | LockSource::Path(_)
+                | LockSource::Git { .. }
+                | LockSource::Foreign { .. } => None,
             })
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "not recorded".to_string());
@@ -282,14 +289,20 @@ pub struct LockedSourceChannel {
 pub enum LockSource {
     Root,
     Path(String),
-    Git { url: String, selector: String },
+    Git {
+        url: String,
+        selector: String,
+    },
     /// D-JPK-OFFLINE2=B: a package realized through the Nix compatibility
     /// provider. `reference` is the source ref it was realized from
     /// (`openssl@nixpkgs`); `output` is the realized output path recorded so an
     /// offline reuse can re-verify the on-disk closure against the package's
     /// [`LockEnvelope`] `output_hash`. The ref spelling is a label only — trust
     /// comes from the re-hashed closure, never the text.
-    Nix { reference: String, output: String },
+    Nix {
+        reference: String,
+        output: String,
+    },
     /// D-FFI-R1: exact CRAN closure pinned by SHA-256 and realized output.
     Cran {
         reference: String,
@@ -444,13 +457,31 @@ pub fn write(lock: &LockFile) -> String {
 
     for contribution in &lock.build_contributions {
         out.push_str("\n[[build.contribution]]\n");
-        out.push_str(&format!("package = \"{}\"\n", escape_str(&contribution.package)));
+        out.push_str(&format!(
+            "package = \"{}\"\n",
+            escape_str(&contribution.package)
+        ));
         out.push_str(&format!("key = \"{}\"\n", escape_str(&contribution.key)));
-        out.push_str(&format!("value = \"{}\"\n", escape_str(&contribution.value)));
-        out.push_str(&format!("scope = \"{}\"\n", escape_str(&contribution.scope)));
-        out.push_str(&format!("layer = \"{}\"\n", escape_str(&contribution.layer)));
-        out.push_str(&format!("source = \"{}\"\n", escape_str(&contribution.source)));
-        out.push_str(&format!("reason = \"{}\"\n", escape_str(&contribution.reason)));
+        out.push_str(&format!(
+            "value = \"{}\"\n",
+            escape_str(&contribution.value)
+        ));
+        out.push_str(&format!(
+            "scope = \"{}\"\n",
+            escape_str(&contribution.scope)
+        ));
+        out.push_str(&format!(
+            "layer = \"{}\"\n",
+            escape_str(&contribution.layer)
+        ));
+        out.push_str(&format!(
+            "source = \"{}\"\n",
+            escape_str(&contribution.source)
+        ));
+        out.push_str(&format!(
+            "reason = \"{}\"\n",
+            escape_str(&contribution.reason)
+        ));
     }
 
     for pkg in &lock.packages {
@@ -565,10 +596,7 @@ pub fn write(lock: &LockFile) -> String {
                 ));
             }
             if let Some(value) = &provenance.build {
-                out.push_str(&format!(
-                    "provenance-build = \"{}\"\n",
-                    escape_str(value)
-                ));
+                out.push_str(&format!("provenance-build = \"{}\"\n", escape_str(value)));
             }
         }
     }
@@ -590,7 +618,10 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str(&format!("engine = \"{}\"\n", escape_str(&browser.engine)));
         out.push_str(&format!("version = \"{}\"\n", escape_str(&browser.version)));
         out.push_str(&format!("binary = \"{}\"\n", escape_str(&browser.binary)));
-        out.push_str(&format!("protocol = \"{}\"\n", escape_str(&browser.protocol)));
+        out.push_str(&format!(
+            "protocol = \"{}\"\n",
+            escape_str(&browser.protocol)
+        ));
         out.push_str(&format!("size = {}\n", browser.size));
         write_envelope(&mut out, &browser.envelope);
     }
@@ -637,7 +668,10 @@ pub fn write(lock: &LockFile) -> String {
         out.push_str("dependencies = []\n");
     }
     if let Some(authority) = &lock.authority {
-        out.push_str(&format!("authority = {}\n", write_authority_value(authority)));
+        out.push_str(&format!(
+            "authority = {}\n",
+            write_authority_value(authority)
+        ));
     }
 
     // D-CTEFFECT1 Tier-1: embed inputs.
@@ -697,17 +731,18 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
             trust_fields.push(format!("default: {}", write_trust_decision(default)));
         }
         if let Some(ci) = trust.ci_prompt {
-            trust_fields.push(format!(
-                "ci: .{{ prompt: {} }}",
-                write_trust_decision(ci)
-            ));
+            trust_fields.push(format!("ci: .{{ prompt: {} }}", write_trust_decision(ci)));
         }
         if !trust.services.is_empty() {
             let services = trust
                 .services
                 .iter()
                 .map(|(name, decision)| {
-                    format!("\"{}\": {}", escape_str(name), write_trust_decision(*decision))
+                    format!(
+                        "\"{}\": {}",
+                        escape_str(name),
+                        write_trust_decision(*decision)
+                    )
                 })
                 .collect::<Vec<_>>();
             trust_fields.push(format!("services: .{{ {} }}", services.join(", ")));
@@ -723,10 +758,8 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
             .providers
             .iter()
             .map(|provider| {
-                let mut provider_fields = vec![format!(
-                    "registry: \"{}\"",
-                    escape_str(&provider.registry)
-                )];
+                let mut provider_fields =
+                    vec![format!("registry: \"{}\"", escape_str(&provider.registry))];
                 if !provider.allow.is_empty() {
                     provider_fields.push(format!("allow: {}", write_string_array(&provider.allow)));
                 }
@@ -776,7 +809,10 @@ fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
         out.push_str("\n[[workspace_overlay]]\n");
         out.push_str(&format!("name = \"{}\"\n", escape_str(&overlay.name)));
         if let Some(provider) = &overlay.provider {
-            out.push_str(&format!("provider = \"{}\"\n", escape_str(&provider.provider)));
+            out.push_str(&format!(
+                "provider = \"{}\"\n",
+                escape_str(&provider.provider)
+            ));
             if let Some(channel) = &provider.channel {
                 out.push_str(&format!("channel = \"{}\"\n", escape_str(channel)));
             }
@@ -801,7 +837,10 @@ fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
                     .iter()
                     .map(|(key, value)| format!("{key}={value}"))
                     .collect::<Vec<_>>();
-                out.push_str(&format!("field_priorities = {}\n", write_string_array(&values)));
+                out.push_str(&format!(
+                    "field_priorities = {}\n",
+                    write_string_array(&values)
+                ));
             }
             if !package.env.is_empty() {
                 let values = package
@@ -812,7 +851,10 @@ fn write_workspace_overlay_policy(out: &mut String, policy: &OverlayPolicy) {
                 out.push_str(&format!("env = {}\n", write_string_array(&values)));
             }
             if !package.patches.is_empty() {
-                out.push_str(&format!("patches = {}\n", write_string_array(&package.patches)));
+                out.push_str(&format!(
+                    "patches = {}\n",
+                    write_string_array(&package.patches)
+                ));
             }
             if package.allow_unfree {
                 out.push_str("allow_unfree = true\n");
@@ -826,7 +868,11 @@ fn escape_str(s: &str) -> String {
 }
 
 fn unescape_str(s: &str) -> String {
-    let s = s.trim().strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(s);
+    let s = s
+        .trim()
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(s);
     let mut out = String::with_capacity(s.len());
     let mut escaped = false;
     for character in s.chars() {
@@ -1196,15 +1242,11 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     let receipt = unescape_str(val);
                     pkg.receipt = (!receipt.is_empty()).then_some(receipt);
                 }
-                "provenance-transparency" => pkg
-                    .provenance_mut()
-                    .transparency = Some(unescape_str(val)),
-                "provenance-publisher" => pkg
-                    .provenance_mut()
-                    .publisher = Some(unescape_str(val)),
-                "provenance-build" => pkg
-                    .provenance_mut()
-                    .build = Some(unescape_str(val)),
+                "provenance-transparency" => {
+                    pkg.provenance_mut().transparency = Some(unescape_str(val))
+                }
+                "provenance-publisher" => pkg.provenance_mut().publisher = Some(unescape_str(val)),
+                "provenance-build" => pkg.provenance_mut().build = Some(unescape_str(val)),
                 _ => {}
             }
         }
@@ -1557,7 +1599,9 @@ fn build_workspace_overlay_policy(
             .overlays
             .iter_mut()
             .find(|overlay| overlay.name == overlay_name)
-            .ok_or_else(|| format!("workspace overlay package names unknown overlay `{overlay_name}`"))?;
+            .ok_or_else(|| {
+                format!("workspace overlay package names unknown overlay `{overlay_name}`")
+            })?;
         let mut field_priorities = std::collections::BTreeMap::new();
         for fact in package.field_priorities {
             let (key, value) = split_fact(&fact)
@@ -1884,8 +1928,11 @@ fn capture_build_stamp(project_root: &Path) -> BuildStamp {
             ..BuildStamp::default()
         };
     };
-    let dirty = git_output(project_root, &["status", "--porcelain", "--untracked-files=all"])
-        .is_some_and(|status| !status.is_empty());
+    let dirty = git_output(
+        project_root,
+        &["status", "--porcelain", "--untracked-files=all"],
+    )
+    .is_some_and(|status| !status.is_empty());
     let git = Some(if dirty {
         format!("{revision}-dirty")
     } else {
@@ -2258,7 +2305,11 @@ fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
 pub fn nix_realization(project_root: &Path, reference: &str) -> Option<(String, LockEnvelope)> {
     let lock = load(project_root)?;
     for pkg in lock.packages {
-        if let LockSource::Nix { reference: r, output } = pkg.source {
+        if let LockSource::Nix {
+            reference: r,
+            output,
+        } = pkg.source
+        {
             if r == reference {
                 if let Some(env) = pkg.envelope {
                     return Some((output, env));
@@ -2359,9 +2410,11 @@ pub fn record_cran_realization(
         receipt: existing_receipt,
         provenance: existing_provenance,
     };
-    if let Some(existing) = lock.packages.iter_mut().find(|p| {
-        p.name == name && matches!(&p.source, LockSource::Cran { .. })
-    }) {
+    if let Some(existing) = lock
+        .packages
+        .iter_mut()
+        .find(|p| p.name == name && matches!(&p.source, LockSource::Cran { .. }))
+    {
         *existing = entry;
     } else {
         lock.packages.push(entry);
@@ -2380,7 +2433,14 @@ pub fn cran_realization(
 ) -> Option<(String, String, String, String, LockEnvelope)> {
     let lock = load(project_root)?;
     for pkg in lock.packages {
-        if let LockSource::Cran { reference: r, output, source_hash, repository, authority } = pkg.source {
+        if let LockSource::Cran {
+            reference: r,
+            output,
+            source_hash,
+            repository,
+            authority,
+        } = pkg.source
+        {
             if r == reference {
                 return Some((output, source_hash, repository, authority, pkg.envelope?));
             }
@@ -2479,9 +2539,11 @@ pub fn record_luarocks_realization(
         receipt: existing_receipt,
         provenance: existing_provenance,
     };
-    if let Some(existing) = lock.packages.iter_mut().find(|p| {
-        p.name == name && matches!(&p.source, LockSource::LuaRocks { .. })
-    }) {
+    if let Some(existing) = lock
+        .packages
+        .iter_mut()
+        .find(|p| p.name == name && matches!(&p.source, LockSource::LuaRocks { .. }))
+    {
         *existing = entry;
     } else {
         lock.packages.push(entry);
@@ -2500,7 +2562,14 @@ pub fn luarocks_realization(
 ) -> Option<(String, String, String, String, LockEnvelope)> {
     let lock = load(project_root)?;
     for pkg in lock.packages {
-        if let LockSource::LuaRocks { reference: r, output, source_hash, repository, authority } = pkg.source {
+        if let LockSource::LuaRocks {
+            reference: r,
+            output,
+            source_hash,
+            repository,
+            authority,
+        } = pkg.source
+        {
             if r == reference {
                 return Some((output, source_hash, repository, authority, pkg.envelope?));
             }
@@ -2640,7 +2709,13 @@ pub fn registry_realization(
         } = package.source
         {
             if locked_registry == registry && locked_reference == reference {
-                return Some((output, source_hash, repository, authority, package.envelope?));
+                return Some((
+                    output,
+                    source_hash,
+                    repository,
+                    authority,
+                    package.envelope?,
+                ));
             }
         }
     }
@@ -2743,8 +2818,12 @@ pub fn verify_locked_generated_inputs(
         }
         return Err(Diagnostic::error(
             "E3512",
-            format!("locked generated input `{}` has no unified lock entry", generated[0].path),
-            "`--locked` requires every generated source hash to be recorded before materialization".to_string(),
+            format!(
+                "locked generated input `{}` has no unified lock entry",
+                generated[0].path
+            ),
+            "`--locked` requires every generated source hash to be recorded before materialization"
+                .to_string(),
             "rerun without `--locked` to review and record the generated provenance".to_string(),
             None,
         ));
@@ -2791,17 +2870,27 @@ pub fn record_generated_inputs(
         });
     if locked {
         let mut expected = lock.comptime_inputs.clone();
-        expected.sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
+        expected.sort_by(|left, right| {
+            left.path
+                .cmp(&right.path)
+                .then_with(|| left.hash.cmp(&right.hash))
+        });
         expected.dedup();
         let mut actual = generated.to_vec();
-        actual.sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
+        actual.sort_by(|left, right| {
+            left.path
+                .cmp(&right.path)
+                .then_with(|| left.hash.cmp(&right.hash))
+        });
         actual.dedup();
         if expected != actual {
             let drifted = actual
                 .iter()
                 .find(|input| !expected.contains(input))
                 .or_else(|| expected.iter().find(|input| !actual.contains(input)));
-            let path = drifted.map(|input| input.path.as_str()).unwrap_or("<unknown>");
+            let path = drifted
+                .map(|input| input.path.as_str())
+                .unwrap_or("<unknown>");
             return Err(Diagnostic::error(
                 "E3512",
                 format!("locked generated input `{path}` drifted"),
@@ -2829,7 +2918,11 @@ pub fn record_generated_inputs(
         lock.build_stamp = Some(stamp.clone());
     }
     for input in generated {
-        if let Some(existing) = lock.comptime_inputs.iter_mut().find(|old| old.path == input.path) {
+        if let Some(existing) = lock
+            .comptime_inputs
+            .iter_mut()
+            .find(|old| old.path == input.path)
+        {
             *existing = input.clone();
         } else {
             lock.comptime_inputs.push(input.clone());
@@ -2840,11 +2933,17 @@ pub fn record_generated_inputs(
         std::fs::create_dir_all(parent).map_err(|error| lock_write_error(&lock_path, error))?;
     }
     let temp = lock_path.with_extension(format!("lock.tmp.{}", std::process::id()));
-    let mut file = std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&temp)
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&temp)
         .map_err(|error| lock_write_error(&lock_path, error))?;
     use std::io::Write;
-    file.write_all(write(&lock).as_bytes()).map_err(|error| lock_write_error(&lock_path, error))?;
-    file.sync_all().map_err(|error| lock_write_error(&lock_path, error))?;
+    file.write_all(write(&lock).as_bytes())
+        .map_err(|error| lock_write_error(&lock_path, error))?;
+    file.sync_all()
+        .map_err(|error| lock_write_error(&lock_path, error))?;
     std::fs::rename(&temp, &lock_path).map_err(|error| lock_write_error(&lock_path, error))?;
     Ok(())
 }
@@ -3377,12 +3476,24 @@ mod a4_envelope_tests {
         lock.authority = Some(authority.clone());
 
         let raw = write(&lock);
-        assert!(raw.contains("authority = .{"), "missing root authority: {raw}");
+        assert!(
+            raw.contains("authority = .{"),
+            "missing root authority: {raw}"
+        );
         assert!(raw.contains("holds: .{"), "missing authority holds: {raw}");
-        assert!(raw.contains("grants: .{"), "missing authority grants: {raw}");
+        assert!(
+            raw.contains("grants: .{"),
+            "missing authority grants: {raw}"
+        );
         assert!(raw.contains("trust: .{"), "missing authority trust: {raw}");
-        assert!(raw.contains("providers: .{"), "missing authority providers: {raw}");
-        assert_eq!(parse(&raw).expect("authority lock parses").authority, Some(authority));
+        assert!(
+            raw.contains("providers: .{"),
+            "missing authority providers: {raw}"
+        );
+        assert_eq!(
+            parse(&raw).expect("authority lock parses").authority,
+            Some(authority)
+        );
     }
 
     /// A filled signature slot round-trips explicitly (forward-compat for #13).
@@ -3499,7 +3610,10 @@ package = "openssl"
 priority = 2
 "#;
         let error = parse(duplicate_package).expect_err("duplicate overlay facts must fail closed");
-        assert!(error.contains("duplicate workspace overlay package"), "{error}");
+        assert!(
+            error.contains("duplicate workspace overlay package"),
+            "{error}"
+        );
     }
 
     /// `record_envelope` backfills a realized object's envelope into an

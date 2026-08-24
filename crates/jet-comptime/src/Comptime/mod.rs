@@ -15,32 +15,29 @@
 //! i64 `Int`, IEEE f64 `Float` (S21 display via `{:?}`), char-counted
 //! `String` (S41), and `BTreeMap` ordering (S38).
 
+mod AmbientRuntime;
+pub mod AppLite;
+mod ArchiveLite;
+mod ArgsLite;
+pub mod AuthLite;
 pub mod Build;
-pub(crate) mod ComplexParity;
 /// Host/builtin surface shared by the canonical TIR evaluator (#777) and
 /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
 /// eval can dispatch without a second builtin table.
 pub mod Builtins;
 /// Shared collection CtValue ops for TirBridge (#722 / #777).
 pub mod CollectionEval;
-mod AmbientRuntime;
-mod ArgsLite;
-mod EventLite;
-mod CryptoLite;
-mod ArchiveLite;
-mod ZstdEntropy;
+pub(crate) mod ComplexParity;
 pub mod ComputeLite;
-pub mod ServicesLite;
-pub mod AppLite;
-pub mod AuthLite;
-pub mod SyncLite;
+mod CryptoLite;
 /// I8/I9: the one `core.data` table/series/schema pipeline kernel. Public so
 /// the canonical TIR evaluator marshals into it instead of owning a second
 /// table construction (card #2015).
 pub mod DataPipeline;
 mod Diagnostics;
-mod EncodingLite;
 pub mod EmailAdapter;
+mod EncodingLite;
+mod EventLite;
 mod Interpreter;
 mod JSONInterp;
 pub mod MathLayout;
@@ -48,10 +45,13 @@ mod Methods;
 mod Purity;
 mod Reflect;
 mod RegexLite;
+pub mod ServicesLite;
+pub mod SyncLite;
 mod TextLite;
+pub mod TirBridge;
 mod TypedDecode;
 mod UrlLite;
-pub mod TirBridge;
+mod ZstdEntropy;
 
 #[allow(dead_code)]
 mod typed_text_kernel {
@@ -60,10 +60,8 @@ mod typed_text_kernel {
 
 pub use AmbientRuntime::{
     ambient_hooks, try_core_call as try_ambient_core_call,
-    try_core_call_typed as try_ambient_core_call_typed,
-    try_core_call_typed_with_sink,
-    try_extern_call as try_ambient_extern_call, try_handle as try_ambient_handle,
-    with_ambient,
+    try_core_call_typed as try_ambient_core_call_typed, try_core_call_typed_with_sink,
+    try_extern_call as try_ambient_extern_call, try_handle as try_ambient_handle, with_ambient,
 };
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
@@ -78,18 +76,18 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 use crate::Syntax;
+use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{
-    runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer,
-    ReplEffectRequest, REPL_FUEL_BUDGET,
+    runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest,
+    REPL_FUEL_BUDGET,
 };
 pub use Methods::{
     apply_core_call, apply_core_call_with_type, apply_data_line_call, apply_impure_core_call,
-    apply_impure_core_call_with_type,
-    apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
-    display_core_pure_value, eval_regex_replace_all_with,
+    apply_impure_core_call_with_type, apply_repl_authorized_core_call,
+    apply_repl_authorized_core_call_with_type, display_core_pure_value,
+    eval_regex_replace_all_with,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
@@ -97,8 +95,8 @@ pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 pub use Methods::apply_fake_method;
 #[doc(hidden)]
 pub use Methods::{
-    eval_build_time_io, eval_net_fetch, is_tier2_core_call, vault_comptime_denied,
-    project_rejection,
+    eval_build_time_io, eval_net_fetch, is_tier2_core_call, project_rejection,
+    vault_comptime_denied,
 };
 
 /// D-BOUND-HEAD1: typed URL heads validate at comptime with the same URL
@@ -152,7 +150,8 @@ pub fn render_typed_holes(
                 "E0112",
                 "a typed literal hole has no canonical JetShow renderer".to_string(),
                 "typed literal holes use one display contract in every execution tier".to_string(),
-                "use a sema-admitted printable value or convert it to String before the hole".to_string(),
+                "use a sema-admitted printable value or convert it to String before the hole"
+                    .to_string(),
                 Some(span),
             )
         })
@@ -178,7 +177,8 @@ pub fn evaluate_typed_head(
         return Err(Diagnostic::error(
             "E0956",
             format!("typed head `{name}` can't run at compile time yet"),
-            "the canonical TIR evaluator only accepts the ratified URL, Path, and DateTime heads".to_string(),
+            "the canonical TIR evaluator only accepts the ratified URL, Path, and DateTime heads"
+                .to_string(),
             "use one of `URL.{\"…\"}`, `Path.{\"…\"}`, or `DateTime.{\"…\"}`".to_string(),
             Some(span),
         ));
@@ -187,8 +187,10 @@ pub fn evaluate_typed_head(
         return Err(Diagnostic::error(
             "E0155",
             "a `DateTime` literal cannot contain interpolation".to_string(),
-            "DateTime values are checked as complete RFC3339 literals before the program runs".to_string(),
-            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly".to_string(),
+            "DateTime values are checked as complete RFC3339 literals before the program runs"
+                .to_string(),
+            "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly"
+                .to_string(),
             Some(span),
         ));
     }
@@ -221,10 +223,8 @@ pub fn evaluate_typed_head(
             )],
         }),
         Syntax::TypedHeadKind::DateTime => {
-            let text = typed_text_kernel::jet_typed_datetime_interpolate(
-                &literal_refs,
-                &shown_holes,
-            );
+            let text =
+                typed_text_kernel::jet_typed_datetime_interpolate(&literal_refs, &shown_holes);
             let parsed = Methods::evaluate_typed_datetime_literal(&text, span)?;
             match parsed {
                 CtValue::Present(value) => Ok(*value),
@@ -251,29 +251,26 @@ pub fn evaluate_typed_head(
 pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
     Methods::data_status_rows()
 }
+pub use crate::AST::{CtReport, CtValue};
 pub use Purity::{
-    check_build_time_io, walk_calls, walk_identifiers, walk_purity_expr, walk_purity_stmts,
-    walk_purity_stmts_from, walk_expr_nodes_for_validation,
+    check_build_time_io, walk_calls, walk_expr_nodes_for_validation, walk_identifiers,
+    walk_purity_expr, walk_purity_stmts, walk_purity_stmts_from,
     walk_stmt_expr_nodes_for_validation, PurityStage,
 };
 pub use Reflect::{
     build_attribution_info, build_dimension_info, build_distinct_type_info,
     build_distinct_type_info_with_path, build_effect_info, build_enum_layout_info,
-    build_enum_layout_info_with_engine,
-    build_function_type_info, build_maturity_info, build_movedness_info, build_program_info,
-    build_program_info_with_index,
-    build_range_info, build_registered_fact_info, build_registered_fact_infos,
-    build_sendability_info, build_state_infos, build_state_ref, build_state_refs,
-    build_struct_layout_info, build_struct_layout_info_with_engine, build_struct_type_info,
-    build_struct_type_info_with_path,
+    build_enum_layout_info_with_engine, build_function_type_info, build_maturity_info,
+    build_movedness_info, build_program_info, build_program_info_with_index, build_range_info,
+    build_registered_fact_info, build_registered_fact_infos, build_sendability_info,
+    build_state_infos, build_state_ref, build_state_refs, build_struct_layout_info,
+    build_struct_layout_info_with_engine, build_struct_type_info, build_struct_type_info_with_path,
     build_struct_type_info_with_path_and_vocabulary,
-    build_struct_type_info_with_path_and_vocabulary_and_engine,
-    build_struct_type_info_with_states, build_track_origin_info,
-    build_unit_scale_provenance_info, build_view_provenance_info, reflected_fact_field,
+    build_struct_type_info_with_path_and_vocabulary_and_engine, build_struct_type_info_with_states,
+    build_track_origin_info, build_unit_scale_provenance_info, build_view_provenance_info,
     program_reflection_identity, reflect_type_value, reflect_type_value_with_target,
-    registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
+    reflected_fact_field, registered_fact_value, ProgramIndexView, ProgramSemanticFacts,
 };
-pub use crate::AST::{CtReport, CtValue};
 
 static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REPL_RUNTIME_CALL_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -322,7 +319,8 @@ pub fn warn_repl_runtime_call_stopping() {
     }
     #[cfg(unix)]
     {
-        const MESSAGE: &[u8] = b"\r\nwarning: interrupt requested; waiting for active external I/O to stop\r\n";
+        const MESSAGE: &[u8] =
+            b"\r\nwarning: interrupt requested; waiting for active external I/O to stop\r\n";
         unsafe {
             write(2, MESSAGE.as_ptr(), MESSAGE.len());
         }
@@ -407,12 +405,8 @@ pub fn run_build_entry_with_policy(
     gates: jet_foundation::Policy::GateSet,
     policy: Build::BuildPolicy,
 ) -> Result<ProgramBuildEvaluation, Diagnostic> {
-    let context = Build::begin_program_build_with_policy_at(
-        package,
-        program_value,
-        policy,
-        base_dir,
-    );
+    let context =
+        Build::begin_program_build_with_policy_at(package, program_value, policy, base_dir);
     let mut interp = Interp {
         funcs,
         base_dir,
@@ -522,10 +516,7 @@ pub fn cbor_encode_typed_for_tir(
 
 /// TIR/JIT bridge for whole-value CBOR encoding. Keep the wire encoder in the
 /// same comptime-reachable Prelude implementation used by interpreter calls.
-pub fn cbor_encode_for_tir(
-    value: &CtValue,
-    canonical: bool,
-) -> Result<Vec<u8>, CtValue> {
+pub fn cbor_encode_for_tir(value: &CtValue, canonical: bool) -> Result<Vec<u8>, CtValue> {
     if canonical {
         EncodingLite::cbor_encode_canonical(value)
     } else {
@@ -560,10 +551,8 @@ pub fn cbor_parse_for_tir(
     options: Option<&CtValue>,
     allow_bytes: bool,
 ) -> Result<CtValue, CtValue> {
-    let options =
-        EncodingLite::cbor_options(options).map_err(EncodingLite::cbor_error_value)?;
-    EncodingLite::cbor_decode(bytes, &options, allow_bytes)
-        .map_err(EncodingLite::cbor_error_value)
+    let options = EncodingLite::cbor_options(options).map_err(EncodingLite::cbor_error_value)?;
+    EncodingLite::cbor_decode(bytes, &options, allow_bytes).map_err(EncodingLite::cbor_error_value)
 }
 
 /// TIR/JIT bridge for the text codecs' parse-failure wording. `codec` is the
@@ -582,28 +571,34 @@ pub fn cbor_decode_source_error_for_tir(error: CtValue) -> CtValue {
     };
     let text = |name: &str| {
         fields.iter().find_map(|(field, value)| {
-            (field == name).then_some(value).and_then(|value| match value {
-                CtValue::Str(value) => Some(value.as_str()),
-                _ => None,
-            })
+            (field == name)
+                .then_some(value)
+                .and_then(|value| match value {
+                    CtValue::Str(value) => Some(value.as_str()),
+                    _ => None,
+                })
         })
     };
     let kind = fields
         .iter()
         .find_map(|(field, value)| {
-            (field == "kind").then_some(value).and_then(|value| match value {
-                CtValue::Enum { variant, .. } => Some(variant.as_str()),
-                _ => None,
-            })
+            (field == "kind")
+                .then_some(value)
+                .and_then(|value| match value {
+                    CtValue::Enum { variant, .. } => Some(variant.as_str()),
+                    _ => None,
+                })
         })
         .unwrap_or("Unsupported");
     let offset = fields
         .iter()
         .find_map(|(field, value)| {
-            (field == "byte_offset").then_some(value).and_then(|value| match value {
-                CtValue::Int(offset) => Some(*offset),
-                _ => None,
-            })
+            (field == "byte_offset")
+                .then_some(value)
+                .and_then(|value| match value {
+                    CtValue::Int(offset) => Some(*offset),
+                    _ => None,
+                })
         })
         .unwrap_or(0);
     let raw_path = text("path").unwrap_or("$");
@@ -668,8 +663,7 @@ pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
 
 /// TIR static-call bridge for the shared Email limits constructor.
 pub fn email_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
-    (method == "safe" && path == "jet_email::Limits")
-        .then(EmailAdapter::limits_safe_value)
+    (method == "safe" && path == "jet_email::Limits").then(EmailAdapter::limits_safe_value)
 }
 static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
     std::sync::OnceLock::new();
@@ -811,10 +805,7 @@ fn fold_build_facts(
     closed
 }
 
-fn build_fact_expr(
-    value: &CtValue,
-    span: crate::Diagnostics::Span,
-) -> Option<crate::AST::Expr> {
+fn build_fact_expr(value: &CtValue, span: crate::Diagnostics::Span) -> Option<crate::AST::Expr> {
     Some(match value {
         CtValue::Bool(value) => crate::AST::Expr::Bool(*value, span),
         CtValue::Int(value) => crate::AST::Expr::Int(*value, span, None, None),
@@ -1433,7 +1424,9 @@ fn run_repl_step_inner(
         Some(pair) => pair,
         None => return Ok(None),
     };
-    interp.exec_block(head, scope).map_err(ReplStepError::Diagnostic)?;
+    interp
+        .exec_block(head, scope)
+        .map_err(ReplStepError::Diagnostic)?;
     // Determine if the last statement should produce an echo value.
     // Case 1: `Stmt::Val` named `__repl_echo__` — the sentinel that `classify`
     //   injects for bare-expression inputs (e.g. `1 + 2` → `__repl_echo__ :: 1 + 2`).
@@ -1442,13 +1435,19 @@ fn run_repl_step_inner(
     let echo_bare = !suppress && matches!(last, crate::AST::Stmt::Expr(_));
     match last {
         crate::AST::Stmt::Val(b) if !suppress && b.name == "__repl_echo__" => {
-            let v = interp.eval(&b.init, scope).map_err(ReplStepError::Diagnostic)?;
+            let v = interp
+                .eval(&b.init, scope)
+                .map_err(ReplStepError::Diagnostic)?;
             Ok(Some(v))
         }
         crate::AST::Stmt::Val(b) => {
-            let v = interp.eval(&b.init, scope).map_err(ReplStepError::Diagnostic)?;
+            let v = interp
+                .eval(&b.init, scope)
+                .map_err(ReplStepError::Diagnostic)?;
             if let Some(pat) = &b.pattern {
-                interp.bind_pattern(pat, v, scope).map_err(ReplStepError::Diagnostic)?;
+                interp
+                    .bind_pattern(pat, v, scope)
+                    .map_err(ReplStepError::Diagnostic)?;
             } else {
                 scope.insert(b.name.clone(), v);
             }
@@ -1459,7 +1458,9 @@ fn run_repl_step_inner(
             Ok(Some(v))
         }
         other => {
-            interp.exec_stmt(other, scope).map_err(ReplStepError::Diagnostic)?;
+            interp
+                .exec_stmt(other, scope)
+                .map_err(ReplStepError::Diagnostic)?;
             Ok(None)
         }
     }
@@ -1561,8 +1562,10 @@ pub fn evaluate_owned_with_imports_opts(
     initial_impure_depth: usize,
 ) -> Result<CtValue, Diagnostic> {
     let reachable = Purity::reachable_owned_funcs(init, funcs);
-    let refs: HashMap<String, &Func> =
-        reachable.iter().map(|(name, function)| (name.clone(), function)).collect();
+    let refs: HashMap<String, &Func> = reachable
+        .iter()
+        .map(|(name, function)| (name.clone(), function))
+        .collect();
     evaluate_with_imports_opts(
         init,
         &refs,
@@ -1589,8 +1592,10 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let reachable = Purity::reachable_owned_funcs(init, funcs);
-    let refs: HashMap<String, &Func> =
-        reachable.iter().map(|(name, function)| (name.clone(), function)).collect();
+    let refs: HashMap<String, &Func> = reachable
+        .iter()
+        .map(|(name, function)| (name.clone(), function))
+        .collect();
     evaluate_with_imports_opts_collecting(
         init,
         &refs,
@@ -1738,7 +1743,9 @@ fn expand_derive_items(
                 expand_template_item(&mut item, interp, scope)?;
                 out.push(item);
             }
-            crate::AST::DeriveBodyItem::Loop { var, source, body, .. } => {
+            crate::AST::DeriveBodyItem::Loop {
+                var, source, body, ..
+            } => {
                 let value = eval_template_loop_source(source, interp, scope)?;
                 let CtValue::List(values) = value else {
                     return Err(Diagnostic::error(
@@ -1813,7 +1820,9 @@ fn expand_template_item(
                 interp,
                 scope,
             )?;
-            let trait_span = implementation.trait_span.unwrap_or(implementation.type_span);
+            let trait_span = implementation
+                .trait_span
+                .unwrap_or(implementation.type_span);
             if let Some(trait_name) = &mut implementation.trait_name {
                 *trait_name = expand_template_name(trait_name, trait_span, interp, scope)?;
             }
@@ -1826,18 +1835,10 @@ fn expand_template_item(
             Ok(())
         }
         crate::AST::Item::ErrorConv(conversion) => {
-            conversion.from_ty = expand_template_name(
-                &conversion.from_ty,
-                conversion.from_span,
-                interp,
-                scope,
-            )?;
-            conversion.to_ty = expand_template_name(
-                &conversion.to_ty,
-                conversion.to_span,
-                interp,
-                scope,
-            )?;
+            conversion.from_ty =
+                expand_template_name(&conversion.from_ty, conversion.from_span, interp, scope)?;
+            conversion.to_ty =
+                expand_template_name(&conversion.to_ty, conversion.to_span, interp, scope)?;
             for stmt in &mut conversion.body {
                 expand_template_stmt(stmt, interp, scope)?;
             }
@@ -1865,12 +1866,8 @@ fn expand_template_item(
             Ok(())
         }
         crate::AST::Item::Struct(definition) => {
-            definition.name = expand_template_name(
-                &definition.name,
-                definition.name_span,
-                interp,
-                scope,
-            )?;
+            definition.name =
+                expand_template_name(&definition.name, definition.name_span, interp, scope)?;
             for field in &mut definition.fields {
                 field.name = expand_template_name(&field.name, field.name_span, interp, scope)?;
                 expand_template_type(&mut field.ty, interp, scope)?;
@@ -1895,12 +1892,8 @@ fn expand_template_item(
             Ok(())
         }
         crate::AST::Item::Enum(definition) => {
-            definition.name = expand_template_name(
-                &definition.name,
-                definition.name_span,
-                interp,
-                scope,
-            )?;
+            definition.name =
+                expand_template_name(&definition.name, definition.name_span, interp, scope)?;
             for variant in &mut definition.variants {
                 match &mut variant.payload {
                     crate::AST::VariantPayload::Unit => {}
@@ -1909,12 +1902,8 @@ fn expand_template_item(
                     }
                     crate::AST::VariantPayload::Named(fields) => {
                         for field in fields {
-                            field.name = expand_template_name(
-                                &field.name,
-                                field.name_span,
-                                interp,
-                                scope,
-                            )?;
+                            field.name =
+                                expand_template_name(&field.name, field.name_span, interp, scope)?;
                             expand_template_type(&mut field.ty, interp, scope)?;
                         }
                     }
@@ -2055,7 +2044,11 @@ fn expand_template_bind_pattern(
     scope: &mut HashMap<String, CtValue>,
 ) -> Result<(), Diagnostic> {
     match pattern {
-        crate::AST::BindPattern::Struct { type_name, type_span, .. } => {
+        crate::AST::BindPattern::Struct {
+            type_name,
+            type_span,
+            ..
+        } => {
             *type_name = expand_template_name(type_name, *type_span, interp, scope)?;
         }
         crate::AST::BindPattern::Refutable { pattern, .. } => {
@@ -2113,17 +2106,22 @@ fn expand_template_name(
                 CtValue::Str(value) => Some(value.clone()),
                 _ => None,
             })
-            .ok_or_else(|| Diagnostic::error(
-                "E0956",
-                format!("compile-time name `@{binding}` has no text name"),
-                "a generated item name needs the reflected value's `name` field".to_string(),
-                "bind the name to a String value".to_string(),
-                Some(span),
-            )),
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "E0956",
+                    format!("compile-time name `@{binding}` has no text name"),
+                    "a generated item name needs the reflected value's `name` field".to_string(),
+                    "bind the name to a String value".to_string(),
+                    Some(span),
+                )
+            }),
         Some(value) if explicit => Err(Diagnostic::error(
             "E0956",
             format!("compile-time name `{name}` is not text"),
-            format!("a generated item name needs text, but this value is {}", value.jet_type().name()),
+            format!(
+                "a generated item name needs text, but this value is {}",
+                value.jet_type().name()
+            ),
             "bind the name to a String value".to_string(),
             Some(span),
         )),
@@ -2239,18 +2237,19 @@ fn expand_template_expr_node(
         crate::AST::Expr::PtrFromAddr { elem, .. } => {
             expand_template_type(elem, interp, scope)?;
         }
-        crate::AST::Expr::StructLit { type_name, type_args, .. } => {
-            *type_name = expand_template_name(
-                type_name,
-                span,
-                interp,
-                scope,
-            )?;
+        crate::AST::Expr::StructLit {
+            type_name,
+            type_args,
+            ..
+        } => {
+            *type_name = expand_template_name(type_name, span, interp, scope)?;
             for ty in type_args {
                 expand_template_type(ty, interp, scope)?;
             }
         }
-        crate::AST::Expr::TypedLit { head: Some(head), .. } => {
+        crate::AST::Expr::TypedLit {
+            head: Some(head), ..
+        } => {
             expand_template_type(head, interp, scope)?;
         }
         crate::AST::Expr::EnumLit { type_name, .. } => {
@@ -2265,9 +2264,7 @@ fn expand_template_expr_node(
 }
 
 fn scope_value<'a>(scope: &'a HashMap<String, CtValue>, name: &str) -> Option<&'a CtValue> {
-    scope
-        .get(name)
-        .or_else(|| scope.get(&format!("@{name}")))
+    scope.get(name).or_else(|| scope.get(&format!("@{name}")))
 }
 
 fn comptime_literal_expr(
@@ -2302,7 +2299,11 @@ fn expand_template_type(
         | Type::Option(inner)
         | Type::FixedList { elem: inner, .. }
         | Type::Tagged { inner, .. } => expand_template_type(inner, interp, scope)?,
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             expand_template_type(key, interp, scope)?;
             expand_template_type(value, interp, scope)?;
         }

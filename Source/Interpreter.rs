@@ -229,9 +229,7 @@ fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) ->
         .why
         .strip_prefix("while computing this value at compile time, the program panicked: ")
         .unwrap_or(d.what.as_str());
-    let _ = crate::development_receipt::jet_production_failure_receipt_write(
-        "E3001", "", 0, "",
-    );
+    let _ = crate::development_receipt::jet_production_failure_receipt_write("E3001", "", 0, "");
     let report =
         jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, msg, "");
     sink.stderr.push_str(&report.rendered);

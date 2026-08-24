@@ -38,7 +38,11 @@ const ALLOWED_SENTINELS: &[&str] = &[];
 /// a fake-name type sentinel.
 fn foundation_sources() -> Vec<PathBuf> {
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("crates/jet-foundation/src");
-    let mut out = vec![src.join("lib.rs"), src.join("Syntax.rs"), src.join("Syntax/core_surface.rs")];
+    let mut out = vec![
+        src.join("lib.rs"),
+        src.join("Syntax.rs"),
+        src.join("Syntax/core_surface.rs"),
+    ];
     let mut stack = vec![src.join("AST")];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir).unwrap().flatten() {
@@ -80,8 +84,7 @@ fn defer_close_string_sentinel_stays_retired() {
 }
 
 fn scan(path: &PathBuf) -> Vec<String> {
-    let text =
-        fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let text = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let mut found = Vec::new();
     for (line_no, line) in text.lines().enumerate() {
         let mut rest = line;
@@ -89,7 +92,12 @@ fn scan(path: &PathBuf) -> Vec<String> {
             let tail = &rest[at + 1..];
             let Some(end) = tail.find('"') else { break };
             let literal = &tail[..end];
-            found.push(format!("{}:{}: \\0{}", path.display(), line_no + 1, &literal[2..]));
+            found.push(format!(
+                "{}:{}: \\0{}",
+                path.display(),
+                line_no + 1,
+                &literal[2..]
+            ));
             rest = &tail[end + 1..];
         }
     }

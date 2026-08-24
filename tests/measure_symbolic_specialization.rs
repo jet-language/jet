@@ -1,9 +1,9 @@
 //! D-TYPE2-MEASURE1=A: symbolic fixed-list lengths stay symbolic in a generic
 //! module and become concrete only after value-parameter specialization.
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 use std::fs;
 use std::process::Command;
@@ -47,7 +47,10 @@ fn parser_preserves_the_generic_additive_measure_rule() {
         left_len,
         Measure::Symbol { kind, name } if kind == "length" && name == "N"
     ));
-    let Type::FixedList { len: return_len, .. } = function.return_type.as_ref().unwrap() else {
+    let Type::FixedList {
+        len: return_len, ..
+    } = function.return_type.as_ref().unwrap()
+    else {
         panic!("expected fixed return list");
     };
     assert!(matches!(
@@ -120,10 +123,7 @@ fn run() {
 
 #[test]
 fn repl_accepts_fixed_list_measure_use() {
-    let transcript = jet::REPL::run_transcript(
-        &["print([Int#3]{1, 2, 3}.len())"],
-        None,
-    );
+    let transcript = jet::REPL::run_transcript(&["print([Int#3]{1, 2, 3}.len())"], None);
     assert!(
         transcript.contains("3"),
         "REPL rejected fixed-list measure use:\n{transcript}"

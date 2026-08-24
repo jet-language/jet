@@ -31,17 +31,19 @@ fn sql_and_html_blocks_compile_and_formatter_round_trip() {
 
 #[test]
 fn dsl_block_body_keeps_normal_sema_and_registry_rules() {
-    let body_error = jet::compile(
-        "fn run() { #SQL { missing :: unknown_name() } }\n",
-    )
-    .unwrap_err();
+    let body_error = jet::compile("fn run() { #SQL { missing :: unknown_name() } }\n").unwrap_err();
     assert!(
-        body_error.iter().any(|diagnostic| diagnostic.code != "E0617"),
+        body_error
+            .iter()
+            .any(|diagnostic| diagnostic.code != "E0617"),
         "DSL body should use ordinary sema diagnostics: {body_error:?}"
     );
 
     let foreign_marker = jet::compile("fn run() { #Graph { value :: 1 } }\n").unwrap_err();
-    assert!(!foreign_marker.is_empty(), "undeclared block markers must be rejected");
+    assert!(
+        !foreign_marker.is_empty(),
+        "undeclared block markers must be rejected"
+    );
 }
 
 #[test]
@@ -151,7 +153,9 @@ fn run() {
 "#;
     let diagnostics = jet::compile(invalid).expect_err("a bare String must not reach a text sink");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0149"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0149"),
         "custom text sinks should use the checked-text mismatch: {diagnostics:?}"
     );
 }
@@ -176,7 +180,9 @@ fn run() {
     )
     .expect_err("an invalid URL head must fail in sema");
     assert!(
-        invalid_url.iter().any(|diagnostic| diagnostic.code == "E0155"),
+        invalid_url
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0155"),
         "invalid URL head should use E0155: {invalid_url:?}"
     );
 
@@ -208,7 +214,9 @@ fn run() {
     )
     .expect_err("Regex heads must reject interpolation after receiving raw text");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0152"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0152"),
         "Regex interpolation should use E0152: {diagnostics:?}"
     );
 }
@@ -218,8 +226,7 @@ fn sql_row_header_is_a_real_declared_type_position() {
     let error = jet::compile("fn run() { #SQL(MissingRow) {} }\n").unwrap_err();
     assert!(
         error.iter().any(|diagnostic| {
-            diagnostic.what.contains("MissingRow")
-                || diagnostic.fix.contains("MissingRow")
+            diagnostic.what.contains("MissingRow") || diagnostic.fix.contains("MissingRow")
         }),
         "unknown SQL row type should use ordinary declared-type diagnostics: {error:?}"
     );

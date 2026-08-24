@@ -171,16 +171,14 @@ fn expand_web_lens_and_explain_web_graph_json() {
     );
     let jet = env!("CARGO_BIN_EXE_jet");
     let expand = Command::new(jet)
-        .args([
-            "inspect",
-            "expand",
-            "--facts",
-            "web",
-            &path,
-        ])
+        .args(["inspect", "expand", "--facts", "web", &path])
         .output()
         .unwrap();
-    assert!(expand.status.success(), "{}", String::from_utf8_lossy(&expand.stderr));
+    assert!(
+        expand.status.success(),
+        "{}",
+        String::from_utf8_lossy(&expand.stderr)
+    );
     let stdout = String::from_utf8_lossy(&expand.stdout);
     assert!(stdout.contains("web —"));
     assert!(stdout.contains("hydration: dev-overlay (shared TIR: true)"));
@@ -190,7 +188,11 @@ fn expand_web_lens_and_explain_web_graph_json() {
         .args(["explain", "--web-graph", &path, "--json"])
         .output()
         .unwrap();
-    assert!(explain.status.success(), "{}", String::from_utf8_lossy(&explain.stderr));
+    assert!(
+        explain.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
     let json = String::from_utf8_lossy(&explain.stdout);
     assert!(json.contains("\"shared_tir\": true"));
     assert!(json.contains("\"hydration\": \"dev-overlay\""));

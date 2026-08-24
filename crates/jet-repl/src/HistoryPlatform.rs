@@ -88,12 +88,9 @@ fn flags_for_target(os: &str, arch: &str) -> Option<UnixOpenFlags> {
     match (os, arch) {
         (
             "linux",
-            "x86" | "x86_64" | "s390x" | "riscv32" | "riscv64" | "loongarch64"
-            | "csky" | "hexagon",
+            "x86" | "x86_64" | "s390x" | "riscv32" | "riscv64" | "loongarch64" | "csky" | "hexagon",
         ) => Some(LINUX_BASE),
-        ("linux", "arm" | "aarch64" | "powerpc" | "powerpc64" | "m68k") => {
-            Some(LINUX_ASM_GENERIC)
-        }
+        ("linux", "arm" | "aarch64" | "powerpc" | "powerpc64" | "m68k") => Some(LINUX_ASM_GENERIC),
         ("linux", "mips" | "mips64") => Some(LINUX_MIPS),
         ("linux", "sparc" | "sparc64") => Some(LINUX_SPARC),
         ("android", "x86" | "x86_64") => Some(LINUX_BASE),
@@ -190,11 +187,7 @@ mod unix_flag_tests {
             assert_eq!(flags("android", arch), linux_base, "android/{arch}");
         }
         for arch in ["arm", "aarch64"] {
-            assert_eq!(
-                flags("android", arch),
-                linux_asm_generic,
-                "android/{arch}"
-            );
+            assert_eq!(flags("android", arch), linux_asm_generic, "android/{arch}");
         }
         assert_eq!(
             flags("android", "riscv64"),
@@ -302,7 +295,11 @@ impl Backend {
             CString::new(value.as_bytes())
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "NUL in state path"))
         }
-        fn descend(parent: &std::fs::File, part: &OsStr, create: bool) -> io::Result<std::fs::File> {
+        fn descend(
+            parent: &std::fs::File,
+            part: &OsStr,
+            create: bool,
+        ) -> io::Result<std::fs::File> {
             let part = name(part)?;
             let abi = unix_open_flags()?;
             let flags = abi.read_only | abi.directory | abi.nofollow | abi.cloexec;
@@ -519,15 +516,7 @@ impl Drop for BackendLock {
                 overlapped: *mut WindowsOverlapped,
             ) -> i32;
         }
-        let _ = unsafe {
-            UnlockFileEx(
-                self.file.as_raw_handle(),
-                0,
-                1,
-                0,
-                &mut self.overlapped,
-            )
-        };
+        let _ = unsafe { UnlockFileEx(self.file.as_raw_handle(), 0, 1, 0, &mut self.overlapped) };
     }
 }
 
@@ -559,7 +548,10 @@ impl Backend {
     pub(super) fn open(root: &std::path::Path) -> io::Result<Self> {
         use std::path::Component;
         if !root.is_absolute() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "state path is not absolute"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "state path is not absolute",
+            ));
         }
         let mut current = PathBuf::new();
         for component in root.components() {
@@ -574,7 +566,12 @@ impl Backend {
                         reject_windows_reparse(&current, true)?;
                     }
                 }
-                _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, "non-normal state path")),
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "non-normal state path",
+                    ))
+                }
             }
         }
         current.push("jet");
@@ -853,7 +850,8 @@ fn windows_final_path(file: &std::fs::File) -> io::Result<String> {
             flags: u32,
         ) -> u32;
     }
-    let needed = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0) };
+    let needed =
+        unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, 0) };
     if needed == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -895,7 +893,11 @@ fn reject_windows_reparse(path: &std::path::Path, directory: bool) -> io::Result
         fn GetFileAttributesW(name: *const u16) -> u32;
         fn CloseHandle(handle: Handle) -> i32;
     }
-    let wide = path.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
     let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };
     if attrs == u32::MAX || attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(io::Error::new(
@@ -904,7 +906,11 @@ fn reject_windows_reparse(path: &std::path::Path, directory: bool) -> io::Result
         ));
     }
     let flags = FILE_FLAG_OPEN_REPARSE_POINT
-        | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 };
+        | if directory {
+            FILE_FLAG_BACKUP_SEMANTICS
+        } else {
+            0
+        };
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
@@ -939,18 +945,30 @@ impl Backend {
     }
 
     pub(super) fn lock(&self) -> io::Result<BackendLock> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "history unavailable"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "history unavailable",
+        ))
     }
 
     pub(super) fn read(&self) -> io::Result<Option<Vec<u8>>> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "history unavailable"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "history unavailable",
+        ))
     }
 
     pub(super) fn rewrite(&self, _entries: &[String]) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "history unavailable"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "history unavailable",
+        ))
     }
 
     pub(super) fn clear(&self) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "history unavailable"))
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "history unavailable",
+        ))
     }
 }

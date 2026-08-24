@@ -3,8 +3,8 @@
 
 mod common;
 
-use jetpack::Overlay::{self, OverlayPolicy, OverlaySet, PackageOverride};
 use jetpack::Lock::{self, DependencyProvenance};
+use jetpack::Overlay::{self, OverlayPolicy, OverlaySet, PackageOverride};
 use jetpack::Package::ProvenanceRequirement;
 use jetpack::SemanticLock::{
     self, apply_overlay_invalidations, atomic_commit, load, merge, merge_revalidate_commit,
@@ -114,12 +114,19 @@ dependencies = ["textkit"]
     assert!(encoded.contains("provenance-publisher = \"ed25519:ak3f \\\"textkit team\\\"\""));
     assert!(encoded.contains("provenance-build = \"slsa v1.0\""));
     let round_trip = Lock::parse(&encoded).expect("provenance fields should round-trip");
-    assert_eq!(round_trip.packages[0].provenance, lock.packages[0].provenance);
+    assert_eq!(
+        round_trip.packages[0].provenance,
+        lock.packages[0].provenance
+    );
 
     let root = unique_root("provenance-e1204");
     let entry = root.join("textkit");
     fs::create_dir_all(&entry).unwrap();
-    fs::write(entry.join("package.jet"), "name: \"textkit\"\nversion: \"1.2.0\"\n").unwrap();
+    fs::write(
+        entry.join("package.jet"),
+        "name: \"textkit\"\nversion: \"1.2.0\"\n",
+    )
+    .unwrap();
     let diagnostic = jet::Store::verify_content_hash("textkit", &entry, "sha256-not-the-tree")
         .expect_err("a changed store entry must retain E1204");
     assert_eq!(diagnostic.code, "E1204");
@@ -148,12 +155,8 @@ dependencies = ["app"]
     )
     .unwrap();
 
-    let mut semantic = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "core.log",
-        "1.2.3",
-        "sha256-log",
-    )]);
+    let mut semantic =
+        SemanticLockFile::with_records(vec![pkg("app", "core.log", "1.2.3", "sha256-log")]);
     semantic.inputs = vec![
         LockInput {
             name: "nixpkgs".into(),
@@ -208,7 +211,10 @@ fn catalog_selection_records_owner_and_source_ref() {
     );
     assert_eq!(lock.records.len(), 1);
     assert_eq!(lock.records[0].rationales[0].source_ref, "catalog:log");
-    assert_eq!(lock.records[0].rationales[0].adapter_id, "workspace.catalog");
+    assert_eq!(
+        lock.records[0].rationales[0].adapter_id,
+        "workspace.catalog"
+    );
     assert!(revalidate(&lock).is_ok());
 }
 
@@ -225,10 +231,7 @@ fn selective_update_keeps_unrelated_record_bytes_stable() {
         .expect("http record")
         .to_string();
 
-    selective_update(
-        &mut lock,
-        pkg("app", "core.log", "1.3.0", "sha256-log-new"),
-    );
+    selective_update(&mut lock, pkg("app", "core.log", "1.3.0", "sha256-log-new"));
     let after = SemanticLock::write(&lock);
     let http_after = after
         .split("[[semantic_record]]")
@@ -241,12 +244,8 @@ fn selective_update_keeps_unrelated_record_bytes_stable() {
 
 #[test]
 fn input_follows_cycle_and_missing_target_fail_revalidate() {
-    let mut lock = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "core.log",
-        "1.2.3",
-        "sha256-log",
-    )]);
+    let mut lock =
+        SemanticLockFile::with_records(vec![pkg("app", "core.log", "1.2.3", "sha256-log")]);
     lock.inputs = vec![
         LockInput {
             name: "a".into(),
@@ -260,7 +259,9 @@ fn input_follows_cycle_and_missing_target_fail_revalidate() {
         },
     ];
     let err = revalidate(&lock).expect_err("cycle");
-    assert!(err.iter().any(|i| matches!(i, ValidationIssue::InputCycle(_))));
+    assert!(err
+        .iter()
+        .any(|i| matches!(i, ValidationIssue::InputCycle(_))));
 
     lock.inputs = vec![LockInput {
         name: "home".into(),
@@ -275,12 +276,8 @@ fn input_follows_cycle_and_missing_target_fail_revalidate() {
 
 #[test]
 fn source_map_rejects_wrong_authority() {
-    let mut lock = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "Company.Lib",
-        "1.0.0",
-        "sha256-lib",
-    )]);
+    let mut lock =
+        SemanticLockFile::with_records(vec![pkg("app", "Company.Lib", "1.0.0", "sha256-lib")]);
     lock.records[0].rationales[0].source_ref = "nuget:PublicGallery".into();
     lock.source_maps = vec![SourceMapEntry {
         pattern: "Company.*".into(),
@@ -339,7 +336,10 @@ fn overlay_change_invalidates_exact_action_keys_and_explains_why() {
     assert_eq!(inv.len(), 1);
     assert_eq!(
         inv[0].affected_action_keys,
-        vec!["action:foo:build".to_string(), "action:foo:check".to_string()]
+        vec![
+            "action:foo:build".to_string(),
+            "action:foo:check".to_string()
+        ]
     );
     assert!(inv[0].reason.contains("changed package `foo`"));
     assert_ne!(
@@ -401,9 +401,9 @@ fn overlay_semantic_projection_uses_resolved_facts_and_provenance() {
         .iter()
         .any(|rationale| rationale.reason.contains("force")));
 
-    let loaded = SemanticLock::parse(&SemanticLock::write(
-        &SemanticLockFile::with_records(records),
-    ));
+    let loaded = SemanticLock::parse(&SemanticLock::write(&SemanticLockFile::with_records(
+        records,
+    )));
     let loaded = loaded
         .records
         .iter()
@@ -433,18 +433,8 @@ fn overlay_semantic_projection_uses_resolved_facts_and_provenance() {
 #[test]
 fn merge_revalidate_commit_rejects_conflicts_before_write() {
     let root = unique_root("merge-conflict");
-    let left = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "core.log",
-        "1.2.3",
-        "sha256-a",
-    )]);
-    let right = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "core.log",
-        "1.3.0",
-        "sha256-b",
-    )]);
+    let left = SemanticLockFile::with_records(vec![pkg("app", "core.log", "1.2.3", "sha256-a")]);
+    let right = SemanticLockFile::with_records(vec![pkg("app", "core.log", "1.3.0", "sha256-b")]);
     let err = merge_revalidate_commit(&root, &SemanticLockFile::default(), &left, &right)
         .expect_err("conflict");
     assert!(!err.issues.is_empty());
@@ -455,18 +445,9 @@ fn merge_revalidate_commit_rejects_conflicts_before_write() {
 #[test]
 fn merge_revalidate_commit_writes_when_clean() {
     let root = unique_root("merge-ok");
-    let left = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "core.log",
-        "1.2.3",
-        "sha256-log",
-    )]);
-    let right = SemanticLockFile::with_records(vec![pkg(
-        "app",
-        "core.http",
-        "2.0.0",
-        "sha256-http",
-    )]);
+    let left = SemanticLockFile::with_records(vec![pkg("app", "core.log", "1.2.3", "sha256-log")]);
+    let right =
+        SemanticLockFile::with_records(vec![pkg("app", "core.http", "2.0.0", "sha256-http")]);
     let merged =
         merge_revalidate_commit(&root, &SemanticLockFile::default(), &left, &right).unwrap();
     assert_eq!(merged.records.len(), 2);

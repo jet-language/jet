@@ -14,8 +14,8 @@ use cranelift_codegen::ir::{
     AbiParam, ExternalName, Function, Signature, UserExternalName, UserFuncName,
 };
 use cranelift_codegen::isa::CallConv;
-use cranelift_codegen::{FinalizedMachReloc, FinalizedRelocTarget};
 use cranelift_codegen::Context;
+use cranelift_codegen::{FinalizedMachReloc, FinalizedRelocTarget};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::{JitBackend::RunOutcome, AST::Type};
@@ -189,9 +189,7 @@ fn capture_is_replayable(capture: &Capture) -> bool {
         let replayable = f.relocs.iter().all(|reloc| match &reloc.target {
             // Namespace 1 is a data object, and a reload declares no data
             // objects at all, so a data relocation is equally unreplayable.
-            StoredTarget::User { namespace, index } => {
-                *namespace == 0 && u64::from(*index) < limit
-            }
+            StoredTarget::User { namespace, index } => *namespace == 0 && u64::from(*index) < limit,
             StoredTarget::FuncOffset(_) => true,
         });
         if !replayable {

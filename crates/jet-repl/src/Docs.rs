@@ -21,7 +21,10 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
             if let Some(bundle) = bundle {
                 let db = jet_semindex::build_symbol_db(&bundle, &facts);
                 index.extend(db.symbols.symbols().iter().cloned().map(|mut symbol| {
-                    if matches!(symbol.provenance, jet_semindex::SemanticProvenance::Source { .. }) {
+                    if matches!(
+                        symbol.provenance,
+                        jet_semindex::SemanticProvenance::Source { .. }
+                    ) {
                         symbol.provenance = jet_semindex::SemanticProvenance::Session;
                     }
                     symbol
@@ -33,7 +36,11 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
     for (name, value) in &session.scope {
         // Docs keeps the type in the live symbol fact. The workspace renderer
         // intentionally uses the bare binding spelling after D-BIND-BARE1.
-        let sigil = if session.mutable_names.contains(name) { ":=" } else { "::" };
+        let sigil = if session.mutable_names.contains(name) {
+            ":="
+        } else {
+            "::"
+        };
         index.push(jet_semindex::SemanticSymbol {
             identity: format!("session:binding:{name}"),
             name: name.clone(),

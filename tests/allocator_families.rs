@@ -117,9 +117,7 @@ fn compile_program_allocator_harness(body: &str) -> std::process::Output {
         std::fs::read_to_string("crates/jet-codegen/src/Prelude/ProgramAllocator.rs").unwrap();
     std::fs::write(
         &source,
-        format!(
-            "#![allow(dead_code)]\nmod allocator {{\n{allocator}\n}}\n{body}\n"
-        ),
+        format!("#![allow(dead_code)]\nmod allocator {{\n{allocator}\n}}\n{body}\n"),
     )
     .unwrap();
     let compiled = Command::new("rustc")
@@ -163,12 +161,8 @@ fn compile_jet(src: &str) -> Result<jet::CompileOutput, Vec<String>> {
 }
 
 fn run_jet(label: &str, src: &str) -> (i32, String, String) {
-    let output = compile_jet(src).unwrap_or_else(|diags| {
-        panic!(
-            "{label} front end failed: {:?}",
-            diags
-        )
-    });
+    let output =
+        compile_jet(src).unwrap_or_else(|diags| panic!("{label} front end failed: {:?}", diags));
     let user = common::strip_vetted_prelude_modules(&output.rust);
     let unsafe_lines = user
         .lines()
@@ -278,7 +272,11 @@ fn main() {
 }
 "#,
     );
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }
 
@@ -333,7 +331,11 @@ fn main() {
 }
 "#,
     );
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }
 
@@ -353,9 +355,15 @@ fn run() {
     )
     .expect("positive comptime Fixed size should compile");
     let user = common::strip_vetted_prelude_modules(&output.rust);
-    assert!(user.contains("[std::mem::MaybeUninit::<u8>::uninit(); 256]"), "{user}");
+    assert!(
+        user.contains("[std::mem::MaybeUninit::<u8>::uninit(); 256]"),
+        "{user}"
+    );
     assert!(user.contains("JetFixed::over_uninit"), "{user}");
-    assert!(user.contains("impl __jet_Close for jet_mem::JetFixed"), "{user}");
+    assert!(
+        user.contains("impl __jet_Close for jet_mem::JetFixed"),
+        "{user}"
+    );
 
     let over_src = r#"
 use core.mem
@@ -367,8 +375,8 @@ fn run() {
     close(^fixed)
 }
 "#;
-    let over = compile_jet(over_src)
-        .expect("Fixed.over should accept one mutable inline byte array");
+    let over =
+        compile_jet(over_src).expect("Fixed.over should accept one mutable inline byte array");
     let over_user = common::strip_vetted_prelude_modules(&over.rust);
     assert!(
         over_user.contains("JetFixed::over_uninit_fixed(&mut __jet_bytes)"),
@@ -404,7 +412,10 @@ fn run() {
 "#,
     )
     .expect_err("reset cannot invalidate a live Fixed allocation view");
-    assert!(live_reset.iter().any(|code| code == "E0212"), "{live_reset:?}");
+    assert!(
+        live_reset.iter().any(|code| code == "E0212"),
+        "{live_reset:?}"
+    );
 
     let stored = compile_jet(
         r#"
@@ -520,7 +531,10 @@ fn run() {
 "#;
     let (code, _stdout, stderr) = run_jet("pool_stale", src);
     assert_eq!(code, 70, "{stderr}");
-    assert!(stderr.contains("no longer refers to a live value"), "{stderr}");
+    assert!(
+        stderr.contains("no longer refers to a live value"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -602,11 +616,8 @@ fn try_allocation_example_reports_exhaustion_as_a_value() {
         let path = dir.join("main.jet");
         std::fs::write(&path, src).unwrap();
         for force_interpreter in [false, true] {
-            let outcome = jet::Interpreter::dev_iteration(
-                &path.to_string_lossy(),
-                false,
-                force_interpreter,
-            );
+            let outcome =
+                jet::Interpreter::dev_iteration(&path.to_string_lossy(), false, force_interpreter);
             match outcome {
                 jet::Interpreter::RunOutcome::Ran {
                     stdout, exit_code, ..
@@ -617,7 +628,11 @@ fn try_allocation_example_reports_exhaustion_as_a_value() {
                 jet::Interpreter::RunOutcome::Problems(diags) => {
                     panic!(
                         "try allocation example failed on {} tier: {diags:?}",
-                        if force_interpreter { "interpreter" } else { "default dev" }
+                        if force_interpreter {
+                            "interpreter"
+                        } else {
+                            "default dev"
+                        }
                     );
                 }
             }
@@ -657,7 +672,11 @@ fn main() {
 }
 "#,
     );
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }
 
@@ -704,8 +723,7 @@ fn missing_program_allocator_keeps_hidden_system_heap() {
 
 #[test]
 fn invalid_program_allocator_fact_is_a_teaching_diagnostic() {
-    let entry =
-        write_program_allocator_project("program_allocator_invalid", Some("mem.Mystery"));
+    let entry = write_program_allocator_project("program_allocator_invalid", Some("mem.Mystery"));
     let diagnostics = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
     let diagnostic = diagnostics
         .iter()
@@ -743,7 +761,11 @@ fn main() {
 }
 "#,
     );
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }
 
@@ -766,7 +788,11 @@ fn main() {
 }
 "#,
     );
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }
 
@@ -800,7 +826,11 @@ fn main() {
 }
 "#,
     );
-    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
 }
 
@@ -811,8 +841,7 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
     }
     let project = std::path::Path::new("examples/features/memory/program_allocator");
     let expected =
-        std::fs::read_to_string("examples/features/expected/memory/program_allocator.out")
-            .unwrap();
+        std::fs::read_to_string("examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
         ("jit", &["run", "main.jet"][..]),
         ("interpreter", &["run", "--interpret", "main.jet"][..]),
@@ -822,7 +851,10 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
             .args(args)
             .current_dir(project)
             .env("NO_COLOR", "1")
-            .env("JET_RUN_CACHE_DIR", temp_dir(&format!("program_allocator_{name}")))
+            .env(
+                "JET_RUN_CACHE_DIR",
+                temp_dir(&format!("program_allocator_{name}")),
+            )
             .output()
             .unwrap();
         assert!(

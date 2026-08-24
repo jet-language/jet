@@ -1,9 +1,9 @@
 //! Tower #1557: task state and join duty keep one meaning across the tier
 //! boundaries that support native task execution.
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 use std::fs;
 use std::process::Command;
@@ -27,14 +27,20 @@ const EXPECTED: &str = "42\n";
 fn parser_reads_the_canonical_task_surface() {
     let (tokens, diagnostics) = jet::Lexer::lex(SOURCE);
     assert!(diagnostics.is_empty(), "lexer diagnostics: {diagnostics:?}");
-    assert!(jet::Parser::parse(&tokens).is_ok(), "task fixture must parse");
+    assert!(
+        jet::Parser::parse(&tokens).is_ok(),
+        "task fixture must parse"
+    );
 }
 
 #[test]
 fn sema_tracks_task_state_and_duty_without_a_new_surface() {
     let output = jet::compile(SOURCE).expect("task fixture must pass sema");
     assert!(
-        output.lints.iter().all(|diagnostic| diagnostic.code != "L1101"),
+        output
+            .lints
+            .iter()
+            .all(|diagnostic| diagnostic.code != "L1101"),
         "join and detach must discharge the shared duty: {:?}",
         output.lints
     );
@@ -56,9 +62,7 @@ fn aot_jit_and_interpreter_agree() {
 
 #[test]
 fn comptime_keeps_task_facts_in_the_front_end() {
-    let source = format!(
-        "{SOURCE}\n@folded :: 40 + 2\n\nfn show() {{\n    print(@folded)\n}}\n"
-    );
+    let source = format!("{SOURCE}\n@folded :: 40 + 2\n\nfn show() {{\n    print(@folded)\n}}\n");
     jet::compile(&source).expect("comptime and runtime task code must share the front end");
 }
 

@@ -4,10 +4,7 @@ use std::process::Command;
 mod common;
 
 fn project_dir(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "jet_auto_derive_{name}_{}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("jet_auto_derive_{name}_{}", std::process::id()))
 }
 
 fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
@@ -16,9 +13,7 @@ fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("package.jet"),
-        format!(
-            "name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"
-        ),
+        format!("name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"),
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -29,22 +24,13 @@ fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::
 fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> jet::AST::ProgramBundle {
     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
-        })
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
     bundle
 }
 
-fn checked_project(
-    name: &str,
-    manifest_policy: &str,
-    source: &str,
-) -> jet::AST::ProgramBundle {
+fn checked_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
     checked_bundle(loaded_project(name, manifest_policy, source))
 }
 
@@ -54,9 +40,7 @@ fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<S
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("package.jet"),
-        format!(
-            "name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"
-        ),
+        format!("name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"),
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -105,11 +89,7 @@ fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMe
     let rust = dir.join("main.rs");
     let binary = dir.join("main_bin");
     let generated = jet::Codegen::emit_bundle(bundle, jet::Sema::CompileMode::Run, None);
-    std::fs::write(
-        &rust,
-        &generated,
-    )
-    .unwrap();
+    std::fs::write(&rust, &generated).unwrap();
     let built = Command::new("rustc")
         .args(["--edition", "2021", "-O"])
         .arg(&rust)
@@ -230,7 +210,10 @@ fn run() {
     assert_eq!(stdout, expected);
 
     let outcome = jet::Interpreter::dev_iteration(
-        project_dir("plain_codable").join("main.jet").to_str().unwrap(),
+        project_dir("plain_codable")
+            .join("main.jet")
+            .to_str()
+            .unwrap(),
         false,
         true,
     );
@@ -278,7 +261,8 @@ fn run() {
     let Some(automatic) = aot_measurement(&automatic_bundle, "auto_measure_after_aot") else {
         return;
     };
-    let Some(automatic_repeat) = aot_measurement(&automatic_bundle, "auto_measure_after_aot") else {
+    let Some(automatic_repeat) = aot_measurement(&automatic_bundle, "auto_measure_after_aot")
+    else {
         return;
     };
     for (label, first, repeat) in [
@@ -286,23 +270,25 @@ fn run() {
         ("automatic", &automatic, &automatic_repeat),
     ] {
         assert_eq!(first.exit, repeat.exit, "{label} exit changed between runs");
-        assert_eq!(first.stdout, repeat.stdout, "{label} stdout changed between runs");
         assert_eq!(
-            first.generated_rust_bytes,
-            repeat.generated_rust_bytes,
+            first.stdout, repeat.stdout,
+            "{label} stdout changed between runs"
+        );
+        assert_eq!(
+            first.generated_rust_bytes, repeat.generated_rust_bytes,
             "{label} generated-Rust bytes changed between runs",
         );
         assert_eq!(
-            first.binary_bytes,
-            repeat.binary_bytes,
+            first.binary_bytes, repeat.binary_bytes,
             "{label} binary bytes changed between runs",
         );
     }
     assert_eq!(explicit.exit, 0);
     assert_eq!(automatic.exit, 0);
     assert_eq!(explicit.stdout, automatic.stdout);
-    let generated_rust_delta =
-        explicit.generated_rust_bytes.abs_diff(automatic.generated_rust_bytes);
+    let generated_rust_delta = explicit
+        .generated_rust_bytes
+        .abs_diff(automatic.generated_rust_bytes);
     let binary_delta = explicit.binary_bytes.abs_diff(automatic.binary_bytes);
     eprintln!(
         "auto-derive measurement: generated Rust {} -> {} ({generated_rust_delta} bytes); binary {} -> {} ({binary_delta} bytes)",
@@ -411,13 +397,13 @@ fn run() {}
 "#,
     );
     let mut defaults = Vec::new();
-    collect_struct_defaults(
-        &bundle.modules[bundle.entry].items,
-        &mut defaults,
-    );
+    collect_struct_defaults(&bundle.modules[bundle.entry].items, &mut defaults);
     assert_eq!(
         defaults,
-        vec![("Defaulted".to_string(), false), ("Explicit".to_string(), false)]
+        vec![
+            ("Defaulted".to_string(), false),
+            ("Explicit".to_string(), false)
+        ]
     );
     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
     let facts = &facts[bundle.entry];
@@ -516,9 +502,7 @@ fn old_auto_derive_key_is_rejected() {
     let legacy_key = ["auto", "derive"].join("_");
     std::fs::write(
         dir.join("package.jet"),
-        format!(
-            "name: \"old-key\"\nversion: \"1\"\npolicy: .{{ {legacy_key}: false }}\n"
-        ),
+        format!("name: \"old-key\"\nversion: \"1\"\npolicy: .{{ {legacy_key}: false }}\n"),
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -528,8 +512,14 @@ fn old_auto_derive_key_is_rejected() {
         .expect_err("retired policy key must be rejected");
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     assert_eq!(diagnostics[0].code, "E1206");
-    assert!(diagnostics[0].what.contains("policy.auto_derive"), "{diagnostics:#?}");
-    assert!(diagnostics[0].fix.contains("policy.lints.deny"), "{diagnostics:#?}");
+    assert!(
+        diagnostics[0].what.contains("policy.auto_derive"),
+        "{diagnostics:#?}"
+    );
+    assert!(
+        diagnostics[0].fix.contains("policy.lints.deny"),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]
@@ -581,7 +571,10 @@ fn run() {
             >= 6,
         "{diagnostics:?}"
     );
-    assert!(diagnostics.iter().any(|code| code == "E0312"), "{diagnostics:?}");
+    assert!(
+        diagnostics.iter().any(|code| code == "E0312"),
+        "{diagnostics:?}"
+    );
 
     let entry = project_dir("reject_use").join("main.jet");
     let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
@@ -638,10 +631,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     }
     assert_eq!(
         defaults,
-        vec![
-            ("Outer".to_string(), false),
-            ("Inner".to_string(), false)
-        ]
+        vec![("Outer".to_string(), false), ("Inner".to_string(), false)]
     );
 
     let workspace = project_dir("multi_package");
@@ -665,11 +655,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
         "name: \"dep\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
     )
     .unwrap();
-    std::fs::write(
-        dep.join("dep.jet"),
-        "pub struct DepType { value: Int }\n",
-    )
-    .unwrap();
+    std::fs::write(dep.join("dep.jet"), "pub struct DepType { value: Int }\n").unwrap();
     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
     let mut by_module = std::collections::HashMap::new();
     for module in &bundle.modules {
@@ -746,11 +732,7 @@ fn run() {
         "name: \"dep\"\nversion: \"1\"\npolicy: .{ lints: .{ deny: [auto_derive] } }\n",
     )
     .unwrap();
-    std::fs::write(
-        dep.join("dep.jet"),
-        "pub struct Token { value: Int }\n",
-    )
-    .unwrap();
+    std::fs::write(dep.join("dep.jet"), "pub struct Token { value: Int }\n").unwrap();
     std::fs::write(
         open_dep.join("package.jet"),
         "name: \"open_dep\"\nversion: \"1\"\n",
@@ -762,8 +744,7 @@ fn run() {
     )
     .unwrap();
 
-    let mut bundle =
-        jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+    let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
     let app_facts = &facts[bundle.entry];
     for selected in [
@@ -833,8 +814,7 @@ fn run() {
 "#,
     )
     .unwrap();
-    let mut bundle =
-        jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+    let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
     let app_facts = &facts[bundle.entry];
     let dep_idx = bundle
@@ -896,7 +876,6 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
 
-
     let expected = "\
 Token { value: 7 }\n\
 Token { value: 7 }\n\
@@ -925,11 +904,8 @@ true\n";
         panic!("same-name program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
-    let outcome = jet::Interpreter::dev_iteration(
-        app.join("main.jet").to_str().unwrap(),
-        false,
-        true,
-    );
+    let outcome =
+        jet::Interpreter::dev_iteration(app.join("main.jet").to_str().unwrap(), false, true);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the forced interpreter: {outcome:?}");
     };

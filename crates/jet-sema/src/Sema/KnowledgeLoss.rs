@@ -43,10 +43,9 @@ impl KnowledgeGate {
             )
             | (KnowledgePlane::Unit, Self::RoundedConversion | Self::RawProjection)
             | (KnowledgePlane::State, Self::StateTransition | Self::RawProjection)
-            | (
-                KnowledgePlane::Classification,
-                Self::ClassificationScrub | Self::RawProjection,
-            ) => true,
+            | (KnowledgePlane::Classification, Self::ClassificationScrub | Self::RawProjection) => {
+                true
+            }
             _ => false,
         }
     }
@@ -80,10 +79,7 @@ impl KnowledgePlane {
 ///
 /// `None` is the ordinary implicit path. A caller supplies `Some(gate)` only
 /// after it has recognized the existing source spelling in its own AST rule.
-pub(crate) const fn requires_gate(
-    plane: KnowledgePlane,
-    gate: Option<KnowledgeGate>,
-) -> bool {
+pub(crate) const fn requires_gate(plane: KnowledgePlane, gate: Option<KnowledgeGate>) -> bool {
     !matches!(gate, Some(gate) if gate.permits(plane))
 }
 
@@ -131,10 +127,7 @@ mod tests {
             KnowledgePlane::State,
             KnowledgePlane::Classification,
         ] {
-            assert!(!requires_gate(
-                plane,
-                Some(KnowledgeGate::RawProjection)
-            ));
+            assert!(!requires_gate(plane, Some(KnowledgeGate::RawProjection)));
         }
     }
 }

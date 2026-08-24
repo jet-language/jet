@@ -178,7 +178,8 @@ fn map_view() String {
     values.clear()
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }"#;
-const MAP_EXPECTED: &str = "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
+const MAP_EXPECTED: &str =
+    "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
 const POOL_DECLS: &str = r#"fn pool_view() String {
     pool := Pool<String>.new()
     first :: pool.add("first")
@@ -302,7 +303,8 @@ fn bits_view() String {
     bits.clear()
     return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
 }"#;
-const BITS_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
+const BITS_EXPECTED: &str =
+    "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
 const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
     values.push(value)
 }
@@ -422,7 +424,8 @@ fn bag_view() String {
     empty := Tally<Int>.new()
     return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) -> value == "z")}|{tokens.count(TallyToken.Red)}|{tokens.has(TallyToken.Blue)}|{empty.any((value) -> value == 0)}"
 }"#;
-const TALLY_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
+const TALLY_EXPECTED: &str =
+    "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
 const TALLY_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() String {
     receiver_hits := 0
     count :: counted_bag(&receiver_hits).count(6)
@@ -523,10 +526,7 @@ fn public_transcript_covers_remaining_core_pure_families() {
 
 #[test]
 fn public_transcript_covers_integer_bit_queries_exactly() {
-    let values = exact_values(&[
-        INTEGER_BIT_QUERIES_DECLS,
-        "integer_bit_queries_view()",
-    ]);
+    let values = exact_values(&[INTEGER_BIT_QUERIES_DECLS, "integer_bit_queries_view()"]);
     assert_eq!(
         values,
         [format!("\"{INTEGER_BIT_QUERIES_EXPECTED}\" : String")]
@@ -612,10 +612,7 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
 
 #[test]
 fn public_transcript_evaluates_pure_add_arguments_once() {
-    let values = exact_values(&[
-        ADD_ARGUMENT_ONCE_DECLS,
-        "add_argument_once_view()",
-    ]);
+    let values = exact_values(&[ADD_ARGUMENT_ONCE_DECLS, "add_argument_once_view()"]);
     assert_eq!(values, ["\"3.0|1\" : String"]);
 }
 
@@ -634,10 +631,7 @@ fn public_transcript_covers_map_methods_exactly() {
 #[test]
 fn public_transcript_preserves_sequential_inline_hof_mutations_exactly() {
     let values = exact_values(&[INLINE_HOF_DECLS, "inline_hof_view()"]);
-    assert_eq!(
-        values,
-        [format!("\"{INLINE_HOF_EXPECTED}\" : String")]
-    );
+    assert_eq!(values, [format!("\"{INLINE_HOF_EXPECTED}\" : String")]);
 }
 
 #[test]
@@ -707,17 +701,16 @@ fn public_transcript_covers_testing_fake_clock_writeback_exactly() {
     ]);
     assert_eq!(
         values,
-        [format!("\"{TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED}\" : String")]
+        [format!(
+            "\"{TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED}\" : String"
+        )]
     );
 }
 
 #[test]
 fn public_transcript_covers_priority_queue_methods_exactly() {
     let values = exact_values(&[PRIORITY_QUEUE_DECLS, "priority_queue_view()"]);
-    assert_eq!(
-        values,
-        [format!("\"{PRIORITY_QUEUE_EXPECTED}\" : String")]
-    );
+    assert_eq!(values, [format!("\"{PRIORITY_QUEUE_EXPECTED}\" : String")]);
 }
 
 #[test]
@@ -779,10 +772,7 @@ fn public_transcript_covers_rank_field_writeback_exactly() {
     // Direct field receivers work in the public comptime path. Generated-Rust
     // lowering for this source shape remains a pre-existing TIR boundary.
     let values = exact_values(&[RANK_FIELD_DECLS, "rank_field_view()"]);
-    assert_eq!(
-        values,
-        [format!("\"{RANK_FIELD_EXPECTED}\" : String")]
-    );
+    assert_eq!(values, [format!("\"{RANK_FIELD_EXPECTED}\" : String")]);
 }
 
 fn parity_source(expression: &str, imports: &str) -> String {
@@ -820,7 +810,10 @@ fn rustc_aot_stdout(label: &str, source: &str) -> String {
         rustc
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        for directory in link.dependency_dirs().filter(|directory| directory.is_dir()) {
+        for directory in link
+            .dependency_dirs()
+            .filter(|directory| directory.is_dir())
+        {
             rustc
                 .arg("-L")
                 .arg(format!("dependency={}", directory.display()));
@@ -840,7 +833,11 @@ fn rustc_aot_stdout(label: &str, source: &str) -> String {
 fn check_aot_comptime(label: &str, source: &str) -> String {
     let output = rustc_aot_stdout(label, source);
     let lines = output.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 2, "{label} emitted unexpected output: {lines:?}");
+    assert_eq!(
+        lines.len(),
+        2,
+        "{label} emitted unexpected output: {lines:?}"
+    );
     assert_eq!(lines[0], lines[1], "{label} comptime/AOT divergence");
     lines[0].to_string()
 }
@@ -863,12 +860,7 @@ fn check_dev_tiers_with_boundary(
     );
 }
 
-fn check_dev_tier_output(
-    label: &str,
-    source: &str,
-    expected: &str,
-    force_interpreter: bool,
-) {
+fn check_dev_tier_output(label: &str, source: &str, expected: &str, force_interpreter: bool) {
     let id = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = common::unique_tmp(&format!("jet_core_pure_dev_{id}"));
     fs::create_dir_all(&dir).unwrap();
@@ -876,8 +868,16 @@ fn check_dev_tier_output(
     fs::write(&path, source).unwrap();
     let path = path.to_string_lossy();
     for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
-        match dev_iteration(&path, force_interpreter && interpreter_only, interpreter_only) {
-            RunOutcome::Ran { stdout, stderr, exit_code } => {
+        match dev_iteration(
+            &path,
+            force_interpreter && interpreter_only,
+            interpreter_only,
+        ) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
                 assert_eq!(exit_code, 0, "{label} {tier} exit");
                 assert_eq!(stderr, "", "{label} {tier} stderr");
                 assert_eq!(stdout, expected, "{label} {tier} stdout");
@@ -1147,10 +1147,7 @@ fn rustc_backed_datetime_and_measurement_display_are_exact() {
     assert_eq!(
         check_aot_comptime(
             "datetime/negative-unix-ms-display",
-            &parity_source(
-                "time.from_unix_ms(-1).to_string()",
-                "use core.time as time",
-            ),
+            &parity_source("time.from_unix_ms(-1).to_string()", "use core.time as time",),
         ),
         "1969-12-31 23:59:59 UTC"
     );
@@ -1228,7 +1225,10 @@ fn rustc_backed_map_matches_aot_comptime_forced_interpreter_and_default_dev_fall
 #[test]
 fn rustc_backed_pool_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
     let source = parity_source("pool_view()", POOL_DECLS);
-    assert_eq!(check_aot_comptime("pool/generations", &source), POOL_EXPECTED);
+    assert_eq!(
+        check_aot_comptime("pool/generations", &source),
+        POOL_EXPECTED
+    );
     check_dev_tiers_with_boundary("pool", &source, POOL_EXPECTED, true);
 }
 
@@ -1248,7 +1248,10 @@ fn rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and
 #[test]
 fn rustc_backed_queue_matches_all_execution_tiers_exactly() {
     let source = parity_source("queue_view()", QUEUE_DECLS);
-    assert_eq!(check_aot_comptime("queue/all-methods", &source), QUEUE_EXPECTED);
+    assert_eq!(
+        check_aot_comptime("queue/all-methods", &source),
+        QUEUE_EXPECTED
+    );
     check_dev_tiers("queue", &source, QUEUE_EXPECTED);
 }
 
@@ -1263,7 +1266,8 @@ fn rustc_backed_bits_matches_aot_comptime_forced_interpreter_and_default_dev_fal
 }
 
 #[test]
-fn rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+fn rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+) {
     // TIR currently rejects a nested call receiver before rustc. Materializing
     // that producer once into a named place proves the supported evaluation,
     // mutation, and caller-visible writeback path without hiding the boundary.
@@ -1272,12 +1276,7 @@ fn rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_defau
         check_aot_comptime("priority-queue/all-methods", &source),
         PRIORITY_QUEUE_EXPECTED
     );
-    check_dev_tiers_with_boundary(
-        "priority-queue",
-        &source,
-        PRIORITY_QUEUE_EXPECTED,
-        true,
-    );
+    check_dev_tiers_with_boundary("priority-queue", &source, PRIORITY_QUEUE_EXPECTED, true);
 }
 
 #[test]
@@ -1293,7 +1292,10 @@ fn rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fall
 #[test]
 fn rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
     let source = parity_source("bag_view()", TALLY_DECLS);
-    assert_eq!(check_aot_comptime("tally/all-methods", &source), TALLY_EXPECTED);
+    assert_eq!(
+        check_aot_comptime("tally/all-methods", &source),
+        TALLY_EXPECTED
+    );
     check_dev_tiers_with_boundary("tally", &source, TALLY_EXPECTED, true);
 }
 
@@ -1331,20 +1333,14 @@ fn rustc_backed_testing_fake_rng_matches_aot_comptime_forced_interpreter_and_def
     );
     // Rng remains outside the resident JIT subset: force the interpreter,
     // then prove default dev's ordinary AOT fallback.
-    check_dev_tiers_with_boundary(
-        "testing-fake-rng",
-        &source,
-        TESTING_FAKE_RNG_EXPECTED,
-        true,
-    );
+    check_dev_tiers_with_boundary("testing-fake-rng", &source, TESTING_FAKE_RNG_EXPECTED, true);
 }
 
 #[test]
 fn rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
 ) {
-    let declarations = format!(
-        "use core.testing as testing\nuse core.time as time\n{TESTING_FAKE_CLOCK_FN}"
-    );
+    let declarations =
+        format!("use core.testing as testing\nuse core.time as time\n{TESTING_FAKE_CLOCK_FN}");
     let source = parity_source("testing_fake_clock_view()", &declarations);
     assert_eq!(
         check_aot_comptime("testing/fake-clock", &source),
@@ -1363,9 +1359,7 @@ fn rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_d
 #[test]
 fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
 ) {
-    let declarations = format!(
-        "use core.testing as testing\n{TESTING_FAKE_CLOCK_WRITEBACK_DECLS}"
-    );
+    let declarations = format!("use core.testing as testing\n{TESTING_FAKE_CLOCK_WRITEBACK_DECLS}");
     let source = parity_source("testing_fake_clock_writeback_view()", &declarations);
     assert_eq!(
         check_aot_comptime("testing/fake-clock-writeback", &source),
@@ -1561,12 +1555,16 @@ fn ui_value_view() String {
     return "{point.x}:{point.y}|{size.width}:{size.height}|{rect.width}:{rect.height}|{constraint.min_height}:{constraint.max_width}|{plain.label}:{plain.width}:{plain.height}|{role.label}:{role.width}|{colored.label}:{colored.width}|{row.width}:{row.height}"
 }"##;
 
-const UI_EXPECTED: &str = "1.5:-2.0|80.0:24.0|3.0:4.0|1.0:80.0|plain:5.0:2.0|save:8.0|blue:4.0|8.0:2.0";
+const UI_EXPECTED: &str =
+    "1.5:-2.0|80.0:24.0|3.0:4.0|1.0:80.0|plain:5.0:2.0|save:8.0|blue:4.0|8.0:2.0";
 
 #[test]
 fn ui_values_match_aot_comptime_forced_interpreter_and_default_dev() {
     let source = parity_source("ui_value_view()", UI_DECLS);
-    assert_eq!(check_aot_comptime("ui/value-constructors", &source), UI_EXPECTED);
+    assert_eq!(
+        check_aot_comptime("ui/value-constructors", &source),
+        UI_EXPECTED
+    );
     check_dev_tiers_with_boundary("ui-value-constructors", &source, UI_EXPECTED, true);
 }
 
@@ -1595,7 +1593,10 @@ const CRYPTO_EXPECTED: &str = "[60, 178, 95, 37, 250, 172, 213, 122, 144, 67, 79
 #[test]
 fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
     let source = parity_source("crypto_value_view()", CRYPTO_DECLS);
-    assert_eq!(check_aot_comptime("crypto/expert-pure-values", &source), CRYPTO_EXPECTED);
+    assert_eq!(
+        check_aot_comptime("crypto/expert-pure-values", &source),
+        CRYPTO_EXPECTED
+    );
     check_dev_tiers_with_boundary("crypto-expert-pure-values", &source, CRYPTO_EXPECTED, true);
 }
 
@@ -1643,15 +1644,18 @@ fn net_and_forced_style_values_match_all_execution_tiers_exactly() {
         check_aot_comptime("net/pure-values-and-style-force", &source),
         NET_STYLE_EXPECTED
     );
-    check_dev_tiers("net-pure-values-and-style-force", &source, NET_STYLE_EXPECTED);
+    check_dev_tiers(
+        "net-pure-values-and-style-force",
+        &source,
+        NET_STYLE_EXPECTED,
+    );
 }
 
 #[test]
 fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let read = |path: &str| {
-        fs::read_to_string(root.join(path))
-            .unwrap_or_else(|error| panic!("read {path}: {error}"))
+        fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
     };
 
     let random = read("crates/jet-codegen/src/Prelude/Core/SeededRandom.rs");
@@ -1666,15 +1670,16 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     let path = read("crates/jet-codegen/src/Prelude/Core/Path.rs");
     assert!(path.contains("ParentDir if normal_depth > 0"));
     assert!(path.contains("ParentDir if !rooted"));
-    assert!(read("crates/jet-jit/src/CoreHost.rs")
-        .contains("path_kernel::jet_std_path_normalize"));
+    assert!(read("crates/jet-jit/src/CoreHost.rs").contains("path_kernel::jet_std_path_normalize"));
 
     let fmt = read("crates/jet-codegen/src/Prelude/Core/Fmt.rs");
     assert!(fmt.contains("precision.clamp(0, 9)"));
     assert!(fmt.contains("11..=13"));
     assert!(fmt.contains("fill.is_empty()"));
-    assert!(read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
-        .contains("fmt_kernel::jet_fmt_percent"));
+    assert!(
+        read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
+            .contains("fmt_kernel::jet_fmt_percent")
+    );
 
     let net = read("crates/jet-codegen/src/Prelude/Core/NetPure.rs");
     assert!(net.contains("text.parse()"));
@@ -1687,20 +1692,24 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(math.contains("value.unsigned_abs()"));
     assert!(math.contains("x.is_nan()"));
     assert!(read("crates/jet-jit/build.rs").contains("MathLibPure.rs"));
-    assert!(read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
-        .contains("math_lib_pure::jet_std_math_gcd"));
+    assert!(
+        read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
+            .contains("math_lib_pure::jet_std_math_gcd")
+    );
 
     let loadable = read("crates/jet-codegen/src/Prelude/Core/Loadable.rs");
     assert!(loadable.contains("JET_LOADABLE_FAILED: u8 = 3"));
     assert!(loadable.contains("jet_loadable_has_value"));
-    assert!(read("crates/jet-jit/src/Reactive.rs")
-        .contains("loadable_kernel::jet_loadable_has_value"));
+    assert!(
+        read("crates/jet-jit/src/Reactive.rs").contains("loadable_kernel::jet_loadable_has_value")
+    );
 
     let encoding = read("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs");
     assert!(encoding.contains("while out.len() % 8 != 0"));
     assert!(encoding.contains("s.len() % 2 != 0"));
-    assert!(read("crates/jet-jit/src/Encoding.rs")
-        .contains("encoding_base_rt::jet_std_base32_encode"));
+    assert!(
+        read("crates/jet-jit/src/Encoding.rs").contains("encoding_base_rt::jet_std_base32_encode")
+    );
 
     let text = read("crates/jet-comptime/src/Comptime/TextLite.rs");
     assert!(text.contains("UnicodeTables.rs"));

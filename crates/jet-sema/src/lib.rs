@@ -4,14 +4,17 @@
 // all work within Sema source files without cross-crate path changes.
 pub use jet_comptime::Comptime;
 pub use jet_parser::{
-    CanonicalAST, Collections, Diagnostics, Formatter, Generics, Lexer, Numeric, Parser, Syntax,
-    TargetMachine, Traits, Policy, Registry, AST, SHA256,
+    CanonicalAST, Collections, Diagnostics, Formatter, Generics, Lexer, Numeric, Parser, Policy,
+    Registry, Syntax, TargetMachine, Traits, AST, SHA256,
 };
 pub mod Sema;
-pub use Sema::{effect_key, SemIndexEffectFacts};
 pub use Sema::{cognitive_complexity_reports, CognitiveComplexityReport};
-pub use Sema::{collect_budget_specs, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec, CompileWorkloadFact};
+pub use Sema::{
+    collect_budget_specs, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact,
+    BudgetQuantity, BudgetRawQuantity, BudgetSpec, CompileWorkloadFact,
+};
 pub use Sema::{
     collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,
     PolicyFactGraph,
 };
+pub use Sema::{effect_key, SemIndexEffectFacts};

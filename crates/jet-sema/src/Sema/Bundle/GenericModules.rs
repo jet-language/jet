@@ -1,12 +1,14 @@
 use super::*;
 
-mod Substitution;
 mod Identity;
+mod Substitution;
 
-use Substitution::{substitute_expr, substitute_marker, substitute_markers, substitute_meta, substitute_stmts};
 use Identity::{
     definition_full_key, instance_identity, parameter_bytes, register_instance_fingerprint,
     type_full_key,
+};
+use Substitution::{
+    substitute_expr, substitute_marker, substitute_markers, substitute_meta, substitute_stmts,
 };
 // Budget specs and unit registration read package identity through this module,
 // so the two identity helpers keep their reach at this level.
@@ -21,7 +23,6 @@ pub(in crate::Sema) use Identity::{owning_package, package_identity};
 // TypeParam name substituted by the supplied type arg. The original
 // GenericModule/ModuleAlias items are then erased. This runs before
 // `mangle_inline_sibling_calls` so the expanded body is visible to that pass.
-
 
 fn specialize_func(
     mut func: Func,
@@ -104,20 +105,34 @@ fn mapped_definition_name(name: &str, types: &HashMap<String, Type>) -> String {
 }
 
 pub(super) fn module_type_prefix(alias: &str) -> String {
-    let (visibility, body) = alias.strip_prefix('_').map_or(("", alias), |body| ("_", body));
-    let encoded = body.split('_').map(|segment| {
-        let segment = crate::Syntax::canonical_name_case(segment, crate::Syntax::NameCase::Pascal);
-        format!("{}{segment}", segment.chars().count())
-    }).collect::<String>();
+    let (visibility, body) = alias
+        .strip_prefix('_')
+        .map_or(("", alias), |body| ("_", body));
+    let encoded = body
+        .split('_')
+        .map(|segment| {
+            let segment =
+                crate::Syntax::canonical_name_case(segment, crate::Syntax::NameCase::Pascal);
+            format!("{}{segment}", segment.chars().count())
+        })
+        .collect::<String>();
     format!("{visibility}M{encoded}")
 }
 
 pub(crate) fn module_type_name(alias: &str, name: &str) -> String {
-    format!("{}{}", module_type_prefix(alias), name.trim_start_matches('_'))
+    format!(
+        "{}{}",
+        module_type_prefix(alias),
+        name.trim_start_matches('_')
+    )
 }
 
 fn module_value_name(alias: &str, name: &str) -> String {
-    format!("{}_{}", alias.trim_end_matches('_'), name.trim_start_matches('_'))
+    format!(
+        "{}_{}",
+        alias.trim_end_matches('_'),
+        name.trim_start_matches('_')
+    )
 }
 
 /// Return the source-facing paths for declarations inside one expanded
@@ -130,13 +145,7 @@ pub(super) fn instance_display_paths(module: &CodeModule) -> Vec<(String, String
     let Some(body) = &module.body else {
         return paths;
     };
-    collect_instance_display_paths(
-        &module.name,
-        &module.name,
-        &module.name,
-        body,
-        &mut paths,
-    );
+    collect_instance_display_paths(&module.name, &module.name, &module.name, body, &mut paths);
     paths
 }
 
@@ -163,13 +172,7 @@ pub(super) fn top_level_instance_display_paths(
         .cloned()
         .collect();
     let mut paths = Vec::new();
-    collect_instance_display_paths(
-        &instance.name,
-        "",
-        &instance.name,
-        &selected,
-        &mut paths,
-    );
+    collect_instance_display_paths(&instance.name, "", &instance.name, &selected, &mut paths);
     paths
 }
 
@@ -182,13 +185,7 @@ pub(super) fn plain_inline_module_display_paths(
     items: &[Item],
 ) -> Vec<(String, String)> {
     let mut paths = Vec::new();
-    collect_plain_inline_display_paths(
-        instance,
-        &instance.name,
-        &instance.name,
-        items,
-        &mut paths,
-    );
+    collect_plain_inline_display_paths(instance, &instance.name, &instance.name, items, &mut paths);
     paths
 }
 
@@ -255,7 +252,10 @@ fn collect_instance_display_paths(
     let add = |paths: &mut Vec<(String, String)>, internal: String, display: String| {
         paths.push((internal, display));
     };
-    let add_method = |paths: &mut Vec<(String, String)>, internal_owner: &str, display_owner: &str, name: &str| {
+    let add_method = |paths: &mut Vec<(String, String)>,
+                      internal_owner: &str,
+                      display_owner: &str,
+                      name: &str| {
         add(
             paths,
             format!("{internal_owner}.{name}"),
@@ -373,13 +373,7 @@ fn collect_instance_display_paths(
                 let display = format!("{display_module_path}.{display_name}");
                 add(paths, internal.clone(), display.clone());
                 if let Some(body) = &child.body {
-                    collect_instance_display_paths(
-                        &child.name,
-                        &internal,
-                        &display,
-                        body,
-                        paths,
-                    );
+                    collect_instance_display_paths(&child.name, &internal, &display, body, paths);
                 }
             }
             _ => {}
@@ -387,15 +381,22 @@ fn collect_instance_display_paths(
     }
 }
 
-fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
-    _values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
+fn specialize_tag(
+    source: &crate::AST::TagDef,
+    types: &HashMap<String, Type>,
+    _values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::TagDef {
     let mut result = source.clone();
     result.name = mapped_definition_name(&source.name, types);
     result
 }
 
-fn specialize_test(source: &crate::AST::TestDef, alias: &str,
-    types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TestDef {
+fn specialize_test(
+    source: &crate::AST::TestDef,
+    alias: &str,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> crate::AST::TestDef {
     let mut result = source.clone();
     if let Some(expression) = &mut result.name_expr {
         substitute_expr(expression, types, values);
@@ -417,7 +418,9 @@ fn specialize_test(source: &crate::AST::TestDef, alias: &str,
     result.faults.clear();
     for param in &mut result.params {
         param.ty = specialize_module_type(&param.ty, types, values);
-        if let Some(default) = &mut param.default { substitute_expr(default, types, values); }
+        if let Some(default) = &mut param.default {
+            substitute_expr(default, types, values);
+        }
     }
     substitute_stmts(&mut result.body, types, values);
     result
@@ -435,7 +438,9 @@ fn specialize_trait(
     for method in &mut result.methods {
         for param in &mut method.params {
             param.ty = specialize_module_type(&param.ty, types, values);
-            if let Some(default) = &mut param.default { substitute_expr(default, types, values); }
+            if let Some(default) = &mut param.default {
+                substitute_expr(default, types, values);
+            }
         }
         if let Some(ret) = &mut method.return_type {
             *ret = specialize_module_type(ret, types, values);
@@ -457,12 +462,27 @@ fn specialize_impl(
 ) -> crate::AST::ImplDef {
     let mut result = source.clone();
     result.type_name = mapped_definition_name(&source.type_name, types);
-    result.trait_name = source.trait_name.as_ref().map(|name| mapped_definition_name(name, types));
-    result.methods = source.methods.iter().cloned()
-        .map(|method| specialize_func(method, params, args, types, values)).collect();
-    result.assoc_type_impls = source.assoc_type_impls.iter().map(|(name, span, ty)| {
-        (name.clone(), *span, specialize_module_type(ty, types, values))
-    }).collect();
+    result.trait_name = source
+        .trait_name
+        .as_ref()
+        .map(|name| mapped_definition_name(name, types));
+    result.methods = source
+        .methods
+        .iter()
+        .cloned()
+        .map(|method| specialize_func(method, params, args, types, values))
+        .collect();
+    result.assoc_type_impls = source
+        .assoc_type_impls
+        .iter()
+        .map(|(name, span, ty)| {
+            (
+                name.clone(),
+                *span,
+                specialize_module_type(ty, types, values),
+            )
+        })
+        .collect();
     result
 }
 
@@ -484,7 +504,11 @@ fn specialize_module_type(
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> Type {
     let mut resolved = crate::Generics::substitute_type(ty, types);
-    fn lengths(ty: &mut Type, types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) {
+    fn lengths(
+        ty: &mut Type,
+        types: &HashMap<String, Type>,
+        values: &HashMap<String, crate::AST::CtValue>,
+    ) {
         match ty {
             Type::FixedList { elem, len } => {
                 lengths(elem, types, values);
@@ -495,10 +519,25 @@ fn specialize_module_type(
                     })
                 });
             }
-            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => lengths(inner, types, values),
-            Type::Map { key, value, .. } => { lengths(key, types, values); lengths(value, types, values); }
-            Type::Result { ok, err } => { lengths(ok, types, values); lengths(err, types, values); }
-            Type::Fn { params, ret, .. } => { for param in params { lengths(param, types, values); } if let Some(ret) = ret { lengths(ret, types, values); } }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+                lengths(inner, types, values)
+            }
+            Type::Map { key, value, .. } => {
+                lengths(key, types, values);
+                lengths(value, types, values);
+            }
+            Type::Result { ok, err } => {
+                lengths(ok, types, values);
+                lengths(err, types, values);
+            }
+            Type::Fn { params, ret, .. } => {
+                for param in params {
+                    lengths(param, types, values);
+                }
+                if let Some(ret) = ret {
+                    lengths(ret, types, values);
+                }
+            }
             Type::Apply { name, args } => {
                 if matches!(name.as_str(), "Vec" | "Matrix") {
                     for argument in args.iter_mut() {
@@ -514,7 +553,9 @@ fn specialize_module_type(
                 }
                 args.iter_mut().for_each(|arg| lengths(arg, types, values));
             }
-            Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, types, values)),
+            Type::Tuple(fields) => fields
+                .iter_mut()
+                .for_each(|(_, ty)| lengths(ty, types, values)),
             Type::Tagged { marker, inner } => {
                 // Only a user-written tag name (D-QUAL4) can coincide with a
                 // generic type-parameter name; an `Internal` fact never is one.
@@ -541,33 +582,62 @@ fn specialize_nested_code_module(
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> CodeModule {
     let body = module.body.as_ref().map(|items| {
-        items.iter().filter_map(|item| match item {
-            Item::Func(def) => Some(Item::Func(specialize_func(def.clone(), params, args, types, values))),
-            Item::Struct(def) => Some(Item::Struct(specialize_struct(def, "", params, args, types, values))),
-            Item::Enum(def) => Some(Item::Enum(specialize_enum(def, "", params, args, types, values))),
-            Item::Const(def) => {
-                let mut value = def.value.clone();
-                substitute_expr(&mut value, types, values);
-                let mut result = def.clone();
-                result.value = value;
-                result.ty = def.ty.as_ref().map(|ty| specialize_module_type(ty, types, values));
-                substitute_meta(&mut result.meta, types, values);
-                Some(Item::Const(result))
-            }
-            Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(child, params, args, types, values))),
-            Item::GenericModule(def) => Some(Item::GenericModule(
-                specialize_nested_template_outer(def, types, values),
-            )),
-            Item::ModuleAlias(def) => Some(Item::ModuleAlias(
-                specialize_nested_alias_outer(def, types, values),
-            )),
-            Item::Trait(def) => Some(Item::Trait(specialize_trait(def, params, args, types, values))),
-            Item::Tag(def) => Some(Item::Tag(specialize_tag(def, types, values))),
-            Item::Impl(def) => Some(Item::Impl(specialize_impl(def, params, args, types, values))),
-            Item::ErrorConv(def) => Some(Item::ErrorConv(specialize_error_conv(def, types, values))),
-            Item::Test(def) => Some(Item::Test(specialize_test(def, &module.name, types, values))),
-            _ => None,
-        }).collect()
+        items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Func(def) => Some(Item::Func(specialize_func(
+                    def.clone(),
+                    params,
+                    args,
+                    types,
+                    values,
+                ))),
+                Item::Struct(def) => Some(Item::Struct(specialize_struct(
+                    def, "", params, args, types, values,
+                ))),
+                Item::Enum(def) => Some(Item::Enum(specialize_enum(
+                    def, "", params, args, types, values,
+                ))),
+                Item::Const(def) => {
+                    let mut value = def.value.clone();
+                    substitute_expr(&mut value, types, values);
+                    let mut result = def.clone();
+                    result.value = value;
+                    result.ty = def
+                        .ty
+                        .as_ref()
+                        .map(|ty| specialize_module_type(ty, types, values));
+                    substitute_meta(&mut result.meta, types, values);
+                    Some(Item::Const(result))
+                }
+                Item::CodeModule(child) => Some(Item::CodeModule(specialize_nested_code_module(
+                    child, params, args, types, values,
+                ))),
+                Item::GenericModule(def) => Some(Item::GenericModule(
+                    specialize_nested_template_outer(def, types, values),
+                )),
+                Item::ModuleAlias(def) => Some(Item::ModuleAlias(specialize_nested_alias_outer(
+                    def, types, values,
+                ))),
+                Item::Trait(def) => Some(Item::Trait(specialize_trait(
+                    def, params, args, types, values,
+                ))),
+                Item::Tag(def) => Some(Item::Tag(specialize_tag(def, types, values))),
+                Item::Impl(def) => Some(Item::Impl(specialize_impl(
+                    def, params, args, types, values,
+                ))),
+                Item::ErrorConv(def) => {
+                    Some(Item::ErrorConv(specialize_error_conv(def, types, values)))
+                }
+                Item::Test(def) => Some(Item::Test(specialize_test(
+                    def,
+                    &module.name,
+                    types,
+                    values,
+                ))),
+                _ => None,
+            })
+            .collect()
     });
     let mut result = module.clone();
     result.body = body;
@@ -584,7 +654,8 @@ fn specialize_struct(
 ) -> crate::AST::StructDef {
     let mut types = definition_types.clone();
     for (param, arg) in params.iter().zip(args) {
-        if let (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) = (param, arg) {
+        if let (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) = (param, arg)
+        {
             types.insert(name.clone(), ty.clone());
         }
     }
@@ -602,15 +673,7 @@ fn specialize_struct(
         .methods
         .iter()
         .cloned()
-        .map(|method| {
-            specialize_func(
-                method,
-                params,
-                args,
-                definition_types,
-                definition_values,
-            )
-        })
+        .map(|method| specialize_func(method, params, args, definition_types, definition_values))
         .collect();
     let trait_impls = source
         .trait_impls
@@ -623,13 +686,7 @@ fn specialize_struct(
                 .iter()
                 .cloned()
                 .map(|method| {
-                    specialize_func(
-                        method,
-                        params,
-                        args,
-                        definition_types,
-                        definition_values,
-                    )
+                    specialize_func(method, params, args, definition_types, definition_values)
                 })
                 .collect(),
             compiler_generated: block.compiler_generated,
@@ -655,9 +712,11 @@ fn specialize_struct(
     result.trait_impls = trait_impls;
     substitute_markers(&mut result.serde_markers, &types, definition_values);
     substitute_markers(&mut result.type_markers, &types, definition_values);
-    result.derives = source.derives.iter().map(|(name, span)| {
-        (mapped_definition_name(name, &types), *span)
-    }).collect();
+    result.derives = source
+        .derives
+        .iter()
+        .map(|(name, span)| (mapped_definition_name(name, &types), *span))
+        .collect();
     result
 }
 
@@ -675,7 +734,8 @@ fn specialize_enum(
 ) -> crate::AST::EnumDef {
     let mut types = definition_types.clone();
     for (param, arg) in params.iter().zip(args) {
-        if let (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) = (param, arg) {
+        if let (ResolvedModuleParam::Type { name, .. }, ResolvedModuleArg::Type(ty)) = (param, arg)
+        {
             types.insert(name.clone(), ty.clone());
         }
     }
@@ -719,15 +779,7 @@ fn specialize_enum(
         .methods
         .iter()
         .cloned()
-        .map(|method| {
-            specialize_func(
-                method,
-                params,
-                args,
-                definition_types,
-                definition_values,
-            )
-        })
+        .map(|method| specialize_func(method, params, args, definition_types, definition_values))
         .collect();
     let trait_impls = source
         .trait_impls
@@ -740,13 +792,7 @@ fn specialize_enum(
                 .iter()
                 .cloned()
                 .map(|method| {
-                    specialize_func(
-                        method,
-                        params,
-                        args,
-                        definition_types,
-                        definition_values,
-                    )
+                    specialize_func(method, params, args, definition_types, definition_values)
                 })
                 .collect(),
             compiler_generated: block.compiler_generated,
@@ -772,9 +818,11 @@ fn specialize_enum(
     result.trait_impls = trait_impls;
     substitute_markers(&mut result.serde_markers, &types, definition_values);
     substitute_markers(&mut result.type_markers, &types, definition_values);
-    result.derives = source.derives.iter().map(|(name, span)| {
-        (mapped_definition_name(name, &types), *span)
-    }).collect();
+    result.derives = source
+        .derives
+        .iter()
+        .map(|(name, span)| (mapped_definition_name(name, &types), *span))
+        .collect();
     result
 }
 
@@ -803,10 +851,7 @@ struct TemplateInfo {
     build_facts: jet_foundation::Facts::BuildFactSnapshot,
 }
 
-fn collect_generic_module_spans(
-    items: &[Item],
-    spans: &mut Vec<crate::Diagnostics::Span>,
-) {
+fn collect_generic_module_spans(items: &[Item], spans: &mut Vec<crate::Diagnostics::Span>) {
     for item in items {
         match item {
             Item::GenericModule(def) => {
@@ -852,9 +897,20 @@ fn specialize_rule_facts(
 fn clone_definition_items(items: &[Item]) -> Vec<Item> {
     items
         .iter()
-        .filter(|item| matches!(item, Item::Func(_) | Item::Struct(_) | Item::Enum(_)
-            | Item::Trait(_) | Item::Tag(_) | Item::Impl(_) | Item::ErrorConv(_)
-            | Item::Test(_) | Item::Const(_)))
+        .filter(|item| {
+            matches!(
+                item,
+                Item::Func(_)
+                    | Item::Struct(_)
+                    | Item::Enum(_)
+                    | Item::Trait(_)
+                    | Item::Tag(_)
+                    | Item::Impl(_)
+                    | Item::ErrorConv(_)
+                    | Item::Test(_)
+                    | Item::Const(_)
+            )
+        })
         .cloned()
         .collect()
 }
@@ -871,18 +927,24 @@ fn specialize_nested_template_outer(
     values: &HashMap<String, crate::AST::CtValue>,
 ) -> GenericModuleDef {
     let mut result = source.clone();
-    result.body = result.body.into_iter().map(|item| match item {
-        Item::Func(func) => Item::Func(specialize_func(func, &[], &[], types, values)),
-        Item::Struct(def) => Item::Struct(specialize_struct(&def, "", &[], &[], types, values)),
-        Item::Enum(def) => Item::Enum(specialize_enum(&def, "", &[], &[], types, values)),
-        Item::Trait(def) => Item::Trait(specialize_trait(&def, &[], &[], types, values)),
-        Item::Tag(def) => Item::Tag(specialize_tag(&def, types, values)),
-        Item::Impl(def) => Item::Impl(specialize_impl(&def, &[], &[], types, values)),
-        Item::ErrorConv(def) => Item::ErrorConv(specialize_error_conv(&def, types, values)),
-        Item::Test(def) => Item::Test(specialize_test(&def, &source.name, types, values)),
-        Item::GenericModule(def) => Item::GenericModule(specialize_nested_template_outer(&def, types, values)),
-        other => other,
-    }).collect();
+    result.body = result
+        .body
+        .into_iter()
+        .map(|item| match item {
+            Item::Func(func) => Item::Func(specialize_func(func, &[], &[], types, values)),
+            Item::Struct(def) => Item::Struct(specialize_struct(&def, "", &[], &[], types, values)),
+            Item::Enum(def) => Item::Enum(specialize_enum(&def, "", &[], &[], types, values)),
+            Item::Trait(def) => Item::Trait(specialize_trait(&def, &[], &[], types, values)),
+            Item::Tag(def) => Item::Tag(specialize_tag(&def, types, values)),
+            Item::Impl(def) => Item::Impl(specialize_impl(&def, &[], &[], types, values)),
+            Item::ErrorConv(def) => Item::ErrorConv(specialize_error_conv(&def, types, values)),
+            Item::Test(def) => Item::Test(specialize_test(&def, &source.name, types, values)),
+            Item::GenericModule(def) => {
+                Item::GenericModule(specialize_nested_template_outer(&def, types, values))
+            }
+            other => other,
+        })
+        .collect();
     result
 }
 
@@ -898,9 +960,16 @@ fn specialize_nested_alias_outer(
             ModuleArg::Value(expr, _) => substitute_expr(expr, types, values),
         }
     }
-    ModuleAliasDef { name: source.name.clone(), name_span: source.name_span,
-        is_pub: source.is_pub, is_package_pub: source.is_package_pub, target: source.target.clone(),
-        target_span: source.target_span, args, span: source.span }
+    ModuleAliasDef {
+        name: source.name.clone(),
+        name_span: source.name_span,
+        is_pub: source.is_pub,
+        is_package_pub: source.is_package_pub,
+        target: source.target.clone(),
+        target_span: source.target_span,
+        args,
+        span: source.span,
+    }
 }
 
 fn expand_nested_generics_in_code_module(
@@ -918,13 +987,17 @@ fn expand_nested_generics_in_code_module(
     fingerprints: &mut HashMap<String, Vec<u8>>,
     applications: &mut HashMap<String, Vec<crate::AST::ModuleInstanceApplication>>,
 ) -> Vec<Item> {
-    let Some(items) = module.body.as_mut() else { return Vec::new() };
+    let Some(items) = module.body.as_mut() else {
+        return Vec::new();
+    };
     let enclosing_identity = crate::SHA256::sha256_hex(enclosing_full_key);
     let scope_full_key = definition_full_key("nested", "", &enclosing_identity, lexical_path);
     let mut declarations = Vec::new();
 
     for item in items.iter_mut() {
-        let Item::CodeModule(child) = item else { continue };
+        let Item::CodeModule(child) = item else {
+            continue;
+        };
         let child_local = child.name.clone();
         child.name = module_value_name(&module.name, &child_local);
         declarations.extend(expand_nested_generics_in_code_module(
@@ -944,14 +1017,24 @@ fn expand_nested_generics_in_code_module(
         ));
     }
 
-    let nested_defs: Vec<GenericModuleDef> = items.iter().filter_map(|item| {
-        let Item::GenericModule(def) = item else { return None };
-        Some(def.clone())
-    }).collect();
-    let alias_defs: Vec<ModuleAliasDef> = items.iter().filter_map(|item| {
-        let Item::ModuleAlias(def) = item else { return None };
-        Some(def.clone())
-    }).collect();
+    let nested_defs: Vec<GenericModuleDef> = items
+        .iter()
+        .filter_map(|item| {
+            let Item::GenericModule(def) = item else {
+                return None;
+            };
+            Some(def.clone())
+        })
+        .collect();
+    let alias_defs: Vec<ModuleAliasDef> = items
+        .iter()
+        .filter_map(|item| {
+            let Item::ModuleAlias(def) = item else {
+                return None;
+            };
+            Some(def.clone())
+        })
+        .collect();
     if nested_defs.is_empty() && alias_defs.is_empty() {
         return declarations;
     }
@@ -965,16 +1048,25 @@ fn expand_nested_generics_in_code_module(
     traits.register_synthetic_io();
     traits.register_synthetic_driver();
     traits.register_items(items, &mut Vec::new());
-    for def in &nested_defs { traits.register_items(&def.body, &mut Vec::new()); }
+    for def in &nested_defs {
+        traits.register_items(&def.body, &mut Vec::new());
+    }
 
-    let enums: HashMap<String, bool> = items.iter()
+    let enums: HashMap<String, bool> = items
+        .iter()
         .chain(nested_defs.iter().flat_map(|def| def.body.iter()))
         .filter_map(|item| {
             let Item::Enum(def) = item else { return None };
-            Some((def.name.clone(), def.variants.iter().all(|variant| matches!(variant.payload, VariantPayload::Unit))))
+            Some((
+                def.name.clone(),
+                def.variants
+                    .iter()
+                    .all(|variant| matches!(variant.payload, VariantPayload::Unit)),
+            ))
         })
         .collect();
-    let funcs: HashMap<String, &Func> = items.iter()
+    let funcs: HashMap<String, &Func> = items
+        .iter()
         .chain(nested_defs.iter().flat_map(|def| def.body.iter()))
         .filter_map(|item| {
             let Item::Func(def) = item else { return None };
@@ -999,21 +1091,33 @@ fn expand_nested_generics_in_code_module(
         }
     }
 
-    let templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
-        let full_key = definition_full_key("nested", "", &crate::SHA256::sha256_hex(&scope_full_key), &def.name);
-        (def.name.clone(), TemplateInfo {
-            def: def.clone(),
-            definition_id: crate::SHA256::sha256_hex(&full_key),
-            definition_full_key: full_key,
-            params: resolve_params(def, &enums, diags),
-            source_module: consumer_module,
-            source_items: Vec::new(),
-            source_values: values.clone(),
-            source_rule_facts: source_rule_facts.to_vec(),
-            build_facts: build_facts.clone(),
+    let templates: HashMap<String, TemplateInfo> = nested_defs
+        .iter()
+        .map(|def| {
+            let full_key = definition_full_key(
+                "nested",
+                "",
+                &crate::SHA256::sha256_hex(&scope_full_key),
+                &def.name,
+            );
+            (
+                def.name.clone(),
+                TemplateInfo {
+                    def: def.clone(),
+                    definition_id: crate::SHA256::sha256_hex(&full_key),
+                    definition_full_key: full_key,
+                    params: resolve_params(def, &enums, diags),
+                    source_module: consumer_module,
+                    source_items: Vec::new(),
+                    source_values: values.clone(),
+                    source_rule_facts: source_rule_facts.to_vec(),
+                    build_facts: build_facts.clone(),
+                },
+            )
         })
-    }).collect();
-    let aliases: HashMap<String, &ModuleAliasDef> = alias_defs.iter()
+        .collect();
+    let aliases: HashMap<String, &ModuleAliasDef> = alias_defs
+        .iter()
         .map(|def| (def.name.clone(), def))
         .collect();
     let mut ordered: Vec<&ModuleAliasDef> = alias_defs.iter().collect();
@@ -1026,7 +1130,8 @@ fn expand_nested_generics_in_code_module(
         if alias_chain_contains(nested_alias, &aliases, &invalid_aliases) {
             continue;
         }
-        let Some(mut resolved) = resolve_local_alias(nested_alias, &aliases, &templates, diags) else {
+        let Some(mut resolved) = resolve_local_alias(nested_alias, &aliases, &templates, diags)
+        else {
             invalid_aliases.insert(nested_alias.name.clone());
             continue;
         };
@@ -1035,7 +1140,10 @@ fn expand_nested_generics_in_code_module(
         let Some(info) = templates.get(&resolved.target) else {
             diags.push(Diagnostic::error(
                 "E0850",
-                format!("generic module `{}` not found in this scope", resolved.target),
+                format!(
+                    "generic module `{}` not found in this scope",
+                    resolved.target
+                ),
                 "check the module template name and make sure it is defined in the same file"
                     .to_string(),
                 format!("example: `module {} :: MyTemplate<String>`", local_name),
@@ -1044,7 +1152,16 @@ fn expand_nested_generics_in_code_module(
             invalid_aliases.insert(nested_alias.name.clone());
             continue;
         };
-        let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &values, build_facts, &enums, diags) else {
+        let Some(args) = resolve_args(
+            &resolved,
+            info,
+            &traits,
+            &funcs,
+            &values,
+            build_facts,
+            &enums,
+            diags,
+        ) else {
             invalid_aliases.insert(nested_alias.name.clone());
             continue;
         };
@@ -1078,8 +1195,11 @@ fn expand_nested_generics_in_code_module(
                 fingerprints,
                 applications,
                 Some(args),
-            ) else { continue };
-            let identity = instance_identity(&key, info, &resolved, application_module, &identity_args);
+            ) else {
+                continue;
+            };
+            let identity =
+                instance_identity(&key, info, &resolved, application_module, &identity_args);
             register_instance_fingerprint(fingerprints, &identity, resolved.span);
             expansion.module.instance_identity = Some(identity);
             instances.insert(key, resolved.name.clone());
@@ -1126,7 +1246,10 @@ fn expand_nested_generics_in_code_module(
 }
 
 #[derive(Clone)]
-enum ResolvedModuleArg { Type(Type), Value(crate::AST::CtValue, Vec<u8>) }
+enum ResolvedModuleArg {
+    Type(Type),
+    Value(crate::AST::CtValue, Vec<u8>),
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ModuleInstanceKey {
@@ -1167,7 +1290,13 @@ fn normalized_instance_type(ty: &Type, aliases: &HashMap<String, Type>) -> Type 
                 seen.remove(name);
             }
         }
-        crate::Generics::substitute_type(ty, &aliases.iter().map(|(name, target)| (name.clone(), target.clone())).collect())
+        crate::Generics::substitute_type(
+            ty,
+            &aliases
+                .iter()
+                .map(|(name, target)| (name.clone(), target.clone()))
+                .collect(),
+        )
     }
     go(ty, aliases, &mut HashSet::new())
 }
@@ -1177,21 +1306,28 @@ fn instance_key(
     args: &[ResolvedModuleArg],
     type_aliases: &HashMap<String, Type>,
 ) -> ModuleInstanceKey {
-    let args = args.iter().map(|arg| match arg {
-        ResolvedModuleArg::Type(ty) => {
-            let key = type_full_key(&normalized_instance_type(ty, type_aliases));
-            let mut bytes = vec![0];
-            frame_bytes(&mut bytes, &key);
-            bytes
-        }
-        ResolvedModuleArg::Value(_, normalized) => {
-            let mut bytes = vec![1];
-            bytes.extend_from_slice(&(normalized.len() as u64).to_be_bytes());
-            bytes.extend_from_slice(normalized);
-            bytes
-        }
-    }).collect();
-    ModuleInstanceKey { definition_full_key: info.definition_full_key.clone(), parameters: parameter_bytes(&info.params), args }
+    let args = args
+        .iter()
+        .map(|arg| match arg {
+            ResolvedModuleArg::Type(ty) => {
+                let key = type_full_key(&normalized_instance_type(ty, type_aliases));
+                let mut bytes = vec![0];
+                frame_bytes(&mut bytes, &key);
+                bytes
+            }
+            ResolvedModuleArg::Value(_, normalized) => {
+                let mut bytes = vec![1];
+                bytes.extend_from_slice(&(normalized.len() as u64).to_be_bytes());
+                bytes.extend_from_slice(normalized);
+                bytes
+            }
+        })
+        .collect();
+    ModuleInstanceKey {
+        definition_full_key: info.definition_full_key.clone(),
+        parameters: parameter_bytes(&info.params),
+        args,
+    }
 }
 
 fn resolve_params(
@@ -1241,11 +1377,71 @@ fn resolve_params(
         .collect()
 }
 
-fn type_name(ty:&Type)->String{match ty{Type::Int=>"Int".into(),Type::Bool=>"Bool".into(),Type::Char=>"Char".into(),Type::String=>"String".into(),Type::Named(n)=>n.clone(),Type::Apply{name,..}=>name.clone(),other=>format!("{other:?}")}}
-fn value_type(value:&crate::AST::CtValue)->Option<Type>{match value{crate::AST::CtValue::Bool(_)=>Some(Type::Bool),crate::AST::CtValue::Int(_)=>Some(Type::Int),crate::AST::CtValue::Char(_)=>Some(Type::Char),crate::AST::CtValue::Str(_)=>Some(Type::String),crate::AST::CtValue::Enum{type_name,args,..}if args.is_empty()=>Some(Type::Named(type_name.clone())),_=>None}}
-fn normalized_value(value:&crate::AST::CtValue)->Option<Vec<u8>>{let mut out=Vec::new();match value{crate::AST::CtValue::Bool(v)=>{out.extend_from_slice(&[1,u8::from(*v)]);},crate::AST::CtValue::Int(v)=>{out.push(2);out.extend_from_slice(&v.to_be_bytes());},crate::AST::CtValue::Char(v)=>{out.push(3);out.extend_from_slice(&(*v as u32).to_be_bytes());},crate::AST::CtValue::Str(v)=>{out.push(4);out.extend_from_slice(&(v.len() as u64).to_be_bytes());out.extend_from_slice(v.as_bytes());},crate::AST::CtValue::Enum{type_name,variant,args}if args.is_empty()=>{out.push(5);for text in [type_name,variant]{out.extend_from_slice(&(text.len() as u64).to_be_bytes());out.extend_from_slice(text.as_bytes());}},_=>return None}Some(out)}
+fn type_name(ty: &Type) -> String {
+    match ty {
+        Type::Int => "Int".into(),
+        Type::Bool => "Bool".into(),
+        Type::Char => "Char".into(),
+        Type::String => "String".into(),
+        Type::Named(n) => n.clone(),
+        Type::Apply { name, .. } => name.clone(),
+        other => format!("{other:?}"),
+    }
+}
+fn value_type(value: &crate::AST::CtValue) -> Option<Type> {
+    match value {
+        crate::AST::CtValue::Bool(_) => Some(Type::Bool),
+        crate::AST::CtValue::Int(_) => Some(Type::Int),
+        crate::AST::CtValue::Char(_) => Some(Type::Char),
+        crate::AST::CtValue::Str(_) => Some(Type::String),
+        crate::AST::CtValue::Enum {
+            type_name, args, ..
+        } if args.is_empty() => Some(Type::Named(type_name.clone())),
+        _ => None,
+    }
+}
+fn normalized_value(value: &crate::AST::CtValue) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    match value {
+        crate::AST::CtValue::Bool(v) => {
+            out.extend_from_slice(&[1, u8::from(*v)]);
+        }
+        crate::AST::CtValue::Int(v) => {
+            out.push(2);
+            out.extend_from_slice(&v.to_be_bytes());
+        }
+        crate::AST::CtValue::Char(v) => {
+            out.push(3);
+            out.extend_from_slice(&(*v as u32).to_be_bytes());
+        }
+        crate::AST::CtValue::Str(v) => {
+            out.push(4);
+            out.extend_from_slice(&(v.len() as u64).to_be_bytes());
+            out.extend_from_slice(v.as_bytes());
+        }
+        crate::AST::CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if args.is_empty() => {
+            out.push(5);
+            for text in [type_name, variant] {
+                out.extend_from_slice(&(text.len() as u64).to_be_bytes());
+                out.extend_from_slice(text.as_bytes());
+            }
+        }
+        _ => return None,
+    }
+    Some(out)
+}
 
-fn module_arg_expr(arg:&ModuleArg)->Option<Expr>{match arg{ModuleArg::Value(expr,_)=>Some(expr.clone()),ModuleArg::Type(Type::Named(name),span)=>Some(Expr::Ident(name.clone(),*span)),_=>None}}
+fn module_arg_expr(arg: &ModuleArg) -> Option<Expr> {
+    match arg {
+        ModuleArg::Value(expr, _) => Some(expr.clone()),
+        ModuleArg::Type(Type::Named(name), span) => Some(Expr::Ident(name.clone(), *span)),
+        _ => None,
+    }
+}
 
 fn resolve_args(
     alias: &ModuleAliasDef,
@@ -1282,7 +1478,9 @@ fn resolve_args(
                         diags.push(Diagnostic::error(
                             "E0852",
                             format!("type argument `{identity}` does not satisfy `{bound}`"),
-                            format!("generic module parameter `{name}` requires the `{bound}` bound"),
+                            format!(
+                                "generic module parameter `{name}` requires the `{bound}` bound"
+                            ),
                             format!("pass a type that implements `{bound}`"),
                             Some(arg.span()),
                         ));
@@ -1296,8 +1494,14 @@ fn resolve_args(
                     diags.push(Diagnostic::error(
                         "E0853",
                         format!("value argument for `{name}` has the wrong type"),
-                        format!("this slot requires an exact `{}` Tier-0 value", type_name(ty)),
-                        format!("pass a compile-time `{}` value without conversion", type_name(ty)),
+                        format!(
+                            "this slot requires an exact `{}` Tier-0 value",
+                            type_name(ty)
+                        ),
+                        format!(
+                            "pass a compile-time `{}` value without conversion",
+                            type_name(ty)
+                        ),
                         Some(arg.span()),
                     ));
                     return None;
@@ -1317,7 +1521,10 @@ fn resolve_args(
                             format!("value argument for `{name}` is not known at compile time"),
                             "generic module instances need one closed, deterministic Tier-0 value"
                                 .to_string(),
-                            format!("pass a literal, a `@build.*` fact, or a comptime `{}` value", type_name(ty)),
+                            format!(
+                                "pass a literal, a `@build.*` fact, or a comptime `{}` value",
+                                type_name(ty)
+                            ),
                             Some(arg.span()),
                         ));
                         return None;
@@ -1338,7 +1545,10 @@ fn resolve_args(
                                 .map(type_name)
                                 .unwrap_or_else(|| "non-Tier-0 value".into())
                         ),
-                        format!("pass a compile-time `{}` value without conversion", type_name(ty)),
+                        format!(
+                            "pass a compile-time `{}` value without conversion",
+                            type_name(ty)
+                        ),
                         Some(arg.span()),
                     ));
                     return None;
@@ -1351,7 +1561,16 @@ fn resolve_args(
     Some(out)
 }
 
-trait ModuleArgSpan{fn span(&self)->crate::Diagnostics::Span;}impl ModuleArgSpan for ModuleArg{fn span(&self)->crate::Diagnostics::Span{match self{ModuleArg::Type(_,s)|ModuleArg::Value(_,s)=>*s}}}
+trait ModuleArgSpan {
+    fn span(&self) -> crate::Diagnostics::Span;
+}
+impl ModuleArgSpan for ModuleArg {
+    fn span(&self) -> crate::Diagnostics::Span {
+        match self {
+            ModuleArg::Type(_, s) | ModuleArg::Value(_, s) => *s,
+        }
+    }
+}
 
 fn expand_alias(
     alias: &ModuleAliasDef,
@@ -1360,11 +1579,11 @@ fn expand_alias(
     instance_full_key: &[u8],
     templates: &std::collections::HashMap<String, TemplateInfo>,
     diags: &mut Vec<Diagnostic>,
-    traits:&TraitRegistry,
-    funcs:&HashMap<String,&Func>,
-    globals:&HashMap<String,crate::AST::CtValue>,
-    build_facts:&jet_foundation::Facts::BuildFactSnapshot,
-    enums:&HashMap<String,bool>,
+    traits: &TraitRegistry,
+    funcs: &HashMap<String, &Func>,
+    globals: &HashMap<String, crate::AST::CtValue>,
+    build_facts: &jet_foundation::Facts::BuildFactSnapshot,
+    enums: &HashMap<String, bool>,
     instances: &mut HashMap<ModuleInstanceKey, String>,
     fingerprints: &mut HashMap<String, Vec<u8>>,
     applications: &mut HashMap<String, Vec<crate::AST::ModuleInstanceApplication>>,
@@ -1419,7 +1638,16 @@ fn expand_alias(
     }
     let resolved_args = match resolved_args {
         Some(args) => args,
-        None => resolve_args(alias, info, traits, funcs, globals, build_facts, enums, diags)?,
+        None => resolve_args(
+            alias,
+            info,
+            traits,
+            funcs,
+            globals,
+            build_facts,
+            enums,
+            diags,
+        )?,
     };
     let mut type_args = HashMap::new();
     let mut value_args = HashMap::new();
@@ -1444,7 +1672,10 @@ fn expand_alias(
             _ => None,
         };
         if let Some(name) = name {
-            definition_types.insert(name.clone(), Type::Named(module_type_name(&alias.name, name)));
+            definition_types.insert(
+                name.clone(),
+                Type::Named(module_type_name(&alias.name, name)),
+            );
         }
     }
     for item in &template.body {
@@ -1504,16 +1735,28 @@ fn expand_alias(
                 &definition_values,
             ))),
             Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
-                def, &[], &[], &definition_types, &definition_values,
+                def,
+                &[],
+                &[],
+                &definition_types,
+                &definition_values,
             ))),
             Item::Tag(def) => declarations.push(Item::Tag(specialize_tag(
-                def, &definition_types, &definition_values,
+                def,
+                &definition_types,
+                &definition_values,
             ))),
             Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
-                def, &[], &[], &definition_types, &definition_values,
+                def,
+                &[],
+                &[],
+                &definition_types,
+                &definition_values,
             ))),
             Item::ErrorConv(def) => declarations.push(Item::ErrorConv(specialize_error_conv(
-                def, &definition_types, &definition_values,
+                def,
+                &definition_types,
+                &definition_values,
             ))),
             _ => {}
         }
@@ -1592,27 +1835,42 @@ fn expand_alias(
         }
         if let Item::Trait(def) = item {
             declarations.push(Item::Trait(specialize_trait(
-                def, &info.params, &resolved_args, &definition_types, &definition_values,
+                def,
+                &info.params,
+                &resolved_args,
+                &definition_types,
+                &definition_values,
             )));
         }
         if let Item::Tag(def) = item {
             declarations.push(Item::Tag(specialize_tag(
-                def, &definition_types, &definition_values,
+                def,
+                &definition_types,
+                &definition_values,
             )));
         }
         if let Item::Impl(def) = item {
             declarations.push(Item::Impl(specialize_impl(
-                def, &info.params, &resolved_args, &definition_types, &definition_values,
+                def,
+                &info.params,
+                &resolved_args,
+                &definition_types,
+                &definition_values,
             )));
         }
         if let Item::ErrorConv(def) = item {
             declarations.push(Item::ErrorConv(specialize_error_conv(
-                def, &definition_types, &definition_values,
+                def,
+                &definition_types,
+                &definition_values,
             )));
         }
         if let Item::Test(def) = item {
             declarations.push(Item::Test(specialize_test(
-                def, &alias.name, &definition_types, &definition_values,
+                def,
+                &alias.name,
+                &definition_types,
+                &definition_values,
             )));
         }
         if let Item::CodeModule(module) = item {
@@ -1658,28 +1916,40 @@ fn expand_alias(
             _ => None,
         })
         .collect();
-    body.extend(template
-        .body
-        .iter()
-        .filter_map(|item| match item {
-            Item::Func(func) => Some(Item::Func(specialize_func(
-                func.clone(),
-                &info.params,
-                &resolved_args,
-                &definition_types,
-                &definition_values,
-            ))),
-            Item::Const(_) => None,
-            _ => None,
-        })
-        .collect::<Vec<_>>());
+    body.extend(
+        template
+            .body
+            .iter()
+            .filter_map(|item| match item {
+                Item::Func(func) => Some(Item::Func(specialize_func(
+                    func.clone(),
+                    &info.params,
+                    &resolved_args,
+                    &definition_types,
+                    &definition_values,
+                ))),
+                Item::Const(_) => None,
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+    );
 
     // BODY1: nested generic templates close over the outer instance. Resolve
     // their aliases now, while the outer type/value environment is concrete.
-    let nested_defs: Vec<GenericModuleDef> = template.body.iter().filter_map(|item| {
-        let Item::GenericModule(def) = item else { return None };
-        Some(specialize_nested_template_outer(def, &definition_types, &definition_values))
-    }).collect();
+    let nested_defs: Vec<GenericModuleDef> = template
+        .body
+        .iter()
+        .filter_map(|item| {
+            let Item::GenericModule(def) = item else {
+                return None;
+            };
+            Some(specialize_nested_template_outer(
+                def,
+                &definition_types,
+                &definition_values,
+            ))
+        })
+        .collect();
     if !nested_defs.is_empty() {
         // Disposable bound-resolution registry, same rationale as
         // `expand_generic_module_aliases` above: register builtin hook
@@ -1694,36 +1964,82 @@ fn expand_alias(
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
         nested_traits.register_synthetic_driver();
-        for def in &nested_defs { nested_traits.register_items(&def.body, &mut Vec::new()); }
-        let nested_enums: HashMap<String, bool> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
-            let Item::Enum(def) = item else { return None };
-            Some((def.name.clone(), def.variants.iter().all(|v| matches!(v.payload, VariantPayload::Unit))))
-        }).collect();
-        let nested_funcs: HashMap<String, &Func> = nested_defs.iter().flat_map(|def| def.body.iter()).filter_map(|item| {
-            let Item::Func(def) = item else { return None }; Some((def.name.clone(), def))
-        }).collect();
+        for def in &nested_defs {
+            nested_traits.register_items(&def.body, &mut Vec::new());
+        }
+        let nested_enums: HashMap<String, bool> = nested_defs
+            .iter()
+            .flat_map(|def| def.body.iter())
+            .filter_map(|item| {
+                let Item::Enum(def) = item else { return None };
+                Some((
+                    def.name.clone(),
+                    def.variants
+                        .iter()
+                        .all(|v| matches!(v.payload, VariantPayload::Unit)),
+                ))
+            })
+            .collect();
+        let nested_funcs: HashMap<String, &Func> = nested_defs
+            .iter()
+            .flat_map(|def| def.body.iter())
+            .filter_map(|item| {
+                let Item::Func(def) = item else { return None };
+                Some((def.name.clone(), def))
+            })
+            .collect();
         let enclosing_identity = crate::SHA256::sha256_hex(instance_full_key);
-        let nested_templates: HashMap<String, TemplateInfo> = nested_defs.iter().map(|def| {
-            let full_key = definition_full_key("nested", "", &enclosing_identity, &def.name);
-            (def.name.clone(), TemplateInfo { def: def.clone(), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
-                                params: resolve_params(def, &nested_enums, diags),
-                source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone(),
-                source_rule_facts: info.source_rule_facts.clone(),
-                build_facts: info.build_facts.clone() })
-        }).collect();
-        let nested_alias_defs: Vec<ModuleAliasDef> = template.body.iter().filter_map(|item| {
-            let Item::ModuleAlias(def) = item else { return None };
-            Some(specialize_nested_alias_outer(def, &definition_types, &definition_values))
-        }).collect();
-        let nested_aliases: HashMap<String, &ModuleAliasDef> = nested_alias_defs.iter()
-            .map(|def| (def.name.clone(), def)).collect();
+        let nested_templates: HashMap<String, TemplateInfo> = nested_defs
+            .iter()
+            .map(|def| {
+                let full_key = definition_full_key("nested", "", &enclosing_identity, &def.name);
+                (
+                    def.name.clone(),
+                    TemplateInfo {
+                        def: def.clone(),
+                        definition_id: crate::SHA256::sha256_hex(&full_key),
+                        definition_full_key: full_key,
+                        params: resolve_params(def, &nested_enums, diags),
+                        source_module: consumer_module,
+                        source_items: Vec::new(),
+                        source_values: definition_values.clone(),
+                        source_rule_facts: info.source_rule_facts.clone(),
+                        build_facts: info.build_facts.clone(),
+                    },
+                )
+            })
+            .collect();
+        let nested_alias_defs: Vec<ModuleAliasDef> = template
+            .body
+            .iter()
+            .filter_map(|item| {
+                let Item::ModuleAlias(def) = item else {
+                    return None;
+                };
+                Some(specialize_nested_alias_outer(
+                    def,
+                    &definition_types,
+                    &definition_values,
+                ))
+            })
+            .collect();
+        let nested_aliases: HashMap<String, &ModuleAliasDef> = nested_alias_defs
+            .iter()
+            .map(|def| (def.name.clone(), def))
+            .collect();
         let mut ordered: Vec<&ModuleAliasDef> = nested_alias_defs.iter().collect();
         ordered.sort_by_key(|def| local_alias_depth(def, &nested_aliases));
         let mut nested_projections = HashMap::new();
         for nested_alias in ordered {
-            let Some(mut resolved_alias) = resolve_local_alias(nested_alias, &nested_aliases, &nested_templates, diags) else { continue };
+            let Some(mut resolved_alias) =
+                resolve_local_alias(nested_alias, &nested_aliases, &nested_templates, diags)
+            else {
+                continue;
+            };
             resolved_alias.name = module_value_name(&alias.name, &nested_alias.name);
-            let Some(nested_info) = nested_templates.get(&resolved_alias.target) else { continue };
+            let Some(nested_info) = nested_templates.get(&resolved_alias.target) else {
+                continue;
+            };
             let Some(args) = resolve_args(
                 &resolved_alias,
                 nested_info,
@@ -1733,7 +2049,9 @@ fn expand_alias(
                 &info.build_facts,
                 &nested_enums,
                 diags,
-            ) else { continue };
+            ) else {
+                continue;
+            };
             let key = instance_key(nested_info, &args, &HashMap::new());
             let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
             let application = crate::AST::ModuleInstanceApplication {
@@ -1747,16 +2065,28 @@ fn expand_alias(
                 .or_default()
                 .push(application);
             if let Some(canonical) = instances.get(&key) {
-                nested_projections.insert(
-                    resolved_alias.name.clone(),
-                    Type::Named(canonical.clone()),
-                );
+                nested_projections
+                    .insert(resolved_alias.name.clone(), Type::Named(canonical.clone()));
                 continue;
             }
             let identity_args = args.clone();
-            if let Some(mut expansion) = expand_alias(&resolved_alias, consumer_module, application_module, &key.bytes(), &nested_templates,
-                diags, &nested_traits, &nested_funcs, &definition_values, &info.build_facts, &nested_enums,
-                instances, fingerprints, applications, Some(args)) {
+            if let Some(mut expansion) = expand_alias(
+                &resolved_alias,
+                consumer_module,
+                application_module,
+                &key.bytes(),
+                &nested_templates,
+                diags,
+                &nested_traits,
+                &nested_funcs,
+                &definition_values,
+                &info.build_facts,
+                &nested_enums,
+                instances,
+                fingerprints,
+                applications,
+                Some(args),
+            ) {
                 let identity = instance_identity(
                     &key,
                     nested_info,
@@ -1764,11 +2094,7 @@ fn expand_alias(
                     application_module,
                     &identity_args,
                 );
-                register_instance_fingerprint(
-                    fingerprints,
-                    &identity,
-                    resolved_alias.span,
-                );
+                register_instance_fingerprint(fingerprints, &identity, resolved_alias.span);
                 expansion.module.instance_identity = Some(identity);
                 instances.insert(key, resolved_alias.name.clone());
                 declarations.push(Item::CodeModule(expansion.module));
@@ -1887,14 +2213,7 @@ fn report_generic_module_cycles(items: &[Item], diags: &mut Vec<Diagnostic>) -> 
     let mut reported = HashSet::new();
     for node in nodes {
         if state.get(&node).copied().unwrap_or(0) == 0 {
-            visit(
-                &node,
-                &graph,
-                &mut state,
-                &mut stack,
-                &mut reported,
-                diags,
-            );
+            visit(&node, &graph, &mut state, &mut stack, &mut reported, diags);
         }
     }
     !reported.is_empty()
@@ -1918,7 +2237,10 @@ fn resolve_local_alias(
                     current.target
                 ),
                 "an alias-to-alias link reuses an already-bound module instance".to_string(),
-                format!("remove the arguments and write `module {} :: {}`", current.name, current.target),
+                format!(
+                    "remove the arguments and write `module {} :: {}`",
+                    current.name, current.target
+                ),
                 Some(current.span),
             ));
             return None;
@@ -2036,9 +2358,16 @@ pub(crate) fn expand_generic_module_aliases(
                 .filter_map(|item| match item {
                     Item::GenericModule(gm) => {
                         let (package_root, dependency_name) = owning_package(bundle, &module.path);
-                        let package_identity = package_identity(bundle, package_root, dependency_name);
-                        let module_path = module.path.strip_prefix(package_root).unwrap_or(&module.path).to_string_lossy().replace('\\', "/");
-                        let full_key = definition_full_key(&package_identity, &module_path, "", &gm.name);
+                        let package_identity =
+                            package_identity(bundle, package_root, dependency_name);
+                        let module_path = module
+                            .path
+                            .strip_prefix(package_root)
+                            .unwrap_or(&module.path)
+                            .to_string_lossy()
+                            .replace('\\', "/");
+                        let full_key =
+                            definition_full_key(&package_identity, &module_path, "", &gm.name);
                         Some((
                             gm.name.clone(),
                             TemplateInfo {
@@ -2084,7 +2413,8 @@ pub(crate) fn expand_generic_module_aliases(
     let mut bundle_instances: HashMap<ModuleInstanceKey, String> = HashMap::new();
     let mut bundle_instance_nominals: HashMap<String, Vec<String>> = HashMap::new();
     let mut fingerprint_keys: HashMap<String, Vec<u8>> = HashMap::new();
-    let mut instance_applications: HashMap<String, Vec<crate::AST::ModuleInstanceApplication>> = HashMap::new();
+    let mut instance_applications: HashMap<String, Vec<crate::AST::ModuleInstanceApplication>> =
+        HashMap::new();
 
     // Snapshot aliases up front — the mut loop below can't re-borrow `bundle.modules`
     // for an E0609 message that names the source module.
@@ -2099,7 +2429,7 @@ pub(crate) fn expand_generic_module_aliases(
         // Same disposable-registry rationale as the `template_snapshots` prepass
         // above: only used for bound resolution, never the diagnostic source of
         // truth — register the builtin hook traits and swallow its diags.
-        let mut traits=TraitRegistry::default();
+        let mut traits = TraitRegistry::default();
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
         traits.register_synthetic_close();
@@ -2107,14 +2437,43 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();
         traits.register_synthetic_driver();
-        traits.register_items(&module.items,&mut Vec::new());
-        let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
-        let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
-        let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();
-        if module.items.iter().any(|item| matches!(item, Item::ModuleAlias(_))) {
+        traits.register_items(&module.items, &mut Vec::new());
+        let enums: HashMap<String, bool> = module
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let Item::Enum(def) = item {
+                    Some((
+                        def.name.clone(),
+                        def.variants
+                            .iter()
+                            .all(|v| matches!(v.payload, VariantPayload::Unit)),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let funcs: HashMap<String, &Func> = module
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let Item::Func(f) = item {
+                    Some((f.name.clone(), f))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let mut globals: HashMap<String, crate::AST::CtValue> = HashMap::new();
+        if module
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::ModuleAlias(_)))
+        {
             for item in &module.items {
-                if let Item::Const(c)=item {
-                    if let Ok(value)=crate::Comptime::evaluate_closed_value(
+                if let Item::Const(c) = item {
+                    if let Ok(value) = crate::Comptime::evaluate_closed_value(
                         &c.value,
                         &funcs,
                         &HashSet::new(),
@@ -2122,7 +2481,7 @@ pub(crate) fn expand_generic_module_aliases(
                         &globals,
                         &build_facts,
                     ) {
-                        globals.insert(c.name.clone(),value);
+                        globals.insert(c.name.clone(), value);
                     }
                 }
             }
@@ -2133,11 +2492,7 @@ pub(crate) fn expand_generic_module_aliases(
         let mut denied_templates = HashSet::new();
 
         for import in &mut module.imports {
-            let ImportKind::Unqualified {
-                module_alias,
-                ..
-            } = &import.kind
-            else {
+            let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
                 continue;
             };
             let Some(source_idx) = import_bindings[module_idx]
@@ -2161,7 +2516,10 @@ pub(crate) fn expand_generic_module_aliases(
                     denied_templates.insert(local.clone());
                     diags.push(Diagnostic::error(
                         "E0609",
-                        format!("`{original}` is private in module `{}`", module_aliases[source_idx]),
+                        format!(
+                            "`{original}` is private in module `{}`",
+                            module_aliases[source_idx]
+                        ),
                         "only `pub` items can be brought into scope with `use`".to_string(),
                         format!("add `pub` before `module {original}` in the defining file"),
                         Some(import.span),
@@ -2185,10 +2543,16 @@ pub(crate) fn expand_generic_module_aliases(
                 _ => None,
             })
             .collect();
-        let type_aliases: HashMap<String, Type> = module.items.iter().filter_map(|item| {
-            let Item::TypeAlias(alias) = item else { return None };
-            Some((alias.name.clone(), alias.target.clone()))
-        }).collect();
+        let type_aliases: HashMap<String, Type> = module
+            .items
+            .iter()
+            .filter_map(|item| {
+                let Item::TypeAlias(alias) = item else {
+                    return None;
+                };
+                Some((alias.name.clone(), alias.target.clone()))
+            })
+            .collect();
         let mut projections = HashMap::new();
         for alias in aliases.values().copied() {
             if aliases.contains_key(&alias.target) {
@@ -2217,86 +2581,107 @@ pub(crate) fn expand_generic_module_aliases(
             if alias_chain_contains(alias, &aliases, &invalid_aliases) {
                 continue;
             }
-                let Some(resolved) = resolve_local_alias(alias, &aliases, &templates, diags) else {
-                    invalid_aliases.insert(alias.name.clone());
-                    continue;
-                };
-                if denied_templates.contains(&resolved.target) {
-                    invalid_aliases.insert(alias.name.clone());
-                    continue;
+            let Some(resolved) = resolve_local_alias(alias, &aliases, &templates, diags) else {
+                invalid_aliases.insert(alias.name.clone());
+                continue;
+            };
+            if denied_templates.contains(&resolved.target) {
+                invalid_aliases.insert(alias.name.clone());
+                continue;
+            }
+            // A valid forward alias is a projection of the already-bound
+            // terminal instance, not a second specialization.
+            if aliases.contains_key(&alias.target) {
+                continue;
+            }
+            let Some(info) = templates.get(&resolved.target) else {
+                // The alias names a template that does not exist. This guard
+                // runs before `expand_alias` (the other E0850 site), so it
+                // must report the unknown target itself — otherwise the
+                // alias is silently dropped and the program checks clean.
+                diags.push(Diagnostic::error(
+                    "E0850",
+                    format!(
+                        "generic module `{}` not found in this scope",
+                        resolved.target
+                    ),
+                    "check the module template name and make sure it is defined in the same file"
+                        .to_string(),
+                    format!("example: `module {} :: MyTemplate<String>`", resolved.name),
+                    Some(resolved.target_span),
+                ));
+                invalid_aliases.insert(alias.name.clone());
+                continue;
+            };
+            let Some(args) = resolve_args(
+                &resolved,
+                info,
+                &traits,
+                &funcs,
+                &globals,
+                &build_facts,
+                &enums,
+                diags,
+            ) else {
+                invalid_aliases.insert(alias.name.clone());
+                continue;
+            };
+            let key = instance_key(info, &args, &type_aliases);
+            let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
+            instance_applications
+                .entry(fingerprint.clone())
+                .or_default()
+                .push(crate::AST::ModuleInstanceApplication {
+                    name: resolved.name.clone(),
+                    source_module: module.display.clone(),
+                    semantic_identity: format!("instance:{fingerprint}"),
+                    span: resolved.name_span,
+                });
+            if let Some(canonical) = bundle_instances.get(&key) {
+                projections.insert(alias.name.clone(), canonical.clone());
+                if let Some(nominals) = bundle_instance_nominals.get(canonical).cloned() {
+                    bundle_instance_nominals.insert(alias.name.clone(), nominals);
                 }
-                // A valid forward alias is a projection of the already-bound
-                // terminal instance, not a second specialization.
-                if aliases.contains_key(&alias.target) {
-                    continue;
-                }
-                let Some(info) = templates.get(&resolved.target) else {
-                    // The alias names a template that does not exist. This guard
-                    // runs before `expand_alias` (the other E0850 site), so it
-                    // must report the unknown target itself — otherwise the
-                    // alias is silently dropped and the program checks clean.
-                    diags.push(Diagnostic::error(
-                        "E0850",
-                        format!("generic module `{}` not found in this scope", resolved.target),
-                        "check the module template name and make sure it is defined in the same file"
-                            .to_string(),
-                        format!("example: `module {} :: MyTemplate<String>`", resolved.name),
-                        Some(resolved.target_span),
-                    ));
-                    invalid_aliases.insert(alias.name.clone());
-                    continue;
-                };
-                let Some(args) = resolve_args(&resolved, info, &traits, &funcs, &globals, &build_facts, &enums, diags) else {
-                    invalid_aliases.insert(alias.name.clone());
-                    continue;
-                };
-                let key = instance_key(info, &args, &type_aliases);
-                let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
-                instance_applications.entry(fingerprint.clone())
-                    .or_default().push(crate::AST::ModuleInstanceApplication {
-                        name: resolved.name.clone(),
-                        source_module: module.display.clone(),
-                        semantic_identity: format!("instance:{fingerprint}"),
-                        span: resolved.name_span,
-                    });
-                if let Some(canonical) = bundle_instances.get(&key) {
-                    projections.insert(alias.name.clone(), canonical.clone());
-                    if let Some(nominals) = bundle_instance_nominals.get(canonical).cloned() {
-                        bundle_instance_nominals.insert(alias.name.clone(), nominals);
-                    }
-                    continue;
-                }
-                let identity_args = args.clone();
-                if let Some(mut cm) = expand_alias(
-                    &resolved,
-                    module_idx,
-                    &module.display,
-                    &key.bytes(),
-                    &templates,
-                    diags,
-                    &traits,
-                    &funcs,
-                    &globals,
-                    &build_facts,
-                    &enums,
-                    &mut bundle_instances,
-                    &mut fingerprint_keys,
-                    &mut instance_applications,
-                    Some(args),
-                ) {
-                    let identity = instance_identity(&key, info, &resolved, &module.display, &identity_args);
-                    register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
-                    cm.module.instance_identity = Some(identity);
-                    bundle_instance_nominals.insert(alias.name.clone(), cm.declarations.iter().filter_map(|item| match item {
-                        Item::Struct(def) => Some(def.name.clone()),
-                        Item::Enum(def) => Some(def.name.clone()),
-                        _ => None,
-                    }).collect());
-                    bundle_instances.insert(key, alias.name.clone());
-                    expansions.push((idx, cm));
-                } else {
-                    invalid_aliases.insert(alias.name.clone());
-                }
+                continue;
+            }
+            let identity_args = args.clone();
+            if let Some(mut cm) = expand_alias(
+                &resolved,
+                module_idx,
+                &module.display,
+                &key.bytes(),
+                &templates,
+                diags,
+                &traits,
+                &funcs,
+                &globals,
+                &build_facts,
+                &enums,
+                &mut bundle_instances,
+                &mut fingerprint_keys,
+                &mut instance_applications,
+                Some(args),
+            ) {
+                let identity =
+                    instance_identity(&key, info, &resolved, &module.display, &identity_args);
+                register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
+                cm.module.instance_identity = Some(identity);
+                bundle_instance_nominals.insert(
+                    alias.name.clone(),
+                    cm.declarations
+                        .iter()
+                        .filter_map(|item| match item {
+                            Item::Struct(def) => Some(def.name.clone()),
+                            Item::Enum(def) => Some(def.name.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                );
+                bundle_instances.insert(key, alias.name.clone());
+                expansions.push((idx, cm));
+            } else {
+                invalid_aliases.insert(alias.name.clone());
+            }
         }
 
         // Replace/erase: iterate in reverse to preserve indices.
@@ -2328,7 +2713,9 @@ pub(crate) fn expand_generic_module_aliases(
             let mut canonical = projections[alias].clone();
             let mut seen = HashSet::new();
             while seen.insert(canonical.clone()) {
-                let Some(next) = projections.get(&canonical) else { break };
+                let Some(next) = projections.get(&canonical) else {
+                    break;
+                };
                 canonical = next.clone();
             }
             projections.insert(alias.clone(), canonical);
@@ -2387,12 +2774,19 @@ pub(crate) fn expand_generic_module_aliases(
             .items
             .retain(|i| !matches!(i, Item::GenericModule(_) | Item::ModuleAlias(_)));
         module.items.extend(declarations);
-        debug_assert!(!module.items.iter().any(|item| matches!(item, Item::ModuleAlias(_))));
+        debug_assert!(!module
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::ModuleAlias(_))));
     }
     for module in &mut bundle.modules {
         for item in &mut module.items {
-            let Item::CodeModule(instance) = item else { continue };
-            let Some(identity) = &mut instance.instance_identity else { continue };
+            let Item::CodeModule(instance) = item else {
+                continue;
+            };
+            let Some(identity) = &mut instance.instance_identity else {
+                continue;
+            };
             if let Some(applications) = instance_applications.get(&identity.fingerprint) {
                 identity.applications = applications.clone();
             }
@@ -2429,12 +2823,7 @@ pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
                 continue;
             };
             let source_path = code_module.name.clone();
-            hoist_inline_module_types(
-                code_module,
-                &source_path,
-                &mut declarations,
-                &mut exported,
-            );
+            hoist_inline_module_types(code_module, &source_path, &mut declarations, &mut exported);
         }
         if declarations.is_empty() {
             continue;
@@ -2523,11 +2912,9 @@ fn hoist_inline_module_types(
                 ));
                 kept.push(Item::CodeModule(child));
             }
-            Item::Struct(_)
-            | Item::Enum(_)
-            | Item::Trait(_)
-            | Item::Tag(_)
-            | Item::Impl(_) => lifted.push(inner),
+            Item::Struct(_) | Item::Enum(_) | Item::Trait(_) | Item::Tag(_) | Item::Impl(_) => {
+                lifted.push(inner)
+            }
             other => kept.push(other),
         }
     }

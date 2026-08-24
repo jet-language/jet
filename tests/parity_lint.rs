@@ -98,11 +98,12 @@ fn comment_blocks(source: &str) -> Vec<(usize, String)> {
     let mut current_start = None;
     let mut current = String::new();
 
-    let finish = |blocks: &mut Vec<(usize, String)>, start: &mut Option<usize>, text: &mut String| {
-        if let Some(line) = start.take() {
-            blocks.push((line, std::mem::take(text)));
-        }
-    };
+    let finish =
+        |blocks: &mut Vec<(usize, String)>, start: &mut Option<usize>, text: &mut String| {
+            if let Some(line) = start.take() {
+                blocks.push((line, std::mem::take(text)));
+            }
+        };
 
     for (index, line) in source.lines().enumerate() {
         let Some(comment_start) = line_comment_start(line) else {
@@ -126,10 +127,7 @@ fn is_parity_promise(comment: &str) -> bool {
     if lower.contains("matches aot") || lower.contains("mirrors aot") {
         return true;
     }
-    lower.contains("byte-for-byte")
-        && CROSS_TIER_WORDS
-            .iter()
-            .any(|word| lower.contains(word))
+    lower.contains("byte-for-byte") && CROSS_TIER_WORDS.iter().any(|word| lower.contains(word))
 }
 
 fn parity_annotations(comment: &str) -> Vec<String> {
@@ -146,10 +144,7 @@ fn parity_annotations(comment: &str) -> Vec<String> {
 fn code_without_line_comments(source: &str) -> String {
     source
         .lines()
-        .map(|line| {
-            line_comment_start(line)
-                .map_or(line, |comment_start| &line[..comment_start])
-        })
+        .map(|line| line_comment_start(line).map_or(line, |comment_start| &line[..comment_start]))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -162,8 +157,7 @@ fn include_mentions(source: &str, target: &str) -> bool {
 }
 
 fn is_engine_gap(path: &str) -> bool {
-    path.contains("crates/jet-jit/")
-        || path.contains("crates/jet-codegen/src/Codegen/TIR/eval/")
+    path.contains("crates/jet-jit/") || path.contains("crates/jet-codegen/src/Codegen/TIR/eval/")
 }
 
 fn valid_card_number(token: &str) -> bool {
@@ -210,7 +204,9 @@ fn validate_grade(
             return Err("the marshal grade must name one symbol".to_string());
         }
         if !code_without_line_comments(source).contains(symbol) {
-            return Err(format!("the shared marshalling symbol is not called: {symbol}"));
+            return Err(format!(
+                "the shared marshalling symbol is not called: {symbol}"
+            ));
         }
         return Ok(format!("marshal {symbol}"));
     }
@@ -230,10 +226,14 @@ fn validate_grade(
         let guard_source = fs::read_to_string(&guard_path)
             .map_err(|error| format!("cannot read guard {test_path}: {error}"))?;
         if !guard_source.contains(&format!("fn {function}")) {
-            return Err(format!("guard function does not exist: {test_path}::{function}"));
+            return Err(format!(
+                "guard function does not exist: {test_path}::{function}"
+            ));
         }
         if !guard_source.contains("assert") {
-            return Err(format!("guard has no behavior assertion: {test_path}::{function}"));
+            return Err(format!(
+                "guard has no behavior assertion: {test_path}::{function}"
+            ));
         }
         return Ok(format!("guard {test_path}::{function}"));
     }
@@ -289,8 +289,15 @@ fn scan(repo_root: &Path) -> (Vec<Site>, Vec<String>) {
 fn every_tier_parity_promise_has_one_mechanical_grade() {
     let (mut sites, errors) = scan(&root());
     sites.sort_by(|left, right| (&left.path, left.line).cmp(&(&right.path, right.line)));
-    assert!(errors.is_empty(), "ungraded parity promises:\n  {}", errors.join("\n  "));
-    assert!(!sites.is_empty(), "the parity inventory found no promise comments");
+    assert!(
+        errors.is_empty(),
+        "ungraded parity promises:\n  {}",
+        errors.join("\n  ")
+    );
+    assert!(
+        !sites.is_empty(),
+        "the parity inventory found no promise comments"
+    );
     for site in sites {
         println!("{}:{} — {}", site.path, site.line, site.grade);
     }
@@ -320,7 +327,10 @@ fn include_grade_must_name_real_include_code() {
         .expect("seeded promise comment");
     let error = validate_grade(&root(), "crates/jet-jit/src/new_copy.rs", source, &comment)
         .expect_err("an include path written only in a comment must fail");
-    assert!(error.contains("does not include the canonical source"), "{error}");
+    assert!(
+        error.contains("does not include the canonical source"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -336,6 +346,9 @@ fn jet_jit_and_tir_eval_cannot_card_a_parity_gap() {
             .expect("seeded promise comment");
         let error = validate_grade(&root(), path, source, &comment)
             .expect_err("engine parity gaps must have a mechanical link");
-        assert!(error.contains("require include, marshal, or guard"), "{path}: {error}");
+        assert!(
+            error.contains("require include, marshal, or guard"),
+            "{path}: {error}"
+        );
     }
 }

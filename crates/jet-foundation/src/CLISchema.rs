@@ -407,7 +407,10 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
 pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
     let (source, name) = selected_entry_type_source(bundle)?;
     if std::env::var_os("JET_DEBUG_CLI").is_some() {
-        eprintln!("cli-debug entry_type_module source={source} name={name} entry={}", bundle.entry);
+        eprintln!(
+            "cli-debug entry_type_module source={source} name={name} entry={}",
+            bundle.entry
+        );
     }
     let entry = &bundle.modules[source];
     if name == "run"

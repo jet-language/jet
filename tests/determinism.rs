@@ -125,8 +125,7 @@ fn run() {
     print(reported == clock.now())
 }
 "#;
-    let (code, stdout, stderr) =
-        common::build_and_run("jet_system_clock", "system_clock", runtime);
+    let (code, stdout, stderr) = common::build_and_run("jet_system_clock", "system_clock", runtime);
     assert_eq!(code, 0, "system clock failed: {stderr}");
     assert_eq!(stdout, "true\ntrue\ntrue\ntrue\n");
 }
@@ -152,9 +151,7 @@ fn run() {
         jet_jit::tir_lower_fail_reason(&bundle)
     );
     assert!(!jet_jit::resident_jit_safe_bundle(&bundle));
-    assert!(
-        jet_jit::resident_jit_safe_bundle_detail(&bundle).contains("entry not resident-safe")
-    );
+    assert!(jet_jit::resident_jit_safe_bundle_detail(&bundle).contains("entry not resident-safe"));
 }
 
 #[test]
@@ -171,10 +168,11 @@ fn run() {
     print(read(holder))
 }
 "#;
-    let diagnostics =
-        jet::compile(read).expect_err("aggregate clock observation must retain Time");
+    let diagnostics = jet::compile(read).expect_err("aggregate clock observation must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 
@@ -193,7 +191,9 @@ fn run() {
     let diagnostics =
         jet::compile(compare).expect_err("aggregate clock comparison must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 
@@ -210,10 +210,11 @@ fn run() {
     print(copied.now())
 }
 "#;
-    let diagnostics =
-        jet::compile(copy).expect_err("aggregate clock copy must retain Time");
+    let diagnostics = jet::compile(copy).expect_err("aggregate clock copy must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 
@@ -233,7 +234,9 @@ fn run() {
     let diagnostics =
         jet::compile(copy_aggregate).expect_err("whole aggregate clock copy must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 
@@ -252,7 +255,9 @@ fn run() {}
     let diagnostics = jet::compile(enum_aggregate)
         .expect_err("enum-contained clock observation must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 
@@ -271,7 +276,9 @@ fn run() {
     let diagnostics =
         jet::compile(format).expect_err("aggregate clock formatting must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 
@@ -290,7 +297,9 @@ fn run() {
     let diagnostics = jet::compile(format_aggregate)
         .expect_err("whole aggregate clock formatting must retain Time");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 }
@@ -313,7 +322,9 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
 
     let diagnostics = jet::check_with_path(main.to_str().unwrap());
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "{diagnostics:#?}"
     );
 }
@@ -378,7 +389,9 @@ fn run() {
     let purity_diagnostics =
         jet::compile(pure_src).expect_err("ambient date.today must be rejected in pure code");
     assert!(
-        purity_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        purity_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "sema purity must report E3403, got: {purity_diagnostics:#?}"
     );
 
@@ -392,7 +405,9 @@ fn run() {
     let fold_diagnostics =
         jet::compile(fold_src).expect_err("ambient date.today must be rejected at comptime");
     assert!(
-        fold_diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        fold_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3403"),
         "explicit comptime folding must report E3403, got: {fold_diagnostics:#?}"
     );
     assert!(

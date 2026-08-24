@@ -12,17 +12,17 @@ pub(crate) fn name_defined(
 
 fn declared_type_contains_cell_guard(ty: &Type) -> bool {
     match ty {
-        Type::Apply { name, .. }
-            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") =>
-        {
+        Type::Apply { name, .. } if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard") => {
             true
         }
         Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
             declared_type_contains_cell_guard(inner)
         }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            declared_type_contains_cell_guard(key) || declared_type_contains_cell_guard(value)
-        }
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => declared_type_contains_cell_guard(key) || declared_type_contains_cell_guard(value),
         Type::Fn { params, ret, .. } => {
             params.iter().any(declared_type_contains_cell_guard)
                 || ret
@@ -203,10 +203,7 @@ pub(crate) fn eval_comptime_items(
         // Encode/Decode bodies without mutating or duplicating module items.
         let mut eval_items = items.to_vec();
         let mut ignored_early_serde_diags = Vec::new();
-        super::Serde::expand_builtin_serde_items(
-            &mut eval_items,
-            &mut ignored_early_serde_diags,
-        );
+        super::Serde::expand_builtin_serde_items(&mut eval_items, &mut ignored_early_serde_diags);
         let mut funcs: HashMap<String, &Func> = HashMap::new();
         let mut methods: HashMap<(String, String), &Func> = HashMap::new();
         let mut distinct_ranges = HashMap::new();
@@ -734,9 +731,7 @@ impl<'a> ComptimeTypeResolver<'a> {
                     self.resolve_type(ty);
                 }
             }
-            Expr::StructLit {
-                type_args, ..
-            } => {
+            Expr::StructLit { type_args, .. } => {
                 for ty in type_args {
                     self.resolve_type(ty);
                 }
@@ -767,7 +762,9 @@ impl<'a> ComptimeTypeResolver<'a> {
         for statement in statements {
             match statement {
                 Stmt::Val(binding) => self.resolve_binding(binding),
-                Stmt::CountedLoop { init, step, body, .. } => {
+                Stmt::CountedLoop {
+                    init, step, body, ..
+                } => {
                     self.resolve_binding(init);
                     if let Some(step) = step {
                         self.resolve_stmts(std::slice::from_mut(step));
@@ -909,9 +906,7 @@ fn comptime_builtin_fixed_return_type(
             Some(Type::List(Box::new(Type::String)))
         }
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } if matches!(receiver.as_ref(), Expr::Ident(alias, _)
             if core_imports.get(alias).map(String::as_str) == Some("core.reactive.loadable")) =>
         {
@@ -1046,7 +1041,8 @@ pub(crate) fn register_const(
     // D-SHAPE-OUTPUT-CALLABLE1: typed Outputs are sema-only package graph
     // values. Bundle resolution below checks their closed shape and callable;
     // they are not runtime numeric constants.
-    if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT || name == Syntax::TYPE_OUTPUT_DEFAULTS) {
+    if matches!(&c.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT || name == Syntax::TYPE_OUTPUT_DEFAULTS)
+    {
         consts.insert(c.name.clone(), c.ty.clone().unwrap());
         return;
     }
@@ -1226,12 +1222,9 @@ pub(crate) fn check_strong_shared_cycles(
             continue;
         };
         for (fname, fspan, fty) in &fields {
-            if let Some(through) = graph.strong_shared_cycle_witness(
-                &owner,
-                owner.module,
-                fty,
-                &mut Vec::new(),
-            ) {
+            if let Some(through) =
+                graph.strong_shared_cycle_witness(&owner, owner.module, fty, &mut Vec::new())
+            {
                 diags.push(Diagnostic::error(
                     "E0221",
                     format!(
@@ -1297,12 +1290,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
         self.structs.contains_key(&key).then_some(key)
     }
 
-    fn imported_struct(
-        &self,
-        from_module: usize,
-        namespace: &str,
-        name: &str,
-    ) -> Option<StructId> {
+    fn imported_struct(&self, from_module: usize, namespace: &str, name: &str) -> Option<StructId> {
         let owner = self
             .states
             .get(from_module)?
@@ -1356,10 +1344,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
 
         let mut found = None;
         for key in self.structs.keys().filter(|key| key.name == name) {
-            if !self
-                .name_ledger
-                .visible(from_module, key.module, name)
-            {
+            if !self.name_ledger.visible(from_module, key.module, name) {
                 continue;
             }
             if found.as_ref().is_some_and(|previous| previous != key) {
@@ -1392,16 +1377,16 @@ impl<'a> StrongSharedCycleGraph<'a> {
             | Type::Tagged { inner, .. } => {
                 self.strong_shared_cycle_witness(owner, from_module, inner, stack)
             }
-            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => self
+            Type::Map { key, value, .. }
+            | Type::Result {
+                ok: key,
+                err: value,
+            } => self
                 .strong_shared_cycle_witness(owner, from_module, key, stack)
-                .or_else(|| {
-                    self.strong_shared_cycle_witness(owner, from_module, value, stack)
-                }),
-            Type::Tuple(fields) => fields
-                .iter()
-                .find_map(|(_, fty)| {
-                    self.strong_shared_cycle_witness(owner, from_module, fty, stack)
-                }),
+                .or_else(|| self.strong_shared_cycle_witness(owner, from_module, value, stack)),
+            Type::Tuple(fields) => fields.iter().find_map(|(_, fty)| {
+                self.strong_shared_cycle_witness(owner, from_module, fty, stack)
+            }),
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.strong_shared_cycle_witness(owner, from_module, m, stack)),
@@ -1466,12 +1451,8 @@ impl<'a> StrongSharedCycleGraph<'a> {
                 let mut cycle_cut = false;
                 if let Some(fields) = fields {
                     for (_, _, fty) in &fields {
-                        let (hit, cut) = self.payload_can_reach_owner_inner(
-                            owner,
-                            target.module,
-                            fty,
-                            active,
-                        );
+                        let (hit, cut) =
+                            self.payload_can_reach_owner_inner(owner, target.module, fty, active);
                         cycle_cut |= cut;
                         if hit {
                             reaches = true;
@@ -1492,33 +1473,25 @@ impl<'a> StrongSharedCycleGraph<'a> {
             | Type::Tagged { inner, .. } => {
                 self.payload_can_reach_owner_inner(owner, from_module, inner, active)
             }
-            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-                let (key_reaches, key_cycle) = self.payload_can_reach_owner_inner(
-                    owner,
-                    from_module,
-                    key,
-                    active,
-                );
+            Type::Map { key, value, .. }
+            | Type::Result {
+                ok: key,
+                err: value,
+            } => {
+                let (key_reaches, key_cycle) =
+                    self.payload_can_reach_owner_inner(owner, from_module, key, active);
                 if key_reaches {
                     return (true, key_cycle);
                 }
-                let (value_reaches, value_cycle) = self.payload_can_reach_owner_inner(
-                    owner,
-                    from_module,
-                    value,
-                    active,
-                );
+                let (value_reaches, value_cycle) =
+                    self.payload_can_reach_owner_inner(owner, from_module, value, active);
                 (value_reaches, key_cycle || value_cycle)
             }
             Type::Tuple(fields) => {
                 let mut cycle_cut = false;
                 for (_, fty) in fields {
-                    let (reaches, cut) = self.payload_can_reach_owner_inner(
-                        owner,
-                        from_module,
-                        fty,
-                        active,
-                    );
+                    let (reaches, cut) =
+                        self.payload_can_reach_owner_inner(owner, from_module, fty, active);
                     cycle_cut |= cut;
                     if reaches {
                         return (true, cycle_cut);
@@ -1529,12 +1502,8 @@ impl<'a> StrongSharedCycleGraph<'a> {
             Type::Union(members) => {
                 let mut cycle_cut = false;
                 for member in members {
-                    let (reaches, cut) = self.payload_can_reach_owner_inner(
-                        owner,
-                        from_module,
-                        member,
-                        active,
-                    );
+                    let (reaches, cut) =
+                        self.payload_can_reach_owner_inner(owner, from_module, member, active);
                     cycle_cut |= cut;
                     if reaches {
                         return (true, cycle_cut);
@@ -1546,12 +1515,8 @@ impl<'a> StrongSharedCycleGraph<'a> {
             Type::Apply { args, .. } => {
                 let mut cycle_cut = false;
                 for member in args {
-                    let (reaches, cut) = self.payload_can_reach_owner_inner(
-                        owner,
-                        from_module,
-                        member,
-                        active,
-                    );
+                    let (reaches, cut) =
+                        self.payload_can_reach_owner_inner(owner, from_module, member, active);
                     cycle_cut |= cut;
                     if reaches {
                         return (true, cycle_cut);
@@ -1607,7 +1572,9 @@ pub(crate) fn register_enum(
             ));
             continue;
         }
-        if let Some(other) = mangled.insert(jet_foundation::Names::mangle_path(&v.name), v.name.clone()) {
+        if let Some(other) =
+            mangled.insert(jet_foundation::Names::mangle_path(&v.name), v.name.clone())
+        {
             diags.push(Diagnostic::error(
                 "E0105",
                 format!(

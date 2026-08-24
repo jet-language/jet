@@ -166,14 +166,8 @@ impl WatchGraph {
 
     pub fn upsert(&mut self, path: PathBuf, kind: RootKind) {
         let stamp = PathStamp::capture(&path);
-        self.nodes.insert(
-            path.clone(),
-            WatchNode {
-                path,
-                kind,
-                stamp,
-            },
-        );
+        self.nodes
+            .insert(path.clone(), WatchNode { path, kind, stamp });
     }
 
     pub fn link(&mut self, from: PathBuf, to: PathBuf) {
@@ -251,9 +245,9 @@ impl WatchGraph {
             Some("jet") => RootKind::Import,
             Some("html" | "htm") => RootKind::HTML,
             Some("css") => RootKind::Style,
-            Some("png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "woff" | "woff2" | "ttf" | "otf") => {
-                RootKind::Asset
-            }
+            Some(
+                "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "woff" | "woff2" | "ttf" | "otf",
+            ) => RootKind::Asset,
             Some("toml" | "json" | "yaml" | "yml") => RootKind::BuildInput,
             _ => {
                 if name.starts_with("target.") || name.contains("target_fact") {
@@ -484,10 +478,7 @@ impl WatchSession {
                 generation,
                 changed: settled,
                 closure: Vec::new(),
-                kinds: settled_root_kinds
-                    .iter()
-                    .map(|k| k.as_str())
-                    .collect(),
+                kinds: settled_root_kinds.iter().map(|k| k.as_str()).collect(),
                 change_kinds: vec!["stale"],
                 edit_to_visible_ms: None,
             });
@@ -510,10 +501,7 @@ impl WatchSession {
             generation,
             changed: settled,
             closure,
-            kinds: settled_root_kinds
-                .iter()
-                .map(|k| k.as_str())
-                .collect(),
+            kinds: settled_root_kinds.iter().map(|k| k.as_str()).collect(),
             change_kinds: settled_kinds
                 .iter()
                 .map(|k| match k {
@@ -765,10 +753,7 @@ mod tests {
 
         let mut session = WatchSession::from_graph(graph);
         std::thread::sleep(Duration::from_millis(20));
-        let mut f = fs::OpenOptions::new()
-            .append(true)
-            .open(&lib)
-            .unwrap();
+        let mut f = fs::OpenOptions::new().append(true).open(&lib).unwrap();
         writeln!(f, "// touch").unwrap();
         drop(f);
         session.mark_edit_started();
@@ -816,7 +801,9 @@ mod tests {
         std::thread::sleep(Duration::from_millis(20));
         fs::remove_file(&a).unwrap();
         let receipt = session.poll().expect("delete");
-        assert!(receipt.change_kinds.contains(&"deleted") || receipt.changed.iter().any(|p| p == &a));
+        assert!(
+            receipt.change_kinds.contains(&"deleted") || receipt.changed.iter().any(|p| p == &a)
+        );
         session.acknowledge(&receipt).unwrap();
 
         // Rename a→b (create b, delete a already gone — create b).

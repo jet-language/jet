@@ -6,8 +6,8 @@ use std::path::Path;
 
 use jet::Diagnostics::Span;
 use jet::AST::{Expr, Func, Item, ProgramBundle};
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::json_escape;
 
 use crate::{CmdInspect::CheckProjection, OutputMode};
 

@@ -1,4 +1,4 @@
-use jet::{AST, Formatter, Lexer, Parser, Syntax};
+use jet::{Formatter, Lexer, Parser, Syntax, AST};
 
 mod common;
 

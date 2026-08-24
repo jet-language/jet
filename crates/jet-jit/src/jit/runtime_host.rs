@@ -6,11 +6,11 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Module};
-use jet_foundation::AST::{CtFloat, CtValue};
 use jet_codegen::scheduler::{
     JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetStream, JetStreamSender,
     JetTaskControl,
 };
+use jet_foundation::AST::{CtFloat, CtValue};
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -31,8 +31,7 @@ mod measurement_kernel {
 
 pub(crate) mod contract_kernel {
     use jet_foundation::Outcome::{
-        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr,
-        JetRuntimeDiagnostic,
+        jet_err, jet_render_err, jet_render_runtime_stop, JetAbsent, JetErr, JetRuntimeDiagnostic,
     };
     include!("../../../jet-codegen/src/Prelude/Core/Contracts.rs");
 }
@@ -189,7 +188,10 @@ fn is_nounwind_abort(message: Option<&str>) -> bool {
 /// The fix for that class is not here: every `extern "C"` frame this crate
 /// exposes to generated code is now the generated `host_seam` shim, which
 /// catches and converts *inside* its own C frame (`src/host_seam.rs`, #1997).
-pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
+pub(crate) fn catch_jit_panic<R>(
+    context: &str,
+    f: impl FnOnce() -> Result<R, String>,
+) -> Result<R, String> {
     let result = {
         let _serialize = RESIDENT_JIT_RUN_LOCK
             .lock()
@@ -342,8 +344,7 @@ pub(crate) struct JitRuntime {
     pub(crate) stream_consumers: std::collections::HashMap<i64, JetStream<i64>>,
     pub(crate) stream_producers:
         std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
-    pub(crate) stream_senders:
-        std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
+    pub(crate) stream_senders: std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
     pub(crate) next_stream_channel: i64,
     pub(crate) next_stream_sender: i64,
     /// Unique names for JIT-local OptionLift2 factory/adapter functions.
@@ -872,10 +873,7 @@ fn jet_jit_persist_read_f64(key: i64) -> f64 {
 fn jet_jit_persist_write_f64(key: i64, value: f64) {
     Concurrency::with_runtime_mut(|rt| {
         let key = persist_key(rt, key);
-        if !jet_foundation::Persist::shared_write_key(
-            &key,
-            &CtValue::Float(CtFloat::f64(value)),
-        ) {
+        if !jet_foundation::Persist::shared_write_key(&key, &CtValue::Float(CtFloat::f64(value))) {
             rt.set_host_fault("persistent Float slot was missing");
         }
     });
@@ -897,10 +895,7 @@ fn jet_jit_persist_read_bool(key: i64) -> i8 {
 fn jet_jit_persist_write_bool(key: i64, value: i8) {
     Concurrency::with_runtime_mut(|rt| {
         let key = persist_key(rt, key);
-        if !jet_foundation::Persist::shared_write_key(
-            &key,
-            &CtValue::Bool(value != 0),
-        ) {
+        if !jet_foundation::Persist::shared_write_key(&key, &CtValue::Bool(value != 0)) {
             rt.set_host_fault("persistent Bool slot was missing");
         }
     });
@@ -1082,8 +1077,8 @@ fn jet_jit_intn_binop(
     right_signed: i64,
     line: u32,
 ) -> i64 {
-    use jet_codegen::AST::BinOp;
     use jet_codegen::Comptime::{CtReport, CtValue, MathLayout};
+    use jet_codegen::AST::BinOp;
     let op = match op {
         INTN_OP_ADD => BinOp::Add,
         INTN_OP_SUB => BinOp::Sub,
@@ -1115,9 +1110,9 @@ fn jet_jit_intn_binop(
         BinOp::Shr => Some("right"),
         _ => None,
     };
-    if let Some(message) = shift_direction
-        .and_then(|direction| contract_kernel::jet_arithmetic_shift_message(direction, shift_count, bits))
-    {
+    if let Some(message) = shift_direction.and_then(|direction| {
+        contract_kernel::jet_arithmetic_shift_message(direction, shift_count, bits)
+    }) {
         with_runtime_mut(|rt| rt.set_arithmetic_stop(line, &message));
         return 0;
     }
@@ -1330,23 +1325,29 @@ fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
 }
 
 fn jet_jit_str_contains(hay: i64, needle: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
-        (Some(h), Some(n)) => i8::from(h.contains(n)),
-        _ => 0,
+    Concurrency::with_runtime_mut(|rt| {
+        match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
+            (Some(h), Some(n)) => i8::from(h.contains(n)),
+            _ => 0,
+        }
     })
 }
 
 fn jet_jit_str_starts_with(hay: i64, needle: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
-        (Some(h), Some(n)) => i8::from(h.starts_with(n)),
-        _ => 0,
+    Concurrency::with_runtime_mut(|rt| {
+        match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
+            (Some(h), Some(n)) => i8::from(h.starts_with(n)),
+            _ => 0,
+        }
     })
 }
 
 fn jet_jit_str_ends_with(hay: i64, needle: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
-        (Some(h), Some(n)) => i8::from(h.ends_with(n)),
-        _ => 0,
+    Concurrency::with_runtime_mut(|rt| {
+        match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
+            (Some(h), Some(n)) => i8::from(h.ends_with(n)),
+            _ => 0,
+        }
     })
 }
 
@@ -1361,16 +1362,18 @@ fn jet_jit_str_len(id: i64) -> i64 {
 
 fn jet_jit_str_byte_len(id: i64) -> i64 {
     with_runtime_result(0, |rt| {
-        rt.heap
-            .get_string(id)
-            .map(|s| s.len() as i64)
-            .unwrap_or(0)
+        rt.heap.get_string(id).map(|s| s.len() as i64).unwrap_or(0)
     })
 }
 
 fn jet_jit_str_is_ascii(id: i64) -> i8 {
     with_runtime_result(0, |rt| {
-        i8::from(rt.heap.get_string(id).map(|s| s.is_ascii()).unwrap_or(false))
+        i8::from(
+            rt.heap
+                .get_string(id)
+                .map(|s| s.is_ascii())
+                .unwrap_or(false),
+        )
     })
 }
 
@@ -1532,8 +1535,7 @@ fn jet_jit_str_after(id: i64, sep_id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
         let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
-        rt.heap
-            .alloc_string(jet_rt::string_after(&text, &sep))
+        rt.heap.alloc_string(jet_rt::string_after(&text, &sep))
     })
 }
 
@@ -1541,8 +1543,7 @@ fn jet_jit_str_before(id: i64, sep_id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
         let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
-        rt.heap
-            .alloc_string(jet_rt::string_before(&text, &sep))
+        rt.heap.alloc_string(jet_rt::string_before(&text, &sep))
     })
 }
 
@@ -1647,7 +1648,6 @@ fn jet_jit_clock_wait(handle: i64, duration_ms: i64) -> i64 {
     })
 }
 
-
 fn jet_jit_rich_panic(
     file: i64,
     line: i64,
@@ -1720,7 +1720,6 @@ fn jet_jit_todo_stop(line: i64, expected_type: i64) -> i64 {
     })
 }
 
-
 fn jet_jit_trap_panic(_unused: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap("panic");
@@ -1746,12 +1745,7 @@ fn jet_jit_contract_fail(msg: i64, file: i64, line: i64, kind: i64) -> i64 {
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let clause = if kind == 0 { "Pre" } else { "Post" };
-        let report = contract_kernel::jet_contract_report(
-            clause,
-            &msg,
-            &file,
-            line as u32,
-        );
+        let report = contract_kernel::jet_contract_report(clause, &msg, &file, line as u32);
         rt.set_rendered_runtime_stop(report.rendered, report.exit_code);
         0
     })
@@ -1766,12 +1760,7 @@ fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        jet_foundation::Outcome::jet_journey_frame(
-            &file,
-            line as u32,
-            &fn_name,
-            String::new,
-        );
+        jet_foundation::Outcome::jet_journey_frame(&file, line as u32, &fn_name, String::new);
     });
 }
 
@@ -1780,12 +1769,7 @@ fn jet_jit_trace_err_note(file: i64, line: i64, fn_name: i64, note: i64) {
         let file = rt.heap.clone_string(file).unwrap_or_default();
         let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
         let note = rt.heap.clone_string(note).unwrap_or_default();
-        jet_foundation::Outcome::jet_journey_frame(
-            &file,
-            line as u32,
-            &fn_name,
-            || note,
-        );
+        jet_foundation::Outcome::jet_journey_frame(&file, line as u32, &fn_name, || note);
     })
 }
 
@@ -1847,7 +1831,9 @@ fn jet_jit_numeric_try_i64(value: i64, source_unsigned: i64, kind: i64) -> i64 {
         if value >= lo && value <= hi {
             alloc_jit_result(rt, true, value as u64)
         } else {
-            let error = rt.heap.alloc_string("value doesn't fit in destination type");
+            let error = rt
+                .heap
+                .alloc_string("value doesn't fit in destination type");
             alloc_jit_result(rt, false, error as u64)
         }
     })
@@ -1857,7 +1843,9 @@ fn jet_jit_numeric_try_int(value: i64, kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.int_try_from(value, kind) {
         Some(value) => alloc_jit_result(rt, true, value as u64),
         None => {
-            let error = rt.heap.alloc_string("value doesn't fit in destination type");
+            let error = rt
+                .heap
+                .alloc_string("value doesn't fit in destination type");
             alloc_jit_result(rt, false, error as u64)
         }
     })
@@ -1870,7 +1858,9 @@ fn jet_jit_numeric_float_to_int(value: f64, kind: i64) -> i64 {
         if value.is_finite() && value >= lo as f64 && value < upper {
             alloc_jit_result(rt, true, value.trunc() as i128 as u64)
         } else {
-            let error = rt.heap.alloc_string("value doesn't fit in destination type");
+            let error = rt
+                .heap
+                .alloc_string("value doesn't fit in destination type");
             alloc_jit_result(rt, false, error as u64)
         }
     })
@@ -1887,13 +1877,9 @@ fn jet_jit_numeric_float_narrow(value: f64) -> i64 {
     })
 }
 
-fn jet_jit_numeric_checked_widen(
-    raw: i64,
-    source_signed: i64,
-    target_f32: i64,
-) -> f64 {
-    Concurrency::with_runtime_mut(|rt| {
-        match jet_codegen::numeric_widen::jet_numeric_checked_widen(
+fn jet_jit_numeric_checked_widen(raw: i64, source_signed: i64, target_f32: i64) -> f64 {
+    Concurrency::with_runtime_mut(
+        |rt| match jet_codegen::numeric_widen::jet_numeric_checked_widen(
             raw as u64,
             source_signed != 0,
             target_f32 != 0,
@@ -1903,18 +1889,20 @@ fn jet_jit_numeric_checked_widen(
                 rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
                 0.0
             }
-        }
-    })
+        },
+    )
 }
 
 fn jet_jit_numeric_int_checked_widen(value: i64, target_f32: i64) -> f64 {
-    Concurrency::with_runtime_mut(|rt| match rt.heap.int_checked_widen(value, target_f32 != 0) {
-        Some(value) => value,
-        None => {
-            rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
-            0.0
-        }
-    })
+    Concurrency::with_runtime_mut(
+        |rt| match rt.heap.int_checked_widen(value, target_f32 != 0) {
+            Some(value) => value,
+            None => {
+                rt.set_trap(jet_codegen::numeric_widen::JET_NUMERIC_WIDEN_TRAP);
+                0.0
+            }
+        },
+    )
 }
 
 fn jet_jit_distinct_range(value: i64, lo: i64, hi: i64) -> i64 {
@@ -1922,7 +1910,9 @@ fn jet_jit_distinct_range(value: i64, lo: i64, hi: i64) -> i64 {
         if value >= lo && value <= hi {
             alloc_jit_result(rt, true, value as u64)
         } else {
-            let error = rt.heap.alloc_string("value is outside the distinct type's range");
+            let error = rt
+                .heap
+                .alloc_string("value is outside the distinct type's range");
             alloc_jit_result(rt, false, error as u64)
         }
     })
@@ -1940,7 +1930,9 @@ fn jet_jit_distinct_range_result(handle: i64, lo: i64, hi: i64) -> i64 {
         if value >= lo && value <= hi {
             handle
         } else {
-            let error = rt.heap.alloc_string("value is outside the distinct type's range");
+            let error = rt
+                .heap
+                .alloc_string("value is outside the distinct type's range");
             alloc_jit_result(rt, false, error as u64)
         }
     })
@@ -2082,9 +2074,7 @@ fn jet_jit_memo_probe(record: i64, slot: i64) -> i8 {
 }
 
 fn jet_jit_memo_get(record: i64, slot: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.memo_values.get(&(record, slot)).copied().unwrap_or(0)
-    })
+    Concurrency::with_runtime_mut(|rt| rt.memo_values.get(&(record, slot)).copied().unwrap_or(0))
 }
 
 fn jet_jit_memo_put(record: i64, slot: i64, value: i64) {
@@ -2132,9 +2122,7 @@ fn jet_jit_err_new(message: i64, code: i64, cause: i64) -> i64 {
         let code = if code == 0 {
             Err(JetAbsent)
         } else {
-            rt.heap
-                .clone_string(code - 1)
-                .ok_or(JetAbsent)
+            rt.heap.clone_string(code - 1).ok_or(JetAbsent)
         };
         let cause = if cause == 0 {
             Err(JetAbsent)
@@ -2212,10 +2200,8 @@ fn jet_jit_measurement_new(value: f64, uncertainty: f64) -> i64 {
 
 fn jet_jit_measurement_arithmetic(left: i64, right: i64, op: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let (Some(left), Some(right)) = (
-            read_measurement(rt, left),
-            read_measurement(rt, right),
-        ) else {
+        let (Some(left), Some(right)) = (read_measurement(rt, left), read_measurement(rt, right))
+        else {
             rt.set_trap("the JIT received an invalid Measurement handle");
             return 0;
         };
@@ -2236,12 +2222,10 @@ fn jet_jit_measurement_arithmetic(left: i64, right: i64, op: i64) -> i64 {
 
 fn jet_jit_measurement_get(handle: i64, field: i64) -> f64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .record_get_float(handle, field)
-            .unwrap_or_else(|| {
-                rt.set_trap("the JIT received an invalid Measurement handle");
-                0.0
-            })
+        rt.heap.record_get_float(handle, field).unwrap_or_else(|| {
+            rt.set_trap("the JIT received an invalid Measurement handle");
+            0.0
+        })
     })
 }
 
@@ -2303,8 +2287,8 @@ pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 
 
 mod service_adapter {
     use super::{alloc_jit_result, service_prelude, JitRuntime};
-    use jet_foundation::AST::{CtReport, CtValue};
     use jet_foundation::Diagnostics::Span;
+    use jet_foundation::AST::{CtReport, CtValue};
 
     const SERVICES_MODULE: i64 = 0;
     const SYNC_MODULE: i64 = 1;
@@ -2347,13 +2331,8 @@ mod service_adapter {
                 "send" if index == 0 => Some(ArgKind::Slot),
                 "send" if index == 1 => Some(ArgKind::Slot),
                 "send" if index == 2 => Some(ArgKind::String),
-                "receive"
-                | "mailbox_depth"
-                | "restarts"
-                | "fail_worker"
-                | "drain_worker"
-                | "partition_worker"
-                | "reconcile_worker"
+                "receive" | "mailbox_depth" | "restarts" | "fail_worker" | "drain_worker"
+                | "partition_worker" | "reconcile_worker"
                     if index < 2 =>
                 {
                     Some(ArgKind::Slot)
@@ -2378,21 +2357,11 @@ mod service_adapter {
                 }
                 "send_durable" if index < 2 => Some(ArgKind::Slot),
                 "send_durable" if index < 4 => Some(ArgKind::String),
-                "set_state_snapshot" | "set_state_event_log" if index == 0 => {
-                    Some(ArgKind::Slot)
-                }
-                "set_state_snapshot" | "set_state_event_log" if index == 1 => {
-                    Some(ArgKind::Slot)
-                }
-                "set_state_snapshot" | "set_state_event_log" if index == 2 => {
-                    Some(ArgKind::String)
-                }
-                "set_state_snapshot" | "set_state_event_log" if index == 3 => {
-                    Some(ArgKind::Int)
-                }
-                "set_state_snapshot" | "set_state_event_log" if index == 4 => {
-                    Some(ArgKind::String)
-                }
+                "set_state_snapshot" | "set_state_event_log" if index == 0 => Some(ArgKind::Slot),
+                "set_state_snapshot" | "set_state_event_log" if index == 1 => Some(ArgKind::Slot),
+                "set_state_snapshot" | "set_state_event_log" if index == 2 => Some(ArgKind::String),
+                "set_state_snapshot" | "set_state_event_log" if index == 3 => Some(ArgKind::Int),
+                "set_state_snapshot" | "set_state_event_log" if index == 4 => Some(ArgKind::String),
                 "commit_snapshot" if index == 0 => Some(ArgKind::Slot),
                 "commit_snapshot" if index == 1 => Some(ArgKind::String),
                 "append_event" if index == 0 => Some(ArgKind::Slot),
@@ -2403,9 +2372,7 @@ mod service_adapter {
                 "workflow_sleep" if index == 0 => Some(ArgKind::Slot),
                 "workflow_sleep" if index == 1 => Some(ArgKind::DurationNs),
                 "workflow_activity_wait" if index == 0 => Some(ArgKind::Slot),
-                "workflow_activity_wait" if index == 1 || index == 2 => {
-                    Some(ArgKind::String)
-                }
+                "workflow_activity_wait" if index == 1 || index == 2 => Some(ArgKind::String),
                 "workflow_all" if index == 0 => Some(ArgKind::Slot),
                 "workflow_all" if index == 1 => Some(ArgKind::StringList),
                 "workflow_step" if index == 0 => Some(ArgKind::Slot),
@@ -2516,12 +2483,14 @@ mod service_adapter {
         match kind {
             ArgKind::String => rt.heap.clone_string(raw).map(CtValue::Str),
             ArgKind::Int => Some(CtValue::Int(raw)),
-            ArgKind::WorkflowId => service_value(rt, raw).filter(|value| {
-                matches!(
-                    value,
-                    CtValue::Struct { type_name, .. } if type_name == "ServiceWorkflow"
-                )
-            }).or_else(|| Some(CtValue::Int(raw))),
+            ArgKind::WorkflowId => service_value(rt, raw)
+                .filter(|value| {
+                    matches!(
+                        value,
+                        CtValue::Struct { type_name, .. } if type_name == "ServiceWorkflow"
+                    )
+                })
+                .or_else(|| Some(CtValue::Int(raw))),
             ArgKind::StringList => {
                 let length = rt.heap.list_len(raw)?;
                 if length < 0 {
@@ -2645,11 +2614,7 @@ mod service_adapter {
         list
     }
 
-    fn marshal_struct(
-        rt: &mut JitRuntime,
-        type_name: &str,
-        fields: &[(String, CtValue)],
-    ) -> i64 {
+    fn marshal_struct(rt: &mut JitRuntime, type_name: &str, fields: &[(String, CtValue)]) -> i64 {
         let record = rt.heap.alloc_record(fields.len());
         remember_service_value(
             rt,
@@ -2762,7 +2727,10 @@ mod service_adapter {
             CtValue::Failed(_) | CtValue::Unit => 0,
             CtValue::Bytes(values) => marshal_list(
                 rt,
-                &values.iter().map(|value| CtValue::Int(i64::from(*value))).collect::<Vec<_>>(),
+                &values
+                    .iter()
+                    .map(|value| CtValue::Int(i64::from(*value)))
+                    .collect::<Vec<_>>(),
             ),
             CtValue::List(values) => marshal_list(rt, values),
             CtValue::Struct { type_name, fields } => marshal_struct(rt, type_name, fields),
@@ -2817,7 +2785,9 @@ mod service_adapter {
     fn call_ct(rt: &mut JitRuntime, module: i64, method: &str, raw_args: &[i64]) -> CtValue {
         let span = Span::new(0, 0);
         if module == SERVICES_MODULE && method == "runtime" {
-            let Some(store) = raw_args.first().and_then(|handle| rt.heap.clone_string(*handle))
+            let Some(store) = raw_args
+                .first()
+                .and_then(|handle| rt.heap.clone_string(*handle))
             else {
                 return CtValue::failed(Box::new(CtValue::Str(
                     "core.services.runtime expects a store path".to_string(),
@@ -2884,7 +2854,10 @@ mod service_adapter {
         let Some(method) = rt.heap.clone_string(method_handle) else {
             return 0;
         };
-        let Some(count) = usize::try_from(argc).ok().filter(|count| *count <= raw.len()) else {
+        let Some(count) = usize::try_from(argc)
+            .ok()
+            .filter(|count| *count <= raw.len())
+        else {
             return 0;
         };
         let value = call_ct(rt, module, &method, &raw[..count]);
@@ -2966,9 +2939,7 @@ pub(crate) fn alloc_io_error_result(
     cause: &str,
 ) -> i64 {
     let context = rt.heap.alloc_record(4);
-    let _ = rt
-        .heap
-        .record_set_int(context, 0, operation);
+    let _ = rt.heap.record_set_int(context, 0, operation);
     let resource = resource
         .map(|value| rt.heap.alloc_string(value.to_string()).wrapping_add(1))
         .unwrap_or(0);
@@ -2976,11 +2947,7 @@ pub(crate) fn alloc_io_error_result(
     let _ = rt.heap.record_set_int(context, 2, 0);
     let cause = rt.heap.alloc_string(cause.to_string()).wrapping_add(1);
     let _ = rt.heap.record_set_int(context, 3, cause);
-    alloc_jit_result(
-        rt,
-        false,
-        (context as u64).wrapping_shl(8) | variant as u64,
-    )
+    alloc_jit_result(rt, false, (context as u64).wrapping_shl(8) | variant as u64)
 }
 
 pub(crate) fn result_err_terminal(error: crate::IO::term_prelude::JetTermSecretError) -> i64 {
@@ -3031,9 +2998,11 @@ fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
 }
 
 fn jet_jit_duration_from_int(value: i64, scale: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match duration_kernel::jet_duration_kernel_from_int(value, scale) {
-        Some(ms) => alloc_jit_result(rt, true, ms as u64),
-        None => alloc_jit_result(rt, false, 0),
+    Concurrency::with_runtime_mut(|rt| {
+        match duration_kernel::jet_duration_kernel_from_int(value, scale) {
+            Some(ms) => alloc_jit_result(rt, true, ms as u64),
+            None => alloc_jit_result(rt, false, 0),
+        }
     })
 }
 
@@ -3059,12 +3028,12 @@ fn jet_jit_duration_in(value: i64, scale: i64) -> i64 {
 fn jet_jit_duration_in_unit(value: i64, unit: i64) -> i64 {
     // DurationUnit disc order matches Prelude CommonTypes.
     let scale = match unit {
-        0 => 1i64,                     // Nanoseconds
-        1 => 1_000,                    // Microseconds
-        2 => 1_000_000,                // Milliseconds
-        3 => 1_000_000_000,            // Seconds
-        4 => 60_000_000_000,           // Minutes
-        5 => 3_600_000_000_000,        // Hours
+        0 => 1i64,              // Nanoseconds
+        1 => 1_000,             // Microseconds
+        2 => 1_000_000,         // Milliseconds
+        3 => 1_000_000_000,     // Seconds
+        4 => 60_000_000_000,    // Minutes
+        5 => 3_600_000_000_000, // Hours
         _ => 1,
     };
     jet_jit_duration_in(value, scale)
@@ -3123,10 +3092,7 @@ fn jit_callable_slot(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {
 /// callable ABI remains opaque to Prelude code; resident adapters may inspect
 /// the already-validated pointer/environment pair when a shared Prelude
 /// operation returns a new function value.
-pub(crate) fn jit_callable_parts(
-    rt: &JitRuntime,
-    handle: i64,
-) -> Option<JitCallableSlot> {
+pub(crate) fn jit_callable_parts(rt: &JitRuntime, handle: i64) -> Option<JitCallableSlot> {
     jit_callable_slot(rt, handle)
 }
 
@@ -3307,7 +3273,9 @@ fn jet_jit_callable_fn(handle: i64) -> i64 {
 }
 
 fn jet_jit_callable_env(handle: i64) -> i64 {
-    with_runtime_result(0, |rt| jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.env))
+    with_runtime_result(0, |rt| {
+        jit_callable_or_trap(rt, handle).map_or(0, |slot| slot.env)
+    })
 }
 
 fn jet_jit_callable_has_env(handle: i64) -> i8 {
@@ -3345,10 +3313,8 @@ fn jet_jit_option_lift2(
         || jet_codegen::option_lift2::jet_option_pack_i64(false, 0),
         |value| jet_codegen::option_lift2::jet_option_pack_i64(true, value),
         || {
-            let factory: OptionLift2Factory =
-                unsafe { std::mem::transmute(factory as usize) };
-            let adapter: OptionLift2Adapter =
-                unsafe { std::mem::transmute(adapter as usize) };
+            let factory: OptionLift2Factory = unsafe { std::mem::transmute(factory as usize) };
+            let adapter: OptionLift2Adapter = unsafe { std::mem::transmute(adapter as usize) };
             let callable = unsafe { factory(env) };
             move |left, right| unsafe { adapter(callable, left, right) }
         },
@@ -3368,11 +3334,7 @@ fn jet_jit_unit_convert_exact(
         let converted = match &ratios {
             [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] => {
                 jet_foundation::jet_unit_conversion_exact(
-                    value,
-                    scale_num,
-                    scale_den,
-                    offset_num,
-                    offset_den,
+                    value, scale_num, scale_den, offset_num, offset_den,
                 )
             }
             _ => None,
@@ -3406,17 +3368,12 @@ fn jet_jit_unit_convert_rounded(
             _ => None,
         };
         let converted = match (&ratios, mode) {
-            ([Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)], Some(mode)) => {
-                jet_foundation::jet_unit_conversion_rounded(
-                    value,
-                    scale_num,
-                    scale_den,
-                    offset_num,
-                    offset_den,
-                    mode,
-                    digits,
-                )
-            }
+            (
+                [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)],
+                Some(mode),
+            ) => jet_foundation::jet_unit_conversion_rounded(
+                value, scale_num, scale_den, offset_num, offset_den, mode, digits,
+            ),
             _ => Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
         };
         match converted {
@@ -3442,11 +3399,7 @@ fn jet_jit_unit_convert_implicit(
         let converted = match &ratios {
             [Some(scale_num), Some(scale_den), Some(offset_num), Some(offset_den)] => {
                 jet_foundation::jet_unit_conversion_exact(
-                    value,
-                    scale_num,
-                    scale_den,
-                    offset_num,
-                    offset_den,
+                    value, scale_num, scale_den, offset_num, offset_den,
                 )
             }
             _ => None,
@@ -3478,9 +3431,7 @@ fn jet_jit_result_get_i64(handle: i64) -> i64 {
 }
 
 fn jet_jit_result_get_f64(handle: i64) -> f64 {
-    Concurrency::with_runtime_mut(|rt| {
-        f64::from_bits(jit_result(rt, handle).map_or(0, |r| r.bits))
-    })
+    Concurrency::with_runtime_mut(|rt| f64::from_bits(jit_result(rt, handle).map_or(0, |r| r.bits)))
 }
 
 fn jet_jit_result_get_i8(handle: i64) -> i8 {
@@ -3638,13 +3589,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Ok((module, host))
 }
 
-
-fn jet_jit_reflect_of_finish(
-    type_name: i64,
-    path: i64,
-    display: i64,
-    fields: i64,
-) -> i64 {
+fn jet_jit_reflect_of_finish(type_name: i64, path: i64, display: i64, fields: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let type_name = rt.heap.clone_string(type_name).unwrap_or_default();
         let path = rt.heap.clone_string(path).unwrap_or_default();
@@ -3796,7 +3741,13 @@ fn jet_jit_testing_snap(name: i64, actual: i64) -> i8 {
         let actual = rt.heap.clone_string(actual).unwrap_or_default();
         let safe: String = name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let path = std::path::Path::new("__snapshots__").join(format!("{safe}.snap"));
         let update = std::env::var("JET_UPDATE_SNAPSHOTS").ok().as_deref() == Some("1");
@@ -4447,9 +4398,9 @@ mod zip_value_kind_tests {
 
 #[cfg(test)]
 mod host_fns_tests {
-    use crate::resident::fresh_runtime;
     use super::new_jit_module;
     use crate::host_fns_audit;
+    use crate::resident::fresh_runtime;
 
     /// #1633 criterion #3: every `host_fns!`-declared symbol (across every
     /// `host_fns!`-migrated module, `@shared` entries included) must have a

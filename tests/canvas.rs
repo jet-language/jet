@@ -73,7 +73,12 @@ fn variant_name(chunk: &str) -> Option<&str> {
                 && !line.starts_with("//")
                 && !line.starts_with("#[")
         })
-        .find(|line| line.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))?;
+        .find(|line| {
+            line.chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+        })?;
     let end = line
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .unwrap_or(line.len());
@@ -827,7 +832,10 @@ fn run() {
             .iter()
             .find(|pin| pin.contains(&format!("\"name\":\"{name}\"")))
             .unwrap_or_else(|| panic!("missing {name} pin: {choose}"));
-        assert!(pin.contains(&format!("\"pattern_source\":\"{pattern}\"")), "{pin}");
+        assert!(
+            pin.contains(&format!("\"pattern_source\":\"{pattern}\"")),
+            "{pin}"
+        );
         let offset = source
             .find(&format!("{pattern} ->"))
             .expect("arm source span");
@@ -856,10 +864,13 @@ fn canvas_rejects_ambiguous_package_facts_before_projection() {
 
     let diagnostics = jet::Canvas::graph_json_for_file(&entry)
         .expect_err("Canvas must reject ambiguous package facts");
-    assert!(diagnostics
-        .iter()
-        .find(|diagnostic| diagnostic.code == "E1206")
-        .is_some(), "{diagnostics:?}");
+    assert!(
+        diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E1206")
+            .is_some(),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -924,7 +935,10 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
     let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
     let catalog = json_array_field(&json, "node_descriptors");
     let descriptors = json_top_level_objects(catalog);
-    assert!(!descriptors.is_empty(), "descriptor catalog is empty: {catalog}");
+    assert!(
+        !descriptors.is_empty(),
+        "descriptor catalog is empty: {catalog}"
+    );
     let mut catalog_ids = HashSet::new();
     let mut catalog_projected_ids = HashSet::new();
     let mut catalog_insertable_ids = HashSet::new();
@@ -944,7 +958,10 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
         );
         let projected = descriptor.contains("\"projected\":true");
         let insertable = descriptor.contains("\"insertable\":true");
-        assert!(projected || insertable, "orphaned descriptor `{id}`: {descriptor}");
+        assert!(
+            projected || insertable,
+            "orphaned descriptor `{id}`: {descriptor}"
+        );
         if projected {
             catalog_projected_ids.insert(id.clone());
         }
@@ -991,13 +1008,17 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
     );
     let actions =
         jet::Canvas::query_json_for_file(&path, &actions_request).expect("Canvas actions");
-    let mut action_objects = json_top_level_objects(json_array_field(&actions, "project_functions"));
+    let mut action_objects =
+        json_top_level_objects(json_array_field(&actions, "project_functions"));
     action_objects.extend(
         json_top_level_objects(json_array_field(&actions, "actions"))
             .into_iter()
             .filter(|action| !action.contains("\"kind\":\"canvas.command\"")),
     );
-    assert!(!action_objects.is_empty(), "insertable actions need descriptors: {actions}");
+    assert!(
+        !action_objects.is_empty(),
+        "insertable actions need descriptors: {actions}"
+    );
 
     let mut exported_insertable_ids = HashSet::new();
     for action in &action_objects {
@@ -1083,7 +1104,10 @@ fn canvas_edit_transactions_write_source_and_reproject() {
     assert!(receipt.contains("\"from\":\"total\""), "{receipt}");
     assert!(receipt.contains("\"to\":\"score\""), "{receipt}");
     let scm = jet::Canvas::source_control_json_for_file(&path);
-    assert!(scm.contains("\"semantic_ops\":[{\"kind\":\"rename\""), "{scm}");
+    assert!(
+        scm.contains("\"semantic_ops\":[{\"kind\":\"rename\""),
+        "{scm}"
+    );
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph after rename");
     assert!(graph.contains("\"title\":\"score\""));
@@ -1133,18 +1157,29 @@ fn canvas_source_paste_is_renamed_checked_and_stale_atomic() {
         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source_edit\":\"paste_clone\",\"source\":\"{}\"}}",
         stale_revision, escaped_clone
     );
-    let paste_out = jet::Canvas::apply_transaction_json(&path, &paste).expect("paste clone transaction");
+    let paste_out =
+        jet::Canvas::apply_transaction_json(&path, &paste).expect("paste clone transaction");
     assert!(paste_out.contains("\"changed\":true"), "{paste_out}");
     let pasted = fs::read_to_string(&path).unwrap();
-    let original_offset = pasted.find("total := square(limit)").expect("original binding");
-    let clone_offset = pasted.find("total_copy := square(limit)").expect("renamed clone");
-    assert!(clone_offset > original_offset, "paste must insert after the selected source line");
+    let original_offset = pasted
+        .find("total := square(limit)")
+        .expect("original binding");
+    let clone_offset = pasted
+        .find("total_copy := square(limit)")
+        .expect("renamed clone");
+    assert!(
+        clone_offset > original_offset,
+        "paste must insert after the selected source line"
+    );
     assert!(jet::Canvas::graph_json_for_file(&path)
         .expect("reproject pasted graph")
         .contains("\"title\":\"total_copy\""));
 
     let invalid_revision = jet::Canvas::source_revision(&pasted);
-    let invalid = pasted.replace("total_copy := square(limit)", "total_copy := missing(limit)");
+    let invalid = pasted.replace(
+        "total_copy := square(limit)",
+        "total_copy := missing(limit)",
+    );
     let escaped_invalid = invalid
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
@@ -1154,16 +1189,30 @@ fn canvas_source_paste_is_renamed_checked_and_stale_atomic() {
         invalid_revision, escaped_invalid
     );
     let error = jet::Canvas::apply_transaction_json(&path, &invalid_request).unwrap_err();
-    assert!(error.contains("Error [") || error.contains("diagnostic"), "{error}");
-    assert_eq!(fs::read_to_string(&path).unwrap(), pasted, "invalid paste must not write source");
+    assert!(
+        error.contains("Error [") || error.contains("diagnostic"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        pasted,
+        "invalid paste must not write source"
+    );
 
     let stale_request = format!(
         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\"}}",
         stale_revision, escaped_clone
     );
     let stale_error = jet::Canvas::apply_transaction_json(&path, &stale_request).unwrap_err();
-    assert!(stale_error.contains("source changed since this Canvas graph was drawn"), "{stale_error}");
-    assert_eq!(fs::read_to_string(&path).unwrap(), pasted, "stale paste must not write source");
+    assert!(
+        stale_error.contains("source changed since this Canvas graph was drawn"),
+        "{stale_error}"
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        pasted,
+        "stale paste must not write source"
+    );
 }
 
 #[test]
@@ -1363,7 +1412,10 @@ fn run() {
     let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("fn shared_finish(done: Int)"), "{after}");
     assert_eq!(after.matches("shared_finish(done)").count(), 2, "{after}");
-    assert_eq!(after, jet::format_source(&after).expect("formatted convergence"));
+    assert_eq!(
+        after,
+        jet::format_source(&after).expect("formatted convergence")
+    );
 
     let refused = write_fixture(
         "convergence_scope_refusal",
@@ -1401,7 +1453,10 @@ fn run() {
         target_end
     );
     let error = jet::Canvas::apply_transaction_json(&refused, &request).unwrap_err();
-    assert!(error.contains("E0107") || error.contains("diagnostic"), "{error}");
+    assert!(
+        error.contains("E0107") || error.contains("diagnostic"),
+        "{error}"
+    );
     assert_eq!(fs::read_to_string(&refused).unwrap(), before);
 }
 
@@ -1456,14 +1511,20 @@ fn run() {
         target_start,
         target_end
     );
-    let result = jet::Canvas::apply_transaction_json(&path, &request)
-        .expect("selected convergence helper");
+    let result =
+        jet::Canvas::apply_transaction_json(&path, &request).expect("selected convergence helper");
     assert!(result.contains("\"changed\":true"), "{result}");
     let after = fs::read_to_string(&path).unwrap();
     assert_eq!(after.matches("shared_work(value)").count(), 2, "{after}");
     assert!(after.contains("fn shared_work(value: Int)"), "{after}");
-    assert!(!after.contains("notify(value)\n    bump_metric()\n        print(value)"), "{after}");
-    assert_eq!(after, jet::format_source(&after).expect("formatted selected convergence"));
+    assert!(
+        !after.contains("notify(value)\n    bump_metric()\n        print(value)"),
+        "{after}"
+    );
+    assert_eq!(
+        after,
+        jet::format_source(&after).expect("formatted selected convergence")
+    );
 }
 
 #[test]
@@ -1490,7 +1551,8 @@ fn run() {
 }
 "#,
     );
-    let formatted = jet::format_source(&fs::read_to_string(&path).unwrap()).expect("format fixture");
+    let formatted =
+        jet::format_source(&fs::read_to_string(&path).unwrap()).expect("format fixture");
     fs::write(&path, formatted).unwrap();
     let graph = jet::Canvas::graph_json_for_file(&path).expect("inline convergence graph");
     let graph_id = graph_id_for_title(&graph, "converge");
@@ -1509,7 +1571,10 @@ fn run() {
     jet::Canvas::apply_transaction_json(&path, &request).expect("inline convergence");
     let after = fs::read_to_string(&path).unwrap();
     assert_eq!(after.matches("shared_finish(done)").count(), 2, "{after}");
-    assert_eq!(after, jet::format_source(&after).expect("formatted inline convergence"));
+    assert_eq!(
+        after,
+        jet::format_source(&after).expect("formatted inline convergence")
+    );
 }
 
 #[test]
@@ -1801,7 +1866,10 @@ fn canvas_statement_state_nodes_and_toggle_transaction() {
         "\"badges\":[\"#DebugOnly\"]",
         "toggle_switch_state",
     ] {
-        assert!(graph.contains(field), "statement-state graph missing {field}: {graph}");
+        assert!(
+            graph.contains(field),
+            "statement-state graph missing {field}: {graph}"
+        );
     }
 
     let graph_id = graph_id_for_title(&graph, "run");
@@ -1832,7 +1900,8 @@ fn canvas_statement_state_nodes_and_toggle_transaction() {
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after turn off");
     let off_on_start = off.find("#Off print(\"on\")").expect("off plain on call");
-    let (node_start, node_end) = source_span_at_or_after(&graph, "\"title\":\"#Off\"", off_on_start);
+    let (node_start, node_end) =
+        source_span_at_or_after(&graph, "\"title\":\"#Off\"", off_on_start);
     let revision = jet::Canvas::source_revision(&off);
     let restore = format!(
         "{{\"schema_version\":1,\"op\":\"toggle_switch_state\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{}}}",
@@ -1878,8 +1947,14 @@ fn canvas_debug_only_execution_path_keeps_source_backed_incoming_wires() {
                 && wire.contains("\"to_source_span\":{")
         })
     };
-    assert!(control_wire(&before, &debug).is_some(), "missing before -> debug wire: {graph}");
-    assert!(control_wire(&debug, &after).is_some(), "missing debug -> after wire: {graph}");
+    assert!(
+        control_wire(&before, &debug).is_some(),
+        "missing before -> debug wire: {graph}"
+    );
+    assert!(
+        control_wire(&debug, &after).is_some(),
+        "missing debug -> after wire: {graph}"
+    );
 }
 
 #[test]
@@ -2273,7 +2348,8 @@ fn canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target() {
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), inserted);
 
-    let live_target_node_id = field_before(&graph_after, "\"source\":\"\\\"target\\\"\"", "node_id");
+    let live_target_node_id =
+        field_before(&graph_after, "\"source\":\"\\\"target\\\"\"", "node_id");
     let unknown_pin = format!(
         "{{\"schema_version\":1,\"op\":\"insert_branch\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"wire_origin_pin_id\":\"{}:input:not_a_pin\",\"wire_target_pin\":\"exec\"}}",
         jet::Canvas::source_revision(&inserted),
@@ -2355,10 +2431,7 @@ fn canvas_structural_incomplete_wire_refuses_without_writing() {
     );
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
 
-    let data_path = write_fixture(
-        "structural_data_wire",
-        "fn run() {\n    doubled :: 1\n}\n",
-    );
+    let data_path = write_fixture("structural_data_wire", "fn run() {\n    doubled :: 1\n}\n");
     let data_before = fs::read_to_string(&data_path).unwrap();
     let data_graph = jet::Canvas::graph_json_for_file(&data_path).expect("data wire graph");
     let data_graph_id = graph_id_for_title(&data_graph, "run");
@@ -2390,7 +2463,10 @@ fn canvas_structural_incomplete_wire_refuses_without_writing() {
 
 #[test]
 fn canvas_fallible_rail_is_excluded_outside_fallible_function() {
-    let path = write_fixture("fallible_rail_nonfallible", "fn compute() {\n    print(1)\n}\n");
+    let path = write_fixture(
+        "fallible_rail_nonfallible",
+        "fn compute() {\n    print(1)\n}\n",
+    );
     let before = fs::read_to_string(&path).unwrap();
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
     let graph_id = field_before(&graph, "\"title\":\"compute\"", "graph_id");
@@ -2429,7 +2505,9 @@ fn canvas_code_lens_source_edit_uses_replace_source_transaction() {
     assert!(out.contains("print(\\\"new\\\")"), "{out}");
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph after source edit");
     assert!(graph.contains("print(\\\"new\\\")"), "{graph}");
-    assert!(fs::read_to_string(&path).unwrap().contains("print(\"new\")"));
+    assert!(fs::read_to_string(&path)
+        .unwrap()
+        .contains("print(\"new\")"));
 }
 
 #[test]
@@ -2514,7 +2592,10 @@ fn canvas_project_search_and_references_share_project_revision() {
     )
     .unwrap();
 
-    let project_revision = json_field(&jet::Canvas::project_json_for_entry(&entry), "project_revision");
+    let project_revision = json_field(
+        &jet::Canvas::project_json_for_entry(&entry),
+        "project_revision",
+    );
     let entry_src = fs::read_to_string(&entry).unwrap();
     let entry_revision = jet::Canvas::source_revision(&entry_src);
     let search = format!(
@@ -2529,7 +2610,10 @@ fn canvas_project_search_and_references_share_project_revision() {
         "\"source_id\":\"helper.jet\"",
         "\"kind\":\"definition\"",
     ] {
-        assert!(found.contains(field), "project search missing {field}: {found}");
+        assert!(
+            found.contains(field),
+            "project search missing {field}: {found}"
+        );
     }
 
     let references = format!(
@@ -2539,11 +2623,18 @@ fn canvas_project_search_and_references_share_project_revision() {
     let refs = jet::Canvas::query_json_for_entry(&entry, &references).expect("project references");
     assert!(refs.contains("\"op\":\"references\""), "{refs}");
     assert!(refs.contains("\"impact\""), "{refs}");
-    assert!(refs.matches("\"kind\":\"definition\"").count() >= 2, "{refs}");
-    assert!(refs.matches("\"kind\":\"reference\"").count() >= 2, "{refs}");
+    assert!(
+        refs.matches("\"kind\":\"definition\"").count() >= 2,
+        "{refs}"
+    );
+    assert!(
+        refs.matches("\"kind\":\"reference\"").count() >= 2,
+        "{refs}"
+    );
 
     fs::write(&other, "fn helper() Int -> {\n    return 3\n}\n").unwrap();
-    let stale = jet::Canvas::query_json_for_entry(&entry, &search).expect_err("stale project query");
+    let stale =
+        jet::Canvas::query_json_for_entry(&entry, &search).expect_err("stale project query");
     assert!(stale.contains("\"kind\":\"conflict\""), "{stale}");
     assert!(fs::read_to_string(&other).unwrap().contains("return 3"));
 }
@@ -2586,8 +2677,8 @@ fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
         main_revision, project_revision
     );
 
-    let preview = jet::Canvas::query_json_for_entry(&entry, &request)
-        .expect("project rename preview");
+    let preview =
+        jet::Canvas::query_json_for_entry(&entry, &request).expect("project rename preview");
     for field in [
         "\"op\":\"preview_rename\"",
         "\"project_revision\":\"sha256-",
@@ -2598,7 +2689,10 @@ fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
         "-pub fn helper()",
         "+pub fn compute()",
     ] {
-        assert!(preview.contains(field), "rename preview missing {field}: {preview}");
+        assert!(
+            preview.contains(field),
+            "rename preview missing {field}: {preview}"
+        );
     }
     assert_eq!(fs::read_to_string(&entry).unwrap(), main_before);
     assert_eq!(fs::read_to_string(&other).unwrap(), other_before);
@@ -2613,18 +2707,25 @@ fn canvas_project_rename_preview_and_atomic_commit_use_semantic_sites() {
         "{{\"schema_version\":1,\"op\":\"rename_binding\",\"preview\":false,\"project_revision\":\"{}\",\"files\":{},\"source_id\":\"main.jet\",\"from\":\"helper\",\"to\":\"compute\"}}",
         project_revision, touched
     );
-    let committed = jet::Canvas::apply_project_transaction_json(&entry, &apply)
-        .expect("project rename commit");
-    assert!(committed.contains("\"writes\":\"source_transaction\""), "{committed}");
+    let committed =
+        jet::Canvas::apply_project_transaction_json(&entry, &apply).expect("project rename commit");
+    assert!(
+        committed.contains("\"writes\":\"source_transaction\""),
+        "{committed}"
+    );
     assert!(fs::read_to_string(&entry).unwrap().contains("compute()"));
     assert!(fs::read_to_string(&other).unwrap().contains("compute()"));
     let receipt = fs::read_dir(dir.join(".jet/codemods"))
         .unwrap()
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
-            name.starts_with("CanvasProjectRename-") && name.ends_with(".log.json")
-        }))
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.starts_with("CanvasProjectRename-") && name.ends_with(".log.json")
+                })
+        })
         .expect("project rename receipt");
     let receipt = fs::read_to_string(receipt).unwrap();
     assert!(receipt.contains("\"kind\":\"rename\""), "{receipt}");
@@ -2738,11 +2839,9 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         src,
         "Canvas action preview must not write source"
     );
-    let wrong_callee_preview =
-        preview.replace("\"callee\":\"square\"", "\"callee\":\"print\"");
-    let wrong_callee =
-        jet::Canvas::apply_transaction_json(&path, &wrong_callee_preview)
-            .expect_err("preview must reject a callee that disagrees with its descriptor");
+    let wrong_callee_preview = preview.replace("\"callee\":\"square\"", "\"callee\":\"print\"");
+    let wrong_callee = jet::Canvas::apply_transaction_json(&path, &wrong_callee_preview)
+        .expect_err("preview must reject a callee that disagrees with its descriptor");
     assert!(
         wrong_callee.contains("does not match its checked descriptor"),
         "{wrong_callee}"
@@ -2793,16 +2892,19 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
     let project_insert_src = fs::read_to_string(&project_insert_path).unwrap();
     let project_insert_graph =
         jet::Canvas::graph_json_for_file(&project_insert_path).expect("project insert graph");
-    let project_run_graph_id =
-        field_before(&project_insert_graph, "\"title\":\"run\"", "graph_id");
+    let project_run_graph_id = field_before(&project_insert_graph, "\"title\":\"run\"", "graph_id");
     let project_insert = format!(
         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"callee\":\"square\",\"args\":[\"1\"]}}",
         jet::Canvas::source_revision(&project_insert_src),
         project_run_graph_id,
     );
-    let project_insert_out = jet::Canvas::apply_transaction_json(&project_insert_path, &project_insert)
-        .expect("project function insert_call");
-    assert!(project_insert_out.contains("\"changed\":true"), "{project_insert_out}");
+    let project_insert_out =
+        jet::Canvas::apply_transaction_json(&project_insert_path, &project_insert)
+            .expect("project function insert_call");
+    assert!(
+        project_insert_out.contains("\"changed\":true"),
+        "{project_insert_out}"
+    );
     assert!(
         fs::read_to_string(&project_insert_path)
             .unwrap()
@@ -2826,8 +2928,14 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
     jet::Canvas::apply_transaction_json(&wired_path, &wired_insert)
         .expect("wired project function insert_call");
     let wired_after = fs::read_to_string(&wired_path).unwrap();
-    assert!(wired_after.find("limit :: 4").unwrap() < wired_after.find("square(limit)").unwrap(), "{wired_after}");
-    assert_eq!(jet::Formatter::format_source(&wired_after).unwrap(), wired_after);
+    assert!(
+        wired_after.find("limit :: 4").unwrap() < wired_after.find("square(limit)").unwrap(),
+        "{wired_after}"
+    );
+    assert_eq!(
+        jet::Formatter::format_source(&wired_after).unwrap(),
+        wired_after
+    );
 
     let core_path = write_fixture(
         "actions_core_insert",
@@ -2841,10 +2949,19 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
     );
     let core_actions =
         jet::Canvas::query_json_for_file(&core_path, &core_actions_req).expect("core actions");
-    assert!(core_actions.contains("\"action_id\":\"canvas.core_catalog:core.math:abs\""), "{core_actions}");
+    assert!(
+        core_actions.contains("\"action_id\":\"canvas.core_catalog:core.math:abs\""),
+        "{core_actions}"
+    );
     assert!(core_actions.contains("\"title\":\"abs "), "{core_actions}");
-    assert!(core_actions.contains("\"insert_callee\":\"math.abs\""), "{core_actions}");
-    assert!(core_actions.contains("\"ret\":\"Int\""), "Core catalog action must expose its checked return type: {core_actions}");
+    assert!(
+        core_actions.contains("\"insert_callee\":\"math.abs\""),
+        "{core_actions}"
+    );
+    assert!(
+        core_actions.contains("\"ret\":\"Int\""),
+        "Core catalog action must expose its checked return type: {core_actions}"
+    );
     let core_graph = jet::Canvas::graph_json_for_file(&core_path).expect("core graph");
     let core_run_graph_id = field_before(&core_graph, "\"title\":\"run\"", "graph_id");
     let core_insert = format!(
@@ -2855,11 +2972,16 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         jet::Canvas::apply_transaction_json(&core_path, &core_insert).expect("core insert_call");
     assert!(core_out.contains("\"changed\":true"), "{core_out}");
     assert!(
-        fs::read_to_string(&core_path).unwrap().contains("math.abs(-3)"),
+        fs::read_to_string(&core_path)
+            .unwrap()
+            .contains("math.abs(-3)"),
         "Core catalog insert_call should write source"
     );
 
-    let synth_path = write_fixture("actions_core_insert_synth_import", "fn run() {\n    print(1)\n}\n");
+    let synth_path = write_fixture(
+        "actions_core_insert_synth_import",
+        "fn run() {\n    print(1)\n}\n",
+    );
     let synth_src = fs::read_to_string(&synth_path).unwrap();
     let synth_revision = jet::Canvas::source_revision(&synth_src);
     let synth_graph = jet::Canvas::graph_json_for_file(&synth_path).expect("synth core graph");
@@ -2876,7 +2998,10 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "transaction result should include synthesized Core import: {synth_out}"
     );
     let synth_after = fs::read_to_string(&synth_path).unwrap();
-    assert!(synth_after.contains("use core.encoding.json as json"), "{synth_after}");
+    assert!(
+        synth_after.contains("use core.encoding.json as json"),
+        "{synth_after}"
+    );
     assert!(
         synth_after.contains("json.decode(\"canvas\") ?? panic(\"canvas\")"),
         "{synth_after}"
@@ -2922,7 +3047,8 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
         "imported action must use the entry-facing callee: {actions}"
     );
     assert!(
-        actions.contains("\"rank\":74") && actions.contains("\"rank_terms\":[\"call\",\"pure\",\"function\"]"),
+        actions.contains("\"rank\":74")
+            && actions.contains("\"rank_terms\":[\"call\",\"pure\",\"function\"]"),
         "project action must carry descriptor-owned ranking facts: {actions}"
     );
     let noisy = json_top_level_objects(json_array_field(&actions, "actions"))
@@ -2950,8 +3076,8 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
         jet::Canvas::source_revision(src),
         graph_id
     );
-    let inserted = jet::Canvas::apply_transaction_json(&path, &insert)
-        .expect("imported action insert");
+    let inserted =
+        jet::Canvas::apply_transaction_json(&path, &insert).expect("imported action insert");
     assert!(inserted.contains("\"changed\":true"), "{inserted}");
     let changed = fs::read_to_string(&path).unwrap();
     assert!(changed.contains("h.square(1)"), "{changed}");
@@ -2975,16 +3101,12 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
     );
     let square_pin = json_top_level_objects(json_array_field(&graph, "pins"))
         .into_iter()
-        .find(|pin| {
-            pin.contains(":method:square") && pin.contains("\"type\":\"Int\"")
-        })
+        .find(|pin| pin.contains(":method:square") && pin.contains("\"type\":\"Int\""))
         .expect("typed imported call pin");
     assert!(square_pin.contains("\"node_id\":\""), "{square_pin}");
     let inline_id = json_top_level_objects(json_array_field(&graph, "inline_exprs"))
         .into_iter()
-        .find(|inline| {
-            inline.contains(":method:square") && inline.contains("\"source\":\"1\"")
-        })
+        .find(|inline| inline.contains(":method:square") && inline.contains("\"source\":\"1\""))
         .map(|inline| json_field(inline, "inline_expr_id"))
         .expect("editable imported call argument");
     let edit = format!(
@@ -3017,7 +3139,10 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
         reloaded.contains("\"source\":\"2\""),
         "reload must preserve edited imported call spelling: {reloaded}"
     );
-    let undo_source = src.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
+    let undo_source = src
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n");
     let undo = format!(
         "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"{}\",\"undo_restore\":\"Undo\"}}",
         jet::Canvas::source_revision(&edited),
@@ -3039,7 +3164,10 @@ fn canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports() {
         graph_id
     );
     let error = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
-    assert!(error.contains("diagnostic") || error.contains("E"), "{error}");
+    assert!(
+        error.contains("diagnostic") || error.contains("E"),
+        "{error}"
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
 }
 
@@ -3151,7 +3279,10 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"pure\"",
         "\"insert_callee\":\"m.abs\"",
     ] {
-        assert!(catalog.contains(field), "catalog missing {field}: {catalog}");
+        assert!(
+            catalog.contains(field),
+            "catalog missing {field}: {catalog}"
+        );
     }
 
     let sema_query = format!(
@@ -3183,13 +3314,32 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
     );
     let args_catalog =
         jet::Canvas::query_json_for_file(&path, &args_query).expect("Canvas args catalog query");
-    assert!(args_catalog.contains("\"path\":\"core.args\""), "{args_catalog}");
+    assert!(
+        args_catalog.contains("\"path\":\"core.args\""),
+        "{args_catalog}"
+    );
     assert!(args_catalog.contains("\"name\":\"help\""), "{args_catalog}");
-    assert!(args_catalog.contains("\"available\":false"), "{args_catalog}");
-    assert!(args_catalog.contains("\"stageable\":true"), "{args_catalog}");
-    assert!(args_catalog.contains("\"stage_reason_code\":\"method_only\""), "{args_catalog}");
-    assert!(args_catalog.contains("\"receiver_type\":\"ArgsSpec\""), "{args_catalog}");
-    assert!(args_catalog.contains("\"name\":\"receiver\",\"direction\":\"input\",\"type\":\"ArgsSpec\""), "{args_catalog}");
+    assert!(
+        args_catalog.contains("\"available\":false"),
+        "{args_catalog}"
+    );
+    assert!(
+        args_catalog.contains("\"stageable\":true"),
+        "{args_catalog}"
+    );
+    assert!(
+        args_catalog.contains("\"stage_reason_code\":\"method_only\""),
+        "{args_catalog}"
+    );
+    assert!(
+        args_catalog.contains("\"receiver_type\":\"ArgsSpec\""),
+        "{args_catalog}"
+    );
+    assert!(
+        args_catalog
+            .contains("\"name\":\"receiver\",\"direction\":\"input\",\"type\":\"ArgsSpec\""),
+        "{args_catalog}"
+    );
     assert!(
         args_catalog.contains("\"unavailable_reason_code\":\"method_only\""),
         "{args_catalog}"
@@ -3213,16 +3363,19 @@ fn canvas_core_catalog_uses_default_alias_without_import() {
         revision
     );
     let actions = jet::Canvas::query_json_for_file(&path, &request).expect("query core actions");
-    assert!(actions.contains("\"insert_callee\":\"math.abs\""), "{actions}");
-    assert!(!actions.contains("\"insert_callee\":\"core.math.abs\""), "{actions}");
+    assert!(
+        actions.contains("\"insert_callee\":\"math.abs\""),
+        "{actions}"
+    );
+    assert!(
+        !actions.contains("\"insert_callee\":\"core.math.abs\""),
+        "{actions}"
+    );
 }
 
 #[test]
 fn canvas_core_insert_synthesizes_default_alias_import_without_import() {
-    let path = write_fixture(
-        "core_insert_default_alias",
-        "fn run() {\n    print(1)\n}\n",
-    );
+    let path = write_fixture("core_insert_default_alias", "fn run() {\n    print(1)\n}\n");
     let source = fs::read_to_string(&path).unwrap();
     let graph = jet::Canvas::graph_json_for_file(&path).expect("default alias graph");
     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
@@ -3263,7 +3416,10 @@ fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits()
         "\"writes\":\"source_transaction_only\"",
         "\"source\":\"docs/reference/core-library.md\"",
     ] {
-        assert!(actions.contains(field), "library action missing {field}: {actions}");
+        assert!(
+            actions.contains(field),
+            "library action missing {field}: {actions}"
+        );
     }
 
     let graph_id = field_before(&graph, "\"title\":\"run\"", "graph_id");
@@ -3273,11 +3429,20 @@ fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits()
     );
     jet::Canvas::apply_transaction_json(&path, &insert).expect("insert library action");
     let after = fs::read_to_string(&path).unwrap();
-    assert!(after.contains("scope_from_library :: event.scope()"), "{after}");
-    assert_eq!(jet::format_source(&after).expect("format library edit"), after);
+    assert!(
+        after.contains("scope_from_library :: event.scope()"),
+        "{after}"
+    );
+    assert_eq!(
+        jet::format_source(&after).expect("format library edit"),
+        after
+    );
     let projected = jet::Canvas::graph_json_for_file(&path).expect("reproject library edit");
     assert!(projected.contains("scope_from_library"), "{projected}");
-    assert!(projected.contains("\"source_span\""), "library node lost provenance: {projected}");
+    assert!(
+        projected.contains("\"source_span\""),
+        "library node lost provenance: {projected}"
+    );
 
     let bad_revision = jet::Canvas::source_revision(&after);
     let bad = format!(
@@ -3285,19 +3450,30 @@ fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits()
         bad_revision, graph_id
     );
     assert!(jet::Canvas::apply_transaction_json(&path, &bad).is_err());
-    assert_eq!(fs::read_to_string(&path).unwrap(), after, "ill-typed library edit wrote source");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        after,
+        "ill-typed library edit wrote source"
+    );
 
     let stale = format!(
         "{{\"schema_version\":1,\"op\":\"insert_call\",\"revision\":\"sha256-stale\",\"graph_id\":\"{}\",\"callee\":\"event.scope\",\"args\":[],\"bind\":\"stale_scope\"}}",
         graph_id
     );
     assert!(jet::Canvas::apply_transaction_json(&path, &stale).is_err());
-    assert_eq!(fs::read_to_string(&path).unwrap(), after, "stale library edit wrote source");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        after,
+        "stale library edit wrote source"
+    );
 }
 
 #[test]
 fn canvas_core_catalog_classifies_every_action_for_palette_placement() {
-    let path = write_fixture("core_catalog_statuses", "fn run() {\n    print(\"core\")\n}\n");
+    let path = write_fixture(
+        "core_catalog_statuses",
+        "fn run() {\n    print(\"core\")\n}\n",
+    );
     let source = fs::read_to_string(&path).unwrap();
     let revision = jet::Canvas::source_revision(&source);
     let catalog_request = format!(
@@ -3346,35 +3522,72 @@ fn canvas_core_catalog_classifies_every_action_for_palette_placement() {
         let stage_reason = json_field(action, "stage_reason_code");
         if stageable {
             assert!(!available, "stageable action is available: {action}");
-            assert!(stageable_reasons.contains(&stage_reason.as_str()), "unstable stage reason: {action}");
-            assert_eq!(json_field(action, "unavailable_reason_code"), stage_reason, "stage status drift: {action}");
-            assert!(!json_field(action, "denied_reason").is_empty(), "staged action lacks reason: {action}");
-            assert_eq!(json_field(action, "insert_op"), "insert_call", "staged action lacks insertion path: {action}");
-            assert!(!json_field(action, "insert_callee").is_empty(), "staged action lacks callee: {action}");
+            assert!(
+                stageable_reasons.contains(&stage_reason.as_str()),
+                "unstable stage reason: {action}"
+            );
+            assert_eq!(
+                json_field(action, "unavailable_reason_code"),
+                stage_reason,
+                "stage status drift: {action}"
+            );
+            assert!(
+                !json_field(action, "denied_reason").is_empty(),
+                "staged action lacks reason: {action}"
+            );
+            assert_eq!(
+                json_field(action, "insert_op"),
+                "insert_call",
+                "staged action lacks insertion path: {action}"
+            );
+            assert!(
+                !json_field(action, "insert_callee").is_empty(),
+                "staged action lacks callee: {action}"
+            );
             let inputs = json_top_level_objects(json_array_field(action, "pins"))
                 .into_iter()
                 .filter(|pin| pin.contains("\"direction\":\"input\""))
                 .collect::<Vec<_>>();
             assert!(!inputs.is_empty(), "staged action lacks inputs: {action}");
-            assert!(inputs.iter().all(|pin| {
-                let ty = json_field(pin, "type");
-                !ty.is_empty()
-                    && (ty != "Value"
-                        || (stage_reason == "method_only" && pin.contains("\"name\":\"receiver\"")))
-            }), "staged action has untyped input: {action}");
+            assert!(
+                inputs.iter().all(|pin| {
+                    let ty = json_field(pin, "type");
+                    !ty.is_empty()
+                        && (ty != "Value"
+                            || (stage_reason == "method_only"
+                                && pin.contains("\"name\":\"receiver\"")))
+                }),
+                "staged action has untyped input: {action}"
+            );
             if stage_reason == "method_only" {
                 let receiver_type = json_field(action, "receiver_type");
-                assert!(inputs.iter().any(|pin| {
-                    pin.contains("\"name\":\"receiver\"") && json_field(pin, "type") == receiver_type
-                }), "staged method lacks typed receiver: {action}");
+                assert!(
+                    inputs.iter().any(|pin| {
+                        pin.contains("\"name\":\"receiver\"")
+                            && json_field(pin, "type") == receiver_type
+                    }),
+                    "staged method lacks typed receiver: {action}"
+                );
             }
         } else if !available {
             let reason = json_field(action, "unavailable_reason_code");
-            assert!(excluded_reasons.contains(&reason.as_str()), "unstable exclusion: {action}");
-            assert!(!json_field(action, "denied_reason").is_empty(), "excluded action lacks reason: {action}");
-            assert!(stage_reason.is_empty(), "excluded action carries stage status: {action}");
+            assert!(
+                excluded_reasons.contains(&reason.as_str()),
+                "unstable exclusion: {action}"
+            );
+            assert!(
+                !json_field(action, "denied_reason").is_empty(),
+                "excluded action lacks reason: {action}"
+            );
+            assert!(
+                stage_reason.is_empty(),
+                "excluded action carries stage status: {action}"
+            );
         } else {
-            assert!(stage_reason.is_empty(), "available action carries stage status: {action}");
+            assert!(
+                stage_reason.is_empty(),
+                "available action carries stage status: {action}"
+            );
         }
     }
 }
@@ -3499,10 +3712,7 @@ fn run() {
         ),
         "{graph}"
     );
-    assert!(
-        graph.contains("\"title\":\"amount\""),
-        "{graph}"
-    );
+    assert!(graph.contains("\"title\":\"amount\""), "{graph}");
     assert!(
         graph.contains("\"meta\":{\"category\":\"Tuning\",\"tunable\":true}"),
         "{graph}"
@@ -3535,24 +3745,38 @@ fn run() {
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject enum edit");
     let revision = jet::Canvas::source_revision(&after_enum);
-    let alias_id = field_before(graph_object_for_title(&graph, "edit"), "\"source\":\"amount\"", "inline_expr_id");
+    let alias_id = field_before(
+        graph_object_for_title(&graph, "edit"),
+        "\"source\":\"amount\"",
+        "inline_expr_id",
+    );
     let reference_edit = format!(
         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"other\"}}",
         revision, alias_id
     );
     jet::Canvas::apply_transaction_json(&path, &reference_edit).expect("reference Details edit");
     let after_reference = fs::read_to_string(&path).unwrap();
-    assert!(after_reference.contains("alias :: other"), "{after_reference}");
+    assert!(
+        after_reference.contains("alias :: other"),
+        "{after_reference}"
+    );
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("reproject reference edit");
     let revision = jet::Canvas::source_revision(&after_reference);
-    let amount_id = field_before(graph_object_for_title(&graph, "edit"), "\"source\":\"7\"", "inline_expr_id");
+    let amount_id = field_before(
+        graph_object_for_title(&graph, "edit"),
+        "\"source\":\"7\"",
+        "inline_expr_id",
+    );
     let invalid = format!(
         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"Mode.Slow\"}}",
         revision, amount_id
     );
     let err = jet::Canvas::apply_transaction_json(&path, &invalid).unwrap_err();
-    assert!(err.contains("E"), "invalid Details edit lost diagnostic: {err}");
+    assert!(
+        err.contains("E"),
+        "invalid Details edit lost diagnostic: {err}"
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), after_reference);
 
     let stale = format!(
@@ -3560,10 +3784,19 @@ fn run() {
         jet::Canvas::source_revision(&after_scalar), amount_id
     );
     let stale_err = jet::Canvas::apply_transaction_json(&path, &stale).unwrap_err();
-    assert!(stale_err.contains("conflict"), "stale Details edit lost conflict: {stale_err}");
+    assert!(
+        stale_err.contains("conflict"),
+        "stale Details edit lost conflict: {stale_err}"
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), after_reference);
-    assert!(after_reference.contains("fn edit()"), "scope/provenance lost: {after_reference}");
-    assert!(after_reference.contains("print(alias)"), "reference consumers lost: {after_reference}");
+    assert!(
+        after_reference.contains("fn edit()"),
+        "scope/provenance lost: {after_reference}"
+    );
+    assert!(
+        after_reference.contains("print(alias)"),
+        "reference consumers lost: {after_reference}"
+    );
 }
 
 #[test]
@@ -3602,7 +3835,11 @@ fn run() {
     }
 
     let before = fs::read_to_string(&path).unwrap();
-    let matrix_id = field_before(edit_graph, "\"source\":\"[[1, 2], [3, 4]]\"", "inline_expr_id");
+    let matrix_id = field_before(
+        edit_graph,
+        "\"source\":\"[[1, 2], [3, 4]]\"",
+        "inline_expr_id",
+    );
     let edit = format!(
         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"[[1, 2], [9, 4]]\"}}",
         jet::Canvas::source_revision(&before),
@@ -3625,14 +3862,18 @@ fn run() {
         matrix_id
     );
     let error = jet::Canvas::apply_transaction_json(&path, &invalid).expect_err("bad nested type");
-    assert!(error.contains("Error [") || error.contains("diagnostic"), "{error}");
+    assert!(
+        error.contains("Error [") || error.contains("diagnostic"),
+        "{error}"
+    );
     assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
 
     let stale = format!(
         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"sha256-stale\",\"inline_expr_id\":\"{}\",\"new_expr\":\"[[1, 2], [8, 4]]\"}}",
         matrix_id
     );
-    let stale_error = jet::Canvas::apply_transaction_json(&path, &stale).expect_err("stale nested edit");
+    let stale_error =
+        jet::Canvas::apply_transaction_json(&path, &stale).expect_err("stale nested edit");
     assert!(stale_error.contains("conflict"), "{stale_error}");
     assert_eq!(fs::read_to_string(&path).unwrap(), before_invalid);
     assert_eq!(
@@ -3797,7 +4038,11 @@ fn canvas_source_control_reports_project_file_set() {
         .expect("git commit");
 
     fs::write(&entry, "fn run() {\n    print(\"changed\")\n}\n").unwrap();
-    fs::write(dir.join("helper.jet"), "fn helper() Int -> {\n    return 7\n}\n").unwrap();
+    fs::write(
+        dir.join("helper.jet"),
+        "fn helper() Int -> {\n    return 7\n}\n",
+    )
+    .unwrap();
     let scm = jet::Canvas::source_control_json_for_entry(&entry);
     assert!(
         scm.contains("\"protocol\":\"jet.canvas.source_control\""),
@@ -3823,17 +4068,32 @@ fn canvas_proof_lens_reports_revision_check_git_and_missing_receipts() {
 
     let proof = jet::Canvas::proof_json_for_entry(&entry, None).expect("canvas proof");
     let src = fs::read_to_string(&entry).unwrap();
-    assert!(proof.contains("\"protocol\":\"jet.canvas.proof\""), "{proof}");
+    assert!(
+        proof.contains("\"protocol\":\"jet.canvas.proof\""),
+        "{proof}"
+    );
     assert!(proof.contains("\"schema_version\":1"), "{proof}");
     assert!(proof.contains(&format!(
         "\"revision\":\"{}\"",
         jet::Canvas::source_revision(&src)
     )));
     assert!(proof.contains("\"check\":{\"state\":\"ok\""), "{proof}");
-    assert!(proof.contains("\"source_control\":{\"truth\":\"git-text\""), "{proof}");
-    assert!(proof.contains("\"command_receipts\":{\"state\":\"missing\""), "{proof}");
-    assert!(proof.contains("no Canvas command authority receipt has run"), "{proof}");
-    assert!(proof.contains("\"proof\":{\"state\":\"missing\",\"stale\":true"), "{proof}");
+    assert!(
+        proof.contains("\"source_control\":{\"truth\":\"git-text\""),
+        "{proof}"
+    );
+    assert!(
+        proof.contains("\"command_receipts\":{\"state\":\"missing\""),
+        "{proof}"
+    );
+    assert!(
+        proof.contains("no Canvas command authority receipt has run"),
+        "{proof}"
+    );
+    assert!(
+        proof.contains("\"proof\":{\"state\":\"missing\",\"stale\":true"),
+        "{proof}"
+    );
 
     if Command::new("git")
         .arg("--version")
@@ -3881,18 +4141,27 @@ fn canvas_proof_lens_reports_revision_check_git_and_missing_receipts() {
         diagnostic.contains("\"check\":{\"state\":\"diagnostic\""),
         "{diagnostic}"
     );
-    assert!(diagnostic.contains("\"diagnostics_count\":"), "{diagnostic}");
+    assert!(
+        diagnostic.contains("\"diagnostics_count\":"),
+        "{diagnostic}"
+    );
 }
 
 #[test]
 fn canvas_proof_projects_canonical_budget_report_read_only() {
     let dir = temp_dir("proof_budget_projection");
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
     // Bare `jet budget check` resolves the canonical `run.jet` entry
     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
     let entry = dir.join("src/run.jet");
-    fs::write(&entry, r#"module perf.package {
+    fs::write(
+        &entry,
+        r#"module perf.package {
     budgets: [Budget{
         name: "public-api",
         scope: .Package,
@@ -3903,28 +4172,75 @@ fn canvas_proof_projects_canonical_budget_report_read_only() {
 }
 pub fn api() {}
 fn run() {}
-"#).unwrap();
-    let out = Command::new(PathBuf::from(env!("CARGO_BIN_EXE_jet"))).current_dir(&dir).args(["budget", "check", "--json"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+"#,
+    )
+    .unwrap();
+    let out = Command::new(PathBuf::from(env!("CARGO_BIN_EXE_jet")))
+        .current_dir(&dir)
+        .args(["budget", "check", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let command = String::from_utf8(out.stdout).unwrap();
-    let report_id = command.split("\"report_id\":\"").nth(1).unwrap().split('"').next().unwrap();
+    let report_id = command
+        .split("\"report_id\":\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
     let before = fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count();
     let proof = jet::Canvas::proof_json_for_entry(&entry, None).expect("canvas proof");
-    assert!(proof.contains("\"budget_reports\":{\"mode\":\"read_only\""), "{proof}");
-    assert!(proof.contains("\"budget_id\":\"package:public-api\""), "{proof}");
-    assert!(proof.contains(&format!("\"report_id\":\"{report_id}\"")), "{proof}");
-    assert_eq!(fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "Canvas measured or wrote a report");
-    fs::write(&entry, format!("{}\n// relevant source digest changed\n", fs::read_to_string(&entry).unwrap())).unwrap();
+    assert!(
+        proof.contains("\"budget_reports\":{\"mode\":\"read_only\""),
+        "{proof}"
+    );
+    assert!(
+        proof.contains("\"budget_id\":\"package:public-api\""),
+        "{proof}"
+    );
+    assert!(
+        proof.contains(&format!("\"report_id\":\"{report_id}\"")),
+        "{proof}"
+    );
+    assert_eq!(
+        fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count(),
+        before,
+        "Canvas measured or wrote a report"
+    );
+    fs::write(
+        &entry,
+        format!(
+            "{}\n// relevant source digest changed\n",
+            fs::read_to_string(&entry).unwrap()
+        ),
+    )
+    .unwrap();
     let stale = jet::Canvas::proof_json_for_entry(&entry, None).expect("stale canvas proof");
-    assert!(stale.contains("\"budget_reports\":{\"mode\":\"read_only\",\"reports\":[]"), "{stale}");
-    assert_eq!(fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "stale Canvas projection refreshed measurement");
+    assert!(
+        stale.contains("\"budget_reports\":{\"mode\":\"read_only\",\"reports\":[]"),
+        "{stale}"
+    );
+    assert_eq!(
+        fs::read_dir(dir.join(".jet/perf/reports")).unwrap().count(),
+        before,
+        "stale Canvas projection refreshed measurement"
+    );
 }
 
 #[test]
 fn canvas_project_json_reports_single_file_without_manifest() {
     let path = write_fixture("project_single", CANVAS_FIXTURE);
     let json = jet::Canvas::project_json_for_entry(&path);
-    assert!(json.contains("\"protocol\":\"jet.canvas.project\""), "{json}");
+    assert!(
+        json.contains("\"protocol\":\"jet.canvas.project\""),
+        "{json}"
+    );
     assert!(json.contains("\"schema_version\":1"), "{json}");
     assert!(json.contains("\"mode\":\"single_file\""), "{json}");
     assert!(json.contains("\"workspace\":null"), "{json}");
@@ -3986,16 +4302,8 @@ fn canvas_and_semindex_share_composed_package_facts() {
 fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_projection() {
     let dir = temp_dir("package_config_discovery_boundary");
     let entry = dir.join("main.jet");
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"demo\"\nconfigs: [dev]\n",
-    )
-    .unwrap();
-    fs::write(
-        dir.join("one.jet"),
-        "pub dev :: Config{ version: \"1\" }\n",
-    )
-    .unwrap();
+    fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
+    fs::write(dir.join("one.jet"), "pub dev :: Config{ version: \"1\" }\n").unwrap();
     fs::write(&entry, "fn run() {}\n").unwrap();
 
     let composed = jet::Canvas::project_json_for_entry(&entry);
@@ -4003,14 +4311,13 @@ fn canvas_composes_discovered_config_and_rejects_ambiguous_config_before_project
     assert!(composed.contains("\"version\":\"1\""), "{composed}");
     assert!(composed.contains("one.jet"), "{composed}");
 
-    fs::write(
-        dir.join("two.jet"),
-        "pub dev :: Config{ version: \"2\" }\n",
-    )
-    .unwrap();
+    fs::write(dir.join("two.jet"), "pub dev :: Config{ version: \"2\" }\n").unwrap();
     let ambiguous = jet::Canvas::project_json_for_entry(&entry);
     assert!(ambiguous.contains("\"code\":\"E1206\""), "{ambiguous}");
-    assert!(ambiguous.contains("Config `dev` is ambiguous"), "{ambiguous}");
+    assert!(
+        ambiguous.contains("Config `dev` is ambiguous"),
+        "{ambiguous}"
+    );
     assert!(!ambiguous.contains("\"version\":\"1\""), "{ambiguous}");
 }
 
@@ -4034,7 +4341,10 @@ fn canvas_project_reports_and_filters_internal_parts() {
     )
     .unwrap();
     let changed = jet::Canvas::project_json_for_entry(&entry);
-    assert_ne!(changed, skipped, "skipped sources must stay in the watch revision");
+    assert_ne!(
+        changed, skipped,
+        "skipped sources must stay in the watch revision"
+    );
 
     fs::write(&entry, "use project._bench;\nfn run() {}\n").unwrap();
     let explicit = jet::Canvas::project_json_for_entry(&entry);
@@ -4127,8 +4437,14 @@ fn canvas_project_discovery_requires_declared_workspace_membership() {
         member_json.contains("\"workspace\":{\"path\":\"workspace.jet\""),
         "{member_json}"
     );
-    assert!(member_json.contains("\"path\":\"env.jet\""), "{member_json}");
-    assert!(member_json.contains("\"path\":\".jet/lock\""), "{member_json}");
+    assert!(
+        member_json.contains("\"path\":\"env.jet\""),
+        "{member_json}"
+    );
+    assert!(
+        member_json.contains("\"path\":\".jet/lock\""),
+        "{member_json}"
+    );
 }
 
 #[test]
@@ -4143,7 +4459,10 @@ fn canvas_project_discovery_keeps_malformed_root_workspace_visible() {
         json_field(&no_pkg_json, "project_root"),
         no_pkg.to_string_lossy()
     );
-    assert!(no_pkg_json.contains("\"mode\":\"workspace\""), "{no_pkg_json}");
+    assert!(
+        no_pkg_json.contains("\"mode\":\"workspace\""),
+        "{no_pkg_json}"
+    );
     assert!(
         no_pkg_json.contains("\"workspace\":{\"path\":\"workspace.jet\""),
         "{no_pkg_json}"
@@ -4170,9 +4489,18 @@ fn canvas_project_discovery_keeps_malformed_root_workspace_visible() {
         json_field(&with_pkg_json, "project_root"),
         with_pkg.to_string_lossy()
     );
-    assert!(with_pkg_json.contains("\"mode\":\"workspace\""), "{with_pkg_json}");
-    assert!(with_pkg_json.contains("\"code\":\"E0996\""), "{with_pkg_json}");
-    assert!(with_pkg_json.contains("\"name\":\"rootpkg\""), "{with_pkg_json}");
+    assert!(
+        with_pkg_json.contains("\"mode\":\"workspace\""),
+        "{with_pkg_json}"
+    );
+    assert!(
+        with_pkg_json.contains("\"code\":\"E0996\""),
+        "{with_pkg_json}"
+    );
+    assert!(
+        with_pkg_json.contains("\"name\":\"rootpkg\""),
+        "{with_pkg_json}"
+    );
     assert!(
         with_pkg_json.contains("\"manifest\":\"package.jet\""),
         "{with_pkg_json}"
@@ -4205,7 +4533,10 @@ fn canvas_project_discovery_preserves_malformed_ancestor_workspace() {
     let json = jet::Canvas::project_json_for_entry(&entry);
     assert_eq!(json_field(&json, "project_root"), dir.to_string_lossy());
     assert!(json.contains("\"mode\":\"workspace\""), "{json}");
-    assert!(json.contains("\"workspace\":{\"path\":\"workspace.jet\""), "{json}");
+    assert!(
+        json.contains("\"workspace\":{\"path\":\"workspace.jet\""),
+        "{json}"
+    );
     assert!(json.contains("\"code\":\"E0996\""), "{json}");
     assert!(json.contains("\"name\":\"scratch\""), "{json}");
 }
@@ -4239,12 +4570,24 @@ fn canvas_project_discovery_does_not_promote_lock_only_roots() {
         json_field(&populated_json, "project_root"),
         member.to_string_lossy()
     );
-    assert!(populated_json.contains("\"mode\":\"package\""), "{populated_json}");
-    assert!(populated_json.contains("\"workspace\":null"), "{populated_json}");
+    assert!(
+        populated_json.contains("\"mode\":\"package\""),
+        "{populated_json}"
+    );
+    assert!(
+        populated_json.contains("\"workspace\":null"),
+        "{populated_json}"
+    );
     assert!(populated_json.contains("\"envs\":[]"), "{populated_json}");
     assert!(populated_json.contains("\"locks\":[]"), "{populated_json}");
-    assert!(populated_json.contains("\"manifest\":\"package.jet\""), "{populated_json}");
-    assert!(!populated_json.contains("workspace.jet"), "{populated_json}");
+    assert!(
+        populated_json.contains("\"manifest\":\"package.jet\""),
+        "{populated_json}"
+    );
+    assert!(
+        !populated_json.contains("workspace.jet"),
+        "{populated_json}"
+    );
 
     let empty = temp_dir("project_lock_only_empty");
     fs::create_dir_all(empty.join(".jet")).unwrap();
@@ -4253,7 +4596,10 @@ fn canvas_project_discovery_does_not_promote_lock_only_roots() {
     let loose_entry = empty.join("loose/main.jet");
     fs::write(&loose_entry, "fn run() {\n    print(\"loose\")\n}\n").unwrap();
     let empty_json = jet::Canvas::project_json_for_entry(&loose_entry);
-    assert!(empty_json.contains("\"mode\":\"single_file\""), "{empty_json}");
+    assert!(
+        empty_json.contains("\"mode\":\"single_file\""),
+        "{empty_json}"
+    );
     assert!(empty_json.contains("\"workspace\":null"), "{empty_json}");
     assert!(empty_json.contains("\"locks\":[]"), "{empty_json}");
 }
@@ -4303,24 +4649,49 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     .unwrap();
     let entry = hello.join("main.jet");
     fs::write(&entry, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
-    fs::write(ranker.join("lib.jet"), "fn score() Int -> {\n    return 1\n}\n").unwrap();
+    fs::write(
+        ranker.join("lib.jet"),
+        "fn score() Int -> {\n    return 1\n}\n",
+    )
+    .unwrap();
 
     let json = jet::Canvas::project_json_for_entry(&entry);
-    assert!(json.contains("\"protocol\":\"jet.canvas.project\""), "{json}");
+    assert!(
+        json.contains("\"protocol\":\"jet.canvas.project\""),
+        "{json}"
+    );
     assert!(json.contains("\"mode\":\"workspace\""), "{json}");
-    assert!(json.contains("\"workspace\":{\"path\":\"workspace.jet\""), "{json}");
+    assert!(
+        json.contains("\"workspace\":{\"path\":\"workspace.jet\""),
+        "{json}"
+    );
     assert!(json.contains("\"name\":\"hello\""), "{json}");
     assert!(json.contains("\"path\":\"packages/hello\""), "{json}");
-    assert!(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}");
+    assert!(
+        json.contains("\"manifest\":\"packages/hello/package.jet\""),
+        "{json}"
+    );
     assert!(json.contains("\"target\":\"web\""), "{json}");
     assert!(json.contains("\"name\":\"ranker\""), "{json}");
-    assert!(json.contains("\"targets\":[{\"package\":\"hello\""), "{json}");
-    assert!(json.contains("\"package_path\":\"packages/hello\""), "{json}");
-    assert!(json.contains("\"manifest\":\"packages/hello/package.jet\""), "{json}");
+    assert!(
+        json.contains("\"targets\":[{\"package\":\"hello\""),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"package_path\":\"packages/hello\""),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"manifest\":\"packages/hello/package.jet\""),
+        "{json}"
+    );
     assert!(json.contains("\"target\":\"executable\""), "{json}");
     assert!(json.contains("\"target\":\"library\""), "{json}");
     assert!(json.contains("\"version\":\"0.1.0\""), "{json}");
-    assert!(json.contains("\"path\":\"packages/ranker/lib.jet\""), "{json}");
+    assert!(
+        json.contains("\"path\":\"packages/ranker/lib.jet\""),
+        "{json}"
+    );
     assert!(json.contains("\"kind\":\"source\""), "{json}");
 }
 
@@ -4355,10 +4726,17 @@ fn canvas_projects_typed_member_after_package_transition() {
     let project = jet::Canvas::project_json_for_entry(&entry);
     assert!(project.contains("\"mode\":\"workspace\""), "{project}");
     assert!(project.contains("\"name\":\"app\""), "{project}");
-    assert!(project.contains("\"manifest\":\"packages/app/package.jet\""), "{project}");
+    assert!(
+        project.contains("\"manifest\":\"packages/app/package.jet\""),
+        "{project}"
+    );
 
-    jetpack::Transition::fold(&dir, PathBuf::from("packages/app/package.jet").as_path(), false)
-        .expect("package fold");
+    jetpack::Transition::fold(
+        &dir,
+        PathBuf::from("packages/app/package.jet").as_path(),
+        false,
+    )
+    .expect("package fold");
     assert!(!dir.join("packages/app/package.jet").exists());
     assert!(fs::read_to_string(dir.join("package.jet"))
         .unwrap()
@@ -4386,13 +4764,19 @@ fn canvas_project_json_projects_env_services_and_diagnostics() {
     assert!(json.contains("\"packages\":[]"), "{json}");
     assert!(json.contains("\"services\":[{\"name\":\"redis\""), "{json}");
     assert!(json.contains("\"ports\":[6380]"), "{json}");
-    assert!(json.contains("\"ready\":\"redis-cli -p 6380 ping\""), "{json}");
+    assert!(
+        json.contains("\"ready\":\"redis-cli -p 6380 ping\""),
+        "{json}"
+    );
     assert!(json.contains("\"path\":\"env.jet\""), "{json}");
     assert!(json.contains("\"kind\":\"env\""), "{json}");
 
     fs::write(dir.join("env.jet"), "module dev { env.dev: System{} }\n").unwrap();
     let json = jet::Canvas::project_json_for_entry(&entry);
-    assert!(json.contains("\"diagnostics\":[{\"code\":\"E0966\""), "{json}");
+    assert!(
+        json.contains("\"diagnostics\":[{\"code\":\"E0966\""),
+        "{json}"
+    );
 }
 
 #[test]
@@ -4419,18 +4803,26 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     .unwrap();
     let entry = app.join("main.jet");
     fs::write(&entry, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
-    fs::write(app.join("helper.jet"), "fn helper() Int -> {\n    return 1\n}\n").unwrap();
+    fs::write(
+        app.join("helper.jet"),
+        "fn helper() Int -> {\n    return 1\n}\n",
+    )
+    .unwrap();
 
     let project = jet::Canvas::project_json_for_entry(&entry);
     let project_revision = json_field(&project, "project_revision");
-    let manifest_revision = jet::Canvas::source_revision(&fs::read_to_string(app.join("package.jet")).unwrap());
+    let manifest_revision =
+        jet::Canvas::source_revision(&fs::read_to_string(app.join("package.jet")).unwrap());
     let req = format!(
         "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/package.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}",
         project_revision, manifest_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("project transaction preview");
-    assert!(preview.contains("\"protocol\":\"jet.canvas.project.edit\""), "{preview}");
+    assert!(
+        preview.contains("\"protocol\":\"jet.canvas.project.edit\""),
+        "{preview}"
+    );
     assert!(preview.contains("\"preview\":true"), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
     assert!(preview.contains("+deps: .{"), "{preview}");
@@ -4438,11 +4830,18 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let before_apply = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(!before_apply.contains("logging"), "{before_apply}");
 
-    fs::write(app.join("helper.jet"), "fn helper() Int -> {\n    return 2\n}\n").unwrap();
+    fs::write(
+        app.join("helper.jet"),
+        "fn helper() Int -> {\n    return 2\n}\n",
+    )
+    .unwrap();
     let apply = req.replace("\"preview\":true", "\"preview\":false");
     let stale_project = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect_err("any changed projected file should conflict before writing");
-    assert!(stale_project.contains("\"kind\":\"conflict\""), "{stale_project}");
+    assert!(
+        stale_project.contains("\"kind\":\"conflict\""),
+        "{stale_project}"
+    );
     let after_stale = fs::read_to_string(app.join("package.jet")).unwrap();
     assert!(!after_stale.contains("logging"), "{after_stale}");
 
@@ -4457,9 +4856,15 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let applied = jet::Canvas::apply_project_transaction_json(&entry, &fresh_apply)
         .expect("fresh project revision should permit apply");
     assert!(applied.contains("\"preview\":false"), "{applied}");
-    assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
+    assert!(
+        applied.contains("\"writes\":\"source_transaction\""),
+        "{applied}"
+    );
     let after_apply = fs::read_to_string(app.join("package.jet")).unwrap();
-    assert!(after_apply.contains("logging: ../logging,"), "{after_apply}");
+    assert!(
+        after_apply.contains("logging: ../logging,"),
+        "{after_apply}"
+    );
     assert!(
         jetpack::Package::PackageFacts::parse(&after_apply, "test").is_ok(),
         "{after_apply}"
@@ -4474,7 +4879,9 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let err = jet::Canvas::apply_project_transaction_json(&entry, &stale_touched)
         .expect_err("stale touched file should conflict");
     assert!(err.contains("\"kind\":\"conflict\""), "{err}");
-    assert!(!fs::read_to_string(app.join("package.jet")).unwrap().contains("extra"));
+    assert!(!fs::read_to_string(app.join("package.jet"))
+        .unwrap()
+        .contains("extra"));
 }
 
 #[test]
@@ -4567,14 +4974,25 @@ fn canvas_project_transactions_remove_dependency() {
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("remove dependency preview");
-    assert!(preview.contains("\"op\":\"remove_dependency\""), "{preview}");
-    assert!(preview.contains("-    logging: logging#0.1.0,"), "{preview}");
-    assert!(fs::read_to_string(dir.join("package.jet")).unwrap().contains("logging"));
+    assert!(
+        preview.contains("\"op\":\"remove_dependency\""),
+        "{preview}"
+    );
+    assert!(
+        preview.contains("-    logging: logging#0.1.0,"),
+        "{preview}"
+    );
+    assert!(fs::read_to_string(dir.join("package.jet"))
+        .unwrap()
+        .contains("logging"));
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
     let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect("remove dependency apply");
-    assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
+    assert!(
+        applied.contains("\"writes\":\"source_transaction\""),
+        "{applied}"
+    );
     let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(!manifest.contains("logging"), "{manifest}");
     assert!(manifest.contains("tools: ../tools"), "{manifest}");
@@ -4616,8 +5034,8 @@ fn canvas_project_transactions_edit_pkg_field_and_add_target() {
         "{{\"schema_version\":1,\"op\":\"add_target\",\"preview\":false,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"package.jet\",\"revision\":\"{}\"}}],\"manifest\":\"package.jet\",\"name\":\"app\",\"target\":\"executable\"}}",
         project_revision, manifest_revision
     );
-    let targeted = jet::Canvas::apply_project_transaction_json(&entry, &target_req)
-        .expect("add target apply");
+    let targeted =
+        jet::Canvas::apply_project_transaction_json(&entry, &target_req).expect("add target apply");
     assert!(targeted.contains("\"op\":\"add_target\""), "{targeted}");
     let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(
@@ -4646,8 +5064,8 @@ fn canvas_project_transactions_add_env_service() {
         "{{\"schema_version\":1,\"op\":\"add_env_service\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"env.jet\",\"revision\":\"missing\"}}],\"env\":\"env.jet\",\"name\":\"redis\",\"port\":6380,\"run\":[\"redis-server\",\"--port\",\"6380\"],\"ready\":\"redis-cli -p 6380 ping\"}}",
         project_revision
     );
-    let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
-        .expect("add env service preview");
+    let preview =
+        jet::Canvas::apply_project_transaction_json(&entry, &req).expect("add env service preview");
     assert!(preview.contains("\"op\":\"add_env_service\""), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
     assert!(
@@ -4657,16 +5075,25 @@ fn canvas_project_transactions_add_env_service() {
     assert!(!dir.join("env.jet").exists());
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
-    let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
-        .expect("add env service apply");
-    assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
+    let applied =
+        jet::Canvas::apply_project_transaction_json(&entry, &apply).expect("add env service apply");
+    assert!(
+        applied.contains("\"writes\":\"source_transaction\""),
+        "{applied}"
+    );
     let env = fs::read_to_string(dir.join("env.jet")).unwrap();
     assert!(env.contains("module env.dev"), "{env}");
     assert!(env.contains("redis:"), "{env}");
     assert!(env.contains("ports: [6380]"), "{env}");
-    assert!(env.contains("run: [\"redis-server\", \"--port\", \"6380\"]"), "{env}");
+    assert!(
+        env.contains("run: [\"redis-server\", \"--port\", \"6380\"]"),
+        "{env}"
+    );
     let project = jet::Canvas::project_json_for_entry(&entry);
-    assert!(project.contains("\"services\":[{\"name\":\"redis\""), "{project}");
+    assert!(
+        project.contains("\"services\":[{\"name\":\"redis\""),
+        "{project}"
+    );
     assert!(project.contains("\"ports\":[6380]"), "{project}");
 }
 
@@ -4693,21 +5120,33 @@ fn canvas_project_transactions_create_package_from_workspace() {
         "{{\"schema_version\":1,\"op\":\"create_package\",\"preview\":true,\"project_revision\":\"{}\",\"package_path\":\"packages/tools\",\"files\":[{{\"path\":\"packages/tools/package.jet\",\"revision\":\"missing\"}},{{\"path\":\"packages/tools/run.jet\",\"revision\":\"missing\"}}],\"name\":\"tools\",\"target\":\"executable\"}}",
         project_revision
     );
-    let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
-        .expect("create package preview");
+    let preview =
+        jet::Canvas::apply_project_transaction_json(&entry, &req).expect("create package preview");
     assert!(preview.contains("\"op\":\"create_package\""), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("diff -- packages/tools/package.jet"), "{preview}");
-    assert!(preview.contains("diff -- packages/tools/run.jet"), "{preview}");
+    assert!(
+        preview.contains("diff -- packages/tools/package.jet"),
+        "{preview}"
+    );
+    assert!(
+        preview.contains("diff -- packages/tools/run.jet"),
+        "{preview}"
+    );
     assert!(!dir.join("packages/tools/package.jet").exists());
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
-    let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
-        .expect("create package apply");
-    assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
+    let applied =
+        jet::Canvas::apply_project_transaction_json(&entry, &apply).expect("create package apply");
+    assert!(
+        applied.contains("\"writes\":\"source_transaction\""),
+        "{applied}"
+    );
     let manifest = fs::read_to_string(dir.join("packages/tools/package.jet")).unwrap();
     assert!(manifest.contains("name: \"tools\""), "{manifest}");
-    assert!(manifest.contains("tools: Output :: .Executable"), "{manifest}");
+    assert!(
+        manifest.contains("tools: Output :: .Executable"),
+        "{manifest}"
+    );
     assert!(
         jet::Package::PackageFacts::parse(&manifest, "package.jet").is_ok(),
         "{manifest}"
@@ -4715,7 +5154,10 @@ fn canvas_project_transactions_create_package_from_workspace() {
     let main = fs::read_to_string(dir.join("packages/tools/run.jet")).unwrap();
     assert!(main.contains("print(\"tools\")"), "{main}");
     let after_project = jet::Canvas::project_json_for_entry(&entry);
-    assert!(after_project.contains("\"name\":\"tools\""), "{after_project}");
+    assert!(
+        after_project.contains("\"name\":\"tools\""),
+        "{after_project}"
+    );
     assert!(
         after_project.contains("\"path\":\"packages/tools/run.jet\""),
         "{after_project}"
@@ -4755,18 +5197,26 @@ fn canvas_project_transactions_add_workspace_member() {
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("add workspace member preview");
-    assert!(preview.contains("\"op\":\"add_workspace_member\""), "{preview}");
+    assert!(
+        preview.contains("\"op\":\"add_workspace_member\""),
+        "{preview}"
+    );
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
     assert!(
         preview.contains("+    members: [\\\"./packages/app\\\", \\\"./packages/tools\\\"]"),
         "{preview}"
     );
-    assert!(!fs::read_to_string(dir.join("workspace.jet")).unwrap().contains("tools"));
+    assert!(!fs::read_to_string(dir.join("workspace.jet"))
+        .unwrap()
+        .contains("tools"));
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
     let applied = jet::Canvas::apply_project_transaction_json(&entry, &apply)
         .expect("add workspace member apply");
-    assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
+    assert!(
+        applied.contains("\"writes\":\"source_transaction\""),
+        "{applied}"
+    );
     let workspace = fs::read_to_string(dir.join("workspace.jet")).unwrap();
     assert!(workspace.contains("\"./packages/tools\""), "{workspace}");
     assert!(
@@ -4774,7 +5224,10 @@ fn canvas_project_transactions_add_workspace_member() {
         "{workspace}"
     );
     let after_project = jet::Canvas::project_json_for_entry(&entry);
-    assert!(after_project.contains("\"name\":\"tools\""), "{after_project}");
+    assert!(
+        after_project.contains("\"name\":\"tools\""),
+        "{after_project}"
+    );
 }
 
 #[test]
@@ -4790,8 +5243,8 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     let helper = dir.join("helper.jet");
     fs::write(&helper, "fn helper() Int -> {\n    return 7\n}\n").unwrap();
 
-    let graph = jet::Canvas::graph_json_for_entry_source(&entry, Some("helper.jet"))
-        .expect("helper graph");
+    let graph =
+        jet::Canvas::graph_json_for_entry_source(&entry, Some("helper.jet")).expect("helper graph");
     assert!(graph.contains("\"source_id\":\"helper.jet\""), "{graph}");
     assert!(graph.contains("helper.jet"), "{graph}");
     assert!(graph.contains("\"title\":\"helper\""), "{graph}");
@@ -4804,7 +5257,10 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
         revision
     );
     let result = jet::Canvas::query_json_for_entry(&entry, &query).expect("helper query");
-    assert!(result.contains("\"protocol\":\"jet.canvas.query\""), "{result}");
+    assert!(
+        result.contains("\"protocol\":\"jet.canvas.query\""),
+        "{result}"
+    );
     assert!(result.contains("\"title\":\"helper\""), "{result}");
 
     let command = format!(
@@ -4813,9 +5269,18 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     );
     let receipt = jet::Canvas::command_receipt_json_for_entry(&entry, &command)
         .expect("selected helper command receipt");
-    assert!(receipt.contains("\"source_id\":\"helper.jet\""), "{receipt}");
-    assert!(receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"), "{receipt}");
-    assert!(receipt.contains(&format!("\"revision\":\"{}\"", revision)), "{receipt}");
+    assert!(
+        receipt.contains("\"source_id\":\"helper.jet\""),
+        "{receipt}"
+    );
+    assert!(
+        receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"),
+        "{receipt}"
+    );
+    assert!(
+        receipt.contains(&format!("\"revision\":\"{}\"", revision)),
+        "{receipt}"
+    );
 
     let edit = format!(
         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"source\":\"fn helper() Int -> {{\\n    return 8\\n}}\\n\"}}",
@@ -4823,10 +5288,15 @@ fn canvas_project_source_id_selects_file_graph_and_query() {
     );
     let edited = jet::Canvas::apply_transaction_json(&entry, &edit)
         .expect("selected helper source transaction");
-    assert!(edited.contains("\"protocol\":\"jet.canvas.edit\""), "{edited}");
+    assert!(
+        edited.contains("\"protocol\":\"jet.canvas.edit\""),
+        "{edited}"
+    );
     assert!(edited.contains("\"changed\":true"), "{edited}");
     assert!(fs::read_to_string(&helper).unwrap().contains("return 8"));
-    assert!(fs::read_to_string(&entry).unwrap().contains("print(\"main\")"));
+    assert!(fs::read_to_string(&entry)
+        .unwrap()
+        .contains("print(\"main\")"));
 
     let missing = jet::Canvas::graph_json_for_entry_source(&entry, Some("missing.jet"))
         .expect_err("bad source_id should be rejected");
@@ -4867,10 +5337,16 @@ fn canvas_project_source_id_selects_debug_session_and_revision() {
         .expect("Canvas debug embedder must not overflow")
         .expect("selected helper debug session");
     assert!(out.contains("\"protocol\":\"jet.canvas.debug\""), "{out}");
-    assert!(out.contains(&format!("\"revision\":\"{}\"", revision)), "{out}");
+    assert!(
+        out.contains(&format!("\"revision\":\"{}\"", revision)),
+        "{out}"
+    );
     assert!(out.contains("\"debug_overlay\":\"finished\""), "{out}");
     assert!(out.contains("program finished"), "{out}");
-    assert!(!out.contains("entry"), "debug selected the entry source instead of helper: {out}");
+    assert!(
+        !out.contains("entry"),
+        "debug selected the entry source instead of helper: {out}"
+    );
     assert_eq!(fs::read_to_string(&helper).unwrap(), src);
 }
 
@@ -4890,7 +5366,11 @@ fn canvas_project_source_id_rejects_existing_unprojected_file() {
     .unwrap();
     let entry = dir.join("packages/app/main.jet");
     fs::write(&entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
-    fs::write(dir.join("stray.jet"), "fn stray() Int -> {\n    return 1\n}\n").unwrap();
+    fs::write(
+        dir.join("stray.jet"),
+        "fn stray() Int -> {\n    return 1\n}\n",
+    )
+    .unwrap();
 
     let project = jet::Canvas::project_json_for_entry(&entry);
     assert!(!project.contains("\"path\":\"stray.jet\""), "{project}");
@@ -5051,7 +5531,10 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(html.contains("id=\"toolbar-search\""), "{html}");
     assert!(html.contains("<svg viewBox=\"0 0 24 24\""), "{html}");
     assert!(html.contains("id=\"trust-summary\""), "{html}");
-    assert!(html.contains("id=\"trust-summary\" class=\"project-section dev-only"), "{html}");
+    assert!(
+        html.contains("id=\"trust-summary\" class=\"project-section dev-only"),
+        "{html}"
+    );
     assert!(html.contains(".library-panel"), "{html}");
     assert!(html.contains(".library-entry"), "{html}");
     assert!(!html.contains("source-truth"), "{html}");
@@ -5061,18 +5544,45 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("function syncVariablesList"), "{js}");
     assert!(js.contains("function renderVariableDetails"), "{js}");
     assert!(js.contains("function functionEffectSuffix"), "{js}");
-    assert!(!js.contains("originalSignature.includes(\"=[\")"), "retired effect signature spelling leaked into Canvas: {js}");
+    assert!(
+        !js.contains("originalSignature.includes(\"=[\")"),
+        "retired effect signature spelling leaked into Canvas: {js}"
+    );
     assert!(js.contains("fnMeta && fnMeta.effect_via"), "{js}");
-    assert!(js.contains("\" -[\" + fnMeta.effects.join(\", \") + \"]>\""), "{js}");
-    assert!(!js.contains("\" =[\" + effects + \"]=>\""), "retired effect signature arrow leaked into Canvas: {js}");
+    assert!(
+        js.contains("\" -[\" + fnMeta.effects.join(\", \") + \"]>\""),
+        "{js}"
+    );
+    assert!(
+        !js.contains("\" =[\" + effects + \"]=>\""),
+        "retired effect signature arrow leaked into Canvas: {js}"
+    );
     assert!(!js.contains("fnMeta.pure ? \"#Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
-    assert!(js.contains("const sourceFiles = (project.files || []).filter"), "{js}");
-    assert!(js.contains("Showing first ${visibleResults.length}"), "{js}");
-    assert!(js.contains("const requestedSourceId = currentCanvasSourceId();"), "{js}");
-    assert!(js.contains("Command result is stale; current source was kept"), "{js}");
-    assert!(js.contains("Debug result is stale; current source was kept"), "{js}");
-    assert!(js.contains("Debug session disconnected; source was kept"), "{js}");
+    assert!(
+        js.contains("const sourceFiles = (project.files || []).filter"),
+        "{js}"
+    );
+    assert!(
+        js.contains("Showing first ${visibleResults.length}"),
+        "{js}"
+    );
+    assert!(
+        js.contains("const requestedSourceId = currentCanvasSourceId();"),
+        "{js}"
+    );
+    assert!(
+        js.contains("Command result is stale; current source was kept"),
+        "{js}"
+    );
+    assert!(
+        js.contains("Debug result is stale; current source was kept"),
+        "{js}"
+    );
+    assert!(
+        js.contains("Debug session disconnected; source was kept"),
+        "{js}"
+    );
     assert!(
         js.contains("function releaseDebugSession"),
         "debug cleanup must be source-bound: {js}"
@@ -5094,7 +5604,10 @@ fn canvas_editor_shell_matches_round3_contract() {
         !js.contains("window.prompt(\"Call function\""),
         "Canvas must not invent a callee for an incomplete action: {js}"
     );
-    assert!(js.contains("const candidates = actionEntries.filter"), "{js}");
+    assert!(
+        js.contains("const candidates = actionEntries.filter"),
+        "{js}"
+    );
     assert!(
         !js.contains("checkedFallbackCallee"),
         "Canvas must not turn a display title into an insertion callee: {js}"
@@ -5113,10 +5626,18 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("descriptor.presentation.hover"), "{js}");
     assert!(js.contains("nodeDescriptor(node).default_editor"), "{js}");
     assert!(js.contains("editablePinKind(graph, pin)"), "{js}");
-    assert!(js.contains("nodeDescriptors: latestDoc.node_descriptors"), "{js}");
-    assert!(js.contains("descriptorConsumption: graph.nodes.map"), "{js}");
     assert!(
-        !js.contains("[\"insert_branch\", \"insert_switch\", \"insert_loop\", \"insert_fallible_rail\"]"),
+        js.contains("nodeDescriptors: latestDoc.node_descriptors"),
+        "{js}"
+    );
+    assert!(
+        js.contains("descriptorConsumption: graph.nodes.map"),
+        "{js}"
+    );
+    assert!(
+        !js.contains(
+            "[\"insert_branch\", \"insert_switch\", \"insert_loop\", \"insert_fallible_rail\"]"
+        ),
         "parallel insertion-kind tables must not return: {js}"
     );
     assert!(
@@ -5136,7 +5657,10 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("data-library-search"), "{js}");
     assert!(js.contains("data-library-action"), "{js}");
     assert!(js.contains("function runLibraryAction"), "{js}");
-    assert!(js.contains("transactionForPaletteInsert(item, null"), "{js}");
+    assert!(
+        js.contains("transactionForPaletteInsert(item, null"),
+        "{js}"
+    );
     assert!(js.contains("data-canvas-traits"), "{js}");
     assert!(js.contains("data-trait-create"), "{js}");
     assert!(js.contains("function traitMethodActions"), "{js}");
@@ -5153,7 +5677,10 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("id=\"apply-exec-convergence\""), "{js}");
     assert!(js.contains("data-exec-convergence-function"), "{js}");
     assert!(js.contains("strategy: \"extract\""), "{js}");
-    assert!(js.contains("const accepted = result && result.changed === true"), "{js}");
+    assert!(
+        js.contains("const accepted = result && result.changed === true"),
+        "{js}"
+    );
 }
 
 #[test]
@@ -5165,38 +5692,94 @@ fn canvas_debug_browser_state_is_revision_bound() {
         "{js}"
     );
     assert!(js.contains("source was kept"), "{js}");
-    assert!(js.contains("Debug state was bounded; source was kept"), "{js}");
+    assert!(
+        js.contains("Debug state was bounded; source was kept"),
+        "{js}"
+    );
 }
 
 #[test]
 fn canvas_details_are_descriptor_driven_and_dom_safe() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let inspector = fs::read_to_string(repo.join("crates/jet-canvas/src/js/inspector-connections.js"))
-        .expect("read inspector JavaScript");
-    let diagnostics = fs::read_to_string(repo.join("crates/jet-canvas/src/js/diagnostics-query.js"))
-        .expect("read diagnostics JavaScript");
+    let inspector =
+        fs::read_to_string(repo.join("crates/jet-canvas/src/js/inspector-connections.js"))
+            .expect("read inspector JavaScript");
+    let diagnostics =
+        fs::read_to_string(repo.join("crates/jet-canvas/src/js/diagnostics-query.js"))
+            .expect("read diagnostics JavaScript");
     let project = fs::read_to_string(repo.join("crates/jet-canvas/src/js/project-navigation.js"))
         .expect("read project JavaScript");
 
-    assert!(inspector.contains("function renderFieldDescriptors"), "{inspector}");
-    assert!(inspector.contains("function validatedFieldDescriptors"), "{inspector}");
-    assert!(inspector.contains("const operationCache = new WeakMap()"), "descriptor operations must be normalized once per render: {inspector}");
-    assert!(inspector.contains("operationCache.has(operation)"), "descriptor operations must share one live control group: {inspector}");
-    assert!(inspector.contains("function appendSafeDescriptorAttributes"), "{inspector}");
-    assert!(inspector.contains("function detailsEditorSelectionIsCurrent"), "{inspector}");
-    assert!(inspector.contains("if (state.phase === \"applying\") return false"), "{inspector}");
+    assert!(
+        inspector.contains("function renderFieldDescriptors"),
+        "{inspector}"
+    );
+    assert!(
+        inspector.contains("function validatedFieldDescriptors"),
+        "{inspector}"
+    );
+    assert!(
+        inspector.contains("const operationCache = new WeakMap()"),
+        "descriptor operations must be normalized once per render: {inspector}"
+    );
+    assert!(
+        inspector.contains("operationCache.has(operation)"),
+        "descriptor operations must share one live control group: {inspector}"
+    );
+    assert!(
+        inspector.contains("function appendSafeDescriptorAttributes"),
+        "{inspector}"
+    );
+    assert!(
+        inspector.contains("function detailsEditorSelectionIsCurrent"),
+        "{inspector}"
+    );
+    assert!(
+        inspector.contains("if (state.phase === \"applying\") return false"),
+        "{inspector}"
+    );
     assert!(inspector.contains("apply_op"), "{inspector}");
-    assert!(inspector.contains("function variableDetailDescriptors"), "{inspector}");
-    assert!(inspector.contains("function functionDetailDescriptors"), "{inspector}");
-    assert!(inspector.contains("function nodeDetailDescriptors"), "{inspector}");
-    assert!(!inspector.contains("innerHTML"), "Details retained an HTML sink: {inspector}");
-    assert!(!inspector.contains("row.innerHTML"), "Details retained per-row HTML construction: {inspector}");
-    assert!(diagnostics.contains("function diagnosticDetailDescriptors"), "{diagnostics}");
-    assert!(diagnostics.contains("renderFieldDescriptors(problemsList"), "{diagnostics}");
-    assert!(!diagnostics.contains("problemsList.innerHTML"), "diagnostics retained an HTML sink: {diagnostics}");
+    assert!(
+        inspector.contains("function variableDetailDescriptors"),
+        "{inspector}"
+    );
+    assert!(
+        inspector.contains("function functionDetailDescriptors"),
+        "{inspector}"
+    );
+    assert!(
+        inspector.contains("function nodeDetailDescriptors"),
+        "{inspector}"
+    );
+    assert!(
+        !inspector.contains("innerHTML"),
+        "Details retained an HTML sink: {inspector}"
+    );
+    assert!(
+        !inspector.contains("row.innerHTML"),
+        "Details retained per-row HTML construction: {inspector}"
+    );
+    assert!(
+        diagnostics.contains("function diagnosticDetailDescriptors"),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("renderFieldDescriptors(problemsList"),
+        "{diagnostics}"
+    );
+    assert!(
+        !diagnostics.contains("problemsList.innerHTML"),
+        "diagnostics retained an HTML sink: {diagnostics}"
+    );
     assert!(project.contains("function projectMiniCard"), "{project}");
-    assert!(project.contains("renderFieldDescriptors(projectRail"), "{project}");
-    assert!(!project.contains("projectRail.innerHTML"), "project selection retained an HTML sink: {project}");
+    assert!(
+        project.contains("renderFieldDescriptors(projectRail"),
+        "{project}"
+    );
+    assert!(
+        !project.contains("projectRail.innerHTML"),
+        "project selection retained an HTML sink: {project}"
+    );
 }
 
 #[test]
@@ -5252,7 +5835,8 @@ fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
             .map(|offset| previous_end + offset)
             .unwrap_or_else(|| panic!("{} missing from assembled runtime", path.display()));
         assert_eq!(
-            position, previous_end,
+            position,
+            previous_end,
             "{} is out of order or separated by untracked JavaScript",
             path.display()
         );
@@ -5272,7 +5856,8 @@ fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
     }
 
     assert_eq!(previous_end + "})();\n".len(), runtime.len());
-    let glue = fs::read_to_string(repo.join("crates/jet-canvas/src/js.rs")).expect("read Canvas JS glue");
+    let glue =
+        fs::read_to_string(repo.join("crates/jet-canvas/src/js.rs")).expect("read Canvas JS glue");
     assert!(glue.lines().count() < 40, "js.rs must remain assembly glue");
 }
 
@@ -5302,7 +5887,7 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         "\"ok\":true",
         "\"persistence\":\"local-source-span\"",
         "\"state\":\"finished\"",
-       "\"debug_overlay\":\"finished\"",
+        "\"debug_overlay\":\"finished\"",
         "\"runtime_state\":\"finished\"",
         "\"active_line\":null",
         "\"active_span\":{\"start\":0,\"end\":0}",
@@ -5312,7 +5897,7 @@ fn canvas_debug_session_projects_runtime_overlay_to_source_spans() {
         "\"breakpoints\"",
         "\"locals\"",
         "\"watches\"",
-       "\"name\":\"total\"",
+        "\"name\":\"total\"",
         "\"type\":\"Int\"",
         "\"value\":\"1\"",
         "\"call_stack\"",
@@ -5354,7 +5939,10 @@ fn canvas_debug_session_projects_live_runtime_snapshot() {
         "\"run()\"",
         "\"wire_path\":[",
     ] {
-        assert!(out.contains(field), "live debug overlay missing {field}: {out}");
+        assert!(
+            out.contains(field),
+            "live debug overlay missing {field}: {out}"
+        );
     }
 }
 
@@ -5442,13 +6030,19 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
         "\"name\":\"key\"",
         "\"name\":\"value\"",
     ] {
-        assert!(graph.contains(field), "unified loop graph missing {field}: {graph}");
+        assert!(
+            graph.contains(field),
+            "unified loop graph missing {field}: {graph}"
+        );
     }
     for exact in [
         "\"role\":\"initializer\",\"source\":\"cursor := 0\"",
         "\"role\":\"condition\",\"source\":\"cursor < 1\"",
     ] {
-        assert!(graph.contains(exact), "unified loop graph missing exact clause {exact}: {graph}");
+        assert!(
+            graph.contains(exact),
+            "unified loop graph missing exact clause {exact}: {graph}"
+        );
     }
 
     let (list_start, list_end) = source_span_near(&graph, "\"title\":\"list\"");
@@ -5463,11 +6057,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     assert!(after.contains("loop item in [1, 2, 3, 4], 2"), "{after}");
 
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph before header edits");
-    let initializer_id = field_before(
-        &graph,
-        "\"source\":\"cursor := 0\"",
-        "inline_expr_id",
-    );
+    let initializer_id = field_before(&graph, "\"source\":\"cursor := 0\"", "inline_expr_id");
     let edit_initializer = format!(
         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"cursor := 1\"}}",
         jet::Canvas::source_revision(&after), initializer_id
@@ -5477,11 +6067,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
 
     let after_initializer = fs::read_to_string(&path).unwrap();
     let graph = jet::Canvas::graph_json_for_file(&path).expect("graph before condition edit");
-    let condition_id = field_before(
-        &graph,
-        "\"source\":\"cursor < 1\"",
-        "inline_expr_id",
-    );
+    let condition_id = field_before(&graph, "\"source\":\"cursor < 1\"", "inline_expr_id");
     let edit_condition = format!(
         "{{\"schema_version\":1,\"op\":\"edit_inline_expr\",\"revision\":\"{}\",\"inline_expr_id\":\"{}\",\"new_expr\":\"cursor < 2\"}}",
         jet::Canvas::source_revision(&after_initializer), condition_id
@@ -5546,7 +6132,10 @@ fn canvas_projects_and_source_edits_shield_region() {
         "\"title\":\"print\"",
         "\"title\":\"\\\"before\\\"\"",
     ] {
-        assert!(graph.contains(field), "shield graph missing {field}: {graph}");
+        assert!(
+            graph.contains(field),
+            "shield graph missing {field}: {graph}"
+        );
     }
     assert!(
         !graph.contains("\"kind\":\"source\""),
@@ -5581,7 +6170,10 @@ fn canvas_projects_policy_region() {
         "\"title\":\"print\"",
         "\"title\":\"\\\"bounded\\\"\"",
     ] {
-        assert!(graph.contains(field), "policy graph missing {field}: {graph}");
+        assert!(
+            graph.contains(field),
+            "policy graph missing {field}: {graph}"
+        );
     }
 }
 
@@ -5590,7 +6182,11 @@ fn canvas_projects_async_task_rail() {
     let path = write_fixture("task_rail", CANVAS_TASK_RAIL_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
 
-    for field in ["\"async\"", "\"kind\":\"structured_task_scope\"", "\"source\":\"task.group\""] {
+    for field in [
+        "\"async\"",
+        "\"kind\":\"structured_task_scope\"",
+        "\"source\":\"task.group\"",
+    ] {
         assert!(
             graph.contains(field),
             "task rail graph missing {field}: {graph}"
@@ -5685,7 +6281,10 @@ fn canvas_projects_event_dispatchers_from_imported_source_module() {
     assert!(graph.contains("\"kind\":\"event_scope_create\""), "{graph}");
     assert!(graph.contains("scope :: event.scope()"), "{graph}");
     let entry_graph = jet::Canvas::graph_json_for_file(&entry).expect("entry event graph");
-    assert!(entry_graph.contains("\"event_dispatchers\":[]"), "{entry_graph}");
+    assert!(
+        entry_graph.contains("\"event_dispatchers\":[]"),
+        "{entry_graph}"
+    );
 }
 
 #[test]
@@ -5724,7 +6323,10 @@ fn canvas_event_dispatcher_edits_are_checked_and_stale_or_invalid_edits_keep_sou
     assert!(after.contains("event.new<String>()"), "{after}");
     assert_eq!(jet::Formatter::format_source(&after).unwrap(), after);
     let graph = jet::Canvas::graph_json_for_file(&path).expect("reprojected event graph");
-    assert!(graph.contains("\"receiver_type\":\"Event<String>\""), "{graph}");
+    assert!(
+        graph.contains("\"receiver_type\":\"Event<String>\""),
+        "{graph}"
+    );
 }
 
 #[test]
@@ -5823,8 +6425,7 @@ fn canvas_trait_impl_authoring_preserves_nested_scope_and_provenance() {
         "{{\"schema_version\":1,\"op\":\"create_trait_impl\",\"revision\":\"{}\",\"type_name\":\"Badge\",\"trait_name\":\"ui.Drawable\"}}",
         revision
     );
-    let out =
-        jet::Canvas::apply_transaction_json(&path, &edit).expect("create nested trait impl");
+    let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("create nested trait impl");
     assert!(out.contains("\"changed\":true"), "{out}");
     let after = fs::read_to_string(&path).unwrap();
     assert!(after.contains("impl Badge.Drawable"), "{after}");
@@ -6115,7 +6716,13 @@ fn canvas_reconstructs_checked_output_callable_from_semindex() {
         "\"fact_source\":\"semindex_resolved_output\"",
         "\"effects\":[\"IO\"]",
     ] {
-        assert!(graph.contains(field), "Canvas Output fact missing {field}: {graph}");
+        assert!(
+            graph.contains(field),
+            "Canvas Output fact missing {field}: {graph}"
+        );
     }
-    assert!(graph.contains(&identity), "Canvas Output fact missing {identity}: {graph}");
+    assert!(
+        graph.contains(&identity),
+        "Canvas Output fact missing {identity}: {graph}"
+    );
 }

@@ -491,7 +491,10 @@ fn ci_shard_matrix_matches_test_shards_script_count() {
         .nth(1)
         .and_then(|rest| rest.split(']').next())
         .unwrap_or_else(|| panic!("verify-tests job must declare a `shard: [...]` matrix"));
-    let declared_count = shard_list.split(',').filter(|s| !s.trim().is_empty()).count();
+    let declared_count = shard_list
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .count();
     assert!(
         declared_count >= 1,
         "verify-tests shard matrix must not be empty"
@@ -579,8 +582,9 @@ fn ci_test_shards_use_the_committed_weight_table() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let table = fs::read_to_string(root.join("tools/ci/test-weights.tsv"))
         .expect("read tools/ci/test-weights.tsv");
-    let inventory: std::collections::BTreeSet<String> =
-        full_workspace_test_target_inventory(&root).into_iter().collect();
+    let inventory: std::collections::BTreeSet<String> = full_workspace_test_target_inventory(&root)
+        .into_iter()
+        .collect();
 
     let mut weighed = std::collections::BTreeSet::new();
     for (index, line) in table.lines().enumerate() {

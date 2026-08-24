@@ -13,16 +13,29 @@ fn compile(dir: &Path, name: &str, src: &str) -> PathBuf {
     fs::write(&source, src).unwrap();
     let shown = source.to_string_lossy();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        panic!(
+            "front end rejected fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
     });
     let rust = dir.join(format!("{name}.rs"));
     let binary = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     fs::write(&rust, out.rust).unwrap();
     let built = Command::new("rustc")
-        .args(["--edition", "2021", rust.to_str().unwrap(), "-o", binary.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rust.to_str().unwrap(),
+            "-o",
+            binary.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(built.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    assert!(
+        built.status.success(),
+        "rustc failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     binary
 }
 
@@ -73,8 +86,14 @@ fn run() {
 "#,
     );
     let output = Command::new(binary).output().unwrap();
-    assert!(output.status.success(), "facts child failed: {}", String::from_utf8_lossy(&output.stderr));
-    let stdout = String::from_utf8(output.stdout).unwrap().replace("\r\n", "\n");
+    assert!(
+        output.status.success(),
+        "facts child failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace("\r\n", "\n");
     let lines: Vec<_> = stdout.lines().collect();
     assert_eq!(lines.len(), 8, "unexpected facts output: {stdout:?}");
     assert_eq!(lines[0], std::env::consts::OS);
@@ -128,7 +147,9 @@ fn run() {
         }
     };
     assert_eq!(ready, "ready");
-    unsafe extern "C" { fn kill(pid: i32, signal: i32) -> i32; }
+    unsafe extern "C" {
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
     assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
     let status = wait_bounded(&mut child, "interrupt child");
     assert!(status.success(), "interrupt child failed: {status}");

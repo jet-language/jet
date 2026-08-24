@@ -339,11 +339,8 @@ fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
             .join(",");
         let components = scene_ref.components.join(",");
         let callbacks = scene_ref.callbacks.clone();
-        let binding_actions: Vec<String> = scene_ref
-            .bindings
-            .iter()
-            .map(|(a, _)| a.clone())
-            .collect();
+        let binding_actions: Vec<String> =
+            scene_ref.bindings.iter().map(|(a, _)| a.clone()).collect();
 
         let mut out = Vec::new();
         out.push(format!("scene:{name}"));
@@ -468,8 +465,3 @@ host_fns! {
     asset_show: "jet_jit_game_asset_show" => jet_jit_game_asset_show: sig_ii_ret;
     run: "jet_jit_game_run" => jet_jit_game_run: sig_run;
 }
-
-
-
-
-

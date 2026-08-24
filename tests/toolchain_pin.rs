@@ -137,11 +137,7 @@ fn platform_miss_reports_e1251() {
 #[test]
 fn init_refuses_to_clobber_reports_e1252() {
     let dir = scratch("clobber");
-    write(
-        &dir,
-        "package.jet",
-        "name: \"x\"\nversion: \"1\"\n",
-    );
+    write(&dir, "package.jet", "name: \"x\"\nversion: \"1\"\n");
     let out = run(&["init"], &dir);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("E1252"), "expected E1252:\n{err}");

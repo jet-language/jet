@@ -209,7 +209,10 @@ fn run() {
     assert!(
         out.lints.iter().any(|d| d.code == "E2934"),
         "expected an E2934 lint, got: {:?}",
-        out.lints.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+        out.lints
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
     );
 }
 

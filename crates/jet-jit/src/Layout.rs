@@ -56,7 +56,10 @@ fn slot(handle: i64) -> LayoutSlot {
 
 fn jet_jit_layout_new(label: i64) -> i64 {
     with_rt(|rt| {
-        let label = rt.heap.clone_string(label).unwrap_or_else(|| "layout".into());
+        let label = rt
+            .heap
+            .clone_string(label)
+            .unwrap_or_else(|| "layout".into());
         let h = jet_layout::Handle::new(&label);
         rt.layout_slots.push(LayoutSlot::Handle(h));
         rt.layout_slots.len() as i64
@@ -69,21 +72,27 @@ fn jet_jit_layout_from_const(v: f64) -> i64 {
 
 fn jet_jit_layout_ge(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
-        (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::ge(a, b))),
+        (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => {
+            push_slot(LayoutSlot::Constraint(jet_layout::ge(a, b)))
+        }
         _ => jet_foundation::ice!(None, "jit layout ge: bad operands"),
     }
 }
 
 fn jet_jit_layout_le(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
-        (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::le(a, b))),
+        (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => {
+            push_slot(LayoutSlot::Constraint(jet_layout::le(a, b)))
+        }
         _ => jet_foundation::ice!(None, "jit layout le: bad operands"),
     }
 }
 
 fn jet_jit_layout_eq(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
-        (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::eq_(a, b))),
+        (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => {
+            push_slot(LayoutSlot::Constraint(jet_layout::eq_(a, b)))
+        }
         _ => jet_foundation::ice!(None, "jit layout eq: bad operands"),
     }
 }
@@ -278,11 +287,6 @@ host_fns! {
     add_constraint: "jet_jit_layout_add_constraint" => jet_jit_layout_add_constraint: add_c;
     strength: "jet_jit_layout_strength" => jet_jit_layout_strength: binary;
 }
-
-
-
-
-
 
 // silence unused import warning until lower_ctx wires Result packing
 #[allow(dead_code)]

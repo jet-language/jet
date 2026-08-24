@@ -13,6 +13,10 @@ per-attribute differential ledger, and no evaluated graph or closure result.
 The five card criteria therefore remain open. The existing dogfood index path
 must stay separate from this evaluator program.
 
+Coverage counts below use current `HEAD` (`14f1a62ec`). The earlier 20-item
+`env.jet` count is a historical card baseline; `env.jet` gained the full
+runtime/tool projection after that baseline was recorded.
+
 ## Plan of record
 
 1. **Freeze reuse and licence policy.** Keep GPL Snix/Tvix evaluator code out
@@ -152,12 +156,15 @@ also names the source inventory digest.
 
 ### Repository demand
 
-`env.jet` declares 20 nixpkgs package attributes
-(`env.jet:7-15`). The current `.jet/lock` contains one `cargo` record and no
-whole-repository nixpkgs index (`.jet/lock:1-14`). The signed index client and
-producer exist, but no committed index target proves these 20 attrs, and the
-provider consumer is not yet wired. Therefore current evaluator identity
-coverage for this repository is **0/20**, not 20/20.
+`env.jet` currently declares 28 nixpkgs selections: 27 plain attributes in
+`default.[...]` plus the nested `default.rPackages.jsonlite`
+(`env.jet:8-18`). The original card baseline was 20 plain attributes. The
+current `.jet/lock` contains one `cargo` record and no whole-repository
+nixpkgs index (`.jet/lock:1-14`). The signed index client and producer exist,
+and `HEAD` integrates the index/closure consumer, but no committed index target
+proves these 28 selections. That substitution path is not evaluator parity.
+Therefore current evaluator identity coverage for the repository is **0/28**,
+not 28/28. Uncommitted sibling-lane edits are not counted as card evidence.
 
 The index producer's differential command compares staged index records with a
 staged Nix oracle and writes only `records_compared`, `mismatches`, and
@@ -250,8 +257,10 @@ Nix result or error class, derivation path, named outputs, graph digest, and
 closure digest. Hash the canonical report. Keep the full row list beside the
 summary; counts without rows cannot debug a regression.
 
-For repository acceptance, the corpus must include all 20 `env.jet` attrs for
-the locked system before the first dogfood claim. The row gate is:
+For repository acceptance, the corpus must include all 28 current `env.jet`
+selections for the locked system before the first dogfood claim. The original
+20-item card baseline remains a required historical regression slice. The row
+gate is:
 
 ```text
 Jet evaluation == Nix evaluation
@@ -334,17 +343,20 @@ The differential graph prototype must test this before more surface work.
 ## Criterion status
 
 1. **NOT MET** — recommendation recorded; owner/legal decision on GPL reuse and
-   MIT protocol use remains open. Evidence: Snix/Tvix licence links above.
+   MIT protocol use remains open. Evidence:
+   `docs/audits/snix-tvix-license-research-2026-08-24.md:37-101`.
 2. **NOT MET** — no whole-nixpkgs per-revision differential counts exist.
-   Evidence: `oracle.json` has no attr records; the published baseline is
-   explicitly `not-measured`.
-3. **NOT MET** — 0/20 repository attrs have native evaluated derivation/output
-   identity rows. Evidence: `env.jet:7-15`, `.jet/lock:1-14`, and no committed
-   index target.
+   Evidence: `tests/fixtures/nix-compat/oracle.json:1-35` has no attr records;
+   the published baseline is explicitly `not-measured`.
+3. **NOT MET** — 0/28 current repository selections have native evaluated
+   derivation/output identity rows. Evidence: `env.jet:8-18`, `.jet/lock:1-14`,
+   and no committed index target.
 4. **NOT MET** — overlay and custom-flake tests are bounded shape projections;
-   no evaluated graph or closure agreement exists.
+   no evaluated graph or closure agreement exists. Evidence:
+   `crates/jet-nix-eval/src/tests.rs:1085-1179`.
 5. **NOT MET** — no limitation claim was removed because no matching graph and
-   closure corpus supports removal.
+   closure corpus supports removal. Evidence:
+   `crates/jet-nix-eval/src/lib.rs:248-254`.
 
 This report changes no evaluator, provider, index, Tower, or user-facing
 product code. It publishes the measured boundary and the closeout contract.

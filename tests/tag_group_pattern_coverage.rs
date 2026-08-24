@@ -69,7 +69,9 @@ fn run() {
 "#,
     );
     assert!(
-        !diagnostics.iter().any(|code| code == "L0301" || code == "E0365"),
+        !diagnostics
+            .iter()
+            .any(|code| code == "L0301" || code == "E0365"),
         "{diagnostics:?}"
     );
 }

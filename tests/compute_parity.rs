@@ -129,7 +129,11 @@ fn compute_cpu_oracle_aot_covers_storage_algebra_and_corruption() {
 
 #[test]
 fn compute_cpu_oracle_default_run_matches_aot_meaning() {
-    let (code, stdout, stderr) = run_default_multi("compute_cpu_oracle_jit", "main.jet", &[("main.jet", SOURCE)]);
+    let (code, stdout, stderr) = run_default_multi(
+        "compute_cpu_oracle_jit",
+        "main.jet",
+        &[("main.jet", SOURCE)],
+    );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
@@ -227,7 +231,10 @@ fn run() {
     if have_rustc() {
         let (code, stdout) = build_and_run("compute_fused_broadcast", source);
         assert_eq!(code, 0);
-        assert_eq!(stdout, "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n");
+        assert_eq!(
+            stdout,
+            "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n"
+        );
     } else {
         eprintln!("SKIP compute_broadcast_ufunc_fuses_indexing_and_arithmetic AOT leg: rustc is unavailable");
     }
@@ -237,5 +244,8 @@ fn run() {
         &[("main.jet", source)],
     );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert_eq!(stdout, "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n");
+    assert_eq!(
+        stdout,
+        "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n"
+    );
 }

@@ -63,14 +63,10 @@ fn assert_example_matches_golden(stem: &str) {
     let root = repo_root();
     let src = fs::read_to_string(root.join(format!("examples/features/tooling/{stem}.jet")))
         .unwrap_or_else(|e| panic!("read {stem}.jet: {e}"));
-    let expected = fs::read_to_string(root.join(format!(
-        "examples/features/expected/tooling/{stem}.out"
-    )))
-    .unwrap_or_else(|e| panic!("read {stem}.out: {e}"));
-    let dir = std::env::temp_dir().join(format!(
-        "jet_data_hostile_{stem}_{}",
-        std::process::id()
-    ));
+    let expected =
+        fs::read_to_string(root.join(format!("examples/features/expected/tooling/{stem}.out")))
+            .unwrap_or_else(|e| panic!("read {stem}.out: {e}"));
+    let dir = std::env::temp_dir().join(format!("jet_data_hostile_{stem}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let (code, stdout, stderr) = build_and_run(&dir, stem, &src);

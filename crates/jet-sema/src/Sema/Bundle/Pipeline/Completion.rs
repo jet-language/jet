@@ -11,7 +11,10 @@ pub(super) fn complete_bundle_check(
     allow_compiler_api: bool,
     mut name_ledger: jet_foundation::Names::NameLedger,
     mut diags: Vec<Diagnostic>,
-) -> (Vec<Diagnostic>, super::super::super::Effects::SemIndexEffectFacts) {
+) -> (
+    Vec<Diagnostic>,
+    super::super::super::Effects::SemIndexEffectFacts,
+) {
     populate_name_ledger(bundle, &states, &mut name_ledger);
     record_import_edge_facts(bundle, &mut name_ledger);
 
@@ -170,14 +173,20 @@ pub(super) fn complete_bundle_check(
                 // not reconstruct that policy here.
             } else if run_fn.params.len() == 1 {
                 let param = &run_fn.params[0];
-                let cli_module = jet_foundation::CLISchema::entry_type_module(bundle)
-                    .unwrap_or(bundle.entry);
+                let cli_module =
+                    jet_foundation::CLISchema::entry_type_module(bundle).unwrap_or(bundle.entry);
                 if std::env::var_os("JET_DEBUG_CLI").is_some() {
                     eprintln!(
                         "cli-debug sema module={cli_module} param={:?} cli={:?} derives={:?}",
                         param.ty,
-                        states[cli_module].trait_reg.implements_trait("RunArgs", "CLI"),
-                        states[cli_module].trait_reg.derives.keys().collect::<Vec<_>>()
+                        states[cli_module]
+                            .trait_reg
+                            .implements_trait("RunArgs", "CLI"),
+                        states[cli_module]
+                            .trait_reg
+                            .derives
+                            .keys()
+                            .collect::<Vec<_>>()
                     );
                 }
                 match cli_entry_param_shape(
@@ -361,7 +370,9 @@ pub(super) fn complete_bundle_check(
         let display = module.display.clone();
         for item in &mut module.items {
             let Item::Const(value) = item else { continue };
-            let Some(output) = &mut value.resolved_output else { continue };
+            let Some(output) = &mut value.resolved_output else {
+                continue;
+            };
             let alias = name_ledger
                 .module_alias(output.module)
                 .unwrap_or(&states[output.module].module_alias);
@@ -423,7 +434,10 @@ pub(super) fn complete_bundle_check(
         );
         let local_solved = public_solved
             .iter()
-            .filter_map(|(key, row)| key.strip_prefix(&prefix).map(|key| (key.to_string(), row.clone())))
+            .filter_map(|(key, row)| {
+                key.strip_prefix(&prefix)
+                    .map(|key| (key.to_string(), row.clone()))
+            })
             .collect::<HashMap<_, _>>();
         let local_summaries = validation_summaries
             .iter()
@@ -448,12 +462,7 @@ pub(super) fn complete_bundle_check(
                 }
             })
             .collect::<HashMap<_, _>>();
-        check_effect_boundaries(
-            &module.items,
-            &local_solved,
-            &local_summaries,
-            &mut diags,
-        );
+        check_effect_boundaries(&module.items, &local_solved, &local_summaries, &mut diags);
         let module_alias = name_ledger
             .module_alias(module_index)
             .unwrap_or(&module.alias);
@@ -478,9 +487,19 @@ pub(super) fn complete_bundle_check(
             &mut failed_diagnostic_phases,
         );
     }
-    check_region_caps(&validation_summaries, &public_solved, &mut failed_diagnostic_phases, &mut diags);
+    check_region_caps(
+        &validation_summaries,
+        &public_solved,
+        &mut failed_diagnostic_phases,
+        &mut diags,
+    );
     // D-EFF2: callback param effect bounds (E0747).
-    check_callback_bounds(&validation_summaries, &public_solved, &mut failed_diagnostic_phases, &mut diags);
+    check_callback_bounds(
+        &validation_summaries,
+        &public_solved,
+        &mut failed_diagnostic_phases,
+        &mut diags,
+    );
     for (module_index, pending_diagnostics) in module_pending_diagnostics.into_iter().enumerate() {
         let module_alias = name_ledger
             .module_alias(module_index)
@@ -556,13 +575,8 @@ pub(super) fn complete_bundle_check(
     // D-FACTMODEL1=A: one erased fact model for tags, effects, and states.
     // Keep the pass in its own frame; this bundle checker already carries the
     // compiler's largest solved graphs.
-    let fact_registry = check_fact_tags_and_states(
-        bundle,
-        &states,
-        &taint_returns,
-        &return_types,
-        &mut diags,
-    );
+    let fact_registry =
+        check_fact_tags_and_states(bundle, &states, &taint_returns, &return_types, &mut diags);
 
     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
     // D-CLIFLAG1: generated CLI specs/decoders and job argv dispatch call
@@ -625,10 +639,15 @@ pub(super) fn complete_bundle_check(
     // D-EMAIL-SMTP-CONFIG1=A: sema canonicalizes `email.Limits.safe()` to a
     // static `Limits.safe()` call before this late usage walk. Preserve CoreLib
     // reachability for type-only SMTP policy programs.
-    if bundle.modules.iter().zip(states.iter()).any(|(module, state)| {
-        module.source.contains(".Limits")
-            && state.core_imports.values().any(|path| path == "core.email")
-    }) {
+    if bundle
+        .modules
+        .iter()
+        .zip(states.iter())
+        .any(|(module, state)| {
+            module.source.contains(".Limits")
+                && state.core_imports.values().any(|path| path == "core.email")
+        })
+    {
         used_core.insert("core.email::Limits.safe".to_string());
     }
     // D-CORE-SOURCE-AUTHORITY1=A: late sema-generated helpers join the same

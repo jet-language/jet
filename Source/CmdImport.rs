@@ -9,8 +9,8 @@ use std::path::{Component, Path, PathBuf};
 
 use jet::Diagnostics::Diagnostic;
 use jet::ExitCodes;
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Report::{render_status_json, ReportEnvelope};
+use jet_foundation::JSON::json_escape;
 
 const TODO_CODE: &str = "JT0101";
 

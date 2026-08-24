@@ -41,7 +41,10 @@ fn pinned_unicode_tables_regenerate_byte_identically() {
 fn generated_rust_emits_only_the_unicode_tier_the_program_needs() {
     let hello = jet::compile(r#"fn run() { print("hello") }"#).expect("hello compiles");
     assert_eq!(
-        hello.rust.matches("pub const UNICODE_STRING_VERSION").count(),
+        hello
+            .rust
+            .matches("pub const UNICODE_STRING_VERSION")
+            .count(),
         1,
         "the always-on Unicode string prelude must be emitted exactly once",
     );
@@ -66,7 +69,9 @@ fn run() { print(text.nfc("é")) }"#,
     )
     .expect("core.text program compiles");
     assert_eq!(
-        text.rust.matches("pub const UNICODE_STRING_VERSION").count(),
+        text.rust
+            .matches("pub const UNICODE_STRING_VERSION")
+            .count(),
         1,
         "core.text must not duplicate the always-on Unicode string prelude",
     );
@@ -94,9 +99,14 @@ fn aot_prelude_passes_full_unicode_corpora() {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs")).unwrap();
-    let start = text.find("// ── core.text helpers").expect("Unicode AOT block start");
-    let end = text.find("fn jet_std_fs_read").expect("Unicode AOT block end");
+    let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs"))
+        .unwrap();
+    let start = text
+        .find("// ── core.text helpers")
+        .expect("Unicode AOT block start");
+    let end = text
+        .find("fn jet_std_fs_read")
+        .expect("Unicode AOT block end");
     let unicode_block = &text[start..end];
     let root_text = root.to_string_lossy().replace('\\', "\\\\");
     let suffix = r#"
@@ -239,10 +249,21 @@ fn main() {
         .arg(&binary)
         .output()
         .unwrap();
-    assert!(compiled.status.success(), "AOT Unicode harness rejected:\n{}", String::from_utf8_lossy(&compiled.stderr));
+    assert!(
+        compiled.status.success(),
+        "AOT Unicode harness rejected:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
     let ran = Command::new(&binary).output().unwrap();
-    assert!(ran.status.success(), "AOT Unicode corpus failed:\n{}", String::from_utf8_lossy(&ran.stderr));
-    assert_eq!(String::from_utf8_lossy(&ran.stdout), "19965 1557 1112064 1093 1826 512\n");
+    assert!(
+        ran.status.success(),
+        "AOT Unicode corpus failed:\n{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&ran.stdout),
+        "19965 1557 1112064 1093 1826 512\n"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -298,9 +319,18 @@ fn run() {
     print(regex_alpha && regex_number && regex_whitespace && insensitive.is_match("K"))
 }
 "#
-    .replace("__PINNED_UPPER__", &char::from_u32(0xA7CE).unwrap().to_string())
-    .replace("__PINNED_LOWER__", &char::from_u32(0xA7CF).unwrap().to_string())
-    .replace("__PINNED_SPACE__", &char::from_u32(0x2003).unwrap().to_string());
+    .replace(
+        "__PINNED_UPPER__",
+        &char::from_u32(0xA7CE).unwrap().to_string(),
+    )
+    .replace(
+        "__PINNED_LOWER__",
+        &char::from_u32(0xA7CF).unwrap().to_string(),
+    )
+    .replace(
+        "__PINNED_SPACE__",
+        &char::from_u32(0x2003).unwrap().to_string(),
+    );
     let (code, stdout, stderr) = common::build_and_run("jet_text_unicode", "parity", &source);
     assert_eq!(code, 0, "Unicode parity fixture failed: {stderr}");
     assert_eq!(
@@ -316,9 +346,14 @@ fn scalar_inspector_names_invisible_codepoints() {
         return;
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs")).unwrap();
-    let start = text.find("// ── core.text helpers").expect("Unicode AOT block start");
-    let end = text.find("fn jet_std_fs_read").expect("Unicode AOT block end");
+    let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs"))
+        .unwrap();
+    let start = text
+        .find("// ── core.text helpers")
+        .expect("Unicode AOT block start");
+    let end = text
+        .find("fn jet_std_fs_read")
+        .expect("Unicode AOT block end");
     let unicode_block = &text[start..end];
     let root_text = root.to_string_lossy().replace('\\', "\\\\");
     let suffix = r#"
@@ -370,9 +405,17 @@ fn main() {
         .arg(&binary)
         .output()
         .unwrap();
-    assert!(compiled.status.success(), "scalar inspector harness rejected:\n{}", String::from_utf8_lossy(&compiled.stderr));
+    assert!(
+        compiled.status.success(),
+        "scalar inspector harness rejected:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
     let ran = Command::new(&binary).output().unwrap();
-    assert!(ran.status.success(), "scalar inspector proof failed:\n{}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "scalar inspector proof failed:\n{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&ran.stdout), "40074\n");
     let _ = fs::remove_dir_all(dir);
 }

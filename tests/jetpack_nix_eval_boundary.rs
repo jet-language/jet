@@ -31,26 +31,23 @@ fn evaluator_seam_is_no_std_dependency_free_and_unsafe_forbidden() {
     let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
         .expect("full verification entry point");
     assert!(verify.contains("verify-nix-eval-stopline.sh"));
-    let escape = fs::read_to_string(
-        root.join("tests/fixtures/nix-compat/authority-escape/lib.rs"),
-    )
-    .expect("native evaluator authority escape fixture");
+    let escape = fs::read_to_string(root.join("tests/fixtures/nix-compat/authority-escape/lib.rs"))
+        .expect("native evaluator authority escape fixture");
     assert!(escape.contains("extern crate std as host;"));
     assert!(escape.contains("host::process::Command::new"));
     assert!(escape.contains("host::net::TcpStream as Wire"));
     assert!(escape.contains("host::net::ToSocketAddrs as Resolve"));
     assert!(escape.contains("host::os::unix::net::UnixStream as Wire"));
-    let build_escape = fs::read_to_string(
-        root.join("tests/fixtures/nix-compat/build-script-escape/build.rs"),
-    )
-    .expect("native evaluator build-script escape fixture");
+    let build_escape =
+        fs::read_to_string(root.join("tests/fixtures/nix-compat/build-script-escape/build.rs"))
+            .expect("native evaluator build-script escape fixture");
     assert!(build_escape.contains("std::process::Command::new"));
 
-    let jetpack_manifest = fs::read_to_string(root.join("crates/jetpack/Cargo.toml"))
-        .expect("jetpack manifest");
+    let jetpack_manifest =
+        fs::read_to_string(root.join("crates/jetpack/Cargo.toml")).expect("jetpack manifest");
     assert!(jetpack_manifest.contains("jet-nix-eval = { path = \"../jet-nix-eval\" }"));
-    let jetpack = fs::read_to_string(root.join("crates/jetpack/src/lib.rs"))
-        .expect("jetpack library root");
+    let jetpack =
+        fs::read_to_string(root.join("crates/jetpack/src/lib.rs")).expect("jetpack library root");
     assert!(jetpack.contains("pub(crate) mod NixEval;"));
     assert!(!jetpack.contains("pub mod NixEval;"));
 }
@@ -84,10 +81,9 @@ fn oracle_pin_is_independent_from_mutable_root_flake_lock() {
     assert!(breadth.contains("\"output_identities\""));
     assert!(breadth.contains("\"memory_bytes\": 16777216"));
     assert!(breadth.contains("\"latency_micros\": 1000000"));
-    let breadth_verifier = fs::read_to_string(
-        root.join("scripts/agent/verify-nix-eval-breadth.js"),
-    )
-    .expect("pinned breadth verifier");
+    let breadth_verifier =
+        fs::read_to_string(root.join("scripts/agent/verify-nix-eval-breadth.js"))
+            .expect("pinned breadth verifier");
     assert!(breadth_verifier.contains("function mutate"));
     assert!(breadth_verifier.contains("Object.entries(fixture.budgets)"));
     assert!(breadth_verifier.contains("reference value"));

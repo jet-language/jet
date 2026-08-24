@@ -320,12 +320,7 @@ mod tests {
         );
     }
 
-    fn writer(
-        key: &str,
-        value: &str,
-        layer: ContributionLayer,
-        source: &str,
-    ) -> FactContribution {
+    fn writer(key: &str, value: &str, layer: ContributionLayer, source: &str) -> FactContribution {
         FactContribution::new(
             key,
             FactValue::Text(value.to_string()),
@@ -340,7 +335,12 @@ mod tests {
         let resolved = jet_foundation::Policy::resolve(
             FactKey::new("k"),
             [
-                writer("k", "default", ContributionLayer::Declaration, "package.jet"),
+                writer(
+                    "k",
+                    "default",
+                    ContributionLayer::Declaration,
+                    "package.jet",
+                ),
                 writer(
                     "k",
                     "bundle",
@@ -357,7 +357,12 @@ mod tests {
         let pinned = jet_foundation::Policy::resolve(
             FactKey::new("k"),
             [
-                writer("k", "bundle", ContributionLayer::OptimizationBundle, "release"),
+                writer(
+                    "k",
+                    "bundle",
+                    ContributionLayer::OptimizationBundle,
+                    "release",
+                ),
                 writer("k", "fleet", ContributionLayer::Fleet, "fleet.jet").force(),
                 writer("k", "cli", ContributionLayer::CommandLine, "command line"),
             ],
@@ -423,24 +428,14 @@ mod tests {
             packages: vec![],
             settings: BTreeMap::from([(
                 "host".to_string(),
-                vec![writer(
-                    "host",
-                    "a",
-                    ContributionLayer::Environment,
-                    "env-a",
-                )],
+                vec![writer("host", "a", ContributionLayer::Environment, "env-a")],
             )]),
         };
         let c2 = EntryContribution {
             packages: vec![],
             settings: BTreeMap::from([(
                 "host".to_string(),
-                vec![writer(
-                    "host",
-                    "b",
-                    ContributionLayer::Environment,
-                    "env-b",
-                )],
+                vec![writer("host", "b", ContributionLayer::Environment, "env-b")],
             )]),
         };
         assert!(matches!(

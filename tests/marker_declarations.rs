@@ -49,7 +49,10 @@ fn every_registry_row_is_one_written_declaration() {
         "the registry and the file must hold the same rows"
     );
     for (declaration, row) in written.iter().zip(registry) {
-        assert_eq!(declaration.name, row.name, "rows are served in written order");
+        assert_eq!(
+            declaration.name, row.name,
+            "rows are served in written order"
+        );
     }
 }
 
@@ -80,10 +83,17 @@ fn the_parser_and_the_registry_read_the_same_rows() {
             .filter(|param| !jet::Syntax::is_comptime_name(&param.name))
             .map(|param| param.name.as_str())
             .collect();
-        let registered_arguments: Vec<&str> =
-            row.signature.params.iter().map(|param| param.name).collect();
-        let registered_variadic =
-            declaration.params.iter().filter(|param| param.variadic).count();
+        let registered_arguments: Vec<&str> = row
+            .signature
+            .params
+            .iter()
+            .map(|param| param.name)
+            .collect();
+        let registered_variadic = declaration
+            .params
+            .iter()
+            .filter(|param| param.variadic)
+            .count();
         assert_eq!(
             registered_variadic,
             usize::from(row.signature.variadic.is_some()),
@@ -97,7 +107,11 @@ fn the_parser_and_the_registry_read_the_same_rows() {
             declaration.name
         );
         for (index, name) in registered_arguments.iter().enumerate() {
-            assert_eq!(&written_arguments[index], name, "`{}` argument order", declaration.name);
+            assert_eq!(
+                &written_arguments[index], name,
+                "`{}` argument order",
+                declaration.name
+            );
         }
     }
 }
@@ -125,7 +139,11 @@ fn every_effect_root_is_one_written_declaration() {
         })
         .collect();
     assert!(!written.is_empty(), "the effect file must declare roots");
-    assert_eq!(written, *Facts::EFFECT_ROOTS, "written roots are the served roots");
+    assert_eq!(
+        written,
+        *Facts::EFFECT_ROOTS,
+        "written roots are the served roots"
+    );
 }
 
 /// D-FACT-LAW1=B: every non-code row writes both law columns in Prelude. The
@@ -147,13 +165,26 @@ fn every_fact_row_carries_its_law_columns() {
         .collect();
     let declarations = Registry::fact_declarations();
     assert_eq!(
-        parsed.iter().map(|declaration| declaration.name.as_str()).collect::<Vec<_>>(),
-        declarations.iter().map(|declaration| declaration.source_name).collect::<Vec<_>>(),
+        parsed
+            .iter()
+            .map(|declaration| declaration.name.as_str())
+            .collect::<Vec<_>>(),
+        declarations
+            .iter()
+            .map(|declaration| declaration.source_name)
+            .collect::<Vec<_>>(),
         "the real parser and the foundation reader must see the same fact rows"
     );
-    assert_eq!(declarations.len(), written.len(), "every fact declaration is read");
+    assert_eq!(
+        declarations.len(),
+        written.len(),
+        "every fact declaration is read"
+    );
 
-    let declaration_names: BTreeSet<_> = declarations.iter().map(|declaration| declaration.name).collect();
+    let declaration_names: BTreeSet<_> = declarations
+        .iter()
+        .map(|declaration| declaration.name)
+        .collect();
     let rows: Vec<_> = Registry::rows()
         .iter()
         .filter(|row| declaration_names.contains(row.name))
@@ -163,7 +194,11 @@ fn every_fact_row_carries_its_law_columns() {
         row_names, declaration_names,
         "parsed fact declarations and registry rows must have the same names"
     );
-    assert_eq!(rows.len(), declarations.len(), "every fact declaration serves one row");
+    assert_eq!(
+        rows.len(),
+        declarations.len(),
+        "every fact declaration serves one row"
+    );
 
     for declaration in declarations {
         let source = written
@@ -186,10 +221,15 @@ fn every_fact_row_carries_its_law_columns() {
             .and_then(|param| param.value.as_deref())
             .and_then(|value| match value {
                 Expr::Str(parts, _) if parts.iter().all(|part| matches!(part, StrPart::Lit(_))) => {
-                    Some(parts.iter().map(|part| match part {
-                        StrPart::Lit(text) => text.as_str(),
-                        StrPart::Interp(..) => unreachable!("checked literal fact name"),
-                    }).collect::<String>())
+                    Some(
+                        parts
+                            .iter()
+                            .map(|part| match part {
+                                StrPart::Lit(text) => text.as_str(),
+                                StrPart::Interp(..) => unreachable!("checked literal fact name"),
+                            })
+                            .collect::<String>(),
+                    )
                 }
                 _ => None,
             });
@@ -197,7 +237,11 @@ fn every_fact_row_carries_its_law_columns() {
             assert_eq!(written_name, declaration.name, "fact @name column");
         }
         for column in ["@holds:", "@safe:", "@gates:"] {
-            assert!(source.contains(column), "`{}` must write `{column}`", declaration.name);
+            assert!(
+                source.contains(column),
+                "`{}` must write `{column}`",
+                declaration.name
+            );
         }
         assert_eq!(row.name, declaration.name);
         assert_eq!(row.target, declaration.target);
@@ -302,19 +346,22 @@ fn source_rule_rejects_a_wrong_typed_argument() {
     )
     .expect_err("a source rule must check its typed argument");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0930"),
         "expected E0930: {diagnostics:?}"
     );
 }
 
 #[test]
 fn unknown_callable_rule_is_checked_against_the_bundle_registry() {
-    let diagnostics = jet::compile(
-        "#MissingRule fn work() {}\nfn run() {}\n",
-    )
-    .expect_err("an undeclared callable rule must not remain a silent marker");
+    let diagnostics = jet::compile("#MissingRule fn work() {}\nfn run() {}\n")
+        .expect_err("an undeclared callable rule must not remain a silent marker");
     assert_eq!(
-        diagnostics.iter().filter(|diagnostic| diagnostic.code == "E0927").count(),
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "E0927")
+            .count(),
         1,
         "expected one registered unknown-rule diagnostic: {diagnostics:?}"
     );
@@ -322,10 +369,9 @@ fn unknown_callable_rule_is_checked_against_the_bundle_registry() {
 
 #[test]
 fn source_rule_rejects_a_site_not_in_its_declared_facts() {
-    let diagnostics = jet::compile(
-        "marker TypeOnly(@sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n",
-    )
-    .expect_err("a source rule must enforce its declared legal sites");
+    let diagnostics =
+        jet::compile("marker TypeOnly(@sites: [.Type])\n#TypeOnly fn work() {}\nfn run() {}\n")
+            .expect_err("a source rule must enforce its declared legal sites");
     assert!(
         diagnostics
             .iter()
@@ -336,10 +382,9 @@ fn source_rule_rejects_a_site_not_in_its_declared_facts() {
 
 #[test]
 fn source_rule_rejects_a_non_repeatable_duplicate() {
-    let diagnostics = jet::compile(
-        "marker Once(@sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n",
-    )
-    .expect_err("a non-repeatable source rule must reject a duplicate");
+    let diagnostics =
+        jet::compile("marker Once(@sites: [.Type])\n#[Once, Once]\nstruct Person { id: Int }\n")
+            .expect_err("a non-repeatable source rule must reject a duplicate");
     let duplicate = diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E0999")
@@ -370,11 +415,15 @@ fn run() {}
     )
     .expect_err("a function-site rule must run its checked body");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0927"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0927"),
         "expected the registered function-rule diagnostic: {diagnostics:?}"
     );
     assert!(
-        diagnostics.iter().all(|diagnostic| diagnostic.code == "E0927"),
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == "E0927"),
         "the rule must surface its registered diagnostic directly: {diagnostics:?}"
     );
 }
@@ -437,11 +486,15 @@ fn run() {}
     )
     .expect_err("a rule rejection must stop compilation");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0927"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0927"),
         "expected the registered rule diagnostic: {diagnostics:?}"
     );
     assert!(
-        diagnostics.iter().all(|diagnostic| diagnostic.code == "E0927"),
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code == "E0927"),
         "the rule must surface its registered diagnostic directly: {diagnostics:?}"
     );
 }

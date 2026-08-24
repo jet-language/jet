@@ -1,6 +1,6 @@
 use super::*;
-use alloc::format;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
@@ -8,14 +8,12 @@ use alloc::vec;
 const ZERO_SRI: &str = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const X86_64_LINUX_BUILD: &str = "sha256-CM7sAhHMOi6XW7Ly1Z3ASuPzMWyz828sLRpLyt7r47Y=";
 const X86_64_LINUX_EXECUTABLE: &str = "sha256-VdvAPujI/c6bKKSPQK+Q1dtICYEqzljvR19Ld+Ht3sQ=";
-const STAGE_A_FIXTURE: &str =
-    include_str!("../../../tests/fixtures/nix-compat/stage-a.json");
+const STAGE_A_FIXTURE: &str = include_str!("../../../tests/fixtures/nix-compat/stage-a.json");
 const STAGE_A_AUTHORITY_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a-authority.json");
 const STAGE_A_DERIVATION_FIXTURE: &str =
     include_str!("../../../tests/fixtures/nix-compat/stage-a-derivation.json");
-const BREADTH_FIXTURE: &str =
-    include_str!("../../../tests/fixtures/nix-compat/breadth.json");
+const BREADTH_FIXTURE: &str = include_str!("../../../tests/fixtures/nix-compat/breadth.json");
 
 #[test]
 fn partial_stage_authority_is_minted_inside_seam_tests() {
@@ -28,13 +26,19 @@ fn partial_stage_authority_is_minted_inside_seam_tests() {
         Authority::InternalStage::Derivation,
         Authority::InternalStage::Flakes,
     ] {
-        assert_eq!(Authority::authorize_internal(&harness, stage).stage(), stage);
+        assert_eq!(
+            Authority::authorize_internal(&harness, stage).stage(),
+            stage
+        );
     }
 }
 
 fn manifest_with_identities(status: &str, corpus_status: &str) -> String {
     ORACLE_JSON
-        .replace("\"status\": \"ready\"", &format!("\"status\": \"{status}\""))
+        .replace(
+            "\"status\": \"ready\"",
+            &format!("\"status\": \"{status}\""),
+        )
         .replace("bit_exact", corpus_status)
 }
 
@@ -115,18 +119,12 @@ fn matching_identity_remains_blocked_when_build_status_is_blocked() {
 fn every_fixed_pin_field_is_validated() {
     let mutations = [
         (NIX_VERSION, "2.34.7"),
-        (
-            NIX_TAG_OBJECT,
-            "a6769c588f60b3e762f73d3a8cf60294df078ccd",
-        ),
+        (NIX_TAG_OBJECT, "a6769c588f60b3e762f73d3a8cf60294df078ccd"),
         (
             NIX_SOURCE_COMMIT,
             "a3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
         ),
-        (
-            NIXPKGS_REVISION,
-            "a5aa0fbd538984f6e3d201be0005b4463d8b09f8",
-        ),
+        (NIXPKGS_REVISION, "a5aa0fbd538984f6e3d201be0005b4463d8b09f8"),
         ("1782723713", "1782723712"),
         (NIXPKGS_NAR_HASH, ZERO_SRI),
     ];
@@ -139,11 +137,7 @@ fn every_fixed_pin_field_is_validated() {
 
 #[test]
 fn duplicate_keys_are_rejected_at_every_depth() {
-    let root_duplicate = ORACLE_JSON.replacen(
-        "\"schema\": 1,",
-        "\"schema\": 1, \"schema\": 1,",
-        1,
-    );
+    let root_duplicate = ORACLE_JSON.replacen("\"schema\": 1,", "\"schema\": 1, \"schema\": 1,", 1);
     assert!(matches!(
         ValidatedOracleManifest::parse_and_validate(&root_duplicate),
         Err(BoundaryError::Manifest(reason)) if reason.contains("duplicate object key `schema`")
@@ -212,7 +206,11 @@ fn native_devshell_projects_literal_packages_and_loss_facts() {
     assert_eq!(evaluated.system(), "x86_64-linux");
     assert_eq!(
         evaluated.packages(),
-        &["fd".to_string(), "nodejs".to_string(), "ripgrep".to_string()]
+        &[
+            "fd".to_string(),
+            "nodejs".to_string(),
+            "ripgrep".to_string()
+        ]
     );
     assert_eq!(evaluated.unsupported(), &["shellHook".to_string()]);
 }
@@ -224,7 +222,9 @@ fn native_devshell_rejects_dynamic_package_expressions() {
         "x86_64-linux",
     )
     .expect_err("dynamic package expressions must not be guessed");
-    assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("literal package list")));
+    assert!(
+        matches!(error, EvaluationError::Unsupported(reason) if reason.contains("literal package list"))
+    );
 }
 
 #[test]
@@ -241,7 +241,9 @@ fn native_devshell_keeps_unused_thunks_lazy_and_reports_forced_cycles() {
         "x86_64-linux",
     )
     .expect_err("forcing a recursive thunk must fail closed");
-    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("cyclic foreign flake evaluation")));
+    assert!(
+        matches!(error, EvaluationError::Invalid(reason) if reason.contains("cyclic foreign flake evaluation"))
+    );
 }
 
 #[test]
@@ -255,7 +257,9 @@ fn native_devshell_bounds_lazy_thunk_chains() {
     );
     let error = evaluate_devshell(&source, "x86_64-linux")
         .expect_err("deep lazy thunk chains must hit the evaluator budget");
-    assert!(matches!(error, EvaluationError::ResourceLimit(reason) if reason.contains("expression steps")));
+    assert!(
+        matches!(error, EvaluationError::ResourceLimit(reason) if reason.contains("expression steps"))
+    );
 }
 
 #[test]
@@ -376,14 +380,18 @@ fn native_devshell_rejects_path_and_import_without_authority() {
         "x86_64-linux",
     )
     .expect_err("absolute paths must not gain ambient authority");
-    assert!(matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("absolute paths")));
+    assert!(
+        matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("absolute paths"))
+    );
 
     let import_error = evaluate_devshell(
         "{ devShells.x86_64-linux.default = import ./shell.nix; }",
         "x86_64-linux",
     )
     .expect_err("imports must require explicit authority");
-    assert!(matches!(import_error, EvaluationError::Unsupported(reason) if reason.contains("explicit project-root authority")));
+    assert!(
+        matches!(import_error, EvaluationError::Unsupported(reason) if reason.contains("explicit project-root authority"))
+    );
 }
 
 #[test]
@@ -424,7 +432,9 @@ fn native_devshell_does_not_coerce_path_contexts_into_packages() {
         Some(authority),
     )
     .expect_err("path string contexts must not become package names");
-    assert!(matches!(error, EvaluationError::Unsupported(reason) if reason.contains("path string contexts")));
+    assert!(
+        matches!(error, EvaluationError::Unsupported(reason) if reason.contains("path string contexts"))
+    );
 }
 
 #[test]
@@ -477,12 +487,8 @@ fn stage_a_authority_fixture_matches_native_projection() {
                 .cloned()
                 .ok_or_else(|| format!("fixture has no `{path}`"))
         });
-        let evaluated = evaluate_devshell_with_import_authority(
-            source,
-            system,
-            Some(authority),
-        )
-        .expect("authority fixture source must evaluate");
+        let evaluated = evaluate_devshell_with_import_authority(source, system, Some(authority))
+            .expect("authority fixture source must evaluate");
         assert_eq!(
             evaluated.packages(),
             &fixture_strings(value.get("jet_packages").unwrap())
@@ -621,9 +627,16 @@ fn stage_a_differential_fixture_matches_native_projection() {
             .expect("required fixture system")
             .as_object()
             .expect("fixture system object");
-        let manifest_identity = manifest.builds.get(system).expect("required manifest system");
+        let manifest_identity = manifest
+            .builds
+            .get(system)
+            .expect("required manifest system");
         assert_eq!(
-            fixture_identity.get("build_nar_hash").unwrap().as_str().unwrap(),
+            fixture_identity
+                .get("build_nar_hash")
+                .unwrap()
+                .as_str()
+                .unwrap(),
             manifest_identity.build_nar_hash.as_deref().unwrap()
         );
         assert_eq!(
@@ -687,12 +700,9 @@ fn breadth_fixture_matches_native_projection_for_every_seed() {
             .and_then(|value| value.as_str().ok())
             .unwrap_or("default");
         for seed in &seeds {
-            let evaluated = evaluate_devshell_output(
-                &breadth_variant(source, *seed),
-                system,
-                output,
-            )
-                .expect("seeded breadth value must evaluate");
+            let evaluated =
+                evaluate_devshell_output(&breadth_variant(source, *seed), system, output)
+                    .expect("seeded breadth value must evaluate");
             assert_eq!(evaluated.packages(), packages.as_slice());
             assert_eq!(evaluated.unsupported(), unsupported.as_slice());
         }
@@ -731,7 +741,10 @@ fn breadth_fixture_matches_native_projection_for_every_seed() {
     assert_eq!(budget_number("imports"), budget.imports);
     assert_eq!(budget_number("string_bytes"), budget.string_bytes);
     assert_eq!(budget_number("memory_bytes"), EVALUATOR_MEMORY_BYTES);
-    assert_eq!(budget_number("latency_micros"), EVALUATOR_LATENCY_MICROS as usize);
+    assert_eq!(
+        budget_number("latency_micros"),
+        EVALUATOR_LATENCY_MICROS as usize
+    );
     // The pinned latency budget is asserted as a *declared* number, not measured
     // here. This crate is `#![no_std]` on purpose — its lints keep process and
     // network authority out of the evaluator seam — so `std::time` is not
@@ -809,7 +822,10 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
     let manifest = JSON::parse(PINNED_INVENTORY_MANIFEST).expect("inventory manifest JSON");
     let object = manifest.as_object().expect("inventory manifest object");
     assert_eq!(object.get("schema"), Some(&JSONValue::Num(1.0)));
-    assert_eq!(object.get("nix_version"), Some(&JSONValue::Str(NIX_VERSION.into())));
+    assert_eq!(
+        object.get("nix_version"),
+        Some(&JSONValue::Str(NIX_VERSION.into()))
+    );
     assert_eq!(
         object.get("nixpkgs_revision"),
         Some(&JSONValue::Str(NIXPKGS_REVISION.into()))
@@ -841,11 +857,26 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
     assert_eq!(counts.get("evaluable"), Some(&JSONValue::Num(10.0)));
     assert_eq!(counts.get("buildable"), Some(&JSONValue::Num(5.0)));
     assert_eq!(counts.get("skipped"), Some(&JSONValue::Num(2.0)));
-    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Covered).count(), 15);
-    assert_eq!(inventory.iter().filter(|entry| entry.status == InventoryStatus::Skipped).count(), 2);
+    assert_eq!(
+        inventory
+            .iter()
+            .filter(|entry| entry.status == InventoryStatus::Covered)
+            .count(),
+        15
+    );
+    assert_eq!(
+        inventory
+            .iter()
+            .filter(|entry| entry.status == InventoryStatus::Skipped)
+            .count(),
+        2
+    );
     for (entry, manifest_entry) in inventory.iter().zip(entries) {
         let fields = manifest_entry.as_object().expect("inventory entry object");
-        assert_eq!(fields.get("surface").unwrap().as_str().unwrap(), entry.surface);
+        assert_eq!(
+            fields.get("surface").unwrap().as_str().unwrap(),
+            entry.surface
+        );
         let status = match entry.status {
             InventoryStatus::Covered => "covered",
             InventoryStatus::Skipped => "skipped",
@@ -858,10 +889,12 @@ fn pinned_inventory_has_no_implicit_skip_reason() {
             entry.reason
         );
     }
-    assert!(inventory.iter().any(|entry| {
-        entry.surface == "devshells" && entry.status == InventoryStatus::Covered
-    }));
-    assert!(inventory.iter().all(|entry| !entry.reason.trim().is_empty()));
+    assert!(inventory
+        .iter()
+        .any(|entry| { entry.surface == "devshells" && entry.status == InventoryStatus::Covered }));
+    assert!(inventory
+        .iter()
+        .all(|entry| !entry.reason.trim().is_empty()));
     let budget = evaluator_budget();
     assert_eq!(budget.input_bytes, 1 << 20);
     assert_eq!(budget.tokens, 65_536);
@@ -938,7 +971,9 @@ fn native_derivation_keeps_lazy_fields_lazy_until_strict() {
         "x86_64-linux",
     )
     .expect_err("derivationStrict must force unused fields");
-    assert!(matches!(error, EvaluationError::Invalid(reason) if reason.contains("missing foreign flake value `unused`")));
+    assert!(
+        matches!(error, EvaluationError::Invalid(reason) if reason.contains("missing foreign flake value `unused`"))
+    );
 }
 
 #[test]
@@ -972,7 +1007,9 @@ fn native_derivation_rejects_noncanonical_inputs_and_preserves_multiple_outputs(
         "x86_64-linux",
     )
     .expect_err("package placeholders must not become derivation inputs");
-    assert!(matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("canonical store-path context")));
+    assert!(
+        matches!(path_error, EvaluationError::Unsupported(reason) if reason.contains("canonical store-path context"))
+    );
 
     let evaluated = evaluate_derivation(
         r#"builtins.derivation { name = "many"; system = "x86_64-linux"; builder = "/bin/sh"; outputs = [ "out" "dev" ]; }"#,
@@ -1015,11 +1052,17 @@ fn native_derivation_fixture_matches_pure_request() {
         let value = value.as_object().expect("derivation value object");
         let source = value.get("source").unwrap().as_str().unwrap();
         let system = value.get("system").unwrap().as_str().unwrap();
-        let evaluated = evaluate_derivation(source, system)
-            .expect("fixture derivation must evaluate natively");
+        let evaluated =
+            evaluate_derivation(source, system).expect("fixture derivation must evaluate natively");
         let expected = value.get("jet_request").unwrap().as_object().unwrap();
-        assert_eq!(evaluated.name(), expected.get("name").unwrap().as_str().unwrap());
-        assert_eq!(evaluated.system(), expected.get("system").unwrap().as_str().unwrap());
+        assert_eq!(
+            evaluated.name(),
+            expected.get("name").unwrap().as_str().unwrap()
+        );
+        assert_eq!(
+            evaluated.system(),
+            expected.get("system").unwrap().as_str().unwrap()
+        );
         assert_eq!(
             evaluated.builder(),
             expected.get("builder").unwrap().as_str().unwrap()
@@ -1052,7 +1095,11 @@ fn native_derivation_fixture_matches_pure_request() {
                 .expect("fixture output name");
             assert_eq!(
                 output.method_algo(),
-                expected_output.get("method_algo").unwrap().as_str().unwrap()
+                expected_output
+                    .get("method_algo")
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
             );
             assert_eq!(
                 output.hash_hex(),
@@ -1207,7 +1254,10 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
             .map(|(request, value)| {
                 (
                     request.clone(),
-                    value.as_str().expect("authority response string").to_string(),
+                    value
+                        .as_str()
+                        .expect("authority response string")
+                        .to_string(),
                 )
             })
             .collect::<BTreeMap<_, _>>();
@@ -1255,7 +1305,10 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
             )
             .expect("authorized breadth value must evaluate");
             assert_eq!(evaluated.packages(), expected_packages.as_slice());
-            assert_eq!(evaluated.cross_packages(), expected_cross_packages.as_slice());
+            assert_eq!(
+                evaluated.cross_packages(),
+                expected_cross_packages.as_slice()
+            );
             assert_eq!(evaluated.unsupported(), expected_unsupported.as_slice());
         }
     }
@@ -1278,7 +1331,10 @@ fn breadth_authority_fixture_matches_pinned_values_and_derivation_inputs() {
             .map(|(request, value)| {
                 (
                     request.clone(),
-                    value.as_str().expect("authority response string").to_string(),
+                    value
+                        .as_str()
+                        .expect("authority response string")
+                        .to_string(),
                 )
             })
             .collect::<BTreeMap<_, _>>();
@@ -1329,8 +1385,8 @@ fn breadth_derivation_fixture_matches_native_multi_output_request() {
         let case = case.as_object().expect("breadth derivation value object");
         let source = case.get("source").unwrap().as_str().unwrap();
         let system = case.get("system").unwrap().as_str().unwrap();
-        let evaluated = evaluate_derivation(source, system)
-            .expect("breadth derivation must evaluate natively");
+        let evaluated =
+            evaluate_derivation(source, system).expect("breadth derivation must evaluate natively");
         assert_eq!(
             evaluated.input_sources(),
             &fixture_strings(case.get("jet_input_sources").unwrap())

@@ -38,7 +38,9 @@ fn main() {
             args.remove(0);
             manifest(&args)
         }
-        _ => Err("usage: jetpack-nix-index <generate|verify-differential> ...".to_string()),
+        _ => {
+            Err("usage: jetpack-nix-index <generate|verify-differential|manifest> ...".to_string())
+        }
     };
     if let Err(error) = result {
         eprintln!("jetpack-nix-index: {error}");
@@ -69,20 +71,12 @@ fn generate(args: &[String]) -> Result<(), String> {
         ));
     }
     validate_staged_input(&release_metadata_path, "release metadata")?;
-    let packages = read_json_input(
-        &packages_path,
-        128 * 1024 * 1024,
-        "packages.json",
-    )?;
-    let hydra_eval = read_json_input(
-        &hydra_eval_path,
-        64 * 1024 * 1024,
-        "Hydra evaluation",
-    )?;
-    if !json_value_contains_string(&hydra_eval, &requested_revision) {
+    let packages = read_json_input(&packages_path, 128 * 1024 * 1024, "packages.json")?;
+    let hydra_eval = read_json_input(&hydra_eval_path, 64 * 1024 * 1024, "Hydra evaluation")?;
+    if !json_value_contains_field_string(&hydra_eval, "revision", &requested_revision) {
         return Err("Hydra evaluation does not bind the requested revision".to_string());
     }
-    let hydra_output_paths = read_hydra_output_paths(&hydra_build_dir)?;
+    let hydra_output_paths = read_hydra_output_paths(&hydra_build_dir, &system)?;
     if hydra_output_paths.is_empty() {
         return Err("Hydra build input contains no output paths".to_string());
     }
@@ -95,10 +89,9 @@ fn generate(args: &[String]) -> Result<(), String> {
         })
         .transpose()?
         .or_else(|| {
-            fs::read(&release_metadata_path).ok()
-                .and_then(|bytes| {
-                    find_json_integer(&bytes, &["released_unix", "timestamp", "release_time"])
-                })
+            fs::read(&release_metadata_path).ok().and_then(|bytes| {
+                find_json_integer(&bytes, &["released_unix", "timestamp", "release_time"])
+            })
         })
         .ok_or_else(|| {
             "release metadata must supply released_unix, timestamp, or release_time".to_string()
@@ -170,13 +163,23 @@ fn verify_differential(args: &[String]) -> Result<(), String> {
     let candidate = required_path(&options, "candidate")?;
     let oracle_path = required_path(&options, "oracle")?;
     let report_path = required_path(&options, "report")?;
-    let system = options.get("system").cloned().unwrap_or_default();
-    let index_records = NixIndex::decode_index_records_for_producer(&read_file(
+    let channel = required(&options, "channel")?;
+    let revision = required(&options, "revision")?;
+    let system = required(&options, "system")?;
+    let candidate_bytes = read_file(
         &candidate,
         NixIndex::MAX_COMPRESSED_BYTES as u64,
         "candidate index",
-    )?)
-    .map_err(|error| error.to_string())?;
+    )?;
+    let (candidate_channel, candidate_revision, candidate_system) =
+        NixIndex::producer_index_identity(&candidate_bytes).map_err(|error| error.to_string())?;
+    if (candidate_channel, candidate_revision, candidate_system)
+        != (channel.clone(), revision.clone(), system.clone())
+    {
+        return Err("candidate index identity disagrees with differential key".to_string());
+    }
+    let index_records = NixIndex::decode_index_records_for_producer(&candidate_bytes)
+        .map_err(|error| error.to_string())?;
     let oracle = NixIndex::parse_oracle_for_producer(
         &read_file(&oracle_path, NixIndex::MAX_DECODED_BYTES as u64, "oracle")?,
         &system,
@@ -207,10 +210,17 @@ fn verify_differential(args: &[String]) -> Result<(), String> {
     }
     mismatches.sort();
     mismatches.dedup();
+    let records_compared = expected
+        .keys()
+        .chain(actual.keys())
+        .collect::<BTreeSet<_>>()
+        .len();
     let report = format!(
-        "{{\"schema\":1,\"system\":\"{}\",\"records_compared\":{},\"mismatches\":{},\"status\":\"{}\"}}\n",
+        "{{\"schema\":1,\"channel\":\"{}\",\"revision\":\"{}\",\"system\":\"{}\",\"records_compared\":{},\"mismatches\":{},\"status\":\"{}\"}}\n",
+        escape(&channel),
+        escape(&revision),
         escape(&system),
-        expected.len().max(actual.len()),
+        records_compared,
         mismatches.len(),
         if mismatches.is_empty() { "passed" } else { "failed" }
     );
@@ -252,7 +262,15 @@ fn manifest(args: &[String]) -> Result<(), String> {
         let revision_entry =
             revision_entry.map_err(|error| format!("read target revision: {error}"))?;
         let revision_path = revision_entry.path();
-        if !revision_path.is_dir() {
+        let revision_metadata = fs::symlink_metadata(&revision_path)
+            .map_err(|error| format!("inspect target revision: {error}"))?;
+        if revision_metadata.file_type().is_symlink() {
+            return Err(format!(
+                "target revision `{}` must not be a symlink",
+                revision_path.display()
+            ));
+        }
+        if !revision_metadata.is_dir() {
             continue;
         }
         let revision = revision_path
@@ -266,7 +284,15 @@ fn manifest(args: &[String]) -> Result<(), String> {
             let system_entry =
                 system_entry.map_err(|error| format!("read target system: {error}"))?;
             let system_path = system_entry.path();
-            if !system_path.is_dir() {
+            let system_metadata = fs::symlink_metadata(&system_path)
+                .map_err(|error| format!("inspect target system: {error}"))?;
+            if system_metadata.file_type().is_symlink() {
+                return Err(format!(
+                    "target system `{}` must not be a symlink",
+                    system_path.display()
+                ));
+            }
+            if !system_metadata.is_dir() {
                 continue;
             }
             let system = system_path
@@ -302,25 +328,55 @@ fn manifest(args: &[String]) -> Result<(), String> {
                 let (decoded_length, record_count) =
                     NixIndex::producer_target_measurements(&compressed)
                         .map_err(|error| error.to_string())?;
+                let generation_report =
+                    PathBuf::from(format!("{}.generation-report.json", target.display()));
+                let released_unix = find_json_integer(
+                    &read_file(&generation_report, 16 * 1024, "index generation report")?,
+                    &["released_unix"],
+                )
+                .ok_or_else(|| {
+                    format!(
+                        "index generation report has no released_unix: {}",
+                        generation_report.display()
+                    )
+                })?;
                 let url = format!(
                     "{}/index-v1/{revision}/{system}/{digest}.json.zst",
                     endpoint.trim_end_matches('/')
                 );
                 targets.push((
-                    revision.clone(),
+                    released_unix,
                     system.clone(),
-                    url.clone(),
-                    format!("{url}.sig.json"),
-                    digest,
-                    compressed.len() as u64,
-                    decoded_length,
-                    record_count,
-                    SHA256::sha256_hex(&signature),
-                    true,
+                    (
+                        revision.clone(),
+                        system.clone(),
+                        url.clone(),
+                        format!("{url}.sig.json"),
+                        digest,
+                        compressed.len() as u64,
+                        decoded_length,
+                        record_count,
+                        SHA256::sha256_hex(&signature),
+                        true,
+                    ),
                 ));
             }
         }
     }
+    let discoverable = newest_discoverable_targets(
+        targets
+            .iter()
+            .map(|(released, system, target)| (*released, system.clone(), target.0.clone()))
+            .collect(),
+    );
+    let targets: Vec<_> = targets
+        .into_iter()
+        .map(|(_, system, mut target)| {
+            target.9 = discoverable.contains(&(system, target.0.clone()));
+            target
+        })
+        .collect();
+    let target_count = targets.len();
     let bytes =
         NixIndex::producer_manifest_bytes(&channel, generation, issued_unix, expires_unix, targets)
             .map_err(|error| error.to_string())?;
@@ -330,8 +386,9 @@ fn manifest(args: &[String]) -> Result<(), String> {
         &NixIndex::manifest_signature_request(&bytes),
     )?;
     println!(
-        "generated channel manifest generation={} targets={}",
+        "generated channel manifest generation={} targets={} bytes={}",
         generation,
+        target_count,
         bytes.len()
     );
     Ok(())
@@ -356,6 +413,28 @@ fn options(args: &[String]) -> Result<BTreeMap<String, String>, String> {
         index += 2;
     }
     Ok(options)
+}
+
+fn newest_discoverable_targets(
+    mut targets: Vec<(u64, String, String)>,
+) -> std::collections::BTreeSet<(String, String)> {
+    targets.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.as_bytes().cmp(right.1.as_bytes()))
+            .then_with(|| left.2.as_bytes().cmp(right.2.as_bytes()))
+    });
+    let mut counts = BTreeMap::<String, usize>::new();
+    let mut discoverable = std::collections::BTreeSet::new();
+    for (_, system, revision) in targets {
+        let count = counts.entry(system.clone()).or_default();
+        if *count < 12 {
+            discoverable.insert((system, revision));
+        }
+        *count += 1;
+    }
+    discoverable
 }
 
 fn required(options: &BTreeMap<String, String>, name: &str) -> Result<String, String> {
@@ -443,10 +522,7 @@ fn read_json_input(
         .map_err(|error| format!("parse {label}: {}", error.message))
 }
 
-fn json_value_contains_string(
-    value: &jet_foundation::EncodingJson::Value,
-    needle: &str,
-) -> bool {
+fn json_value_contains_string(value: &jet_foundation::EncodingJson::Value, needle: &str) -> bool {
     value_contains_string(value, needle)
 }
 
@@ -463,7 +539,53 @@ fn value_contains_string(value: &jet_foundation::EncodingJson::Value, needle: &s
     }
 }
 
-fn read_hydra_output_paths(path: &Path) -> Result<BTreeSet<String>, String> {
+fn json_value_contains_field_string(
+    value: &jet_foundation::EncodingJson::Value,
+    field: &str,
+    needle: &str,
+) -> bool {
+    match value {
+        jet_foundation::EncodingJson::Value::Object(values) => values.iter().any(|(key, value)| {
+            (key == field
+                && matches!(
+                    value,
+                    jet_foundation::EncodingJson::Value::Text(value) if value == needle
+                ))
+                || json_value_contains_field_string(value, field, needle)
+        }),
+        jet_foundation::EncodingJson::Value::Array(values) => values
+            .iter()
+            .any(|value| json_value_contains_field_string(value, field, needle)),
+        _ => false,
+    }
+}
+
+fn collect_named_strings(
+    value: &jet_foundation::EncodingJson::Value,
+    field: &str,
+    values: &mut BTreeSet<String>,
+) {
+    match value {
+        jet_foundation::EncodingJson::Value::Object(entries) => {
+            for (key, value) in entries {
+                if key == field {
+                    if let jet_foundation::EncodingJson::Value::Text(value) = value {
+                        values.insert(value.clone());
+                    }
+                }
+                collect_named_strings(value, field, values);
+            }
+        }
+        jet_foundation::EncodingJson::Value::Array(entries) => {
+            for value in entries {
+                collect_named_strings(value, field, values);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn read_hydra_output_paths(path: &Path, system: &str) -> Result<BTreeSet<String>, String> {
     validate_staged_input(path, "Hydra build directory")?;
     let mut files = Vec::new();
     collect_json_files(path, &mut files)?;
@@ -474,6 +596,14 @@ fn read_hydra_output_paths(path: &Path) -> Result<BTreeSet<String>, String> {
     let mut output_paths = BTreeSet::new();
     for file in files {
         let value = read_json_input(&file, 64 * 1024 * 1024, "Hydra build record")?;
+        let mut systems = BTreeSet::new();
+        collect_named_strings(&value, "system", &mut systems);
+        if systems.is_empty() || systems.iter().any(|value| value != system) {
+            return Err(format!(
+                "Hydra build record has no exact `{system}` system: {}",
+                file.display()
+            ));
+        }
         collect_store_paths(&value, &mut output_paths);
     }
     Ok(output_paths)
@@ -483,14 +613,20 @@ fn collect_json_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("inspect Hydra build input: {error}"))?;
     if metadata.file_type().is_symlink() {
-        return Err(format!("Hydra build input `{}` must not be a symlink", path.display()));
+        return Err(format!(
+            "Hydra build input `{}` must not be a symlink",
+            path.display()
+        ));
     }
     if metadata.is_file() {
         files.push(path.to_path_buf());
         return Ok(());
     }
     if !metadata.is_dir() {
-        return Err(format!("Hydra build input `{}` is not a file or directory", path.display()));
+        return Err(format!(
+            "Hydra build input `{}` is not a file or directory",
+            path.display()
+        ));
     }
     for entry in fs::read_dir(path).map_err(|error| format!("read Hydra build input: {error}"))? {
         let entry = entry.map_err(|error| format!("read Hydra build entry: {error}"))?;
@@ -501,9 +637,7 @@ fn collect_json_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
 
 fn collect_store_paths(value: &jet_foundation::EncodingJson::Value, paths: &mut BTreeSet<String>) {
     match value {
-        jet_foundation::EncodingJson::Value::Text(value)
-            if value.starts_with("/nix/store/") =>
-        {
+        jet_foundation::EncodingJson::Value::Text(value) if value.starts_with("/nix/store/") => {
             paths.insert(value.clone());
         }
         jet_foundation::EncodingJson::Value::Array(values) => {
@@ -528,14 +662,26 @@ fn find_json_integer(bytes: &[u8], names: &[&str]) -> Option<u64> {
 
 fn find_integer(value: &jet_foundation::EncodingJson::Value, names: &[&str]) -> Option<u64> {
     match value {
-        jet_foundation::EncodingJson::Value::Number(value) => value.parse().ok(),
-        jet_foundation::EncodingJson::Value::Int(value) if *value >= 0 => Some(*value as u64),
+        jet_foundation::EncodingJson::Value::Number(_)
+        | jet_foundation::EncodingJson::Value::Int(_) => None,
         jet_foundation::EncodingJson::Value::Object(values) => {
             values.iter().find_map(|(key, value)| {
                 if names.contains(&key.as_str()) {
-                    find_integer(value, names)
+                    match value {
+                        jet_foundation::EncodingJson::Value::Number(value) => value.parse().ok(),
+                        jet_foundation::EncodingJson::Value::Int(value) if *value >= 0 => {
+                            Some(*value as u64)
+                        }
+                        _ => find_integer(value, names),
+                    }
                 } else {
-                    find_integer(value, names)
+                    match value {
+                        jet_foundation::EncodingJson::Value::Object(_)
+                        | jet_foundation::EncodingJson::Value::Array(_) => {
+                            find_integer(value, names)
+                        }
+                        _ => None,
+                    }
                 }
             })
         }
@@ -548,4 +694,30 @@ fn find_integer(value: &jet_foundation::EncodingJson::Value, names: &[&str]) -> 
 
 fn escape(value: &str) -> String {
     jet_foundation::JSON::json_escape(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::newest_discoverable_targets;
+
+    #[test]
+    fn manifest_retention_marks_newest_twelve_per_system() {
+        let mut targets = (0..13)
+            .map(|revision| {
+                (
+                    revision,
+                    "x86_64-linux".to_string(),
+                    format!("{revision:040x}"),
+                )
+            })
+            .collect::<Vec<_>>();
+        targets.push((1, "aarch64-linux".to_string(), format!("{:040x}", 90)));
+        targets.reverse();
+
+        let discoverable = newest_discoverable_targets(targets);
+        assert_eq!(discoverable.len(), 13);
+        assert!(discoverable.contains(&("x86_64-linux".to_string(), format!("{:040x}", 12))));
+        assert!(!discoverable.contains(&("x86_64-linux".to_string(), format!("{:040x}", 0))));
+        assert!(discoverable.contains(&("aarch64-linux".to_string(), format!("{:040x}", 90))));
+    }
 }

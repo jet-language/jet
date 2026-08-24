@@ -6,9 +6,9 @@
 //! codegen projection with one checked configuration. It does not load or
 //! link anything; those are the CLI/runtime adapters.
 
-use crate::AST::{Item, ProgramBundle};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::ApiFreeze;
+use crate::AST::{Item, ProgramBundle};
 
 const SUPPORTED_BINDINGS: &[&str] = &["c", "python", "swift"];
 
@@ -167,10 +167,7 @@ fn e1257(delta: &str) -> Diagnostic {
 
 /// D-LIB-REUSE1=B / D-LIB-EXPORT1=C: freeze the exact exported surface before
 /// a native artifact or loadable payload is emitted.
-pub fn check_and_freeze_version(
-    bundle: &ProgramBundle,
-    name: &str,
-) -> Result<(), Vec<Diagnostic>> {
+pub fn check_and_freeze_version(bundle: &ProgramBundle, name: &str) -> Result<(), Vec<Diagnostic>> {
     let package = snapshot_package_key(name);
     let mut funcs = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
@@ -197,7 +194,11 @@ pub fn check_and_freeze_version(
     if let Some(prior) = ApiFreeze::load_snapshot(&bundle.project_root, &package) {
         let mut deltas = Vec::new();
         for old_fn in &prior.funcs {
-            match current.funcs.iter().find(|function| function.name == old_fn.name) {
+            match current
+                .funcs
+                .iter()
+                .find(|function| function.name == old_fn.name)
+            {
                 None => deltas.push(format!("export `{}` was removed", old_fn.name)),
                 Some(new_fn) if new_fn.signature != old_fn.signature => deltas.push(format!(
                     "export `{}` changed from `{}` to `{}`",

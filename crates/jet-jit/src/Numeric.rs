@@ -6,8 +6,8 @@
 //! `CtFraction`) — same semantics AOT Prelude calls, not a third policy copy.
 
 use super::{Concurrency, JitRuntime};
-use jet_foundation::Numeric::{CtDecimal, CtFraction};
 use crate::MathExtra::math_rt::JetComplex;
+use jet_foundation::Numeric::{CtDecimal, CtFraction};
 
 fn trap_decimal(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
@@ -46,10 +46,7 @@ pub(crate) fn push_decimal(d: CtDecimal) -> i64 {
 fn with_decimal<R>(handle: i64, f: impl FnOnce(&CtDecimal) -> R) -> Option<R> {
     Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
-        rt.decimal_values
-            .get(idx)
-            .and_then(|s| s.as_ref())
-            .map(f)
+        rt.decimal_values.get(idx).and_then(|s| s.as_ref()).map(f)
     })
 }
 
@@ -63,10 +60,7 @@ fn push_fraction(f: CtFraction) -> i64 {
 fn with_fraction<R>(handle: i64, f: impl FnOnce(&CtFraction) -> R) -> Option<R> {
     Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
-        rt.fraction_values
-            .get(idx)
-            .and_then(|s| s.as_ref())
-            .map(f)
+        rt.fraction_values.get(idx).and_then(|s| s.as_ref()).map(f)
     })
 }
 
@@ -237,11 +231,9 @@ fn jet_jit_int_pow(a: i64, b: i64) -> i64 {
 
 /// Packed legacy option ABI: `0` is absent, otherwise payload + 1.
 fn jet_jit_int_factorial(a: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        match rt.heap.int_factorial(a) {
-            Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
-            None => crate::runtime_host::alloc_jit_result(rt, false, 0),
-        }
+    Concurrency::with_runtime_mut(|rt| match rt.heap.int_factorial(a) {
+        Some(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
+        None => crate::runtime_host::alloc_jit_result(rt, false, 0),
     })
 }
 
@@ -616,8 +608,8 @@ fn jet_jit_complex_abs(a: i64) -> f64 {
 }
 
 fn jet_jit_complex_to_string(a: i64) -> i64 {
-    let text = with_complex(a, |value| value.to_string_rep())
-        .unwrap_or_else(|| "0 + 0i".to_string());
+    let text =
+        with_complex(a, |value| value.to_string_rep()).unwrap_or_else(|| "0 + 0i".to_string());
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 

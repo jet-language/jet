@@ -2,11 +2,11 @@
 
 mod common;
 
+use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
-use jet::JitBackend::JitBackend;
 
 const EXAMPLE: &str = include_str!("../examples/features/memory/shared_weak_cycle.jet");
 const EXPECTED: &str = include_str!("../examples/features/expected/memory/shared_weak_cycle.out");
@@ -112,12 +112,7 @@ fn shared_weak_cycle_matches_aot_and_default_tiers() {
         let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
         let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
             .into_iter()
-            .filter(|diagnostic| {
-                matches!(
-                    diagnostic.severity,
-                    jet::Diagnostics::Severity::Error
-                )
-            })
+            .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect::<Vec<_>>();
         assert!(errors.is_empty(), "{errors:?}");
 

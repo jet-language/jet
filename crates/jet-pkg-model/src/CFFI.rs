@@ -34,9 +34,7 @@ use std::path::Path;
 // Struct defs live in AST for cross-seam sharing; re-export for callers.
 pub use crate::AST::{CFfi, CImportLink, CLib};
 
-fn all_imports(
-    module: &LoadedModule,
-) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
+fn all_imports(module: &LoadedModule) -> impl Iterator<Item = (Option<&str>, &ImportDecl)> {
     let mut seen = HashSet::new();
     crate::AST::walk_imports(module)
         .into_iter()
@@ -63,17 +61,14 @@ fn invalid_foreign_import_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic>
 
 /// Resolve every C library in a logical-module import, including
 /// `use c.[raylib as rl, sqlite3]`.
-pub fn c_module_imports(
-    imp: &ImportDecl,
-) -> Result<Vec<(String, String)>, ForeignImportError> {
-    imp.foreign_imports()
-        .map(|imports| {
-            imports
-                .into_iter()
-                .filter(|(namespace, _)| namespace.language == ForeignLanguage::C)
-                .map(|(namespace, alias)| (namespace.lib, alias))
-                .collect()
-        })
+pub fn c_module_imports(imp: &ImportDecl) -> Result<Vec<(String, String)>, ForeignImportError> {
+    imp.foreign_imports().map(|imports| {
+        imports
+            .into_iter()
+            .filter(|(namespace, _)| namespace.language == ForeignLanguage::C)
+            .map(|(namespace, alias)| (namespace.lib, alias))
+            .collect()
+    })
 }
 
 fn c_module_imports_after_preflight(imp: &ImportDecl) -> Vec<(String, String)> {
@@ -89,9 +84,7 @@ fn c_module_imports_after_preflight(imp: &ImportDecl) -> Vec<(String, String)> {
 /// For a member list this returns the first library; callers that need every
 /// library must use `c_module_imports`.
 pub fn c_module_lib(imp: &ImportDecl) -> Result<Option<String>, ForeignImportError> {
-    c_module_imports(imp).map(|imports| {
-        imports.into_iter().next().map(|(lib, _)| lib)
-    })
+    c_module_imports(imp).map(|imports| imports.into_iter().next().map(|(lib, _)| lib))
 }
 
 /// `File("<…>.h")` → `Some((header, lib))` (the header-path C `use` form). The
@@ -117,7 +110,11 @@ fn import_alias(imp: &ImportDecl) -> String {
     imp.import_alias()
 }
 
-fn binding_cache_file(project_root: &Path, language: ForeignLanguage, lib: &str) -> std::path::PathBuf {
+fn binding_cache_file(
+    project_root: &Path,
+    language: ForeignLanguage,
+    lib: &str,
+) -> std::path::PathBuf {
     let extension = crate::AST::binder_descriptor(language)
         .map(|descriptor| descriptor.cache_extension)
         .unwrap_or(Syntax::FILE_EXT);
@@ -317,8 +314,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                 diags.push(e3207(&lib, path_span));
                 continue;
             }
-            if kind == CModuleKind::Bindgen
-                && generated_language == Some(ForeignLanguage::Fortran)
+            if kind == CModuleKind::Bindgen && generated_language == Some(ForeignLanguage::Fortran)
             {
                 for function in &mut functions {
                     function.effect_root = Some("FFI.Fortran".to_string());
@@ -540,9 +536,7 @@ struct OriginSurface {
     overlay: Vec<(ExternFn, (String, String))>,
 }
 
-pub fn assemble_with_provenance(
-    bundle: &mut ProgramBundle,
-) -> Result<CFfi, Vec<CffiDiagnostic>> {
+pub fn assemble_with_provenance(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<CffiDiagnostic>> {
     let invalid_diagnostics = invalid_foreign_import_diagnostics(bundle);
     if !invalid_diagnostics.is_empty() {
         return Err(map_diagnostics(
@@ -637,10 +631,7 @@ fn map_diagnostics(
         .collect()
 }
 
-fn take_origin(
-    origins: &[(String, String)],
-    next: &mut usize,
-) -> Option<(String, String)> {
+fn take_origin(origins: &[(String, String)], next: &mut usize) -> Option<(String, String)> {
     let origin = origins.get(*next).cloned();
     if origin.is_some() {
         *next += 1;
@@ -706,7 +697,9 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
                     seen.insert(key, (is_header, header));
                 }
                 if is_header {
-                    header_origins_by_lib.entry(lib).or_insert_with(|| origin.clone());
+                    header_origins_by_lib
+                        .entry(lib)
+                        .or_insert_with(|| origin.clone());
                 }
             }
         }
@@ -826,11 +819,15 @@ fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
                     Err(parse_diags) => parse_diags,
                 }
             };
-            Some(diagnostics.into_iter().map(move |diagnostic| CffiDiagnostic {
-                file: path.display().to_string(),
-                source: source.clone(),
-                diagnostic,
-            }))
+            Some(
+                diagnostics
+                    .into_iter()
+                    .map(move |diagnostic| CffiDiagnostic {
+                        file: path.display().to_string(),
+                        source: source.clone(),
+                        diagnostic,
+                    }),
+            )
         })
         .flatten()
         .collect()
@@ -1046,8 +1043,8 @@ fn load_cache_source(
     modules: &mut Vec<LoadedModule>,
 ) {
     if source.contains("#Bindgen") {
-        let expected = crate::AST::binder_descriptor(ForeignLanguage::C)
-            .map(|descriptor| descriptor.stamp());
+        let expected =
+            crate::AST::binder_descriptor(ForeignLanguage::C).map(|descriptor| descriptor.stamp());
         let actual = source
             .lines()
             .find_map(|line| line.strip_prefix("// jet-ffi-descriptor="));
@@ -1144,7 +1141,10 @@ pub fn resolve_link_for_target(
                         flags.rpath_dirs.push(value.to_string());
                     }
                 } else if let Some(value) = line.strip_prefix("l\t") {
-                    if value.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    if value
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    {
                         has_runtime |= value == crate::FFI::cxx_runtime_for_target(target);
                         flags.link_names.push(value.to_string());
                     }
@@ -1166,8 +1166,17 @@ pub fn resolve_link_for_target(
             .join(format!("libjet_go_{actual}.a"));
         if archive.is_file() {
             return Ok(LinkFlags {
-                lib_dirs: vec![archive.parent().unwrap_or(project_root).display().to_string()],
-                link_names: vec![format!("static=jet_go_{actual}"), "pthread".into(), "dl".into(), "m".into()],
+                lib_dirs: vec![archive
+                    .parent()
+                    .unwrap_or(project_root)
+                    .display()
+                    .to_string()],
+                link_names: vec![
+                    format!("static=jet_go_{actual}"),
+                    "pthread".into(),
+                    "dl".into(),
+                    "m".into(),
+                ],
                 ..Default::default()
             });
         }
@@ -1188,106 +1197,321 @@ pub fn resolve_link_for_target(
         return Err(e3201(lib));
     }
     if let Some(actual) = lib.strip_prefix("jet_java_") {
-        let dir = project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Java.bindings_subdir());
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Java.bindings_subdir());
         let archive = dir.join(format!("libjet_java_{actual}.a"));
         let path_file = dir.join(format!("{actual}.jvm-path"));
-        let Ok(jvm_dir) = std::fs::read_to_string(path_file) else { return Err(e3201(lib)); };
+        let Ok(jvm_dir) = std::fs::read_to_string(path_file) else {
+            return Err(e3201(lib));
+        };
         let jvm_dir = jvm_dir.trim();
-        if archive.is_file() && std::path::Path::new(jvm_dir).is_absolute() && std::path::Path::new(jvm_dir).join(if cfg!(target_os="macos") { "libjvm.dylib" } else { "libjvm.so" }).is_file() {
+        if archive.is_file()
+            && std::path::Path::new(jvm_dir).is_absolute()
+            && std::path::Path::new(jvm_dir)
+                .join(if cfg!(target_os = "macos") {
+                    "libjvm.dylib"
+                } else {
+                    "libjvm.so"
+                })
+                .is_file()
+        {
             return Ok(LinkFlags {
                 lib_dirs: vec![dir.display().to_string(), jvm_dir.to_string()],
-                link_names: vec![format!("static=jet_java_{actual}"), "jvm".into(), "pthread".into(), "dl".into()],
+                link_names: vec![
+                    format!("static=jet_java_{actual}"),
+                    "jvm".into(),
+                    "pthread".into(),
+                    "dl".into(),
+                ],
                 rpath_dirs: vec![jvm_dir.to_string()],
                 ..Default::default()
             });
         }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_cs_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::DotNet.bindings_subdir());
-        let archive=dir.join(format!("libjet_cs_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_cs_{actual}"),"pthread".into(),"dl".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_cs_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::DotNet.bindings_subdir());
+        let archive = dir.join(format!("libjet_cs_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![
+                    format!("static=jet_cs_{actual}"),
+                    "pthread".into(),
+                    "dl".into(),
+                ],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_tcl_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Tcl.bindings_subdir());
-        let archive=dir.join(format!("libjet_tcl_{actual}.a")); let path_file=dir.join(format!("{actual}.tcl-path"));
-        let Ok(tcl_dir)=std::fs::read_to_string(path_file) else{return Err(e3201(lib))}; let tcl_dir=tcl_dir.trim();
-        if archive.is_file()&&std::path::Path::new(tcl_dir).is_absolute()&&std::path::Path::new(tcl_dir).join(if cfg!(target_os="macos"){"libtcl.dylib"}else{"libtcl.so"}).is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string(),tcl_dir.into()],link_names:vec![format!("static=jet_tcl_{actual}"),"tcl".into(),"pthread".into(),"dl".into()],rpath_dirs:vec![tcl_dir.into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_tcl_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Tcl.bindings_subdir());
+        let archive = dir.join(format!("libjet_tcl_{actual}.a"));
+        let path_file = dir.join(format!("{actual}.tcl-path"));
+        let Ok(tcl_dir) = std::fs::read_to_string(path_file) else {
+            return Err(e3201(lib));
+        };
+        let tcl_dir = tcl_dir.trim();
+        if archive.is_file()
+            && std::path::Path::new(tcl_dir).is_absolute()
+            && std::path::Path::new(tcl_dir)
+                .join(if cfg!(target_os = "macos") {
+                    "libtcl.dylib"
+                } else {
+                    "libtcl.so"
+                })
+                .is_file()
+        {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string(), tcl_dir.into()],
+                link_names: vec![
+                    format!("static=jet_tcl_{actual}"),
+                    "tcl".into(),
+                    "pthread".into(),
+                    "dl".into(),
+                ],
+                rpath_dirs: vec![tcl_dir.into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_lua_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Lua.bindings_subdir());
-        let archive=dir.join(format!("libjet_lua_{actual}.a"));let path_file=dir.join(format!("{actual}.lua-path"));
-        let Ok(lua_dir)=std::fs::read_to_string(path_file) else{return Err(e3201(lib))};let lua_dir=lua_dir.trim();
-        if archive.is_file()&&std::path::Path::new(lua_dir).is_absolute()&&std::path::Path::new(lua_dir).join(if cfg!(target_os="macos"){"liblua.dylib"}else{"liblua.so"}).is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string(),lua_dir.into()],link_names:vec![format!("static=jet_lua_{actual}"),"lua".into(),"pthread".into(),"dl".into(),"m".into()],rpath_dirs:vec![lua_dir.into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_lua_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Lua.bindings_subdir());
+        let archive = dir.join(format!("libjet_lua_{actual}.a"));
+        let path_file = dir.join(format!("{actual}.lua-path"));
+        let Ok(lua_dir) = std::fs::read_to_string(path_file) else {
+            return Err(e3201(lib));
+        };
+        let lua_dir = lua_dir.trim();
+        if archive.is_file()
+            && std::path::Path::new(lua_dir).is_absolute()
+            && std::path::Path::new(lua_dir)
+                .join(if cfg!(target_os = "macos") {
+                    "liblua.dylib"
+                } else {
+                    "liblua.so"
+                })
+                .is_file()
+        {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string(), lua_dir.into()],
+                link_names: vec![
+                    format!("static=jet_lua_{actual}"),
+                    "lua".into(),
+                    "pthread".into(),
+                    "dl".into(),
+                    "m".into(),
+                ],
+                rpath_dirs: vec![lua_dir.into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_ada_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Ada.bindings_subdir());
-        let archive=dir.join(format!("libjet_ada_{actual}.a"));let path_file=dir.join(format!("{actual}.ada-path"));
-        let Ok(runtime_dir)=std::fs::read_to_string(path_file) else{return Err(e3201(lib))};let runtime_dir=runtime_dir.trim();
-        if archive.is_file()&&std::path::Path::new(runtime_dir).is_absolute()&&std::path::Path::new(runtime_dir).join(if cfg!(target_os="macos"){"libgnat.dylib"}else{"libgnat.so"}).is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string(),runtime_dir.into()],link_names:vec![format!("static=jet_ada_{actual}"),"gnat".into(),"pthread".into(),"dl".into(),"m".into()],rpath_dirs:vec![runtime_dir.into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_ada_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Ada.bindings_subdir());
+        let archive = dir.join(format!("libjet_ada_{actual}.a"));
+        let path_file = dir.join(format!("{actual}.ada-path"));
+        let Ok(runtime_dir) = std::fs::read_to_string(path_file) else {
+            return Err(e3201(lib));
+        };
+        let runtime_dir = runtime_dir.trim();
+        if archive.is_file()
+            && std::path::Path::new(runtime_dir).is_absolute()
+            && std::path::Path::new(runtime_dir)
+                .join(if cfg!(target_os = "macos") {
+                    "libgnat.dylib"
+                } else {
+                    "libgnat.so"
+                })
+                .is_file()
+        {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string(), runtime_dir.into()],
+                link_names: vec![
+                    format!("static=jet_ada_{actual}"),
+                    "gnat".into(),
+                    "pthread".into(),
+                    "dl".into(),
+                    "m".into(),
+                ],
+                rpath_dirs: vec![runtime_dir.into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_pascal_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Pascal.bindings_subdir());
-        let archive=dir.join(format!("libjet_pascal_{actual}.a"));let runtime=dir.join(format!("libjet_pascal_{actual}_runtime{}",if cfg!(target_os="macos"){".dylib"}else if cfg!(target_os="windows"){".dll"}else{".so"}));
-        if archive.is_file()&&runtime.is_file(){let path=dir.display().to_string();return Ok(LinkFlags{lib_dirs:vec![path.clone()],link_names:vec![format!("static=jet_pascal_{actual}"),format!("dylib=jet_pascal_{actual}_runtime"),"pthread".into(),"dl".into(),"m".into()],rpath_dirs:vec![path],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_pascal_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Pascal.bindings_subdir());
+        let archive = dir.join(format!("libjet_pascal_{actual}.a"));
+        let runtime = dir.join(format!(
+            "libjet_pascal_{actual}_runtime{}",
+            if cfg!(target_os = "macos") {
+                ".dylib"
+            } else if cfg!(target_os = "windows") {
+                ".dll"
+            } else {
+                ".so"
+            }
+        ));
+        if archive.is_file() && runtime.is_file() {
+            let path = dir.display().to_string();
+            return Ok(LinkFlags {
+                lib_dirs: vec![path.clone()],
+                link_names: vec![
+                    format!("static=jet_pascal_{actual}"),
+                    format!("dylib=jet_pascal_{actual}_runtime"),
+                    "pthread".into(),
+                    "dl".into(),
+                    "m".into(),
+                ],
+                rpath_dirs: vec![path],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_dart_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Dart.bindings_subdir());
-        let archive=dir.join(format!("libjet_dart_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_dart_{actual}")],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_dart_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Dart.bindings_subdir());
+        let archive = dir.join(format!("libjet_dart_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_dart_{actual}")],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_pwsh_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::PowerShell.bindings_subdir());
-        let archive=dir.join(format!("libjet_pwsh_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_pwsh_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_pwsh_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::PowerShell.bindings_subdir());
+        let archive = dir.join(format!("libjet_pwsh_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_pwsh_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_py_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Py.bindings_subdir());
-        let archive=dir.join(format!("libjet_py_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_py_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_py_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Py.bindings_subdir());
+        let archive = dir.join(format!("libjet_py_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_py_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_perl_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Perl.bindings_subdir());
-        let archive=dir.join(format!("libjet_perl_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_perl_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_perl_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Perl.bindings_subdir());
+        let archive = dir.join(format!("libjet_perl_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_perl_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_ruby_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Ruby.bindings_subdir());
-        let archive=dir.join(format!("libjet_ruby_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_ruby_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_ruby_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Ruby.bindings_subdir());
+        let archive = dir.join(format!("libjet_ruby_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_ruby_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_php_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Php.bindings_subdir());
-        let archive=dir.join(format!("libjet_php_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_php_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_php_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Php.bindings_subdir());
+        let archive = dir.join(format!("libjet_php_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_php_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_r_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::R.bindings_subdir());
-        let archive=dir.join(format!("libjet_r_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_r_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_r_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::R.bindings_subdir());
+        let archive = dir.join(format!("libjet_r_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_r_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_octave_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Octave.bindings_subdir());
-        let archive=dir.join(format!("libjet_octave_{actual}.a"));
-        if archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_octave_{actual}"),"pthread".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_octave_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Octave.bindings_subdir());
+        let archive = dir.join(format!("libjet_octave_{actual}.a"));
+        if archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![format!("static=jet_octave_{actual}"), "pthread".into()],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
-    if let Some(actual)=lib.strip_prefix("jet_com_") {
-        let dir=project_root.join(Syntax::SOURCE_ROOT_DIR).join(ForeignLanguage::Com.bindings_subdir());
-        let archive=dir.join(format!("libjet_com_{actual}.a"));
-        if cfg!(target_os="windows")&&archive.is_file(){return Ok(LinkFlags{lib_dirs:vec![dir.display().to_string()],link_names:vec![format!("static=jet_com_{actual}"),"ole32".into(),"oleaut32".into()],..Default::default()})}
+    if let Some(actual) = lib.strip_prefix("jet_com_") {
+        let dir = project_root
+            .join(Syntax::SOURCE_ROOT_DIR)
+            .join(ForeignLanguage::Com.bindings_subdir());
+        let archive = dir.join(format!("libjet_com_{actual}.a"));
+        if cfg!(target_os = "windows") && archive.is_file() {
+            return Ok(LinkFlags {
+                lib_dirs: vec![dir.display().to_string()],
+                link_names: vec![
+                    format!("static=jet_com_{actual}"),
+                    "ole32".into(),
+                    "oleaut32".into(),
+                ],
+                ..Default::default()
+            });
+        }
         return Err(e3201(lib));
     }
     if let Some(actual) = lib.strip_prefix("jet_fortran_") {
@@ -1297,7 +1521,11 @@ pub fn resolve_link_for_target(
             .join(format!("libjet_fortran_{actual}.a"));
         if archive.is_file() {
             return Ok(LinkFlags {
-                lib_dirs: vec![archive.parent().unwrap_or(project_root).display().to_string()],
+                lib_dirs: vec![archive
+                    .parent()
+                    .unwrap_or(project_root)
+                    .display()
+                    .to_string()],
                 link_names: vec![format!("static=jet_fortran_{actual}")],
                 ..Default::default()
             });
@@ -1310,15 +1538,29 @@ pub fn resolve_link_for_target(
             .join(ForeignLanguage::Cobol.bindings_subdir());
         let archive = dir.join(format!("libjet_cobol_{actual}.a"));
         let path_file = dir.join(format!("{actual}.cobol-path"));
-        let Ok(runtime_dir) = std::fs::read_to_string(path_file) else { return Err(e3201(lib)); };
+        let Ok(runtime_dir) = std::fs::read_to_string(path_file) else {
+            return Err(e3201(lib));
+        };
         let runtime_dir = runtime_dir.trim();
         if archive.is_file()
             && std::path::Path::new(runtime_dir).is_absolute()
-            && std::path::Path::new(runtime_dir).join(if cfg!(target_os="macos") { "libcob.dylib" } else { "libcob.so" }).is_file()
+            && std::path::Path::new(runtime_dir)
+                .join(if cfg!(target_os = "macos") {
+                    "libcob.dylib"
+                } else {
+                    "libcob.so"
+                })
+                .is_file()
         {
             return Ok(LinkFlags {
                 lib_dirs: vec![dir.display().to_string(), runtime_dir.to_string()],
-                link_names: vec![format!("static=jet_cobol_{actual}"), "dylib=cob".into(), "pthread".into(), "dl".into(), "m".into()],
+                link_names: vec![
+                    format!("static=jet_cobol_{actual}"),
+                    "dylib=cob".into(),
+                    "pthread".into(),
+                    "dl".into(),
+                    "m".into(),
+                ],
                 rpath_dirs: vec![runtime_dir.to_string()],
                 ..Default::default()
             });

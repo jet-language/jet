@@ -118,11 +118,8 @@ fn db_scope_enforces_policy_on_query_insert_and_live_aot() {
 
 #[test]
 fn db_scope_enforces_policy_on_query_insert_and_live_default() {
-    let (code, stdout, stderr) = run_default_multi(
-        "db_policy_scope_jit",
-        "main.jet",
-        &[("main.jet", SOURCE)],
-    );
+    let (code, stdout, stderr) =
+        run_default_multi("db_policy_scope_jit", "main.jet", &[("main.jet", SOURCE)]);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n");
 }
@@ -165,7 +162,8 @@ fn run() {
 }
 "#;
 
-const INVALID_POLICY_EXPECTED: &str = "digit-table:rejected\nspaced-table:rejected\nother-expr:rejected\npadded-rows:1\n";
+const INVALID_POLICY_EXPECTED: &str =
+    "digit-table:rejected\nspaced-table:rejected\nother-expr:rejected\npadded-rows:1\n";
 
 #[test]
 fn invalid_row_policy_is_denied_the_same_way_aot() {

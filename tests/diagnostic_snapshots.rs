@@ -60,7 +60,10 @@ impl Drop for CompilerExtensionEnvRestore {
 
 fn compiler_extension_env(
     compiler_extension: Option<&str>,
-) -> (std::sync::MutexGuard<'static, ()>, CompilerExtensionEnvRestore) {
+) -> (
+    std::sync::MutexGuard<'static, ()>,
+    CompilerExtensionEnvRestore,
+) {
     let guard = compiler_extension_env_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -68,7 +71,10 @@ fn compiler_extension_env(
     match compiler_extension {
         Some(rel) => {
             let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
-            std::env::set_var("JET_COMPILER_EXTENSION", wasm.to_str().expect("utf-8 wasm path"));
+            std::env::set_var(
+                "JET_COMPILER_EXTENSION",
+                wasm.to_str().expect("utf-8 wasm path"),
+            );
         }
         None => std::env::remove_var("JET_COMPILER_EXTENSION"),
     }
@@ -89,7 +95,9 @@ fn compiler_extension_env_lock_covers_plain_compile_regions() {
     });
     attempting_rx.recv().unwrap();
     assert!(
-        entered_rx.recv_timeout(std::time::Duration::from_millis(50)).is_err(),
+        entered_rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err(),
         "plain compile region entered while compiler-extension env lock was held"
     );
     drop(held);
@@ -217,23 +225,18 @@ fn ui_snapshots() {
         let freestanding = src.lines().any(|l| l.trim() == "// @freestanding");
         // I4: `// @all_diags` and workspace fixtures run `check_with_path`.
         let all_diags = src.lines().any(|l| l.trim() == "// @all_diags")
-            || path.file_name().and_then(|name| name.to_str())
-                == Some(jet::Syntax::WORKSPACE_FILE);
+            || path.file_name().and_then(|name| name.to_str()) == Some(jet::Syntax::WORKSPACE_FILE);
         // D-ONCE-GATE1=A: files marked with the invocation gate exercise the
         // same audited policy path as the CLI.
         let gates = src.lines().any(|l| l.trim() == "// @gate impure=allow");
         let repl_deny = src.lines().any(|l| l.trim() == "// @repl_deny");
         // Runtime/interpreter diagnostics still use the same exact snapshot
         // product contract as front-end diagnostics.
-        let dev_interpreter = src
-            .lines()
-            .any(|l| l.trim() == "// @dev_interpreter");
+        let dev_interpreter = src.lines().any(|l| l.trim() == "// @dev_interpreter");
         // D-CANCELMODEL1: parent-control cancellation is produced by a live
         // task wait, so this fixture renders the shared Prelude diagnostic at
         // the representative wait expression without inventing user syntax.
-        let parent_control_cancel = src
-            .lines()
-            .any(|l| l.trim() == "// @parent_control_cancel");
+        let parent_control_cancel = src.lines().any(|l| l.trim() == "// @parent_control_cancel");
         // Compiler/tool-generated Jet may use the reserved `__name` lane.
         // Ordinary fixtures never take this path.
         let generated_source = src.lines().any(|l| l.trim() == "// @generated_source")
@@ -257,11 +260,9 @@ fn ui_snapshots() {
         let web_target = src.lines().any(|l| l.trim() == "// @web_target");
         // D-WASISRV1=A: a target directive drives the real cross-target sema
         // path without requiring the UI snapshot process to invoke rustc.
-        let cross_target = src.lines().find_map(|line| {
-            line.trim()
-                .strip_prefix("// @target ")
-                .map(str::to_owned)
-        });
+        let cross_target = src
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("// @target ").map(str::to_owned));
         // D-BUILDENTRY1: selected-root build diagnostics need programmable
         // staging, not ordinary runtime compilation.
         let programmable_build = src.lines().any(|l| l.trim() == "// @programmable_build");
@@ -274,7 +275,11 @@ fn ui_snapshots() {
         let build_grants = src
             .lines()
             .find_map(|line| line.trim().strip_prefix("// @build_grants "))
-            .map(|list| list.split(',').map(|item| item.trim().to_string()).collect::<Vec<_>>())
+            .map(|list| {
+                list.split(',')
+                    .map(|item| item.trim().to_string())
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         let build_locked = src.lines().any(|line| line.trim() == "// @build_locked");
         // Hangar diagnostics originate in the real Jetpack command surface,
@@ -392,8 +397,7 @@ fn ui_snapshots() {
                 .expect_err("mismatched compiler identity must be refused before mapping");
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if jetlib_effect_refused {
-            let declared: jetpack::Sema::EffectSet =
-                ["Net".to_string()].into_iter().collect();
+            let declared: jetpack::Sema::EffectSet = ["Net".to_string()].into_iter().collect();
             let stamp = jetpack::JetLib::JetLibStamp::for_this_compiler(declared);
             let grant: jetpack::Sema::EffectSet = ["FS".to_string()].into_iter().collect();
             let diagnostics = jetpack::JetLib::check_effect_grant("skyhawk", &stamp, &grant)
@@ -451,9 +455,7 @@ fn ui_snapshots() {
                     jet::render_diagnostics(&shown_path, &src, &diags)
                 }
                 jet::Interpreter::RunOutcome::Ran {
-                    stderr,
-                    exit_code,
-                    ..
+                    stderr, exit_code, ..
                 } if exit_code != 0 => stderr,
                 jet::Interpreter::RunOutcome::Ran { .. } => "(no errors)\n".to_string(),
             }
@@ -467,7 +469,10 @@ fn ui_snapshots() {
                 cancellation.what.to_string(),
                 cancellation.why.to_string(),
                 cancellation.fix.to_string(),
-                Some(jet::Diagnostics::Span::new(wait_start, wait_start + "time.sleep".len())),
+                Some(jet::Diagnostics::Span::new(
+                    wait_start,
+                    wait_start + "time.sleep".len(),
+                )),
             );
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if src.lines().any(|line| line.trim() == "// @ambiguous_call") {
@@ -506,15 +511,17 @@ fn ui_snapshots() {
                 .expect("REPL stdin")
                 .write_all(input.as_bytes())
                 .expect("write REPL diagnostic fixture");
-            let output = child.wait_with_output().expect("finish REPL diagnostic fixture");
-            assert!(output.status.success(), "REPL diagnostic fixture failed to exit");
+            let output = child
+                .wait_with_output()
+                .expect("finish REPL diagnostic fixture");
+            assert!(
+                output.status.success(),
+                "REPL diagnostic fixture failed to exit"
+            );
             String::from_utf8(output.stderr).expect("REPL diagnostic stderr is UTF-8")
         } else if generated_source {
-            match jet::Driver::compile_generated_src(
-                &src,
-                &file_arg,
-                jet::Sema::CompileMode::Check,
-            ) {
+            match jet::Driver::compile_generated_src(&src, &file_arg, jet::Sema::CompileMode::Check)
+            {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
@@ -582,18 +589,14 @@ fn ui_snapshots() {
         } else if path.file_name().and_then(|name| name.to_str())
             == Some(jet::Syntax::WORKSPACE_FILE)
         {
-            path.parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join(format!(
-                    "{}.stderr",
-                    path.parent()
-                        .unwrap()
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                ))
+            path.parent().unwrap().parent().unwrap().join(format!(
+                "{}.stderr",
+                path.parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+            ))
         } else {
             path.with_extension("stderr")
         };
@@ -637,9 +640,7 @@ fn run_retired_gate_flag_snapshot(file: &str) -> String {
         .expect("run retired gate fixture");
     assert!(!output.status.success(), "retired gate flag must fail");
     let mut rendered = String::from_utf8(output.stdout).expect("retired gate stdout is UTF-8");
-    rendered.push_str(
-        &String::from_utf8(output.stderr).expect("retired gate stderr is UTF-8"),
-    );
+    rendered.push_str(&String::from_utf8(output.stderr).expect("retired gate stderr is UTF-8"));
     rendered
 }
 
@@ -673,7 +674,10 @@ fn run_cli_e2101_snapshot() -> String {
         .env("NO_COLOR", "1")
         .output()
         .expect("run E2101 retired benchmark command fixture");
-    assert!(!output.status.success(), "retired benchmark command must fail");
+    assert!(
+        !output.status.success(),
+        "retired benchmark command must fail"
+    );
     let mut rendered = String::from_utf8(output.stdout).expect("E2101 stdout is UTF-8");
     rendered.push_str(&String::from_utf8(output.stderr).expect("E2101 stderr is UTF-8"));
     rendered
@@ -1059,7 +1063,9 @@ fn rendered_diagnostic_count(rendered: &str) -> usize {
     rendered
         .lines()
         .filter(|line| {
-            line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [")
+            line.starts_with("Error [")
+                || line.starts_with("Warning [")
+                || line.starts_with("Stop [")
         })
         .count()
 }

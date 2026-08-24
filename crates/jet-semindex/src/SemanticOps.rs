@@ -47,7 +47,9 @@ impl SemanticOp {
         after_hash: &str,
     ) -> bool {
         self.files.iter().any(|file| {
-            paths.iter().any(|path| normalize(&file.path) == normalize(path))
+            paths
+                .iter()
+                .any(|path| normalize(&file.path) == normalize(path))
                 && same_hash(&file.before_hash, before_hash)
                 && same_hash(&file.after_hash, after_hash)
         })
@@ -239,20 +241,14 @@ mod semantic_op_tests {
 
     #[test]
     fn semantic_op_producer_and_blame_consumer_use_checked_facts() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-semantic-op-unit-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-semantic-op-unit-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let path = root.join("run.jet");
         fs::write(&path, "fn report() Int -[]> { return 1 }\nfn run() {}\n").unwrap();
         let before = crate::open(&path).unwrap();
-        fs::write(
-            &path,
-            "fn summarize() Int -[]> { return 1 }\nfn run() {}\n",
-        )
-        .unwrap();
+        fs::write(&path, "fn summarize() Int -[]> { return 1 }\nfn run() {}\n").unwrap();
         let after = crate::open(&path).unwrap();
 
         let operations = semantic_rename_ops(&before, &after);

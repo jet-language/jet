@@ -1,12 +1,10 @@
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 use std::fs;
 use std::process::Command;
-use tir_support::{
-    build_and_run, have_rustc, run_default_multi, strip_vetted_prelude_modules,
-};
+use tir_support::{build_and_run, have_rustc, run_default_multi, strip_vetted_prelude_modules};
 
 const SOURCE: &str = r#"
 use core.mem
@@ -138,8 +136,7 @@ fn initialized_fixed_storage_mutating_borrow_writes_back() {
         "{user}"
     );
     if have_rustc() {
-        let (code, stdout) =
-            build_and_run("uninit_fixed_mutating_borrow", MUTATING_BORROW_SOURCE);
+        let (code, stdout) = build_and_run("uninit_fixed_mutating_borrow", MUTATING_BORROW_SOURCE);
         assert_eq!(code, 0);
         assert_eq!(stdout, "8\n8\n");
     }
@@ -251,11 +248,7 @@ fn every_path_initialising_a_slot_makes_it_written() {
     let out = jet::compile(
         "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2]{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n            bytes[1] = 4\n        }\n    }\n    print(bytes[0])\n}\nfn run() { decide(true) }\n",
     );
-    assert!(
-        out.is_ok(),
-        "both paths write every slot: {:#?}",
-        out.err()
-    );
+    assert!(out.is_ok(), "both paths write every slot: {:#?}", out.err());
 }
 
 /// The other half of the same rule: a slot written on one path only is not

@@ -21,7 +21,9 @@ fn command(program: &str) -> Command {
 }
 
 fn run_ok(cmd: &mut Command, label: &str) {
-    let output = cmd.output().unwrap_or_else(|e| panic!("could not start {label}: {e}"));
+    let output = cmd
+        .output()
+        .unwrap_or_else(|e| panic!("could not start {label}: {e}"));
     assert!(
         output.status.success(),
         "{label} failed\nstdout:\n{}\nstderr:\n{}",
@@ -189,7 +191,10 @@ fn run() {{
     assert!(!out.rust.contains("/* unsupported"));
     assert!(out.rust.contains("extern \"C\" fn __jet_increment"));
     assert!(out.rust.contains("#[repr(C, u8)]"));
-    assert!(out.rust.contains(&format!("extern \"{}\"", if abi == "default" { "C" } else { &abi })));
+    assert!(out.rust.contains(&format!(
+        "extern \"{}\"",
+        if abi == "default" { "C" } else { &abi }
+    )));
 
     let rust_path = root.join("matrix.rs");
     fs::write(&rust_path, out.rust).unwrap();
@@ -219,14 +224,28 @@ fn run() {{
     } else {
         Command::new(binary(&root))
     };
-    let output = execute.output().expect("could not execute generated matrix binary");
-    assert!(output.status.success(), "generated matrix failed: {}", String::from_utf8_lossy(&output.stderr));
-    let lines: Vec<_> = String::from_utf8(output.stdout).unwrap().lines().map(str::to_owned).collect();
+    let output = execute
+        .output()
+        .expect("could not execute generated matrix binary");
+    assert!(
+        output.status.success(),
+        "generated matrix failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lines: Vec<_> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
     assert_eq!(lines.len(), 12, "unexpected output: {lines:?}");
     assert_eq!(lines[0], "7");
     assert_eq!(lines[1], "7");
     assert_eq!(lines[2], "341");
-    assert_eq!(&lines[3..6], &["24", "8", "8"], "wrong native Packet size/alignment/offset");
+    assert_eq!(
+        &lines[3..6],
+        &["24", "8", "8"],
+        "wrong native Packet size/alignment/offset"
+    );
     assert_eq!(&lines[6..], &["42", "10", "70", "status 9", "42", "42"]);
 
     let _ = fs::remove_dir_all(root);

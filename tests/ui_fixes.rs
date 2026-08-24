@@ -46,18 +46,16 @@ fn ownership_ui_fixes_compile() {
         let entries = Arc::clone(&entries);
         let next = Arc::clone(&next);
         let failures = Arc::clone(&failures);
-        handles.push(std::thread::spawn(move || {
-            loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= entries.len() {
-                    break;
-                }
-                let path = entries[i].clone();
-                if let Err(payload) =
-                    std::panic::catch_unwind(|| check_fixed_companion(i, &path, have_rustc, have_cargo))
-                {
-                    failures.lock().unwrap().push(panic_message(payload));
-                }
+        handles.push(std::thread::spawn(move || loop {
+            let i = next.fetch_add(1, Ordering::Relaxed);
+            if i >= entries.len() {
+                break;
+            }
+            let path = entries[i].clone();
+            if let Err(payload) =
+                std::panic::catch_unwind(|| check_fixed_companion(i, &path, have_rustc, have_cargo))
+            {
+                failures.lock().unwrap().push(panic_message(payload));
             }
         }));
     }
@@ -95,17 +93,19 @@ fn check_fixed_companion(i: usize, path: &PathBuf, have_rustc: bool, have_cargo:
     if have_rustc && !rustc_skip {
         let stem = stem_name.replace('.', "_");
         let tmp = std::env::temp_dir();
-        let rs = tmp.join(format!("jet_ui_fix_{}_{}_{}.rs", std::process::id(), i, stem));
+        let rs = tmp.join(format!(
+            "jet_ui_fix_{}_{}_{}.rs",
+            std::process::id(),
+            i,
+            stem
+        ));
         let bin = tmp.join(format!("jet_ui_fix_{}_{}_{}", std::process::id(), i, stem));
         fs::write(&rs, &out.rust).unwrap();
         let mut cmd = Command::new("rustc");
         cmd.args(["--edition", "2021", "-o"]).arg(&bin).arg(&rs);
         if let Some(link) = &out.ffi {
-            cmd.arg("--extern").arg(format!(
-                "{}={}",
-                link.crate_name,
-                link.rlib_path.display()
-            ));
+            cmd.arg("--extern")
+                .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
             for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
                 cmd.arg("-L")
                     .arg(format!("dependency={}", deps_dir.display()));

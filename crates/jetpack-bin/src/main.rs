@@ -17,17 +17,15 @@
 // Source files/modules use PascalCase names (owner decision).
 #![allow(non_snake_case)]
 
-#[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
-mod CompilerExtensionHost;
 #[path = "../../jet-pkg-model/src/Prelude/BuildPlugin.rs"]
 mod BuildPluginHost;
+#[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
+mod CompilerExtensionHost;
 
 fn main() {
     jetpack::Codegen::TIR::install_comptime_bridge();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str)
-        == Some(jet_pkg_model::CompilerExtension::HOST_SUBCOMMAND)
-    {
+    if args.first().map(String::as_str) == Some(jet_pkg_model::CompilerExtension::HOST_SUBCOMMAND) {
         std::process::exit(run_compiler_extension_host(&args[1..]));
     }
     if args.first().map(String::as_str)
@@ -112,9 +110,7 @@ fn run_build_plugin_host(args: &[String]) -> i32 {
         return 2;
     }
     if request.len() > BUILD_PLUGIN_MAX_REQUEST_BYTES {
-        eprintln!(
-            "build-plugin request exceeds {BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes"
-        );
+        eprintln!("build-plugin request exceeds {BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes");
         return 2;
     }
     let response = match BuildPluginHost::run(component_path, &component, &request) {
@@ -125,9 +121,7 @@ fn run_build_plugin_host(args: &[String]) -> i32 {
         }
     };
     if response.len() > BUILD_PLUGIN_MAX_RESPONSE_BYTES {
-        eprintln!(
-            "build-plugin response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes"
-        );
+        eprintln!("build-plugin response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes");
         return 2;
     }
     if let Err(error) = std::io::stdout().write_all(&response) {
@@ -141,9 +135,7 @@ fn run_build_plugin_host(args: &[String]) -> i32 {
 /// stdin; one validated response is written to stdout. Every failure is plain
 /// Jet-owned stderr plus nonzero status. Wasmtime runs only in this process.
 fn run_compiler_extension_host(args: &[String]) -> i32 {
-    use jet_pkg_model::CompilerExtension::{
-        analyze_with_host, TypedSnapshot, MAX_SNAPSHOT_BYTES,
-    };
+    use jet_pkg_model::CompilerExtension::{analyze_with_host, TypedSnapshot, MAX_SNAPSHOT_BYTES};
     use std::io::{Read, Write};
 
     let [wasm_path] = args else {
@@ -159,9 +151,7 @@ fn run_compiler_extension_host(args: &[String]) -> i32 {
         return 2;
     }
     if request.len() > MAX_SNAPSHOT_BYTES {
-        eprintln!(
-            "compiler-extension snapshot exceeds IPC limit ({MAX_SNAPSHOT_BYTES} bytes)"
-        );
+        eprintln!("compiler-extension snapshot exceeds IPC limit ({MAX_SNAPSHOT_BYTES} bytes)");
         return 2;
     }
     let snapshot = match TypedSnapshot::decode(&request) {

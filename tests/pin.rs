@@ -107,11 +107,12 @@ fn interpret_on_thread(src: String) -> String {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("fixture.jet");
     std::fs::write(&path, &src).unwrap();
-    let mut bundle = jet::Loader::load_entry(&path.to_string_lossy())
-        .expect("fixture loads");
+    let mut bundle = jet::Loader::load_entry(&path.to_string_lossy()).expect("fixture loads");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
-        !diags.iter().any(|d| d.severity == jet::Diagnostics::Severity::Error),
+        !diags
+            .iter()
+            .any(|d| d.severity == jet::Diagnostics::Severity::Error),
         "fixture must type-check: {:?}",
         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
@@ -122,7 +123,7 @@ fn interpret_on_thread(src: String) -> String {
         &mut sink,
         jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
     )
-        .expect("interpreter runs the fixture");
+    .expect("interpreter runs the fixture");
     sink.stdout
 }
 

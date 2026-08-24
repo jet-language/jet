@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use std::sync::atomic::{AtomicI64, Ordering, compiler_fence};
+use std::sync::atomic::{compiler_fence, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub(crate) mod shared_protocol {
@@ -188,7 +188,9 @@ fn shared(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<SharedState>> {
 }
 
 fn condition(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<ConditionState>> {
-    rt.conditions.get((handle as usize).wrapping_sub(1)).cloned()
+    rt.conditions
+        .get((handle as usize).wrapping_sub(1))
+        .cloned()
 }
 
 const GUARD_SHARED: i64 = 0;
@@ -206,11 +208,7 @@ fn guard_state(
     rt.shared_guard_states.get(&guard).cloned()
 }
 
-fn guard_projection_slot(
-    rt: &crate::JitRuntime,
-    guard: i64,
-    path: &[i64],
-) -> Option<(i64, i64)> {
+fn guard_projection_slot(rt: &crate::JitRuntime, guard: i64, path: &[i64]) -> Option<(i64, i64)> {
     if path.is_empty() {
         return Some((guard, GUARD_VALUE));
     }
@@ -356,10 +354,7 @@ fn allocator_view(rt: &crate::JitRuntime, view: i64) -> Result<AllocatorView, St
         .ok_or_else(|| "allocator view is invalid or no longer live".to_string())
 }
 
-fn allocator_slot(
-    rt: &crate::JitRuntime,
-    view: i64,
-) -> Result<(i64, AllocatorSlot), String> {
+fn allocator_slot(rt: &crate::JitRuntime, view: i64) -> Result<(i64, AllocatorSlot), String> {
     let view = allocator_view(rt, view)?;
     let state = rt
         .allocators
@@ -494,11 +489,7 @@ fn jet_jit_allocator_view_write(view: i64, value: i64) {
     });
 }
 
-fn jet_jit_allocator_try_alloc(
-    handle: i64,
-    value: i64,
-    requested_bytes: i64,
-) -> i64 {
+fn jet_jit_allocator_try_alloc(handle: i64, value: i64, requested_bytes: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let requested = usize::try_from(requested_bytes.max(1)).unwrap_or(usize::MAX);
         let (allocator, generation, result) = {
@@ -718,7 +709,9 @@ fn pool_value(handle: i64, id: i64) -> Option<i64> {
     let pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let (index, generation) = unpack_id(id)?;
     let slot = pool.slots.get(index)?;
-    (slot.generation == generation).then_some(slot.value).flatten()
+    (slot.generation == generation)
+        .then_some(slot.value)
+        .flatten()
 }
 
 /// `src_line` is the source line captured in the shared PoolSlot TIR node; it
@@ -795,11 +788,9 @@ fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
     };
-    let Some(permit) = shared_protocol::jet_shared_acquire(
-        &shared.protocol,
-        editable != 0,
-        || false,
-    ) else {
+    let Some(permit) =
+        shared_protocol::jet_shared_acquire(&shared.protocol, editable != 0, || false)
+    else {
         return 0;
     };
     let value = shared.value.load(Ordering::Acquire);
@@ -871,22 +862,13 @@ fn jet_jit_shared_guard_begin(handle: i64, editable: i64) -> i64 {
             0
         });
     };
-    let Some(state) = shared_protocol::jet_shared_guard_acquire(
-        &shared.protocol,
-        editable != 0,
-        || false,
-    ) else {
+    let Some(state) =
+        shared_protocol::jet_shared_guard_acquire(&shared.protocol, editable != 0, || false)
+    else {
         return 0;
     };
     let value = shared.value.load(Ordering::Acquire);
-    Concurrency::with_runtime_mut(|rt| {
-        pack_shared_guard(
-            rt,
-            handle,
-            value,
-            state,
-        )
-    })
+    Concurrency::with_runtime_mut(|rt| pack_shared_guard(rt, handle, value, state))
 }
 
 fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
@@ -899,11 +881,7 @@ fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
             return 0;
         };
-        match shared_protocol::jet_shared_guard_map(
-            &state,
-            field,
-            editable != 0,
-        ) {
+        match shared_protocol::jet_shared_guard_map(&state, field, editable != 0) {
             Ok(mapped) => {
                 let shared_handle = guard_shared_handle(rt, guard)
                     .expect("validated SharedGuard carrier lost its shared handle");
@@ -948,9 +926,7 @@ fn jet_jit_shared_guard_clone(guard: i64, editable: i64) -> i64 {
             });
         }
     };
-    Concurrency::with_runtime_mut(|rt| {
-        pack_shared_guard(rt, shared, value, state)
-    })
+    Concurrency::with_runtime_mut(|rt| pack_shared_guard(rt, shared, value, state))
 }
 
 fn jet_jit_shared_guard_value(guard: i64) -> i64 {
@@ -1057,10 +1033,7 @@ fn jet_jit_shared_guard_value_string(guard: i64) -> i64 {
     })
 }
 
-fn readable_guard_slot(
-    rt: &crate::JitRuntime,
-    guard: i64,
-) -> Option<(i64, i64)> {
+fn readable_guard_slot(rt: &crate::JitRuntime, guard: i64) -> Option<(i64, i64)> {
     guard_shared_handle(rt, guard)?;
     let state = guard_state(rt, guard)?;
     if !state.held() {
@@ -1081,10 +1054,7 @@ fn editable_guard_slot(
     Ok((record, field, state.path().is_empty()))
 }
 
-fn editable_guard_slot_or_trap(
-    rt: &mut crate::JitRuntime,
-    guard: i64,
-) -> Option<(i64, i64, bool)> {
+fn editable_guard_slot_or_trap(rt: &mut crate::JitRuntime, guard: i64) -> Option<(i64, i64, bool)> {
     match editable_guard_slot(rt, guard) {
         Ok(slot) => Some(slot),
         Err(message) => {
@@ -1099,8 +1069,8 @@ fn store_root_guard_value(
     guard: i64,
     value: i64,
 ) -> Result<(), &'static str> {
-    let shared_handle = guard_shared_handle(rt, guard)
-        .ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
+    let shared_handle =
+        guard_shared_handle(rt, guard).ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
     let shared = shared(rt, shared_handle).ok_or(shared_protocol::JET_SHARED_GUARD_INVALID)?;
     shared.value.store(value, Ordering::Release);
     Ok(())
@@ -1228,13 +1198,7 @@ fn jet_jit_shared_guard_end(guard: i64) {
         };
         let editable = state.editable();
         let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
-        Some((
-            shared(rt, shared_handle),
-            value,
-            editable,
-            root,
-            state,
-        ))
+        Some((shared(rt, shared_handle), value, editable, root, state))
     }) else {
         return;
     };
@@ -1246,11 +1210,7 @@ fn jet_jit_shared_guard_end(guard: i64) {
     drop(state);
 }
 
-fn shared_guard_result(
-    rt: &mut crate::JitRuntime,
-    ok: bool,
-    message: Option<&str>,
-) -> i64 {
+fn shared_guard_result(rt: &mut crate::JitRuntime, ok: bool, message: Option<&str>) -> i64 {
     let bits = message
         .map(|message| rt.heap.alloc_string(message.to_string()) as u64)
         .unwrap_or(0);
@@ -1315,15 +1275,15 @@ fn jet_jit_shared_guard_wait_once(guard: i64, condition_handle: i64) -> i64 {
                 shared_guard_result(rt, false, Some(error.message()))
             })
         }
-        jet_codegen::scheduler::JetSchedulerWait::Cancelled => Concurrency::with_runtime_mut(
-            |rt| {
+        jet_codegen::scheduler::JetSchedulerWait::Cancelled => {
+            Concurrency::with_runtime_mut(|rt| {
                 shared_guard_result(
                     rt,
                     false,
                     Some(shared_protocol::JetSharedGuardWaitError::Cancelled.message()),
                 )
-            },
-        ),
+            })
+        }
         jet_codegen::scheduler::JetSchedulerWait::Deadline(rendered) => {
             Concurrency::with_runtime_mut(|rt| {
                 rt.set_deadline(rendered);
@@ -1362,12 +1322,7 @@ fn jet_jit_shared_txn_touch(handle: i64) {
     });
 }
 
-fn jet_jit_shared_txn_record(
-    handle: i64,
-    callback_ptr: i64,
-    environment: i64,
-    record: i64,
-) -> i64 {
+fn jet_jit_shared_txn_record(handle: i64, callback_ptr: i64, environment: i64, record: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
     };
@@ -1383,11 +1338,7 @@ fn jet_jit_shared_txn_record(
         let updated = unsafe { callback(environment, current) };
         Concurrency::with_runtime_mut(|rt| {
             if record != 0 {
-                if rt
-                    .heap
-                    .record_assign_from(current, updated)
-                    .is_none()
-                {
+                if rt.heap.record_assign_from(current, updated).is_none() {
                     rt.set_trap(shared_protocol::JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED);
                 }
             } else {
@@ -1421,12 +1372,7 @@ fn jet_jit_shared_txn_abort() {
     });
 }
 
-fn jet_jit_expiring_new(
-    value: i64,
-    duration: i64,
-    clock: i64,
-    secret: i64,
-) -> i64 {
+fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i64 {
     // SigningKey / X25519 / Secret live in crypto_values (#1222). Claim a
     // zeroize mirror here; keep the crypto handle live for `with` loans.
     let owned_secret = if secret != 0 {

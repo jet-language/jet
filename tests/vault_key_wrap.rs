@@ -9,7 +9,8 @@ fn actual_vault_key_wrap_bridge_fixture_compiles_and_runs() {
     let jet_codegen = root.join("crates/jet-codegen");
     std::fs::write(
         dir.join("Cargo.toml"),
-        format!(r#"[package]
+        format!(
+            r#"[package]
 name = "jet-vault-key-wrap-proof"
 version = "0.0.0"
 edition = "2021"
@@ -28,7 +29,9 @@ sha2 = "0.10"
 subtle = "2"
 x25519-dalek = "2"
 jet-codegen = {{ path = "{}" }}
-"#,jet_codegen.display()),
+"#,
+            jet_codegen.display()
+        ),
     )
     .unwrap();
     let fixture = root.join("tests/fixtures/vault_key_wrap_runtime.rs");

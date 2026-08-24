@@ -117,9 +117,9 @@ pub fn build_fact_name(query: &str) -> Option<String> {
         "build.stamp.at" => Some("Build.Stamp.At"),
         _ => None,
     };
-    if let Some(name) = fixed.filter(|_| {
-        jet_foundation::Registry::build_fact_read(&registered_path).is_some()
-    }) {
+    if let Some(name) =
+        fixed.filter(|_| jet_foundation::Registry::build_fact_read(&registered_path).is_some())
+    {
         return Some(name.to_string());
     }
     let prefix = "build.settings.";
@@ -260,7 +260,10 @@ fn explain_fact_row(row: &jet_foundation::Registry::RegistryRow) -> Explanation 
                 "`{}` — a truth stated once, in {home} ({})",
                 row.name, row.decision
             ),
-            what: Some(format!("rendered from there by: {}.", row.renderers.join(", "))),
+            what: Some(format!(
+                "rendered from there by: {}.",
+                row.renderers.join(", ")
+            )),
             why: Some(format!(
                 "`{}` in {} proves there is no second copy; it {}",
                 guard.test,
@@ -334,7 +337,10 @@ fn marker_argument_declarations(row: &jet_foundation::Policy::AppliedRule) -> St
 }
 
 /// Existing `jet explain` rendering for one effective policy at a concrete site.
-pub fn lookup_policy(key: jet_foundation::Policy::PolicyKey, declarations: impl IntoIterator<Item = jet_foundation::Policy::PolicyDeclaration>) -> Option<Explanation> {
+pub fn lookup_policy(
+    key: jet_foundation::Policy::PolicyKey,
+    declarations: impl IntoIterator<Item = jet_foundation::Policy::PolicyDeclaration>,
+) -> Option<Explanation> {
     let effective = jet_foundation::Policy::resolve(key, declarations).ok()??;
     Some(Explanation {
         code: key.name().to_string(),
@@ -407,9 +413,7 @@ pub fn render(ex: &Explanation, color: bool) -> String {
         if !ex.stage.is_empty() {
             out.push_str(&format!("Stage: {}\n\n", ex.stage));
         }
-        out.push_str(
-            "A longer explanation will land with the detailed typed row.\n\n",
-        );
+        out.push_str("A longer explanation will land with the detailed typed row.\n\n");
     }
     if ex.stage == "syntax registry" {
         out.push_str("This explanation comes from Syntax.rs.\n");
@@ -423,9 +427,7 @@ pub fn render(ex: &Explanation, color: bool) -> String {
 }
 
 fn detailed_example(code: &str) -> Option<String> {
-    (code == "E0003").then(|| {
-        "fn save(path: String) IOError! {\n    print(path)\n}".to_string()
-    })
+    (code == "E0003").then(|| "fn save(path: String) IOError! {\n    print(path)\n}".to_string())
 }
 
 /// The teaching pointer appended after a rendered error (one dim line).
@@ -446,8 +448,7 @@ fn normalize(code: &str) -> String {
 pub fn is_code(s: &str) -> bool {
     let b = s.as_bytes();
     if b.len() == 5 && b[1..].iter().all(|c| c.is_ascii_digit()) {
-        return matches!(b[0], b'E' | b'L')
-            || (b[0] == b'W' && b[1..] == *b"0410");
+        return matches!(b[0], b'E' | b'L') || (b[0] == b'W' && b[1..] == *b"0410");
     }
     if b.len() == 6 && b[..2] == *b"JT" && b[2..].iter().all(|c| c.is_ascii_digit()) {
         return true;
@@ -462,9 +463,7 @@ pub fn is_code(s: &str) -> bool {
                 .bytes()
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
     };
-    words.next().is_some_and(valid)
-        && words.next().is_some_and(valid)
-        && words.all(valid)
+    words.next().is_some_and(valid) && words.next().is_some_and(valid) && words.all(valid)
 }
 
 /// D-ONCE-LAW1=A: `jet inspect facts` reads the one registration table. Every
@@ -567,10 +566,22 @@ mod marker_registry_tests {
             truths += 1;
             let home = row.home.expect("a truth names a home");
             let guard = row.guard.expect("a truth names a guard");
-            assert!(text.contains(row.name), "`{}` is missing from the report", row.name);
+            assert!(
+                text.contains(row.name),
+                "`{}` is missing from the report",
+                row.name
+            );
             assert!(text.contains(home), "`{}` does not show its home", row.name);
-            assert!(text.contains(guard.test), "`{}` does not show its guard", row.name);
-            assert!(json.contains(guard.test), "`{}` is missing from --json", row.name);
+            assert!(
+                text.contains(guard.test),
+                "`{}` does not show its guard",
+                row.name
+            );
+            assert!(
+                json.contains(guard.test),
+                "`{}` is missing from --json",
+                row.name
+            );
         }
         assert!(truths >= 7, "the registry is born non-empty");
         // Every other kind is listed too, so one report reads the whole table.
@@ -581,7 +592,9 @@ mod marker_registry_tests {
     #[test]
     fn explain_reads_a_corpus_truth() {
         let ice = super::lookup("IceReport").expect("IceReport is a registered truth");
-        assert!(ice.meaning.contains("crates/jet-foundation/src/Diagnostics.rs"));
+        assert!(ice
+            .meaning
+            .contains("crates/jet-foundation/src/Diagnostics.rs"));
         assert!(ice
             .why
             .as_deref()

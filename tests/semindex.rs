@@ -34,7 +34,9 @@ fn fact(
         identity: identity.to_string(),
         name: name.to_string(),
         qualified_name: qualified_name.to_string(),
-        owner: qualified_name.split_once('.').map(|(owner, _)| owner.to_string()),
+        owner: qualified_name
+            .split_once('.')
+            .map(|(owner, _)| owner.to_string()),
         module_path: "test".to_string(),
         kind,
         signature: identity.to_string(),
@@ -50,24 +52,41 @@ fn fact(
 fn semantic_visibility_prefers_live_and_local_bindings() {
     let index = SemanticSymbolIndex::new(vec![
         fact(
-            "builtin:keyword:answer", "answer", "answer", SemanticSymbolKind::Keyword,
-            SemanticProvenance::Builtin { module: "syntax".to_string() },
+            "builtin:keyword:answer",
+            "answer",
+            "answer",
+            SemanticSymbolKind::Keyword,
+            SemanticProvenance::Builtin {
+                module: "syntax".to_string(),
+            },
         ),
         fact(
-            "import:test::api.answer::answer", "answer", "answer",
-            SemanticSymbolKind::Function, SemanticProvenance::Session,
-        ),
-        fact(
-            "fn:session::answer", "answer", "answer", SemanticSymbolKind::Function,
+            "import:test::api.answer::answer",
+            "answer",
+            "answer",
+            SemanticSymbolKind::Function,
             SemanticProvenance::Session,
         ),
         fact(
-            "session:binding:answer", "answer", "answer", SemanticSymbolKind::Local,
+            "fn:session::answer",
+            "answer",
+            "answer",
+            SemanticSymbolKind::Function,
+            SemanticProvenance::Session,
+        ),
+        fact(
+            "session:binding:answer",
+            "answer",
+            "answer",
+            SemanticSymbolKind::Local,
             SemanticProvenance::Session,
         ),
     ]);
     assert_eq!(
-        index.resolve_visible("answer").expect("visible answer").identity,
+        index
+            .resolve_visible("answer")
+            .expect("visible answer")
+            .identity,
         "session:binding:answer"
     );
     let completions = index.complete_visible("ans", None);
@@ -117,10 +136,7 @@ fn source_distinct_and_unit_conversion_members_are_cataloged() {
 
 fn run() {}
 "#;
-    let path = temp_fixture(
-        "source_numeric_members.jet",
-        src,
-    );
+    let path = temp_fixture("source_numeric_members.jet", src);
     let symbols = open_symbols(&path).expect("source semantic symbols");
 
     let user = symbols
@@ -162,33 +178,52 @@ fn run() {}
     let path = temp_fixture("source_affine_unit_members.jet", src);
     let symbols = open_symbols(&path).expect("source semantic symbols");
 
-    assert!(symbols.lookup_qualified("CelsiusPoint.from_float").is_some());
-    assert!(symbols.lookup_qualified("CelsiusDelta.from_float").is_some());
+    assert!(symbols
+        .lookup_qualified("CelsiusPoint.from_float")
+        .is_some());
+    assert!(symbols
+        .lookup_qualified("CelsiusDelta.from_float")
+        .is_some());
     assert!(symbols.lookup_qualified("Celsius.from_float").is_none());
 }
 
 #[test]
 fn semantic_visibility_orders_items_imports_and_builtins() {
     let builtin = fact(
-        "builtin:keyword:answer", "answer", "answer", SemanticSymbolKind::Keyword,
-        SemanticProvenance::Builtin { module: "syntax".to_string() },
+        "builtin:keyword:answer",
+        "answer",
+        "answer",
+        SemanticSymbolKind::Keyword,
+        SemanticProvenance::Builtin {
+            module: "syntax".to_string(),
+        },
     );
     let import = fact(
-        "import:test::api.answer::answer", "answer", "answer",
-        SemanticSymbolKind::Function, SemanticProvenance::Session,
+        "import:test::api.answer::answer",
+        "answer",
+        "answer",
+        SemanticSymbolKind::Function,
+        SemanticProvenance::Session,
     );
     let item = fact(
-        "fn:session::answer", "answer", "answer", SemanticSymbolKind::Function,
+        "fn:session::answer",
+        "answer",
+        "answer",
+        SemanticSymbolKind::Function,
         SemanticProvenance::Session,
     );
     assert_eq!(
         SemanticSymbolIndex::new(vec![builtin.clone(), import.clone()])
-            .resolve_visible("answer").unwrap().identity,
+            .resolve_visible("answer")
+            .unwrap()
+            .identity,
         import.identity
     );
     assert_eq!(
         SemanticSymbolIndex::new(vec![builtin, import, item.clone()])
-            .resolve_visible("answer").unwrap().identity,
+            .resolve_visible("answer")
+            .unwrap()
+            .identity,
         item.identity
     );
 }
@@ -196,36 +231,67 @@ fn semantic_visibility_orders_items_imports_and_builtins() {
 #[test]
 fn semantic_visibility_uses_current_module_context() {
     let mut current = fact(
-        "fn:current::answer", "answer", "answer", SemanticSymbolKind::Function,
-        SemanticProvenance::Source { module_path: "current.jet".to_string() },
+        "fn:current::answer",
+        "answer",
+        "answer",
+        SemanticSymbolKind::Function,
+        SemanticProvenance::Source {
+            module_path: "current.jet".to_string(),
+        },
     );
     current.module_path = "current.jet".to_string();
     let mut foreign_local = fact(
-        "local:other::answer", "answer", "answer", SemanticSymbolKind::Local,
-        SemanticProvenance::Source { module_path: "other.jet".to_string() },
+        "local:other::answer",
+        "answer",
+        "answer",
+        SemanticSymbolKind::Local,
+        SemanticProvenance::Source {
+            module_path: "other.jet".to_string(),
+        },
     );
     foreign_local.module_path = "other.jet".to_string();
     let index = SemanticSymbolIndex::new(vec![current.clone(), foreign_local]);
     assert_eq!(
-        index.resolve_visible_in("answer", Some("current.jet")).unwrap().identity,
+        index
+            .resolve_visible_in("answer", Some("current.jet"))
+            .unwrap()
+            .identity,
         current.identity
     );
-    assert_eq!(index.complete_visible_in("ans", None, Some("current.jet")).len(), 1);
+    assert_eq!(
+        index
+            .complete_visible_in("ans", None, Some("current.jet"))
+            .len(),
+        1
+    );
 }
 
 #[test]
 fn semantic_visibility_retains_explicit_qualified_alternatives() {
     let index = SemanticSymbolIndex::new(vec![
         fact(
-            "method:List.answer", "answer", "List.answer", SemanticSymbolKind::Member,
-            SemanticProvenance::Builtin { module: "core".to_string() },
+            "method:List.answer",
+            "answer",
+            "List.answer",
+            SemanticSymbolKind::Member,
+            SemanticProvenance::Builtin {
+                module: "core".to_string(),
+            },
         ),
         fact(
-            "method:Map.answer", "answer", "Map.answer", SemanticSymbolKind::Member,
-            SemanticProvenance::Builtin { module: "core".to_string() },
+            "method:Map.answer",
+            "answer",
+            "Map.answer",
+            SemanticSymbolKind::Member,
+            SemanticProvenance::Builtin {
+                module: "core".to_string(),
+            },
         ),
     ]);
-    assert_eq!(index.resolve_visible("List.answer").unwrap().identity, "method:List.answer");
+    assert_eq!(
+        index.resolve_visible("List.answer").unwrap().identity,
+        "method:List.answer"
+    );
     let qualified = index.complete_visible("", Some("List"));
     assert_eq!(qualified.len(), 1);
     assert_eq!(qualified[0].identity, "method:List.answer");
@@ -257,7 +323,10 @@ fn semindex_reconstructs_checked_output_callable() {
         "\"authority\":\"safe-jet\"",
         "\"effects\":[\"IO\"]",
     ] {
-        assert!(json.contains(field), "semindex JSON missing {field}: {json}");
+        assert!(
+            json.contains(field),
+            "semindex JSON missing {field}: {json}"
+        );
     }
 }
 
@@ -272,10 +341,17 @@ fn jet_inspect_semindex_reports_checked_output() {
         ])
         .output()
         .expect("jet inspect semindex");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let json = String::from_utf8_lossy(&output.stdout);
     assert!(json.contains("\"outputs\":[{\"binding\":\"app\""), "{json}");
-    assert!(json.contains("\"identity\":\"output_callable::launch\""), "{json}");
+    assert!(
+        json.contains("\"identity\":\"output_callable::launch\""),
+        "{json}"
+    );
 }
 
 #[test]
@@ -302,7 +378,10 @@ fn run() {
     assert_eq!(score.signature, "fn score(name: String) Int");
     assert_eq!(score.summary, "Scores one name.");
     assert_eq!(score.examples, vec!["score(\"Ada\")"]);
-    assert!(matches!(score.provenance, SemanticProvenance::Source { .. }));
+    assert!(matches!(
+        score.provenance,
+        SemanticProvenance::Source { .. }
+    ));
 
     let local = symbols.lookup("local_total");
     assert_eq!(local.len(), 1);
@@ -350,7 +429,11 @@ fn run() {}
     assert_eq!(items.len(), 2, "same spelling must retain module identity");
     assert_ne!(items[0].identity, items[1].identity);
     let values = symbols.lookup_member("Item", "value");
-    assert_eq!(values.len(), 2, "same member spelling must retain owner identity");
+    assert_eq!(
+        values.len(),
+        2,
+        "same member spelling must retain owner identity"
+    );
     assert_ne!(values[0].identity, values[1].identity);
 }
 
@@ -358,11 +441,19 @@ fn run() {}
 fn semantic_symbols_include_language_builtins() {
     let path = temp_fixture("semantic_builtins.jet", "fn run() {}\n");
     let symbols = open_symbols(&path).expect("semantic symbols");
-    let filter = symbols.lookup_qualified("List.filter").expect("List.filter");
+    let filter = symbols
+        .lookup_qualified("List.filter")
+        .expect("List.filter");
     assert_eq!(filter.signature, "List.filter(f: fn(T) Bool) List<T>");
     assert_eq!(filter.summary, "Keeps items where f(item) is true.");
-    assert!(matches!(filter.provenance, SemanticProvenance::Builtin { .. }));
-    assert!(symbols.complete("fil", Some("List")).iter().any(|s| s.name == "filter"));
+    assert!(matches!(
+        filter.provenance,
+        SemanticProvenance::Builtin { .. }
+    ));
+    assert!(symbols
+        .complete("fil", Some("List"))
+        .iter()
+        .any(|s| s.name == "filter"));
 }
 
 #[test]
@@ -386,9 +477,7 @@ fn semantic_symbols_include_module_and_selected_imports() {
     let imported = symbols.lookup("imported_score");
     assert_eq!(imported.len(), 1);
     assert!(imported[0].identity.starts_with("import:"));
-    assert!(imported[0]
-        .signature
-        .contains("score(name: String) Int"));
+    assert!(imported[0].signature.contains("score(name: String) Int"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -530,9 +619,15 @@ fn returned_view_provenance_is_structured_and_changes_signature_id() {
     assert!(provenance.output_path.is_empty());
     assert_eq!(provenance.sources.len(), 2);
     assert_eq!(provenance.sources[0].source, ViewSourceFact::Parameter(0));
-    assert_eq!(provenance.sources[0].projections, vec![ViewProjectionFact::Range]);
+    assert_eq!(
+        provenance.sources[0].projections,
+        vec![ViewProjectionFact::Range]
+    );
     assert_eq!(provenance.sources[1].source, ViewSourceFact::Parameter(1));
-    assert_eq!(provenance.sources[1].projections, vec![ViewProjectionFact::Range]);
+    assert_eq!(
+        provenance.sources[1].projections,
+        vec![ViewProjectionFact::Range]
+    );
     assert!(!provenance.mutable);
     let union_signature = union
         .definition_facts()
@@ -568,7 +663,9 @@ fn returned_view_provenance_is_structured_and_changes_signature_id() {
 
 #[test]
 fn aggregate_view_provenance_preserves_slots_and_changes_signature_id() {
-    let source = |right_owner: &str| format!(r#"
+    let source = |right_owner: &str| {
+        format!(
+            r#"
 struct Pair {{ left: View<Int>, right: View<Int> }}
 
 fn pair(left: [Int], right: [Int]) Pair -> {{
@@ -578,15 +675,23 @@ fn pair(left: [Int], right: [Int]) Pair -> {{
 }}
 
 fn run() {{}}
-"#);
+"#
+        )
+    };
     let path = temp_fixture("aggregate_view_provenance.jet", &source("right"));
     let distinct = open(&path).expect("aggregate view provenance indexes");
     let pair = distinct.lookup("pair").expect("pair definition");
     assert_eq!(pair.view_provenance.len(), 2);
     assert_eq!(pair.view_provenance[0].output_path, vec!["left"]);
-    assert_eq!(pair.view_provenance[0].sources[0].source, ViewSourceFact::Parameter(0));
+    assert_eq!(
+        pair.view_provenance[0].sources[0].source,
+        ViewSourceFact::Parameter(0)
+    );
     assert_eq!(pair.view_provenance[1].output_path, vec!["right"]);
-    assert_eq!(pair.view_provenance[1].sources[0].source, ViewSourceFact::Parameter(1));
+    assert_eq!(
+        pair.view_provenance[1].sources[0].source,
+        ViewSourceFact::Parameter(1)
+    );
     let distinct_signature = distinct
         .definition_facts()
         .iter()
@@ -595,8 +700,12 @@ fn run() {{}}
         .signature_id
         .clone();
     let json = distinct.to_json();
-    assert!(json.contains("\"output_path\":[\"left\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"));
-    assert!(json.contains("\"output_path\":[\"right\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":1}"));
+    assert!(json.contains(
+        "\"output_path\":[\"left\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}"
+    ));
+    assert!(json.contains(
+        "\"output_path\":[\"right\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":1}"
+    ));
 
     fs::write(&path, source("left")).unwrap();
     let changed = open(&path).expect("changed aggregate view provenance indexes");
@@ -698,8 +807,18 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
         .iter()
         .map(|node| node.slot.as_str())
         .collect::<std::collections::BTreeSet<_>>();
-    for slot in ["source", "stride", "init", "condition", "afterthought", "body"] {
-        assert!(slots.contains(slot), "missing loop structural slot `{slot}`: {slots:?}");
+    for slot in [
+        "source",
+        "stride",
+        "init",
+        "condition",
+        "afterthought",
+        "body",
+    ] {
+        assert!(
+            slots.contains(slot),
+            "missing loop structural slot `{slot}`: {slots:?}"
+        );
     }
 
     let inner_def = index
@@ -709,7 +828,10 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
         .max_by_key(|def| def.def_span.start)
         .expect("inner state definition");
     for reference in index.references_to("cursor") {
-        assert_eq!(reference.target.as_ref().unwrap().def_span, inner_def.def_span);
+        assert_eq!(
+            reference.target.as_ref().unwrap().def_span,
+            inner_def.def_span
+        );
     }
 
     let out_of_scope = jet::check_document(
@@ -717,9 +839,9 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
         "fn run() {\n    loop cursor in 0..<1 {}\n    print(cursor)\n}\n",
     );
     assert!(
-        out_of_scope.iter().any(|diagnostic| {
-            diagnostic.code == "E0107" && diagnostic.what.contains("cursor")
-        }),
+        out_of_scope
+            .iter()
+            .any(|diagnostic| { diagnostic.code == "E0107" && diagnostic.what.contains("cursor") }),
         "state binding must end with the loop: {out_of_scope:?}"
     );
 }
@@ -770,7 +892,10 @@ fn semindex_projects_omitted_inferred_effects() {
     let index = open(&path).expect("inferred effects index");
     let announce = index.effect_of("announce").expect("announce effects");
     assert_eq!(announce.inferred, vec!["IO"]);
-    assert!(announce.callees.is_empty(), "direct effect has no call edge");
+    assert!(
+        announce.callees.is_empty(),
+        "direct effect has no call edge"
+    );
     assert_eq!(announce.provenance.len(), 1);
     assert_eq!(announce.provenance[0].effect, "IO");
     assert_eq!(announce.provenance[0].call_path, vec!["announce"]);
@@ -792,7 +917,11 @@ fn semindex_projects_inline_module_inferred_effects() {
     let symbols = open_symbols(&path).expect("inline inferred effects index");
     let announce = symbols.lookup("announce");
     assert_eq!(announce.len(), 1);
-    assert!(announce[0].signature.contains("-[IO]>"), "{}", announce[0].signature);
+    assert!(
+        announce[0].signature.contains("-[IO]>"),
+        "{}",
+        announce[0].signature
+    );
 }
 
 #[test]
@@ -811,7 +940,10 @@ fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let stored = index.effect_of("stored").expect("stored callback effects");
     assert!(stored.maximal);
     assert_eq!(stored.provenance.len(), stored.inferred.len());
-    assert!(stored.provenance.iter().all(|origin| !origin.spans.is_empty()));
+    assert!(stored
+        .provenance
+        .iter()
+        .all(|origin| !origin.spans.is_empty()));
 
     let dynamic = index.effect_of("dynamic").expect("trait dispatch effects");
     let io = dynamic
@@ -839,7 +971,10 @@ fn semindex_via_contracts_have_provenance_without_invocation() {
     let open = index.effect_of("open").expect("unbounded via effects");
     assert!(open.maximal);
     assert_eq!(open.provenance.len(), open.inferred.len());
-    assert!(open.provenance.iter().all(|origin| !origin.spans.is_empty()));
+    assert!(open
+        .provenance
+        .iter()
+        .all(|origin| !origin.spans.is_empty()));
 }
 
 #[test]
@@ -854,10 +989,7 @@ fn semindex_preserves_via_effect_row_in_signatures() {
         .into_iter()
         .next()
         .expect("invoke symbol");
-    assert_eq!(
-        invoke.signature,
-        "fn invoke(act: fn() -[IO]>) -[via act]>"
-    );
+    assert_eq!(invoke.signature, "fn invoke(act: fn() -[IO]>) -[via act]>");
 }
 
 #[test]
@@ -885,7 +1017,10 @@ fn semindex_rename_sites_keep_definition_identity_in_json() {
         .expect("helper reference");
     let target = reference.target.as_ref().expect("resolved helper target");
     assert_eq!(target.def_span, definition.def_span);
-    assert_eq!(target.semantic_identity.as_deref(), Some(definition.identity.as_str()));
+    assert_eq!(
+        target.semantic_identity.as_deref(),
+        Some(definition.identity.as_str())
+    );
     assert!(index.to_json().contains("\"semantic_identity\":"));
 }
 
@@ -966,12 +1101,13 @@ fn run() {
         .map(|m| format!("{}:{}", m.name, m.signature))
         .collect();
     assert!(signatures.iter().any(|s| s == "title:title: String"));
-    assert!(signatures
-        .iter()
-        .any(|s| s.contains("label:fn label() String")), "{signatures:?}");
-    assert!(signatures
-        .iter()
-        .any(|s| s.contains("size:fn size() Int")));
+    assert!(
+        signatures
+            .iter()
+            .any(|s| s.contains("label:fn label() String")),
+        "{signatures:?}"
+    );
+    assert!(signatures.iter().any(|s| s.contains("size:fn size() Int")));
     assert!(signatures
         .iter()
         .any(|s| s.contains("render:fn render() String")));
@@ -997,15 +1133,29 @@ impl Client {
 fn run() {}
 "#;
     let path = temp_fixture("dossier_method_contract.jet", src);
-    let dossier = open(&path).expect("method contract fixture indexes").dossier("Client");
+    let dossier = open(&path)
+        .expect("method contract fixture indexes")
+        .dossier("Client");
     let connect = dossier
         .members
         .iter()
         .find(|member| member.name == "connect")
         .expect("connect method fact");
-    assert!(connect.signature.contains("timeout seconds: Int"), "{}", connect.signature);
-    assert!(connect.signature.contains("*, tls enabled: Bool"), "{}", connect.signature);
-    assert!(connect.signature.contains("rest: ...String"), "{}", connect.signature);
+    assert!(
+        connect.signature.contains("timeout seconds: Int"),
+        "{}",
+        connect.signature
+    );
+    assert!(
+        connect.signature.contains("*, tls enabled: Bool"),
+        "{}",
+        connect.signature
+    );
+    assert!(
+        connect.signature.contains("rest: ...String"),
+        "{}",
+        connect.signature
+    );
 }
 
 #[test]
@@ -1114,7 +1264,13 @@ fn jet_dossier_cli_json_smoke() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let path = fixture("types/traits.jet");
     let out = std::process::Command::new(bin)
-        .args(["inspect", "dossier", path.to_str().unwrap(), "Square", "--json"])
+        .args([
+            "inspect",
+            "dossier",
+            path.to_str().unwrap(),
+            "Square",
+            "--json",
+        ])
         .output()
         .expect("jet inspect dossier");
     assert!(
@@ -1131,7 +1287,10 @@ fn jet_dossier_cli_json_smoke() {
 #[test]
 fn shape6_inspect_routes_and_retired_bare_snapshots() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let help = std::process::Command::new(&bin).arg("help").output().unwrap();
+    let help = std::process::Command::new(&bin)
+        .arg("help")
+        .output()
+        .unwrap();
     assert!(help.status.success());
     let help = String::from_utf8(help.stdout).unwrap();
     for group_name in ["inspect", "registry"] {
@@ -1140,12 +1299,10 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
             .actions
             .iter()
             .flat_map(|action| {
-                action.usage.lines().map(|usage| {
-                    format!(
-                        "  jet {} {:<48} {}\n",
-                        group.name, usage, action.summary
-                    )
-                })
+                action
+                    .usage
+                    .lines()
+                    .map(|usage| format!("  jet {} {:<48} {}\n", group.name, usage, action.summary))
             })
             .collect::<String>();
         assert!(
@@ -1171,8 +1328,14 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
     }
 
     for verb in ["build", "run", "test", "fmt", "search"] {
-        assert!(jet::CLI::is_canonical_top_level(verb), "jet {verb} must stay flat");
-        assert!(jet::CLI::moved_command(verb).is_none(), "jet {verb} must not redirect");
+        assert!(
+            jet::CLI::is_canonical_top_level(verb),
+            "jet {verb} must stay flat"
+        );
+        assert!(
+            jet::CLI::moved_command(verb).is_none(),
+            "jet {verb} must not redirect"
+        );
     }
 
     for (verb, handler_text) in [
@@ -1186,9 +1349,15 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
             .args(["inspect", verb])
             .output()
             .unwrap();
-        assert!(!grouped.status.success(), "jet inspect {verb} needs test input");
+        assert!(
+            !grouped.status.success(),
+            "jet inspect {verb} needs test input"
+        );
         let stderr = String::from_utf8(grouped.stderr).unwrap();
-        assert!(stderr.contains(handler_text), "jet inspect {verb}: {stderr}");
+        assert!(
+            stderr.contains(handler_text),
+            "jet inspect {verb}: {stderr}"
+        );
 
         let bare = std::process::Command::new(&bin)
             .args([verb, "sentinel"])

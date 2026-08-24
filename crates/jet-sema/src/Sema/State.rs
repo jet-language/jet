@@ -160,7 +160,11 @@ impl StateTable {
             (Some(TASK_RUNNING.to_string()), TASK_JOINED.to_string()),
         );
         self.transitions.insert(
-            format!("{}::{}", crate::Syntax::TYPE_TASK, crate::Syntax::TASK_DETACH),
+            format!(
+                "{}::{}",
+                crate::Syntax::TYPE_TASK,
+                crate::Syntax::TASK_DETACH
+            ),
             (Some(TASK_RUNNING.to_string()), TASK_DETACHED.to_string()),
         );
     }
@@ -351,11 +355,8 @@ impl<'a> StateCtx<'a> {
         self.check_block(body);
         let after_body = self.flow.clone();
         let mut diverged = Vec::new();
-        self.flow = FlowFacts::after_loop_with_state_diagnostics(
-            &before,
-            &after_body,
-            &mut diverged,
-        );
+        self.flow =
+            FlowFacts::after_loop_with_state_diagnostics(&before, &after_body, &mut diverged);
         self.report_divergence(diverged, span);
     }
 
@@ -473,12 +474,22 @@ impl<'a> StateCtx<'a> {
             }
             Stmt::Return(Some(e), _) => self.check_expr(e),
             Stmt::Return(None, _) => {}
-            Stmt::While { cond, body, span, .. } => {
+            Stmt::While {
+                cond, body, span, ..
+            } => {
                 self.check_expr(cond);
                 self.check_loop_body(body, *span);
             }
-            Stmt::For { kind, body, span, .. } => {
-                if let crate::AST::ForKind::Range { start, end, step, exclusive: _ } = kind {
+            Stmt::For {
+                kind, body, span, ..
+            } => {
+                if let crate::AST::ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } = kind
+                {
                     self.check_expr(start);
                     self.check_expr(end);
                     if let Some(s) = step {
@@ -486,7 +497,9 @@ impl<'a> StateCtx<'a> {
                     }
                 } else if let crate::AST::ForKind::In { collection, step } = kind {
                     self.check_expr(collection);
-                    if let Some(step) = step { self.check_expr(step); }
+                    if let Some(step) = step {
+                        self.check_expr(step);
+                    }
                 }
                 self.check_loop_body(body, *span);
             }
@@ -558,7 +571,7 @@ impl<'a> StateCtx<'a> {
             | Stmt::Shield { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
@@ -922,7 +935,11 @@ impl<'a> StateCtx<'a> {
 /// Run the typestate pass over one function body. The receiver's incoming state is
 /// seeded from a `#State(S)`/`#Transition(S, _)` marker on `self` so a method body
 /// that itself transitions starts from the declared state.
-pub fn check_func_state(f: &Func, tbl: &StateTable, existing_diags: &[Diagnostic]) -> Vec<Diagnostic> {
+pub fn check_func_state(
+    f: &Func,
+    tbl: &StateTable,
+    existing_diags: &[Diagnostic],
+) -> Vec<Diagnostic> {
     let mut ctx = StateCtx::new(tbl, existing_diags);
     // Seed `self`'s incoming state from this function's own typestate marker so a
     // chain of self-transitions inside one body checks correctly.
@@ -1017,7 +1034,11 @@ mod tests {
         assert_eq!(
             table
                 .transitions
-                .get(&format!("{}::{}", crate::Syntax::TYPE_TASK, crate::Syntax::TASK_JOIN))
+                .get(&format!(
+                    "{}::{}",
+                    crate::Syntax::TYPE_TASK,
+                    crate::Syntax::TASK_JOIN
+                ))
                 .map(|(_, to)| to.as_str()),
             Some(TASK_JOINED)
         );

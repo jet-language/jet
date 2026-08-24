@@ -1,5 +1,8 @@
-use crate::AST::{BudgetDecl, ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program, ProgramBundle, Stmt, SystemFieldValue};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{
+    BudgetDecl, ContribValue, EnumLitArg, Expr, Item, ModuleDecl, Namespace, Program,
+    ProgramBundle, Stmt, SystemFieldValue,
+};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
@@ -40,7 +43,9 @@ pub struct LocatedBudgetSpec {
 impl std::ops::Deref for LocatedBudgetSpec {
     type Target = BudgetSpec;
 
-    fn deref(&self) -> &Self::Target { &self.spec }
+    fn deref(&self) -> &Self::Target {
+        &self.spec
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,14 +66,24 @@ pub enum BudgetQuantity {
     DurationNs(u128),
     Bytes(u128),
     Count(u128),
-    Rate { numerator: u128, denominator_ns: u128 },
+    Rate {
+        numerator: u128,
+        denominator_ns: u128,
+    },
     PercentBasisPoints(u128),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BudgetRawQuantity {
-    Scalar { digits: String, suffix: Option<String> },
-    Rate { count_digits: String, per_digits: String, per_suffix: String },
+    Scalar {
+        digits: String,
+        suffix: Option<String>,
+    },
+    Rate {
+        count_digits: String,
+        per_digits: String,
+        per_suffix: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,44 +105,69 @@ pub enum BudgetAxis {
 /// semantic pass calls the same elaborator and reports its diagnostics.
 pub fn collect_budget_specs(program: &Program) -> Result<Vec<BudgetSpec>, Vec<Diagnostic>> {
     let (specs, diags) = validate_items(&program.items);
-    if diags.is_empty() { Ok(specs) } else { Err(diags) }
+    if diags.is_empty() {
+        Ok(specs)
+    } else {
+        Err(diags)
+    }
 }
 
 /// Collect the canonical budget facts from a fully loaded package bundle.
 ///
 /// Budget commands consume this after the ordinary front-end check, so command
 /// execution cannot grow a second parser or semantic interpretation.
-pub fn collect_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<BudgetSpec>, Vec<Diagnostic>> {
+pub fn collect_budget_specs_bundle(
+    bundle: &ProgramBundle,
+) -> Result<Vec<BudgetSpec>, Vec<Diagnostic>> {
     collect_located_budget_specs_bundle(bundle)
         .map(|specs| specs.into_iter().map(|located| located.spec).collect())
 }
 
 /// Collect budgets while retaining the module that owns each source span.
-pub fn collect_located_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<LocatedBudgetSpec>, Vec<Diagnostic>> {
+pub fn collect_located_budget_specs_bundle(
+    bundle: &ProgramBundle,
+) -> Result<Vec<LocatedBudgetSpec>, Vec<Diagnostic>> {
     let mut specs = Vec::new();
     let mut diags = Vec::new();
     let mut groups = BTreeMap::<std::path::PathBuf, (Vec<BudgetSpec>, AttachmentCatalog)>::new();
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let (mut module_specs, mut module_diags) = elaborate_items(&module.items);
-        let group = groups.entry(owning_package_root(bundle, &module.path)).or_default();
+        let group = groups
+            .entry(owning_package_root(bundle, &module.path))
+            .or_default();
         group.0.extend(module_specs.iter().cloned());
         group.1.extend(attachment_catalog(&module.items));
-        specs.extend(module_specs.drain(..).map(|spec| LocatedBudgetSpec { spec, module_index }));
+        specs.extend(
+            module_specs
+                .drain(..)
+                .map(|spec| LocatedBudgetSpec { spec, module_index }),
+        );
         diags.append(&mut module_diags);
     }
     for (_, (group_specs, catalog)) in groups {
         validate_resolution(&group_specs, &catalog, &mut diags);
         validate_collisions(&group_specs, &mut diags);
     }
-    if diags.is_empty() { Ok(specs) } else { Err(diags) }
+    if diags.is_empty() {
+        Ok(specs)
+    } else {
+        Err(diags)
+    }
 }
 
 pub fn validate_bundle(bundle: &ProgramBundle) -> Vec<Diagnostic> {
-    collect_located_budget_specs_bundle(bundle).err().unwrap_or_default()
+    collect_located_budget_specs_bundle(bundle)
+        .err()
+        .unwrap_or_default()
 }
 
-fn owning_package_root(bundle: &ProgramBundle, module_path: &std::path::Path) -> std::path::PathBuf {
-    bundle.dep_roots.values()
+fn owning_package_root(
+    bundle: &ProgramBundle,
+    module_path: &std::path::Path,
+) -> std::path::PathBuf {
+    bundle
+        .dep_roots
+        .values()
         .filter(|root| module_path.starts_with(root))
         .max_by_key(|root| root.components().count())
         .cloned()
@@ -175,10 +215,12 @@ fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
     let mut catalog = AttachmentCatalog::default();
     for item in items {
         if let Item::Test(test) = item {
-            if test.body.iter().any(|statement| matches!(
-                statement,
-                Stmt::ScopeMember { name, .. } if name == crate::Syntax::SCOPE_TEST_MEASURE
-            )) {
+            if test.body.iter().any(|statement| {
+                matches!(
+                    statement,
+                    Stmt::ScopeMember { name, .. } if name == crate::Syntax::SCOPE_TEST_MEASURE
+                )
+            }) {
                 if let Some(name) = &test.name {
                     catalog.tests.insert(name.clone());
                 }
@@ -192,16 +234,24 @@ fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
         let Item::Module(module) = item else { continue };
         for contribution in &module.contributions {
             match contribution.namespace {
-                Namespace::Env => { catalog.envs.insert(contribution.path.clone()); }
-                Namespace::System | Namespace::Image => { catalog.targets.insert(contribution.path.clone()); }
+                Namespace::Env => {
+                    catalog.envs.insert(contribution.path.clone());
+                }
+                Namespace::System | Namespace::Image => {
+                    catalog.targets.insert(contribution.path.clone());
+                }
                 _ => {}
             }
             match &contribution.value {
-                ContribValue::Env(env) => catalog.services.extend(env.services.iter().map(|service| service.name.clone())),
+                ContribValue::Env(env) => catalog
+                    .services
+                    .extend(env.services.iter().map(|service| service.name.clone())),
                 ContribValue::System(system) => {
                     for field in &system.fields {
                         if let SystemFieldValue::Services(services) = &field.value {
-                            catalog.services.extend(services.iter().map(|service| service.name.clone()));
+                            catalog
+                                .services
+                                .extend(services.iter().map(|service| service.name.clone()));
                         }
                     }
                 }
@@ -231,7 +281,7 @@ fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTre
             | Stmt::Shield { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. } => collect_scene_attachments(body, scenes),
@@ -242,7 +292,12 @@ fn collect_scene_attachments(stmts: &[Stmt], scenes: &mut std::collections::BTre
 
 fn collect_scene_expr(expr: &Expr, scenes: &mut std::collections::BTreeSet<String>) {
     match expr {
-        Expr::MethodCall { receiver, method, args, .. } => {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
             if method == "new"
                 && matches!(&**receiver, Expr::Field(_, member, _) if member == "Scene")
                 && args.len() == 1
@@ -252,9 +307,15 @@ fn collect_scene_expr(expr: &Expr, scenes: &mut std::collections::BTreeSet<Strin
                 }
             }
             collect_scene_expr(receiver, scenes);
-            for arg in args { collect_scene_expr(&arg.expr, scenes); }
+            for arg in args {
+                collect_scene_expr(&arg.expr, scenes);
+            }
         }
-        Expr::Call(call) => for arg in &call.args { collect_scene_expr(&arg.expr, scenes); },
+        Expr::Call(call) => {
+            for arg in &call.args {
+                collect_scene_expr(&arg.expr, scenes);
+            }
+        }
         Expr::Field(base, _, _) | Expr::Unary(_, base, _) => collect_scene_expr(base, scenes),
         Expr::Binary(_, left, right, _) => {
             collect_scene_expr(left, scenes);
@@ -264,7 +325,11 @@ fn collect_scene_expr(expr: &Expr, scenes: &mut std::collections::BTreeSet<Strin
     }
 }
 
-fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags: &mut Vec<Diagnostic>) {
+fn validate_resolution(
+    specs: &[BudgetSpec],
+    catalog: &AttachmentCatalog,
+    diags: &mut Vec<Diagnostic>,
+) {
     for spec in specs {
         if let Some((kind, name)) = named_key(&spec.scope) {
             let found = match kind {
@@ -272,8 +337,11 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
                 "Service" => catalog.services.contains(name),
                 "Scene" => catalog.scenes.contains(name),
                 "Test" => catalog.tests.contains(name),
-                "Target" => catalog.targets.contains(name)
-                    || (spec.metric.starts_with("CompileTime(") && provider_kind(&spec.provider) == "CompilerProbe"),
+                "Target" => {
+                    catalog.targets.contains(name)
+                        || (spec.metric.starts_with("CompileTime(")
+                            && provider_kind(&spec.provider) == "CompilerProbe")
+                }
                 _ => true,
             };
             if !found {
@@ -284,7 +352,11 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
         if let Some((kind, name)) = named_key(&spec.provider) {
             let found = match kind {
                 "BuildArtifact" => catalog.targets.contains(name) || name == "Package",
-                "AllocationProbe" => catalog.services.contains(name) || catalog.scenes.contains(name) || catalog.tests.contains(name),
+                "AllocationProbe" => {
+                    catalog.services.contains(name)
+                        || catalog.scenes.contains(name)
+                        || catalog.tests.contains(name)
+                }
                 "BenchMeasurement" => catalog.tests.contains(name),
                 "ServiceProbe" => catalog.services.contains(name),
                 "SceneProbe" => catalog.scenes.contains(name),
@@ -301,23 +373,35 @@ fn validate_resolution(specs: &[BudgetSpec], catalog: &AttachmentCatalog, diags:
 fn unresolved(spec: &BudgetSpec, attachment: &str, why: String, fix: &str) -> Diagnostic {
     Diagnostic::error(
         "E2905",
-        format!("performance budget {} cannot resolve {}", spec.name, attachment),
+        format!(
+            "performance budget {} cannot resolve {}",
+            spec.name, attachment
+        ),
         why,
         fix.to_string(),
-        spec.field_spans.get(attachment).copied().or(Some(spec.span)),
+        spec.field_spans
+            .get(attachment)
+            .copied()
+            .or(Some(spec.span)),
     )
 }
 
 fn named_key(value: &str) -> Option<(&str, &str)> {
     let open = value.find('(')?;
-    value.ends_with(')').then(|| (&value[..open], &value[open + 1..value.len() - 1]))
+    value
+        .ends_with(')')
+        .then(|| (&value[..open], &value[open + 1..value.len() - 1]))
 }
 
 fn validate_collisions(specs: &[BudgetSpec], diags: &mut Vec<Diagnostic>) {
     for (index, right) in specs.iter().enumerate() {
         for left in &specs[..index] {
             if left.role == right.role && left.name == right.name {
-                diags.push(overlap(left, right, "their containing package, perf role, and name form the same budget identity"));
+                diags.push(overlap(
+                    left,
+                    right,
+                    "their containing package, perf role, and name form the same budget identity",
+                ));
                 break;
             }
             if left.scope == right.scope
@@ -335,7 +419,10 @@ fn validate_collisions(specs: &[BudgetSpec], diags: &mut Vec<Diagnostic>) {
 fn overlap(left: &BudgetSpec, right: &BudgetSpec, why: &str) -> Diagnostic {
     Diagnostic::error(
         "E2904",
-        format!("performance budgets {} and {} overlap", left.name, right.name),
+        format!(
+            "performance budgets {} and {} overlap",
+            left.name, right.name
+        ),
         why.to_string(),
         "remove one budget or make their target/profile applicability disjoint".to_string(),
         Some(right.span),
@@ -369,7 +456,9 @@ fn invalid(name: &str, why: impl Into<String>, fix: impl Into<String>, span: Spa
 
 fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut Vec<Diagnostic>) {
     for contribution in &module.contributions {
-        let ContribValue::Perf(perf) = &contribution.value else { continue };
+        let ContribValue::Perf(perf) = &contribution.value else {
+            continue;
+        };
         if !snake_case(&contribution.path) {
             diags.push(invalid(
                 &format!("role `{}`", contribution.path),
@@ -379,7 +468,8 @@ fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut
             ));
             continue;
         }
-        let workloads = compile_workload_catalog(&contribution.path, &perf.compile_workloads, diags);
+        let workloads =
+            compile_workload_catalog(&contribution.path, &perf.compile_workloads, diags);
         for entry in &perf.budgets {
             match elaborate(&contribution.path, entry, &workloads) {
                 Ok(spec) => specs.push(spec),
@@ -389,47 +479,133 @@ fn validate_module(module: &ModuleDecl, specs: &mut Vec<BudgetSpec>, diags: &mut
     }
 }
 
-fn elaborate(role: &str, entry: &BudgetDecl, workloads: &BTreeMap<String, CompileWorkloadFact>) -> Result<BudgetSpec, Diagnostic> {
+fn elaborate(
+    role: &str,
+    entry: &BudgetDecl,
+    workloads: &BTreeMap<String, CompileWorkloadFact>,
+) -> Result<BudgetSpec, Diagnostic> {
     let span = entry.span;
-    const ALLOWED: &[&str] = &["name", "scope", "metric", "provider", "comparison", "limit", "enforcement", "applies"];
+    const ALLOWED: &[&str] = &[
+        "name",
+        "scope",
+        "metric",
+        "provider",
+        "comparison",
+        "limit",
+        "enforcement",
+        "applies",
+    ];
     let mut map: BTreeMap<&str, (&Expr, Span)> = BTreeMap::new();
     for field in &entry.fields {
         if !ALLOWED.contains(&field.name.as_str()) {
-            return Err(invalid("entry", format!("`{}` is not a Budget field", field.name), format!("use one of: {}", ALLOWED.join(", ")), field.name_span));
+            return Err(invalid(
+                "entry",
+                format!("`{}` is not a Budget field", field.name),
+                format!("use one of: {}", ALLOWED.join(", ")),
+                field.name_span,
+            ));
         }
-        if map.insert(field.name.as_str(), (&field.value, field.name_span)).is_some() {
-            return Err(invalid("entry", format!("`{}` is written more than once", field.name), "keep one value for this field", field.name_span));
+        if map
+            .insert(field.name.as_str(), (&field.value, field.name_span))
+            .is_some()
+        {
+            return Err(invalid(
+                "entry",
+                format!("`{}` is written more than once", field.name),
+                "keep one value for this field",
+                field.name_span,
+            ));
         }
     }
     let (name_expr, _name_span) = required(&map, "name", span)?;
-    let name = string_value(name_expr).ok_or_else(|| invalid("entry", "`name` must be constant quoted text", "write `name: \"lowercase-kebab-name\"`", name_expr.span()))?;
+    let name = string_value(name_expr).ok_or_else(|| {
+        invalid(
+            "entry",
+            "`name` must be constant quoted text",
+            "write `name: \"lowercase-kebab-name\"`",
+            name_expr.span(),
+        )
+    })?;
     if name.is_empty() {
-        return Err(invalid("entry", "`name` cannot be empty", "give this budget a stable name", name_expr.span()));
+        return Err(invalid(
+            "entry",
+            "`name` cannot be empty",
+            "give this budget a stable name",
+            name_expr.span(),
+        ));
     }
     let (metric_expr, _) = required(&map, "metric", span)?;
     let (metric, metric_variant) = closed_metric(&name, metric_expr)?;
     let (limit_expr, _) = required(&map, "limit", span)?;
     let limit = enum_variant(limit_expr).ok_or_else(|| invalid(&name, "`limit` must be a typed comparison limit", "use `.AtMost(value)`, `.AtLeast(value)`, `.RegressionAtMost(percent)`, or `.ImprovementAtLeast(percent)`", limit_expr.span()))?;
-    let deterministic = matches!(metric_variant.as_str(), "BinarySize" | "ArtifactSize" | "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount");
+    let deterministic = matches!(
+        metric_variant.as_str(),
+        "BinarySize"
+            | "ArtifactSize"
+            | "GeneratedUnsafe"
+            | "PublicApiItems"
+            | "DependencyCount"
+            | "EffectCount"
+    );
     let comparison_fact = match map.get("comparison") {
         Some((expr, _)) => closed_comparison(&name, expr)?,
-        None if deterministic => BudgetComparisonFact { kind: "Absolute".into(), baseline: None },
-        None => BudgetComparisonFact { kind: String::new(), baseline: None },
+        None if deterministic => BudgetComparisonFact {
+            kind: "Absolute".into(),
+            baseline: None,
+        },
+        None => BudgetComparisonFact {
+            kind: String::new(),
+            baseline: None,
+        },
     };
     let comparison = comparison_fact.kind.clone();
     if comparison.is_empty() {
-        return Err(invalid(&name, "statistical metrics require `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", "add a pinned statistical comparison", metric_expr.span()));
+        return Err(invalid(
+            &name,
+            "statistical metrics require `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`",
+            "add a pinned statistical comparison",
+            metric_expr.span(),
+        ));
     }
     let higher = metric_variant == "Throughput";
-    let direction_ok = if comparison == "RelativeTo" { if higher { limit == "ImprovementAtLeast" } else { limit == "RegressionAtMost" } } else if higher { limit == "AtLeast" } else { limit == "AtMost" };
+    let direction_ok = if comparison == "RelativeTo" {
+        if higher {
+            limit == "ImprovementAtLeast"
+        } else {
+            limit == "RegressionAtMost"
+        }
+    } else if higher {
+        limit == "AtLeast"
+    } else {
+        limit == "AtMost"
+    };
     if !direction_ok {
-        return Err(invalid(&name, format!("`{metric_variant}` and `{comparison}` cannot use `.{limit}`"), if higher { "use `.AtLeast(...)` or relative `.ImprovementAtLeast(...)`" } else { "use `.AtMost(...)` or relative `.RegressionAtMost(...)`" }, limit_expr.span()));
+        return Err(invalid(
+            &name,
+            format!("`{metric_variant}` and `{comparison}` cannot use `.{limit}`"),
+            if higher {
+                "use `.AtLeast(...)` or relative `.ImprovementAtLeast(...)`"
+            } else {
+                "use `.AtMost(...)` or relative `.RegressionAtMost(...)`"
+            },
+            limit_expr.span(),
+        ));
     }
     if deterministic && comparison != "Absolute" {
-        return Err(invalid(&name, "deterministic metrics use `.Absolute`", "remove the baseline comparison", metric_expr.span()));
+        return Err(invalid(
+            &name,
+            "deterministic metrics use `.Absolute`",
+            "remove the baseline comparison",
+            metric_expr.span(),
+        ));
     }
     if !deterministic && comparison == "Absolute" {
-        return Err(invalid(&name, "statistical metrics cannot use `.Absolute`", "use `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", metric_expr.span()));
+        return Err(invalid(
+            &name,
+            "statistical metrics cannot use `.Absolute`",
+            "use `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`",
+            metric_expr.span(),
+        ));
     }
     let limit_fact = normalize_limit(&name, &metric_variant, &limit, limit_expr)?;
     let scope = match map.get("scope") {
@@ -438,7 +614,10 @@ fn elaborate(role: &str, entry: &BudgetDecl, workloads: &BTreeMap<String, Compil
     };
     let provider = if let Some((expr, _)) = map.get("provider") {
         closed_provider(&name, expr)?
-    } else if matches!(metric_variant.as_str(), "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount") {
+    } else if matches!(
+        metric_variant.as_str(),
+        "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount"
+    ) {
         "CompilerFacts".into()
     } else if matches!(metric_variant.as_str(), "BinarySize" | "ArtifactSize") {
         match named_key(&scope) {
@@ -476,12 +655,16 @@ fn elaborate(role: &str, entry: &BudgetDecl, workloads: &BTreeMap<String, Compil
             }),
             edit if edit.starts_with("Edit(") && edit.ends_with(')') => {
                 let workload_name = &edit[5..edit.len() - 1];
-                let workload = workloads.get(workload_name).ok_or_else(|| invalid(
-                    &name,
-                    format!("compile edit workload `{workload_name}` is not declared"),
-                    "add the named `CompilerWorkload.Edit` entry to `compile_workloads`",
-                    map.get("provider").map(|(expr, _)| expr.span()).unwrap_or(metric_expr.span()),
-                ))?;
+                let workload = workloads.get(workload_name).ok_or_else(|| {
+                    invalid(
+                        &name,
+                        format!("compile edit workload `{workload_name}` is not declared"),
+                        "add the named `CompilerWorkload.Edit` entry to `compile_workloads`",
+                        map.get("provider")
+                            .map(|(expr, _)| expr.span())
+                            .unwrap_or(metric_expr.span()),
+                    )
+                })?;
                 if workload.target.as_str() != target {
                     return Err(invalid(
                         &name,
@@ -492,45 +675,100 @@ fn elaborate(role: &str, entry: &BudgetDecl, workloads: &BTreeMap<String, Compil
                 }
                 Some(workload.clone())
             }
-            _ => return Err(invalid(
-                &name,
-                "`CompilerProbe` has an unsupported workload value",
-                "use `.Clean`, `.NoChange`, or `.Edit(\"declared_workload\")`",
-                map.get("provider").map(|(expr, _)| expr.span()).unwrap_or(metric_expr.span()),
-            )),
+            _ => {
+                return Err(invalid(
+                    &name,
+                    "`CompilerProbe` has an unsupported workload value",
+                    "use `.Clean`, `.NoChange`, or `.Edit(\"declared_workload\")`",
+                    map.get("provider")
+                        .map(|(expr, _)| expr.span())
+                        .unwrap_or(metric_expr.span()),
+                ))
+            }
         }
     } else {
         None
     };
     let applicability = match map.get("applies") {
         Some((expr, _)) => parse_applicability(&name, expr)?,
-        None => BudgetApplicability { targets: BudgetAxis::Current, profiles: BudgetAxis::Current },
+        None => BudgetApplicability {
+            targets: BudgetAxis::Current,
+            profiles: BudgetAxis::Current,
+        },
     };
     let enforcement = match map.get("enforcement") {
         Some((expr, _)) => match enum_variant(expr).as_deref() {
             Some("Fail") => "Fail".into(),
             Some("Warn") if !deterministic => "Warn".into(),
-            Some("Warn") => return Err(invalid(&name, "deterministic budgets must use `.Fail` enforcement", "remove `enforcement` or write `.Fail`", expr.span())),
-            _ => return Err(invalid(&name, "`enforcement` must be `.Fail` or `.Warn`", "use `.Fail`, or `.Warn` for a statistical budget", expr.span())),
+            Some("Warn") => {
+                return Err(invalid(
+                    &name,
+                    "deterministic budgets must use `.Fail` enforcement",
+                    "remove `enforcement` or write `.Fail`",
+                    expr.span(),
+                ))
+            }
+            _ => {
+                return Err(invalid(
+                    &name,
+                    "`enforcement` must be `.Fail` or `.Warn`",
+                    "use `.Fail`, or `.Warn` for a statistical budget",
+                    expr.span(),
+                ))
+            }
         },
         None => "Fail".into(),
     };
     validate_scope_provider_pair(&name, &metric_variant, &scope, &provider, span)?;
-    let field_spans = map.into_iter().map(|(k, (_, s))| (k.to_string(), s)).collect();
-    Ok(BudgetSpec { role: role.into(), name, metric, scope, provider, applicability, enforcement, comparison, limit, comparison_fact, limit_fact, compile_workload, span, field_spans })
+    let field_spans = map
+        .into_iter()
+        .map(|(k, (_, s))| (k.to_string(), s))
+        .collect();
+    Ok(BudgetSpec {
+        role: role.into(),
+        name,
+        metric,
+        scope,
+        provider,
+        applicability,
+        enforcement,
+        comparison,
+        limit,
+        comparison_fact,
+        limit_fact,
+        compile_workload,
+        span,
+        field_spans,
+    })
 }
 
 fn closed_scope(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
     let key = enum_key(expr).ok_or_else(|| invalid(name, "`scope` must be one closed scope value", "use `.Package`, `.Target(name)`, `.Env(name)`, `.Service(name)`, `.Scene(name)`, or `.Test(name)`", expr.span()))?;
     match (enum_variant(expr).as_deref(), named_key(&key)) {
         (Some("Package"), None) => Ok(key),
-        (Some("Env" | "Service" | "Scene" | "Test" | "Target"), Some((_, value))) if !value.is_empty() => Ok(key),
-        _ => Err(invalid(name, "`scope` must be one closed scope value with the required name", "use `.Package` or a named scope such as `.Service(\"api\")`", expr.span())),
+        (Some("Env" | "Service" | "Scene" | "Test" | "Target"), Some((_, value)))
+            if !value.is_empty() =>
+        {
+            Ok(key)
+        }
+        _ => Err(invalid(
+            name,
+            "`scope` must be one closed scope value with the required name",
+            "use `.Package` or a named scope such as `.Service(\"api\")`",
+            expr.span(),
+        )),
     }
 }
 
 fn closed_provider(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
-    let key = enum_key(expr).ok_or_else(|| invalid(name, "`provider` must be one closed provider value", "use a typed provider such as `.CompilerFacts` or `.BuildArtifact(name)`", expr.span()))?;
+    let key = enum_key(expr).ok_or_else(|| {
+        invalid(
+            name,
+            "`provider` must be one closed provider value",
+            "use a typed provider such as `.CompilerFacts` or `.BuildArtifact(name)`",
+            expr.span(),
+        )
+    })?;
     match (enum_variant(expr).as_deref(), named_key(&key)) {
         (Some("CompilerFacts"), None) => Ok(key),
         (Some("BuildArtifact" | "AllocationProbe" | "BenchMeasurement" | "ServiceProbe" | "SceneProbe"), Some((_, value))) if !value.is_empty() => Ok(key),
@@ -541,78 +779,170 @@ fn closed_provider(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
 
 fn closed_metric(name: &str, expr: &Expr) -> Result<(String, String), Diagnostic> {
     let Expr::EnumLit { variant, args, .. } = expr else {
-        return Err(invalid(name, "`metric` must be one closed performance metric", "use a metric such as `.BinarySize` or `.Latency(.P99)`", expr.span()));
+        return Err(invalid(
+            name,
+            "`metric` must be one closed performance metric",
+            "use a metric such as `.BinarySize` or `.Latency(.P99)`",
+            expr.span(),
+        ));
     };
     if !crate::Syntax::PERF_BUDGET_METRICS.contains(&variant.as_str()) {
-        return Err(invalid(name, format!("`.{variant}` is not a performance metric"), "use one metric from the registered performance-budget vocabulary", expr.span()));
+        return Err(invalid(
+            name,
+            format!("`.{variant}` is not a performance metric"),
+            "use one metric from the registered performance-budget vocabulary",
+            expr.span(),
+        ));
     }
-    let percentile_metric = matches!(variant.as_str(), "FrameTime" | "Latency" | "BenchTime" | "DrawCalls" | "CompileTime");
+    let percentile_metric = matches!(
+        variant.as_str(),
+        "FrameTime" | "Latency" | "BenchTime" | "DrawCalls" | "CompileTime"
+    );
     if percentile_metric {
         let [arg] = args.as_slice() else {
-            return Err(invalid(name, format!("`.{variant}` requires exactly one percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr.span()));
+            return Err(invalid(
+                name,
+                format!("`.{variant}` requires exactly one percentile"),
+                "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`",
+                expr.span(),
+            ));
         };
-        let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+        let value = match arg {
+            EnumLitArg::Positional(value) => value,
+            EnumLitArg::Named { expr, .. } => expr,
+        };
         let Some(percentile) = enum_variant(value) else {
-            return Err(invalid(name, format!("`.{variant}` requires a typed percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", value.span()));
+            return Err(invalid(
+                name,
+                format!("`.{variant}` requires a typed percentile"),
+                "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`",
+                value.span(),
+            ));
         };
-        if !crate::Syntax::PERF_BUDGET_PERCENTILES.contains(&percentile.as_str()) || !enum_args(value).is_empty() {
-            return Err(invalid(name, format!("`.{percentile}` is not a supported percentile"), "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", value.span()));
+        if !crate::Syntax::PERF_BUDGET_PERCENTILES.contains(&percentile.as_str())
+            || !enum_args(value).is_empty()
+        {
+            return Err(invalid(
+                name,
+                format!("`.{percentile}` is not a supported percentile"),
+                "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`",
+                value.span(),
+            ));
         }
         return Ok((format!("{variant}({percentile})"), variant.clone()));
     }
     if !args.is_empty() {
-        return Err(invalid(name, format!("`.{variant}` does not take a percentile or argument"), format!("write `.{variant}`"), expr.span()));
+        return Err(invalid(
+            name,
+            format!("`.{variant}` does not take a percentile or argument"),
+            format!("write `.{variant}`"),
+            expr.span(),
+        ));
     }
     Ok((variant.clone(), variant.clone()))
 }
 
 fn closed_comparison(name: &str, expr: &Expr) -> Result<BudgetComparisonFact, Diagnostic> {
     let Expr::EnumLit { variant, args, .. } = expr else {
-        return Err(invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant", expr.span()));
+        return Err(invalid(
+            name,
+            "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`",
+            "use one closed comparison variant",
+            expr.span(),
+        ));
     };
     match (variant.as_str(), args.as_slice()) {
-        ("Absolute", []) => Ok(BudgetComparisonFact { kind: variant.clone(), baseline: None }),
+        ("Absolute", []) => Ok(BudgetComparisonFact {
+            kind: variant.clone(),
+            baseline: None,
+        }),
         ("AbsoluteFrom" | "RelativeTo", [EnumLitArg::Positional(value)]) => {
             let Some(baseline) = string_value(value) else {
-                return Err(invalid(name, format!("`.{variant}` requires one constant baseline name"), "write a lowercase slash-separated name such as `\"ci/linux-x64\"`", value.span()));
+                return Err(invalid(
+                    name,
+                    format!("`.{variant}` requires one constant baseline name"),
+                    "write a lowercase slash-separated name such as `\"ci/linux-x64\"`",
+                    value.span(),
+                ));
             };
             if !baseline_name(&baseline) {
-                return Err(invalid(name, format!("`{baseline}` is not a valid baseline name"), "use nonempty slash-separated lowercase kebab-case segments", value.span()));
+                return Err(invalid(
+                    name,
+                    format!("`{baseline}` is not a valid baseline name"),
+                    "use nonempty slash-separated lowercase kebab-case segments",
+                    value.span(),
+                ));
             }
-            Ok(BudgetComparisonFact { kind: variant.clone(), baseline: Some(baseline) })
+            Ok(BudgetComparisonFact {
+                kind: variant.clone(),
+                baseline: Some(baseline),
+            })
         }
-        _ => Err(invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant with its exact arguments", expr.span())),
+        _ => Err(invalid(
+            name,
+            "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`",
+            "use one closed comparison variant with its exact arguments",
+            expr.span(),
+        )),
     }
 }
 
 fn enum_args(expr: &Expr) -> &[EnumLitArg] {
-    match expr { Expr::EnumLit { args, .. } => args, _ => &[] }
+    match expr {
+        Expr::EnumLit { args, .. } => args,
+        _ => &[],
+    }
 }
 
 fn baseline_name(value: &str) -> bool {
-    !value.is_empty() && value.split('/').all(|segment| {
-        !segment.is_empty()
-            && segment != "."
-            && segment != ".."
-            && !segment.starts_with('-')
-            && !segment.ends_with('-')
-            && !segment.contains("--")
-            && segment.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-    })
+    !value.is_empty()
+        && value.split('/').all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && !segment.starts_with('-')
+                && !segment.ends_with('-')
+                && !segment.contains("--")
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        })
 }
 
-fn validate_scope_provider_pair(name: &str, metric: &str, scope: &str, provider: &str, span: Span) -> Result<(), Diagnostic> {
+fn validate_scope_provider_pair(
+    name: &str,
+    metric: &str,
+    scope: &str,
+    provider: &str,
+    span: Span,
+) -> Result<(), Diagnostic> {
     let valid = match metric {
-        "BinarySize" | "ArtifactSize" => (scope == "Package" || scope.starts_with("Target(")) && provider.starts_with("BuildArtifact("),
-        "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount" => (scope == "Package" || scope.starts_with("Target(")) && provider == "CompilerFacts",
+        "BinarySize" | "ArtifactSize" => {
+            (scope == "Package" || scope.starts_with("Target("))
+                && provider.starts_with("BuildArtifact(")
+        }
+        "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount" => {
+            (scope == "Package" || scope.starts_with("Target(")) && provider == "CompilerFacts"
+        }
         "CompileTime" => scope.starts_with("Target(") && provider_kind(provider) == "CompilerProbe",
         "ServiceReadiness" => match (named_key(scope), named_key(provider)) {
-            (Some(("Service", scope_name)), Some(("ServiceProbe", provider_name))) => scope_name == provider_name,
+            (Some(("Service", scope_name)), Some(("ServiceProbe", provider_name))) => {
+                scope_name == provider_name
+            }
             _ => false,
         },
         _ => true,
     };
-    if valid { Ok(()) } else { Err(invalid(name, format!("`{metric}` cannot use scope `{scope}` with provider `{provider}`"), "choose the metric's ratified scope/provider pair", span)) }
+    if valid {
+        Ok(())
+    } else {
+        Err(invalid(
+            name,
+            format!("`{metric}` cannot use scope `{scope}` with provider `{provider}`"),
+            "choose the metric's ratified scope/provider pair",
+            span,
+        ))
+    }
 }
 
 fn compile_workload_catalog(
@@ -627,7 +957,10 @@ fn compile_workload_catalog(
             _ => {
                 diags.push(invalid(
                     role,
-                    format!("compile workload `{}` has an invalid target", declaration.name),
+                    format!(
+                        "compile workload `{}` has an invalid target",
+                        declaration.name
+                    ),
                     "write a constant lowercase target name such as `target: \"cli\"`",
                     declaration.target.span(),
                 ));
@@ -639,7 +972,10 @@ fn compile_workload_catalog(
             _ => {
                 diags.push(invalid(
                     role,
-                    format!("compile workload `{}` has an invalid patch path", declaration.name),
+                    format!(
+                        "compile workload `{}` has an invalid patch path",
+                        declaration.name
+                    ),
                     "write a project-relative patch path without `..`, a root, or a backslash",
                     declaration.patch.span(),
                 ));
@@ -649,14 +985,36 @@ fn compile_workload_catalog(
         if !snake_case(&declaration.name) {
             diags.push(invalid(
                 role,
-                format!("compile workload name `{}` is not lowercase snake_case", declaration.name),
+                format!(
+                    "compile workload name `{}` is not lowercase snake_case",
+                    declaration.name
+                ),
                 "name workloads with lowercase words joined by underscores",
                 declaration.name_span,
             ));
             continue;
         }
-        if catalog.insert(declaration.name.clone(), CompileWorkloadFact { mode: "Edit".into(), name: Some(declaration.name.clone()), target, patch: Some(patch), }).is_some() {
-            diags.push(invalid(role, format!("compile workload `{}` is declared more than once", declaration.name), "keep one declaration for each workload name", declaration.name_span));
+        if catalog
+            .insert(
+                declaration.name.clone(),
+                CompileWorkloadFact {
+                    mode: "Edit".into(),
+                    name: Some(declaration.name.clone()),
+                    target,
+                    patch: Some(patch),
+                },
+            )
+            .is_some()
+        {
+            diags.push(invalid(
+                role,
+                format!(
+                    "compile workload `{}` is declared more than once",
+                    declaration.name
+                ),
+                "keep one declaration for each workload name",
+                declaration.name_span,
+            ));
         }
     }
     catalog
@@ -666,25 +1024,50 @@ fn safe_relative_path(value: &str) -> bool {
     !value.is_empty()
         && !value.starts_with('/')
         && !value.contains('\\')
-        && value.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 fn snake_or_kebab(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-')
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+        })
 }
 
-fn provider_kind(provider: &str) -> &str { provider.split_once('(').map(|(kind, _)| kind).unwrap_or(provider) }
+fn provider_kind(provider: &str) -> &str {
+    provider
+        .split_once('(')
+        .map(|(kind, _)| kind)
+        .unwrap_or(provider)
+}
 
 fn provider_identity(provider: &str) -> Option<&str> {
-    provider.split_once('(').and_then(|(_, rest)| rest.strip_suffix(')'))
+    provider
+        .split_once('(')
+        .and_then(|(_, rest)| rest.strip_suffix(')'))
 }
 
 fn parse_applicability(name: &str, expr: &Expr) -> Result<BudgetApplicability, Diagnostic> {
-    let Expr::StructLit { type_name, fields, .. } = expr else {
-        return Err(invalid(name, "`applies` must be a typed `BudgetApplies` value", "write `applies: BudgetApplies.{ targets: ..., profiles: ... }`", expr.span()));
+    let Expr::StructLit {
+        type_name, fields, ..
+    } = expr
+    else {
+        return Err(invalid(
+            name,
+            "`applies` must be a typed `BudgetApplies` value",
+            "write `applies: BudgetApplies.{ targets: ..., profiles: ... }`",
+            expr.span(),
+        ));
     };
     if type_name != "BudgetApplies" {
-        return Err(invalid(name, "`applies` has type `BudgetApplies`", "write `BudgetApplies.{ targets: ..., profiles: ... }`", expr.span()));
+        return Err(invalid(
+            name,
+            "`applies` has type `BudgetApplies`",
+            "write `BudgetApplies.{ targets: ..., profiles: ... }`",
+            expr.span(),
+        ));
     }
     let mut targets = None;
     let mut profiles = None;
@@ -692,10 +1075,22 @@ fn parse_applicability(name: &str, expr: &Expr) -> Result<BudgetApplicability, D
         let slot = match field.as_str() {
             "targets" => &mut targets,
             "profiles" => &mut profiles,
-            _ => return Err(invalid(name, format!("`{field}` is not a BudgetApplies field"), "use only `targets` and `profiles`", value.span())),
+            _ => {
+                return Err(invalid(
+                    name,
+                    format!("`{field}` is not a BudgetApplies field"),
+                    "use only `targets` and `profiles`",
+                    value.span(),
+                ))
+            }
         };
         if slot.replace(parse_axis(name, field, value)?).is_some() {
-            return Err(invalid(name, format!("`{field}` is written more than once"), "keep one applicability value for this axis", value.span()));
+            return Err(invalid(
+                name,
+                format!("`{field}` is written more than once"),
+                "keep one applicability value for this axis",
+                value.span(),
+            ));
         }
     }
     Ok(BudgetApplicability {
@@ -706,15 +1101,37 @@ fn parse_applicability(name: &str, expr: &Expr) -> Result<BudgetApplicability, D
 
 fn parse_axis(name: &str, axis: &str, expr: &Expr) -> Result<BudgetAxis, Diagnostic> {
     let Expr::EnumLit { variant, args, .. } = expr else {
-        return Err(invalid(name, format!("applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`"), "use one closed applicability variant", expr.span()));
+        return Err(invalid(
+            name,
+            format!("applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`"),
+            "use one closed applicability variant",
+            expr.span(),
+        ));
     };
     match (variant.as_str(), args.as_slice()) {
         ("Current", []) => Ok(BudgetAxis::Current),
         ("All", []) => Ok(BudgetAxis::All),
         ("Only", [arg]) => {
-            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
-            let Expr::ListLit(values, _) = value else { return Err(invalid(name, format!("applicability `{axis}` Only requires a list"), "write `.Only([selector, ...])`", value.span())); };
-            if values.is_empty() { return Err(invalid(name, format!("applicability `{axis}` Only list cannot be empty"), "add at least one selector", value.span())); }
+            let value = match arg {
+                EnumLitArg::Positional(value) => value,
+                EnumLitArg::Named { expr, .. } => expr,
+            };
+            let Expr::ListLit(values, _) = value else {
+                return Err(invalid(
+                    name,
+                    format!("applicability `{axis}` Only requires a list"),
+                    "write `.Only([selector, ...])`",
+                    value.span(),
+                ));
+            };
+            if values.is_empty() {
+                return Err(invalid(
+                    name,
+                    format!("applicability `{axis}` Only list cannot be empty"),
+                    "add at least one selector",
+                    value.span(),
+                ));
+            }
             let mut selectors = std::collections::BTreeSet::new();
             for selector in values {
                 let key = if axis == "targets" {
@@ -726,80 +1143,177 @@ fn parse_axis(name: &str, axis: &str, expr: &Expr) -> Result<BudgetAxis, Diagnos
             }
             Ok(BudgetAxis::Only(selectors))
         }
-        _ => Err(invalid(name, format!("applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`"), "use one closed applicability variant", expr.span())),
+        _ => Err(invalid(
+            name,
+            format!("applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`"),
+            "use one closed applicability variant",
+            expr.span(),
+        )),
     }
 }
 
 fn target_selector(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
     let Expr::EnumLit { variant, args, .. } = expr else {
-        return Err(invalid(name, "target applicability contains a non-target selector", "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`", expr.span()));
+        return Err(invalid(
+            name,
+            "target applicability contains a non-target selector",
+            "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`",
+            expr.span(),
+        ));
     };
     match (variant.as_str(), args.as_slice()) {
         ("Class", [arg]) => {
-            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
-            let Some(class) = enum_variant(value) else {
-                return Err(invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", value.span()));
+            let value = match arg {
+                EnumLitArg::Positional(value) => value,
+                EnumLitArg::Named { expr, .. } => expr,
             };
-            if !crate::Syntax::PERF_BUDGET_TARGET_CLASSES.contains(&class.as_str()) || !enum_args(value).is_empty() {
-                return Err(invalid(name, format!("`.{class}` is not a target class"), "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", value.span()));
+            let Some(class) = enum_variant(value) else {
+                return Err(invalid(
+                    name,
+                    "target class must be one typed class",
+                    "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`",
+                    value.span(),
+                ));
+            };
+            if !crate::Syntax::PERF_BUDGET_TARGET_CLASSES.contains(&class.as_str())
+                || !enum_args(value).is_empty()
+            {
+                return Err(invalid(
+                    name,
+                    format!("`.{class}` is not a target class"),
+                    "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`",
+                    value.span(),
+                ));
             }
             Ok(format!("Class({class})"))
         }
         ("Triple", [arg]) => {
-            let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+            let value = match arg {
+                EnumLitArg::Positional(value) => value,
+                EnumLitArg::Named { expr, .. } => expr,
+            };
             let Some(triple) = string_value(value) else {
-                return Err(invalid(name, "target triple selector requires constant quoted text", "write `.Triple(\"x86_64-unknown-linux-gnu\")`", value.span()));
+                return Err(invalid(
+                    name,
+                    "target triple selector requires constant quoted text",
+                    "write `.Triple(\"x86_64-unknown-linux-gnu\")`",
+                    value.span(),
+                ));
             };
             if !canonical_triple(&triple) {
-                return Err(invalid(name, format!("`{triple}` is not a canonical target triple"), "use the canonical lowercase target triple", value.span()));
+                return Err(invalid(
+                    name,
+                    format!("`{triple}` is not a canonical target triple"),
+                    "use the canonical lowercase target triple",
+                    value.span(),
+                ));
             }
             Ok(format!("Triple({triple})"))
         }
-        _ => Err(invalid(name, "target applicability contains a non-target selector", "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`", expr.span())),
+        _ => Err(invalid(
+            name,
+            "target applicability contains a non-target selector",
+            "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`",
+            expr.span(),
+        )),
     }
 }
 
 fn profile_selector(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
     let Expr::EnumLit { variant, args, .. } = expr else {
-        return Err(invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr.span()));
+        return Err(invalid(
+            name,
+            "profile applicability contains a non-profile selector",
+            "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`",
+            expr.span(),
+        ));
     };
-    if matches!(variant.as_str(), "Dev" | "Release" | "Small" | "Test" | "Bench") && args.is_empty() {
+    if matches!(
+        variant.as_str(),
+        "Dev" | "Release" | "Small" | "Test" | "Bench"
+    ) && args.is_empty()
+    {
         return Ok(variant.clone());
     }
     if variant == "Named" && args.len() == 1 {
-        let value = match &args[0] { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+        let value = match &args[0] {
+            EnumLitArg::Positional(value) => value,
+            EnumLitArg::Named { expr, .. } => expr,
+        };
         let Some(profile) = string_value(value) else {
-            return Err(invalid(name, "named profile selector requires constant quoted text", "write `.Named(\"lowercase_snake_case\")`", value.span()));
+            return Err(invalid(
+                name,
+                "named profile selector requires constant quoted text",
+                "write `.Named(\"lowercase_snake_case\")`",
+                value.span(),
+            ));
         };
         let built_in = ["dev", "release", "small", "test", "bench"];
-        if !snake_case(&profile) || built_in.iter().any(|item| profile.eq_ignore_ascii_case(item)) {
-            return Err(invalid(name, format!("`{profile}` is not a legal named profile"), "use a declared lowercase_snake_case profile distinct from built-ins", value.span()));
+        if !snake_case(&profile)
+            || built_in
+                .iter()
+                .any(|item| profile.eq_ignore_ascii_case(item))
+        {
+            return Err(invalid(
+                name,
+                format!("`{profile}` is not a legal named profile"),
+                "use a declared lowercase_snake_case profile distinct from built-ins",
+                value.span(),
+            ));
         }
         return Ok(format!("Named({profile})"));
     }
-    Err(invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr.span()))
+    Err(invalid(
+        name,
+        "profile applicability contains a non-profile selector",
+        "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`",
+        expr.span(),
+    ))
 }
 
 fn canonical_triple(value: &str) -> bool {
     value.split('-').count() >= 3
         && value.split('-').all(|part| !part.is_empty())
-        && value.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-')
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+        })
 }
 
-fn required<'a>(map: &'a BTreeMap<&str, (&'a Expr, Span)>, field: &str, span: Span) -> Result<(&'a Expr, Span), Diagnostic> {
-    map.get(field).copied().ok_or_else(|| invalid("entry", format!("every Budget requires `{field}`"), format!("add `{field}: ...`"), span))
+fn required<'a>(
+    map: &'a BTreeMap<&str, (&'a Expr, Span)>,
+    field: &str,
+    span: Span,
+) -> Result<(&'a Expr, Span), Diagnostic> {
+    map.get(field).copied().ok_or_else(|| {
+        invalid(
+            "entry",
+            format!("every Budget requires `{field}`"),
+            format!("add `{field}: ...`"),
+            span,
+        )
+    })
 }
 
 fn enum_variant(expr: &Expr) -> Option<String> {
-    match expr { Expr::EnumLit { variant, .. } => Some(variant.clone()), _ => None }
+    match expr {
+        Expr::EnumLit { variant, .. } => Some(variant.clone()),
+        _ => None,
+    }
 }
 
 fn enum_key(expr: &Expr) -> Option<String> {
-    let Expr::EnumLit { variant, args, .. } = expr else { return None };
-    if args.is_empty() { return Some(variant.clone()); }
+    let Expr::EnumLit { variant, args, .. } = expr else {
+        return None;
+    };
+    if args.is_empty() {
+        return Some(variant.clone());
+    }
     let mut rendered = Vec::new();
     for arg in args {
-        let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
+        let value = match arg {
+            EnumLitArg::Positional(value) => value,
+            EnumLitArg::Named { expr, .. } => expr,
+        };
         rendered.push(match value {
             Expr::Str(_, _) => string_value(value)?,
             Expr::EnumLit { .. } => enum_key(value)?,
@@ -809,77 +1323,322 @@ fn enum_key(expr: &Expr) -> Option<String> {
     Some(format!("{}({})", variant, rendered.join(",")))
 }
 
-fn normalize_limit(name: &str, metric: &str, limit: &str, expr: &Expr) -> Result<BudgetLimitFact, Diagnostic> {
-    let Expr::EnumLit { args, .. } = expr else { unreachable!("limit variant checked by caller") };
+fn normalize_limit(
+    name: &str,
+    metric: &str,
+    limit: &str,
+    expr: &Expr,
+) -> Result<BudgetLimitFact, Diagnostic> {
+    let Expr::EnumLit { args, .. } = expr else {
+        unreachable!("limit variant checked by caller")
+    };
     let [EnumLitArg::Positional(value)] = args.as_slice() else {
-        return Err(invalid(name, format!("`.{limit}` requires exactly one positional value"), format!("write `.{limit}(value)`"), expr.span()));
+        return Err(invalid(
+            name,
+            format!("`.{limit}` requires exactly one positional value"),
+            format!("write `.{limit}(value)`"),
+            expr.span(),
+        ));
     };
     if matches!(limit, "RegressionAtMost" | "ImprovementAtLeast") {
-        let (quantity, raw) = normalize_percent(value).ok_or_else(|| invalid(name, "relative limits use the `pct` unit with at most two decimal places", "write a percent such as `3pct` or `0.25pct`", value.span()))?;
-        return Ok(BudgetLimitFact { kind: limit.into(), quantity: BudgetQuantity::PercentBasisPoints(quantity), raw });
+        let (quantity, raw) = normalize_percent(value).ok_or_else(|| {
+            invalid(
+                name,
+                "relative limits use the `pct` unit with at most two decimal places",
+                "write a percent such as `3pct` or `0.25pct`",
+                value.span(),
+            )
+        })?;
+        return Ok(BudgetLimitFact {
+            kind: limit.into(),
+            quantity: BudgetQuantity::PercentBasisPoints(quantity),
+            raw,
+        });
     }
     if metric == "Throughput" {
         let (quantity, raw) = normalize_rate(name, value)?;
-        return Ok(BudgetLimitFact { kind: limit.into(), quantity, raw });
+        return Ok(BudgetLimitFact {
+            kind: limit.into(),
+            quantity,
+            raw,
+        });
     }
-    let allowed = if matches!(metric, "BinarySize" | "ArtifactSize" | "AllocationBytes" | "MemoryHighWater" | "SceneAssetBytes") { &["B", "KiB", "MiB", "GiB"][..] } else if matches!(metric, "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness" | "CompileTime") { &["ns", "us", "ms", "s"][..] } else { &[][..] };
+    let allowed = if matches!(
+        metric,
+        "BinarySize" | "ArtifactSize" | "AllocationBytes" | "MemoryHighWater" | "SceneAssetBytes"
+    ) {
+        &["B", "KiB", "MiB", "GiB"][..]
+    } else if matches!(
+        metric,
+        "StartupTime" | "FrameTime" | "Latency" | "BenchTime" | "ServiceReadiness" | "CompileTime"
+    ) {
+        &["ns", "us", "ms", "s"][..]
+    } else {
+        &[][..]
+    };
     if allowed.is_empty() {
-        let Expr::Int(n, _, _, _) = value else { return Err(invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span())) };
-        let count = u128::try_from(*n).map_err(|_| invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", value.span()))?;
-        return Ok(BudgetLimitFact { kind: limit.into(), quantity: BudgetQuantity::Count(count), raw: BudgetRawQuantity::Scalar { digits: n.to_string(), suffix: None } });
+        let Expr::Int(n, _, _, _) = value else {
+            return Err(invalid(
+                name,
+                "this metric uses a nonnegative Count value",
+                "write a nonnegative integer",
+                value.span(),
+            ));
+        };
+        let count = u128::try_from(*n).map_err(|_| {
+            invalid(
+                name,
+                "this metric uses a nonnegative Count value",
+                "write a nonnegative integer",
+                value.span(),
+            )
+        })?;
+        return Ok(BudgetLimitFact {
+            kind: limit.into(),
+            quantity: BudgetQuantity::Count(count),
+            raw: BudgetRawQuantity::Scalar {
+                digits: n.to_string(),
+                suffix: None,
+            },
+        });
     }
-    let Expr::UnitLit { raw, suffix, .. } = value else { return Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())) };
-    if !allowed.contains(&suffix.as_str()) { return Err(invalid(name, format!("`{metric}` requires one of these units: {}", allowed.join(", ")), format!("write the limit with a {} suffix", allowed[0]), value.span())); }
-    let multiplier = crate::Syntax::perf_budget_unit_scale(suffix).expect("allowed normalized unit");
-    let base = raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).ok_or_else(|| invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", value.span()))?;
-    let quantity = if matches!(suffix.as_str(), "B" | "KiB" | "MiB" | "GiB") { BudgetQuantity::Bytes(base) } else { BudgetQuantity::DurationNs(base) };
-    Ok(BudgetLimitFact { kind: limit.into(), quantity, raw: BudgetRawQuantity::Scalar { digits: raw.clone(), suffix: Some(suffix.clone()) } })
+    let Expr::UnitLit { raw, suffix, .. } = value else {
+        return Err(invalid(
+            name,
+            format!(
+                "`{metric}` requires one of these units: {}",
+                allowed.join(", ")
+            ),
+            format!("write the limit with a {} suffix", allowed[0]),
+            value.span(),
+        ));
+    };
+    if !allowed.contains(&suffix.as_str()) {
+        return Err(invalid(
+            name,
+            format!(
+                "`{metric}` requires one of these units: {}",
+                allowed.join(", ")
+            ),
+            format!("write the limit with a {} suffix", allowed[0]),
+            value.span(),
+        ));
+    }
+    let multiplier =
+        crate::Syntax::perf_budget_unit_scale(suffix).expect("allowed normalized unit");
+    let base = raw
+        .parse::<u128>()
+        .ok()
+        .and_then(|n| n.checked_mul(multiplier))
+        .ok_or_else(|| {
+            invalid(
+                name,
+                "limit value is not a nonnegative integer in range",
+                "write a nonnegative whole value that fits the normalized unit",
+                value.span(),
+            )
+        })?;
+    let quantity = if matches!(suffix.as_str(), "B" | "KiB" | "MiB" | "GiB") {
+        BudgetQuantity::Bytes(base)
+    } else {
+        BudgetQuantity::DurationNs(base)
+    };
+    Ok(BudgetLimitFact {
+        kind: limit.into(),
+        quantity,
+        raw: BudgetRawQuantity::Scalar {
+            digits: raw.clone(),
+            suffix: Some(suffix.clone()),
+        },
+    })
 }
 
 fn normalize_percent(value: &Expr) -> Option<(u128, BudgetRawQuantity)> {
-    let Expr::UnitLit { raw, suffix, .. } = value else { return None };
-    if suffix != "pct" { return None; }
+    let Expr::UnitLit { raw, suffix, .. } = value else {
+        return None;
+    };
+    if suffix != "pct" {
+        return None;
+    }
     let mut parts = raw.split('.');
     let whole = parts.next()?;
     let fraction = parts.next().unwrap_or("");
-    if parts.next().is_some() || fraction.len() > 2 || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) || !fraction.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    if parts.next().is_some()
+        || fraction.len() > 2
+        || whole.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
     let whole = whole.parse::<u128>().ok()?.checked_mul(100)?;
-    let fraction = match fraction.len() { 0 => 0, 1 => fraction.parse::<u128>().ok()?.checked_mul(10)?, _ => fraction.parse::<u128>().ok()? };
-    Some((whole.checked_add(fraction)?, BudgetRawQuantity::Scalar { digits: raw.clone(), suffix: Some(suffix.clone()) }))
+    let fraction = match fraction.len() {
+        0 => 0,
+        1 => fraction.parse::<u128>().ok()?.checked_mul(10)?,
+        _ => fraction.parse::<u128>().ok()?,
+    };
+    Some((
+        whole.checked_add(fraction)?,
+        BudgetRawQuantity::Scalar {
+            digits: raw.clone(),
+            suffix: Some(suffix.clone()),
+        },
+    ))
 }
 
-fn normalize_rate(name: &str, value: &Expr) -> Result<(BudgetQuantity, BudgetRawQuantity), Diagnostic> {
-    let Expr::StructLit { type_name, fields, .. } = value else { return Err(invalid(name, "Throughput limits use `Rate.{ count: Int, per: Duration }`", "write a rate such as `Rate.{ count: 100, per: 1s }`", value.span())) };
-    if type_name != "Rate" { return Err(invalid(name, "Throughput limits use the `Rate` value family", "write `Rate.{ count: 100, per: 1s }`", value.span())); }
+fn normalize_rate(
+    name: &str,
+    value: &Expr,
+) -> Result<(BudgetQuantity, BudgetRawQuantity), Diagnostic> {
+    let Expr::StructLit {
+        type_name, fields, ..
+    } = value
+    else {
+        return Err(invalid(
+            name,
+            "Throughput limits use `Rate.{ count: Int, per: Duration }`",
+            "write a rate such as `Rate.{ count: 100, per: 1s }`",
+            value.span(),
+        ));
+    };
+    if type_name != "Rate" {
+        return Err(invalid(
+            name,
+            "Throughput limits use the `Rate` value family",
+            "write `Rate.{ count: 100, per: 1s }`",
+            value.span(),
+        ));
+    }
     let mut count = None;
     let mut per = None;
     for (field, _, expr) in fields {
-        let slot = match field.as_str() { "count" => &mut count, "per" => &mut per, _ => return Err(invalid(name, format!("`{field}` is not a Rate field"), "use exactly `count` and `per`", expr.span())) };
-        if slot.replace(expr).is_some() { return Err(invalid(name, format!("Rate `{field}` is written more than once"), "keep one value for each Rate field", expr.span())); }
+        let slot = match field.as_str() {
+            "count" => &mut count,
+            "per" => &mut per,
+            _ => {
+                return Err(invalid(
+                    name,
+                    format!("`{field}` is not a Rate field"),
+                    "use exactly `count` and `per`",
+                    expr.span(),
+                ))
+            }
+        };
+        if slot.replace(expr).is_some() {
+            return Err(invalid(
+                name,
+                format!("Rate `{field}` is written more than once"),
+                "keep one value for each Rate field",
+                expr.span(),
+            ));
+        }
     }
-    let count_expr = count.ok_or_else(|| invalid(name, "Rate requires `count`", "add `count: <nonnegative integer>`", value.span()))?;
-    let per_expr = per.ok_or_else(|| invalid(name, "Rate requires `per`", "add `per: <positive duration>`", value.span()))?;
-    let Expr::Int(count, _, _, Some(count_raw)) = count_expr else { return Err(invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span())) };
-    let count = u128::try_from(*count).map_err(|_| invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", count_expr.span()))?;
-    let Expr::UnitLit { raw: per_raw, suffix, .. } = per_expr else { return Err(invalid(name, "Rate per must be a positive Duration", "write `per: 1s`", per_expr.span())) };
-    let multiplier = crate::Syntax::perf_budget_unit_scale(suffix).filter(|_| matches!(suffix.as_str(), "ns" | "us" | "ms" | "s")).ok_or_else(|| invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", per_expr.span()))?;
-    let per_ns = per_raw.parse::<u128>().ok().and_then(|n| n.checked_mul(multiplier)).filter(|n| *n > 0).ok_or_else(|| invalid(name, "Rate per must normalize to a positive Duration", "write a positive whole duration", per_expr.span()))?;
+    let count_expr = count.ok_or_else(|| {
+        invalid(
+            name,
+            "Rate requires `count`",
+            "add `count: <nonnegative integer>`",
+            value.span(),
+        )
+    })?;
+    let per_expr = per.ok_or_else(|| {
+        invalid(
+            name,
+            "Rate requires `per`",
+            "add `per: <positive duration>`",
+            value.span(),
+        )
+    })?;
+    let Expr::Int(count, _, _, Some(count_raw)) = count_expr else {
+        return Err(invalid(
+            name,
+            "Rate count must be a nonnegative integer",
+            "write `count: 100`",
+            count_expr.span(),
+        ));
+    };
+    let count = u128::try_from(*count).map_err(|_| {
+        invalid(
+            name,
+            "Rate count must be a nonnegative integer",
+            "write `count: 100`",
+            count_expr.span(),
+        )
+    })?;
+    let Expr::UnitLit {
+        raw: per_raw,
+        suffix,
+        ..
+    } = per_expr
+    else {
+        return Err(invalid(
+            name,
+            "Rate per must be a positive Duration",
+            "write `per: 1s`",
+            per_expr.span(),
+        ));
+    };
+    let multiplier = crate::Syntax::perf_budget_unit_scale(suffix)
+        .filter(|_| matches!(suffix.as_str(), "ns" | "us" | "ms" | "s"))
+        .ok_or_else(|| {
+            invalid(
+                name,
+                "Rate per must use ns, us, ms, or s",
+                "write `per: 1s`",
+                per_expr.span(),
+            )
+        })?;
+    let per_ns = per_raw
+        .parse::<u128>()
+        .ok()
+        .and_then(|n| n.checked_mul(multiplier))
+        .filter(|n| *n > 0)
+        .ok_or_else(|| {
+            invalid(
+                name,
+                "Rate per must normalize to a positive Duration",
+                "write a positive whole duration",
+                per_expr.span(),
+            )
+        })?;
     let divisor = gcd(count, per_ns);
-    Ok((BudgetQuantity::Rate { numerator: count / divisor, denominator_ns: per_ns / divisor }, BudgetRawQuantity::Rate { count_digits: count_raw.clone(), per_digits: per_raw.clone(), per_suffix: suffix.clone() }))
+    Ok((
+        BudgetQuantity::Rate {
+            numerator: count / divisor,
+            denominator_ns: per_ns / divisor,
+        },
+        BudgetRawQuantity::Rate {
+            count_digits: count_raw.clone(),
+            per_digits: per_raw.clone(),
+            per_suffix: suffix.clone(),
+        },
+    ))
 }
 
-
 fn gcd(mut left: u128, mut right: u128) -> u128 {
-    while right != 0 { let remainder = left % right; left = right; right = remainder; }
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
     left.max(1)
 }
 
 fn string_value(expr: &Expr) -> Option<String> {
-    let Expr::Str(parts, _) = expr else { return None };
-    let [crate::AST::StrPart::Lit(value)] = parts.as_slice() else { return None };
+    let Expr::Str(parts, _) = expr else {
+        return None;
+    };
+    let [crate::AST::StrPart::Lit(value)] = parts.as_slice() else {
+        return None;
+    };
     Some(value.clone())
 }
 
 fn snake_case(value: &str) -> bool {
-    !value.is_empty() && value.bytes().enumerate().all(|(i, b)| b.is_ascii_lowercase() || b.is_ascii_digit() && i > 0 || b == b'_' && i > 0) && !value.ends_with('_') && !value.contains("__")
+    !value.is_empty()
+        && value.bytes().enumerate().all(|(i, b)| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() && i > 0 || b == b'_' && i > 0
+        })
+        && !value.ends_with('_')
+        && !value.contains("__")
 }

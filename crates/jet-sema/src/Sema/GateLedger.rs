@@ -4,9 +4,9 @@
 //! their already-parsed facts, keeps provenance, and exposes stable projections
 //! to inspect commands. No entry is carried into TIR or generated Rust.
 
-use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart};
 use crate::Diagnostics::Span;
 use crate::Policy::GateSet;
+use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart};
 pub use jet_foundation::Authority::{GateDiagnostic, GateEntry, GateKind, GateOperation};
 
 #[derive(Debug, Clone, Default)]
@@ -24,7 +24,10 @@ impl GateLedger {
         for gate in inspection.gates {
             let discharged = gate.operations.iter().all(|operation| operation.discharged);
             let mut provenance = gate.provenance;
-            provenance.push(format!("{}:{}..{}", gate.source, gate.span.start, gate.span.end));
+            provenance.push(format!(
+                "{}:{}..{}",
+                gate.source, gate.span.start, gate.span.end
+            ));
             ledger.push(GateEntry {
                 kind: GateKind::Unsafe,
                 domain: "security".to_string(),
@@ -124,12 +127,13 @@ impl GateLedger {
 /// recorded in the same ledger as every other written move away from safety.
 /// The effective snapshot already owns the complete provenance chain; this
 /// adapter only projects the forced writers into the ledger's build kind.
-fn append_fact_gates(
-    ledger: &mut GateLedger,
-    facts: &jet_foundation::Facts::BuildFactSnapshot,
-) {
+fn append_fact_gates(ledger: &mut GateLedger, facts: &jet_foundation::Facts::BuildFactSnapshot) {
     for fact in facts.contributions.values() {
-        for contribution in fact.provenance.iter().filter(|contribution| contribution.force) {
+        for contribution in fact
+            .provenance
+            .iter()
+            .filter(|contribution| contribution.force)
+        {
             ledger.push(GateEntry {
                 kind: GateKind::BuildFlag,
                 domain: "build".to_string(),
@@ -260,11 +264,7 @@ fn visit_items(source: &str, items: &[Item], ledger: &mut GateLedger) {
 /// item templates until expansion. Walk both branches here so gate inspection
 /// sees expressions in generated items and compile-time control flow without
 /// inventing a source-string parser path.
-fn visit_template_body(
-    source: &str,
-    body: &[crate::AST::DeriveBodyItem],
-    ledger: &mut GateLedger,
-) {
+fn visit_template_body(source: &str, body: &[crate::AST::DeriveBodyItem], ledger: &mut GateLedger) {
     for body_item in body {
         match body_item {
             crate::AST::DeriveBodyItem::Stmt(statement) => {
@@ -273,7 +273,11 @@ fn visit_template_body(
             crate::AST::DeriveBodyItem::Item(item) => {
                 visit_items(source, std::slice::from_ref(item.as_ref()), ledger);
             }
-            crate::AST::DeriveBodyItem::Loop { source: expression, body, .. } => {
+            crate::AST::DeriveBodyItem::Loop {
+                source: expression,
+                body,
+                ..
+            } => {
                 visit_expression(source, expression, ledger);
                 visit_template_body(source, body, ledger);
             }
@@ -324,7 +328,9 @@ fn visit_function(source: &str, function: &Func, ledger: &mut GateLedger) {
                 "#Nondeterministic",
                 "determinism escape",
             ),
-            name if name == crate::Syntax::KW_IMPURE => (GateKind::Impure, "#Impure", "impure function"),
+            name if name == crate::Syntax::KW_IMPURE => {
+                (GateKind::Impure, "#Impure", "impure function")
+            }
             _ => continue,
         };
         ledger.push(source_entry(
@@ -361,9 +367,7 @@ fn visit_expression(source: &str, expression: &Expr, ledger: &mut GateLedger) {
 
 fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedger) {
     match expression {
-        Expr::Call(call)
-            if call.widen_approx || call.name == crate::Syntax::BUILTIN_APPROX =>
-        {
+        Expr::Call(call) if call.widen_approx || call.name == crate::Syntax::BUILTIN_APPROX => {
             ledger.push(source_entry(
                 GateKind::PrecisionDemotion,
                 "knowledge",
@@ -388,9 +392,7 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
                 crate::Syntax::BUILTIN_SATURATING => {
                     "overflow fact replaced by saturating arithmetic"
                 }
-                crate::Syntax::BUILTIN_CHECKED => {
-                    "overflow fact represented as an optional result"
-                }
+                crate::Syntax::BUILTIN_CHECKED => "overflow fact represented as an optional result",
                 _ => "overflow fact replaced by wrapping arithmetic",
             };
             ledger.push(source_entry(
@@ -436,7 +438,8 @@ fn visit_expression_value(source: &str, expression: &Expr, ledger: &mut GateLedg
                 source,
                 *method_span,
                 ".drop",
-                args.first().and_then(|argument| literal_text(Some(&argument.expr))),
+                args.first()
+                    .and_then(|argument| literal_text(Some(&argument.expr))),
                 "result duty explicitly discharged",
                 "discharged",
             ));
@@ -499,9 +502,9 @@ fn is_rounded_conversion(method: &str, args: &[crate::AST::CallArg]) -> bool {
     method.starts_with("from_")
         && method.ends_with("_rounded")
         && args.len() == 3
-        && args.iter().any(|arg| {
-            matches!(arg.label.as_ref(), Some((label, _)) if label == "digits")
-        })
+        && args
+            .iter()
+            .any(|arg| matches!(arg.label.as_ref(), Some((label, _)) if label == "digits"))
 }
 
 fn literal_text(expression: Option<&Expr>) -> Option<String> {
@@ -530,7 +533,11 @@ fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
                 "#Impure",
                 reason.clone(),
                 "ambient comptime effect gate",
-                if reason.is_some() { "recorded" } else { "missing" },
+                if reason.is_some() {
+                    "recorded"
+                } else {
+                    "missing"
+                },
             )),
             Stmt::Caps { caps, span, .. } => ledger.push(source_entry(
                 GateKind::DependencyGrant,
@@ -542,7 +549,10 @@ fn visit_statement_gates(source: &str, body: &[Stmt], ledger: &mut GateLedger) {
                 None,
                 &format!(
                     "abilities: {}",
-                    caps.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(",")
+                    caps.iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
                 ),
                 "recorded",
             )),
@@ -574,7 +584,17 @@ mod tests {
     use super::*;
 
     fn entry(kind: GateKind, source: &str, span: usize) -> GateEntry {
-        source_entry(kind, "test", "test", source, Span::new(span, span + 1), "x", None, "x", "recorded")
+        source_entry(
+            kind,
+            "test",
+            "test",
+            source,
+            Span::new(span, span + 1),
+            "x",
+            None,
+            "x",
+            "recorded",
+        )
     }
 
     #[test]

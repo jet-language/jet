@@ -11,13 +11,13 @@ use crate::Generics;
 use crate::Lexer::{describe, StrTokPart, TokKind, Token};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BinOp, BindName, BindPattern, Binding, Call, CallArg, CodeModule, ConstAttr,
-    CLICommandBinding, ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field, ForKind, Func,
-    GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
-    LambdaMeta, LambdaParam, Marker, MetaAttr, MetaField, ModuleAliasDef, ModuleArg, ModuleDecl,
-    Namespace, OrFallback, Param, Pattern, Program, Stmt, StrMatchPart, StrPart, StructDef,
-    SwitchArm, TagDef, TagMarker, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type,
-    TypeParam, TypedLitBody, UnOp, Variant, VariantField, VariantPayload,
+    AccessConvention, BinOp, BindName, BindPattern, Binding, CLICommandBinding, Call, CallArg,
+    CodeModule, ConstAttr, ConstDef, Contribution, ElseBranch, EnumDef, EnumLitArg, Expr, Field,
+    ForKind, Func, GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda,
+    LambdaBody, LambdaMeta, LambdaParam, Marker, MetaAttr, MetaField, ModuleAliasDef, ModuleArg,
+    ModuleDecl, Namespace, OrFallback, Param, Pattern, Program, Stmt, StrMatchPart, StrPart,
+    StructDef, SwitchArm, TagDef, TagMarker, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert,
+    Type, TypeParam, TypedLitBody, UnOp, Variant, VariantField, VariantPayload,
 };
 
 mod Expressions;
@@ -38,10 +38,7 @@ pub fn parse_config(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
 
 /// Parse a Jetpack config surface while retaining source text for config
 /// values whose spelling is intentionally not a general Jet expression.
-pub fn parse_config_with_source(
-    toks: &[Token],
-    source: &str,
-) -> Result<Program, Vec<Diagnostic>> {
+pub fn parse_config_with_source(toks: &[Token], source: &str) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, false, true, Some(source))
 }
 
@@ -104,11 +101,9 @@ fn parse_for_check_inner(
     prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
-    } else if p
-        .diags
-        .iter()
-        .all(|d| d.severity == crate::Diagnostics::Severity::Lint || is_teaching_parse_diag(&d.code))
-    {
+    } else if p.diags.iter().all(|d| {
+        d.severity == crate::Diagnostics::Severity::Lint || is_teaching_parse_diag(&d.code)
+    }) {
         Ok((prog, p.diags))
     } else {
         Err(p.diags)
@@ -162,8 +157,7 @@ fn parse_inner(
     if errors.clone().next().is_none()
         || (for_fmt
             && errors.all(|d| {
-                is_teaching_parse_diag(&d.code)
-                    || (d.code == "E0927" && d.what.contains("retired"))
+                is_teaching_parse_diag(&d.code) || (d.code == "E0927" && d.what.contains("retired"))
             }))
     {
         Ok(prog)
@@ -193,7 +187,6 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
         )),
     }
 }
-
 
 /// Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
 fn is_teaching_parse_diag(code: &str) -> bool {
@@ -248,7 +241,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E1115"
     )
 }
-
 
 /// Hard cap on recursive parser nesting (parentheses, unary chains,
 /// literals-with-expressions, generic types). Recursive descent here — and
@@ -351,9 +343,9 @@ impl<'a> Parser<'a> {
     }
 
     fn span_has_authored_line_break(&self, start: usize, end: usize) -> bool {
-        self.toks[start..end].iter().any(|token| {
-            matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end
-        })
+        self.toks[start..end]
+            .iter()
+            .any(|token| matches!(token.kind, TokKind::Semi) && token.span.start == token.span.end)
     }
 
     fn prefer_arm_table_lint(&mut self, span: Span) {
@@ -408,10 +400,7 @@ impl<'a> Parser<'a> {
         f: impl FnOnce(&mut Self) -> Result<T, Diagnostic>,
     ) -> Result<T, Diagnostic> {
         if self.depth >= MAX_SOURCE_NESTING {
-            return Err(Diagnostic::source_nesting_exceeded(
-                self.depth + 1,
-                span,
-            ));
+            return Err(Diagnostic::source_nesting_exceeded(self.depth + 1, span));
         }
         self.depth += 1;
         let result = f(self);
@@ -538,13 +527,13 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn at_unified_arrow_token(kind: &TokKind) -> bool {
-        matches!(kind, TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
+        matches!(
+            kind,
+            TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
+        )
     }
 
-    pub(super) fn expect_unified_arrow(
-        &mut self,
-        where_: &str,
-    ) -> Result<Token, Diagnostic> {
+    pub(super) fn expect_unified_arrow(&mut self, where_: &str) -> Result<Token, Diagnostic> {
         let token = self.peek().clone();
         if !Self::at_unified_arrow_token(&token.kind) {
             return Err(Diagnostic::error(
@@ -589,8 +578,14 @@ impl<'a> Parser<'a> {
             } => Err(Diagnostic::error(
                 "E0003",
                 format!("`{}` is reserved as the source-loop keyword", Syntax::KW_IN),
-                format!("the `{}` keyword marks the boundary between a loop binding and its source", Syntax::KW_IN),
-                format!("choose a different identifier name, or use `{}` in a source loop", Syntax::KW_IN),
+                format!(
+                    "the `{}` keyword marks the boundary between a loop binding and its source",
+                    Syntax::KW_IN
+                ),
+                format!(
+                    "choose a different identifier name, or use `{}` in a source loop",
+                    Syntax::KW_IN
+                ),
                 Some(span),
             )),
             Token {
@@ -812,11 +807,16 @@ mod s61_tests {
             source.replace("48 | 45 && ready", "ready && 48 | 45"),
         ] {
             let (tokens, lex_diags) = lex(&variant);
-            assert!(lex_diags.is_empty(), "variant lex diagnostics: {lex_diags:?}");
+            assert!(
+                lex_diags.is_empty(),
+                "variant lex diagnostics: {lex_diags:?}"
+            );
             let (_, diagnostics) = parse_for_check_with_source(&tokens, &variant)
                 .expect("Boolean operands should recover with E0386");
             assert!(
-                diagnostics.iter().any(|diagnostic| diagnostic.code == "E0386"),
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "E0386"),
                 "expected E0386 in variant: {diagnostics:?}"
             );
         }
@@ -959,9 +959,7 @@ fn build(b: BuildContext) {
     /// D-CONC-SPAWN1=D: `task work()` parses as a scoped spawn call.
     #[test]
     fn task_keyword_callable_body_parses_as_spawn() {
-        let p = program(
-            "fn run() {\n    task.group g {\n        h :: task work()\n    }\n}\n",
-        );
+        let p = program("fn run() {\n    task.group g {\n        h :: task work()\n    }\n}\n");
         let run = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
@@ -971,10 +969,13 @@ fn build(b: BuildContext) {
             Stmt::TaskGroup { body, .. } => Some(body),
             _ => None,
         });
-        let bind = task_group.expect("task group").iter().find_map(|s| match s {
-            Stmt::Val(b) => Some(b),
-            _ => None,
-        });
+        let bind = task_group
+            .expect("task group")
+            .iter()
+            .find_map(|s| match s {
+                Stmt::Val(b) => Some(b),
+                _ => None,
+            });
         match &bind.expect("binding").init {
             Expr::MethodCall { method, args, .. } => {
                 assert_eq!(method, Syntax::INTERNAL_TASK_SPAWN_METHOD);
@@ -1077,7 +1078,7 @@ fn build(b: BuildContext) {
     /// captured as foreign source and the statement body is empty.
     #[test]
     fn ffi_c_inline_tier_parses() {
-    let src = "#FFI(c) fn add(a: Int, b: Int) Int -> {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
+        let src = "#FFI(c) fn add(a: Int, b: Int) Int -> {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -1129,13 +1130,19 @@ fn build(b: BuildContext) {
     fn grouped_ffi_keeps_unsafe_gate_and_raw_payload() {
         let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) Int -> {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
         let p = program(src);
-        let func = p.items.iter().find_map(|item| match item {
-            crate::AST::Item::Func(func) if func.name == "add" => Some(func),
-            _ => None,
-        }).expect("add function");
+        let func = p
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(func) if func.name == "add" => Some(func),
+                _ => None,
+            })
+            .expect("add function");
         assert_eq!(func.unsafe_reason.as_deref(), Some("scalar registers"));
         assert_eq!(
-            func.inline_foreign.as_ref().map(|inline| inline.source.as_str()),
+            func.inline_foreign
+                .as_ref()
+                .map(|inline| inline.source.as_str()),
             Some("add {a}, {b} ; -> return")
         );
     }
@@ -1144,10 +1151,14 @@ fn build(b: BuildContext) {
     fn grouped_function_rules_keep_meta_and_policy_semantics() {
         let src = "#[Policy(copies: .Explicit), Meta(category: \"api\", maturity: .Tested), Job]\nfn sync() {}\n";
         let p = program(src);
-        let func = p.items.iter().find_map(|item| match item {
-            crate::AST::Item::Func(func) if func.name == "sync" => Some(func),
-            _ => None,
-        }).expect("sync function");
+        let func = p
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(func) if func.name == "sync" => Some(func),
+                _ => None,
+            })
+            .expect("sync function");
         assert!(func.is_job);
         assert!(func.meta.is_some());
         assert_eq!(func.maturity, Some(crate::AST::MaturityTag::Tested));
@@ -1176,10 +1187,7 @@ fn build(b: BuildContext) {
             .expect("bound transition");
         assert_eq!(transition.from.as_deref(), Some("Open"));
         assert_eq!(transition.to, "Closed");
-        assert_eq!(
-            function.maturity,
-            Some(crate::AST::MaturityTag::Hardened)
-        );
+        assert_eq!(function.maturity, Some(crate::AST::MaturityTag::Hardened));
         assert!(
             !function.meta.as_ref().expect("meta").facts().tunable,
             "explicit false keeps the default"
@@ -1199,9 +1207,7 @@ fn build(b: BuildContext) {
             vec![Some("to"), Some("from")]
         );
 
-        let family = program(
-            "#UnitFamily(base: meter, family: Length) {\n    meter\n}\n",
-        );
+        let family = program("#UnitFamily(base: meter, family: Length) {\n    meter\n}\n");
         let family = family
             .items
             .iter()
@@ -1211,7 +1217,10 @@ fn build(b: BuildContext) {
             })
             .expect("unit family");
         assert_eq!(family.family, "Length");
-        assert_eq!(family.base.as_ref().map(|(name, _)| name.as_str()), Some("meter"));
+        assert_eq!(
+            family.base.as_ref().map(|(name, _)| name.as_str()),
+            Some("meter")
+        );
 
         let formatted = crate::Formatter::format_source(src).expect("format reordered labels");
         assert!(
@@ -1331,8 +1340,16 @@ fn build(b: BuildContext) {
             let (tokens, lex_diagnostics) = lex(src);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
             let diagnostics = parse(&tokens).expect_err("retired marker is teaching");
-            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == code), "{diagnostics:?}");
-            assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930" || diagnostic.code == "E0355"), "{diagnostics:?}");
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                "{diagnostics:?}"
+            );
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "E0930" || diagnostic.code == "E0355"),
+                "{diagnostics:?}"
+            );
         }
     }
 
@@ -1344,7 +1361,8 @@ fn build(b: BuildContext) {
         ] {
             let (tokens, lex_diagnostics) = lex(src);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-            let diagnostics = parse(&tokens).expect_err("ordinary functions reject C ABI selection");
+            let diagnostics =
+                parse(&tokens).expect_err("ordinary functions reject C ABI selection");
             assert!(
                 diagnostics.iter().any(|diagnostic| {
                     diagnostic.code == "E3212"
@@ -1373,8 +1391,7 @@ fn build(b: BuildContext) {
             Some("sysv64")
         );
 
-        let src =
-            "#Extern module c.demo {\n    #[ABI(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
+        let src = "#Extern module c.demo {\n    #[ABI(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
         let (tokens, lex_diagnostics) = lex(src);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         let diagnostics =
@@ -1391,10 +1408,7 @@ fn build(b: BuildContext) {
     fn doc_on_a_function_requires_task() {
         let task_src = "#[Doc(\"task text\"), Job] fn work() {}\n";
         let (task_tokens, task_lex_diagnostics) = lex(task_src);
-        assert!(
-            task_lex_diagnostics.is_empty(),
-            "{task_lex_diagnostics:?}"
-        );
+        assert!(task_lex_diagnostics.is_empty(), "{task_lex_diagnostics:?}");
         parse(&task_tokens).expect("#Doc may attach to a #Job function");
 
         let src = "#Doc(\"helper text\") fn helper() {}\n";
@@ -1531,7 +1545,10 @@ fn notify(ready: Bool) -[Net]> {
 "#;
 
         let once = format_source(src).expect("canonical arrow/control syntax formats");
-        assert!(once.contains("fn classify(score: Int) Grade -> if {"), "{once}");
+        assert!(
+            once.contains("fn classify(score: Int) Grade -> if {"),
+            "{once}"
+        );
         assert!(once.contains("score >= 90 -> .A"), "{once}");
         assert!(once.contains("fn notify(ready: Bool) -[Net]> {"), "{once}");
         assert!(once.contains("if ready -> send() else -> skip()"), "{once}");
@@ -1568,10 +1585,7 @@ fn notify(ready: Bool) -[Net]> {
             _ => None,
         });
         assert!(
-            matches!(
-                func.expect("double").body.last(),
-                Some(Stmt::Expr(_))
-            ),
+            matches!(func.expect("double").body.last(), Some(Stmt::Expr(_))),
             "parser must preserve the final expression; sema lowers it to the callable result"
         );
     }
@@ -1587,13 +1601,17 @@ fn notify(ready: Bool) -[Net]> {
             .items
             .iter()
             .find_map(|item| match item {
-                crate::AST::Item::Func(func) if func.name == "run" => func.body.iter().find_map(|stmt| {
-                    let Stmt::Val(binding) = stmt else { return None };
-                    match &binding.init {
-                        Expr::Lambda(lambda) => Some(lambda),
-                        _ => None,
-                    }
-                }),
+                crate::AST::Item::Func(func) if func.name == "run" => {
+                    func.body.iter().find_map(|stmt| {
+                        let Stmt::Val(binding) = stmt else {
+                            return None;
+                        };
+                        match &binding.init {
+                            Expr::Lambda(lambda) => Some(lambda),
+                            _ => None,
+                        }
+                    })
+                }
                 _ => None,
             })
             .expect("stored lambda");
@@ -1603,10 +1621,10 @@ fn notify(ready: Bool) -[Net]> {
             Some(crate::AST::Type::Named(name)) if name == "MyError"
         ));
         assert_eq!(
-            lambda
-                .effects
-                .as_ref()
-                .map(|effects| effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>()),
+            lambda.effects.as_ref().map(|effects| effects
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()),
             Some(vec!["IO"])
         );
     }
@@ -1626,7 +1644,10 @@ fn notify(ready: Bool) -[Net]> {
             ("fn old() => 1\n", "E0070"),
             ("fn old() Int :: 1\n", "E0065"),
             ("fn run() { if ready send() }\n", "E0372"),
-            ("fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n", "E0077"),
+            (
+                "fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n",
+                "E0077",
+            ),
             (
                 "protocol Old { client -> server: Hello(id: Int) }\n",
                 "E0154",
@@ -1676,10 +1697,7 @@ fn notify(ready: Bool) -[Net]> {
             .find(|diagnostic| diagnostic.code == "E-CALL-VALUE")
             .expect("E-CALL-VALUE");
         assert_eq!(
-            diagnostic
-                .edit
-                .as_ref()
-                .map(|edit| edit.new_text.as_str()),
+            diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
             Some(".call")
         );
     }
@@ -1687,10 +1705,10 @@ fn notify(ready: Bool) -[Net]> {
     #[test]
     fn retired_s14_teaching_is_paused() {
         const RETIRED_CODES: &[&str] = &[
-            "E0008", "E0012", "E0013", "E0014", "E0015", "E0016", "E0017", "E0018",
-            "E0021", "E0022", "E0023", "E0024", "E0025", "E0026", "E0027", "E0028", "E0030",
-            "E0032", "E0033", "E0036", "E0044", "E0045", "E0050", "E0051", "E0052", "E0053",
-            "E0054", "E0056", "E0057", "E0984",
+            "E0008", "E0012", "E0013", "E0014", "E0015", "E0016", "E0017", "E0018", "E0021",
+            "E0022", "E0023", "E0024", "E0025", "E0026", "E0027", "E0028", "E0030", "E0032",
+            "E0033", "E0036", "E0044", "E0045", "E0050", "E0051", "E0052", "E0053", "E0054",
+            "E0056", "E0057", "E0984",
         ];
         let cases = [
             "def run() { return }",
@@ -1739,8 +1757,14 @@ fn notify(ready: Bool) -[Net]> {
                 Err(diags) => diags,
             };
             let codes: Vec<&str> = diags.iter().map(|d| d.code.as_str()).collect();
-            assert!(codes.contains(&"E0003"), "bar shape must use ordinary E0003: {src:?}: {codes:?}");
-            assert!(!codes.contains(&"E0033"), "reserved E0033 leaked for {src:?}: {codes:?}");
+            assert!(
+                codes.contains(&"E0003"),
+                "bar shape must use ordinary E0003: {src:?}: {codes:?}"
+            );
+            assert!(
+                !codes.contains(&"E0033"),
+                "reserved E0033 leaked for {src:?}: {codes:?}"
+            );
         }
 
         for word in [Syntax::FOREIGN_WHILE, Syntax::FOREIGN_FOR] {
@@ -1803,11 +1827,18 @@ fn notify(ready: Bool) -[Net]> {
              fn fetch(value: Int? IOError!) Box<Int? IOError!> -> value\n\
              fn run() {}\n",
         );
-        assert!(parsed.items.iter().any(|item| matches!(item, crate::AST::Item::Struct(_))));
-        let holder = parsed.items.iter().find_map(|item| match item {
-            crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
-            _ => None,
-        }).expect("Holder");
+        assert!(parsed
+            .items
+            .iter()
+            .any(|item| matches!(item, crate::AST::Item::Struct(_))));
+        let holder = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+                _ => None,
+            })
+            .expect("Holder");
         assert!(matches!(
             &holder.fields[0].ty,
             crate::AST::Type::Result { ok, err }
@@ -1829,10 +1860,14 @@ fn notify(ready: Bool) -[Net]> {
                         if matches!(ok.as_ref(), crate::AST::Type::Int)
                             && matches!(err.as_ref(), crate::AST::Type::Union(members) if members.len() == 2))
         ));
-        let alias = parsed.items.iter().find_map(|item| match item {
-            crate::AST::Item::TypeAlias(alias) if alias.name == "Box" => Some(alias),
-            _ => None,
-        }).expect("Box alias");
+        let alias = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::TypeAlias(alias) if alias.name == "Box" => Some(alias),
+                _ => None,
+            })
+            .expect("Box alias");
         assert!(matches!(
             &alias.target,
             crate::AST::Type::Result { ok, err }
@@ -1849,20 +1884,28 @@ fn notify(ready: Bool) -[Net]> {
              fn invoke(callback: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> None\n\
              fn run() {}\n",
         );
-        let holder = parsed.items.iter().find_map(|item| match item {
-            crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
-            _ => None,
-        }).expect("Holder");
+        let holder = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+                _ => None,
+            })
+            .expect("Holder");
         assert!(matches!(
             &holder.fields[0].ty,
             crate::AST::Type::Result { ok, err }
                 if matches!(ok.as_ref(), crate::AST::Type::Option(inner) if matches!(inner.as_ref(), crate::AST::Type::Int))
                     && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")
         ));
-        let fetch = parsed.items.iter().find_map(|item| match item {
-            crate::AST::Item::Func(func) if func.name == "fetch" => Some(func),
-            _ => None,
-        }).expect("fetch");
+        let fetch = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(func) if func.name == "fetch" => Some(func),
+                _ => None,
+            })
+            .expect("fetch");
         assert!(matches!(
             fetch.return_type.as_ref(),
             Some(crate::AST::Type::Result { ok, err })
@@ -1886,21 +1929,29 @@ fn notify(ready: Bool) -[Net]> {
             })
         };
         let save = find("save").expect("save");
-        assert!(matches!(save.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+        assert!(
+            matches!(save.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
             if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError"))
+        );
         let sync = find("sync").expect("sync");
-        assert!(matches!(sync.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+        assert!(
+            matches!(sync.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
             if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR)));
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == Syntax::TYPE_ERR))
+        );
         let bounded = find("bounded").expect("bounded");
-        assert!(matches!(bounded.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+        assert!(
+            matches!(bounded.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
             if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError"))
+        );
         let load = find("load").expect("load");
-        assert!(matches!(load.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
+        assert!(
+            matches!(load.return_type, Some(crate::AST::Type::Result { ref ok, ref err })
             if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "Config")
-                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError")));
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "IOError"))
+        );
     }
 
     #[test]
@@ -1914,10 +1965,14 @@ fn notify(ready: Bool) -[Net]> {
              fn callback(cb: fn(Int? IOError!) Int (DbError | TimeoutError)!) Int? IOError! -> None\n\
              fn run() {}\n",
         );
-        let holder = parsed.items.iter().find_map(|item| match item {
-            crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
-            _ => None,
-        }).expect("Holder");
+        let holder = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) if def.name == "Holder" => Some(def),
+                _ => None,
+            })
+            .expect("Holder");
         assert!(matches!(
             &holder.fields[0].ty,
             crate::AST::Type::Result { ok, err }
@@ -2039,7 +2094,10 @@ fn notify(ready: Bool) -[Net]> {
 
     #[test]
     fn leading_unit_infix_failure_spelling_teaches_suffix_zone() {
-        for source in ["fn save() ! IOError {}\n", "alias OldFn :: fn() ! IOError\n"] {
+        for source in [
+            "fn save() ! IOError {}\n",
+            "alias OldFn :: fn() ! IOError\n",
+        ] {
             let (tokens, lex_diagnostics) = lex(source);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
             let diagnostics = parse(&tokens).expect_err("retired unit infix spelling");
@@ -2061,7 +2119,10 @@ fn notify(ready: Bool) -[Net]> {
         assert!(once.contains("fn save(path: String) IOError!"), "{once}");
         assert!(once.contains("fn sync() !"), "{once}");
         assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
-        assert_eq!(once, format_source(&once).expect("formatted form is stable"));
+        assert_eq!(
+            once,
+            format_source(&once).expect("formatted form is stable")
+        );
     }
 
     #[test]

@@ -93,23 +93,18 @@ fn report_is_explicit_local_private_and_repeatable() {
         "hostname:",
         "username:",
     ] {
-        assert!(!text.contains(forbidden), "private field leaked: {forbidden}");
+        assert!(
+            !text.contains(forbidden),
+            "private field leaked: {forbidden}"
+        );
     }
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&bundle, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::set_permissions(
-            bundle.join("README.txt"),
-            fs::Permissions::from_mode(0o644),
-        )
-        .unwrap();
-        fs::set_permissions(
-            bundle.join("report.txt"),
-            fs::Permissions::from_mode(0o644),
-        )
-        .unwrap();
+        fs::set_permissions(bundle.join("README.txt"), fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(bundle.join("report.txt"), fs::Permissions::from_mode(0o644)).unwrap();
     }
 
     let second = run();
@@ -215,7 +210,10 @@ fn report_is_registered_in_cli_surfaces() {
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli");
     for (name, exact) in [
-        ("completions_bash.txt", "perf) COMPREPLY=( $(compgen -W \"run test attach view compare export"),
+        (
+            "completions_bash.txt",
+            "perf) COMPREPLY=( $(compgen -W \"run test attach view compare export",
+        ),
         (
             "completions_zsh.txt",
             "'report:Write a private local report bundle'",
@@ -228,10 +226,7 @@ fn report_is_registered_in_cli_surfaces() {
             "completions_powershell.txt",
             "'budget','perf','report','fuzz'",
         ),
-        (
-            "man.txt",
-            ".B report\nWrite a private local report bundle",
-        ),
+        ("man.txt", ".B report\nWrite a private local report bundle"),
     ] {
         let golden = fs::read_to_string(root.join(name)).unwrap();
         assert!(golden.contains(exact), "{name} is missing `{exact}`");
@@ -266,7 +261,10 @@ fn report_rejects_send_flag_without_writing_bundle() {
             "missing D-REPORT-SEND1 refusal for {args:?}: {stderr}"
         );
         assert!(!String::from_utf8_lossy(&output.stdout).contains("wrote local report bundle"));
-        assert!(!root.join(".jet").exists(), "send attempt must write nothing");
+        assert!(
+            !root.join(".jet").exists(),
+            "send attempt must write nothing"
+        );
     }
     let _ = fs::remove_dir_all(root);
 }
@@ -413,8 +411,7 @@ fn ordinary_build_and_report_open_no_network_connection() {
         .filter(|line| {
             !(line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,")
                 && line.ends_with("= 0"))
-                && !(line.contains("recvfrom(")
-                    && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
+                && !(line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
                 && !line.contains("sendfile(")
         })
         .collect::<Vec<_>>();

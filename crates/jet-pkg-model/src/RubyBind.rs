@@ -34,7 +34,9 @@ impl std::fmt::Display for BindError {
 pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
     require_supported_host(cfg!(unix))?;
     if !ident(lib) {
-        return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name")));
+        return Err(BindError::Source(format!(
+            "`{lib}` is not a valid Jet library name"
+        )));
     }
     let ruby = tool_path("ruby").ok_or(BindError::ToolMissing("ruby"))?;
     let script = std::fs::canonicalize(path)
@@ -49,10 +51,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let discoverer = build.join("jet_discover.rb");
     std::fs::write(&discoverer, DISCOVERER)
         .map_err(|e| BindError::IO(format!("could not write Ruby binding inspector: {e}")))?;
-    let discovered = run_capture(
-        Command::new(&ruby).arg(&discoverer).arg(&script),
-        "ruby",
-    )?;
+    let discovered = run_capture(Command::new(&ruby).arg(&discoverer).arg(&script), "ruby")?;
     let functions = parse_function_names(&discovered)?;
     let worker = cache.join(format!("{lib}_worker.rb"));
     let worker_source = render_worker(&functions);
@@ -90,7 +89,10 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     )?;
     let archive = cache.join(format!("lib{abi}.a"));
     let _ = std::fs::remove_file(&archive);
-    run(Command::new("ar").arg("rcs").arg(&archive).arg(&object), "ar")?;
+    run(
+        Command::new("ar").arg("rcs").arg(&archive).arg(&object),
+        "ar",
+    )?;
 
     let mut identity = b"jet-ruby-bind-v1\0".to_vec();
     identity.extend_from_slice(source.as_bytes());
@@ -138,18 +140,26 @@ fn parse_function_names(bytes: &[u8]) -> Result<Vec<String>, BindError> {
     let mut out = Vec::new();
     for name in text.lines().map(str::trim).filter(|v| !v.is_empty()) {
         if !ident(name) {
-            return Err(BindError::Source(format!("Ruby function `{name}` cannot be projected as a Jet identifier")));
+            return Err(BindError::Source(format!(
+                "Ruby function `{name}` cannot be projected as a Jet identifier"
+            )));
         }
         if reserved(name) {
-            return Err(BindError::Source(format!("Ruby function `{name}` uses a reserved generated binding name")));
+            return Err(BindError::Source(format!(
+                "Ruby function `{name}` uses a reserved generated binding name"
+            )));
         }
         if out.iter().any(|v| v == name) {
-            return Err(BindError::Source(format!("Ruby function `{name}` is declared more than once")));
+            return Err(BindError::Source(format!(
+                "Ruby function `{name}` is declared more than once"
+            )));
         }
         out.push(name.to_string());
     }
     if out.is_empty() {
-        return Err(BindError::Source("no top-level named Ruby functions were found".into()));
+        return Err(BindError::Source(
+            "no top-level named Ruby functions were found".into(),
+        ));
     }
     Ok(out)
 }
@@ -158,8 +168,10 @@ fn render_worker(functions: &[String]) -> String {
     let allowed = functions
         .iter()
         .map(|v| format!("'{v}'"))
-        .collect::<Vec<_>>().join(", ");
-    format!(r#"require 'json'
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"require 'json'
 STDIN.binmode
 STDOUT.binmode
 ALLOWED = [{allowed}].to_h {{ |name| [name, true] }}.freeze
@@ -202,7 +214,8 @@ loop do
   STDOUT.write([encoded.bytesize].pack('L<'), [response['id'] || 0].pack('Q<'), encoded)
   STDOUT.flush
 end
-"#)
+"#
+    )
 }
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
@@ -229,32 +242,52 @@ fn tool_path(tool: &str) -> Option<PathBuf> {
 fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
     const CAP: usize = 64 * 1024;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
-        BindError::ToolMissing(tool)
-    } else {
-        BindError::IO(format!("could not start `{tool}`: {e}"))
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
             Some(v) => break v,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = out.join();
                 let _ = err.join();
-                return Err(BindError::ToolFailed(tool, "the tool exceeded the 60 second limit".into()));
+                return Err(BindError::ToolFailed(
+                    tool,
+                    "the tool exceeded the 60 second limit".into(),
+                ));
             }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let stdout = out.join().map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
-    let stderr = err.join().map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
-    if status.success() { Ok(()) } else {
+    let stdout = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    if status.success() {
+        Ok(())
+    } else {
         let detail = if stderr.is_empty() { &stdout } else { &stderr };
         Err(BindError::ToolFailed(tool, launder(detail)))
     }
@@ -263,30 +296,66 @@ fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
 fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, BindError> {
     const CAP: usize = 64 * 1024;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { BindError::ToolMissing(tool) } else { BindError::IO(format!("could not start `{tool}`: {e}")) })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
             Some(v) => break v,
-            None if Instant::now() >= deadline => { let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into())); }
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out.join();
+                let _ = err.join();
+                return Err(BindError::ToolFailed(
+                    tool,
+                    "the tool exceeded the 60 second limit".into(),
+                ));
+            }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??;
-    let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;
-    if status.success(){Ok(stdout)}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}
+    let stdout = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    if status.success() {
+        Ok(stdout)
+    } else {
+        Err(BindError::ToolFailed(tool, launder(&stderr)))
+    }
 }
 
 fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
-        let n = input.read(&mut buf).map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
-        if n == 0 { break; }
+        let n = input
+            .read(&mut buf)
+            .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
+        if n == 0 {
+            break;
+        }
         let keep = (limit - out.len()).min(n);
         out.extend_from_slice(&buf[..keep]);
     }
@@ -315,8 +384,12 @@ fn reserved(value: &str) -> bool {
 }
 
 fn require_supported_host(unix: bool) -> Result<(), BindError> {
-    if unix { Ok(()) } else {
-        Err(BindError::Source("persistent Ruby bindings require a POSIX host process supervisor".into()))
+    if unix {
+        Ok(())
+    } else {
+        Err(BindError::Source(
+            "persistent Ruby bindings require a POSIX host process supervisor".into(),
+        ))
     }
 }
 
@@ -324,7 +397,10 @@ fn require_supported_host(unix: bool) -> Result<(), BindError> {
 mod tests {
     #[test]
     fn parses_compiler_discovered_function_names() {
-        assert_eq!(super::parse_function_names(b"Fail\nTransform\n").unwrap(), vec!["Fail", "Transform"]);
+        assert_eq!(
+            super::parse_function_names(b"Fail\nTransform\n").unwrap(),
+            vec!["Fail", "Transform"]
+        );
     }
 
     #[test]

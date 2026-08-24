@@ -1,11 +1,11 @@
 //! D-MEMPROVENANCE3=A: trailing `from` clause after a return type.
 
-use crate::AST::{
-    Param, ViewProvenance, ViewProvenanceMap, ViewSource, ViewSourcePath, ViewSourceProjection,
-};
 use crate::Lexer::TokKind;
 use crate::Parser::Parser;
 use crate::Syntax;
+use crate::AST::{
+    Param, ViewProvenance, ViewProvenanceMap, ViewSource, ViewSourcePath, ViewSourceProjection,
+};
 use std::collections::BTreeSet;
 
 impl<'a> Parser<'a> {
@@ -96,42 +96,38 @@ impl<'a> Parser<'a> {
             .filter(|param| param.name != Syntax::KW_SELF)
             .map(|param| param.name.as_str())
             .collect();
-        let source = if matches!(self.peek().kind, TokKind::KwSelf)
-            || self.peek_is_ident(Syntax::KW_SELF)
-        {
-            self.bump();
-            ViewSource::Receiver
-        } else if self.peek_is_ident(Syntax::VIEW_FROM_STATIC) {
-            self.bump(); // `static`
-            if !matches!(self.peek().kind, TokKind::Dot) {
-                return None;
-            }
-            self.bump();
-            let mut parts = Vec::new();
-            let Some(first) = self.bump_ident() else {
-                return None;
-            };
-            parts.push(first);
-            while matches!(self.peek().kind, TokKind::Dot) {
+        let source =
+            if matches!(self.peek().kind, TokKind::KwSelf) || self.peek_is_ident(Syntax::KW_SELF) {
                 self.bump();
-                let Some(next) = self.bump_ident() else {
-                    break;
+                ViewSource::Receiver
+            } else if self.peek_is_ident(Syntax::VIEW_FROM_STATIC) {
+                self.bump(); // `static`
+                if !matches!(self.peek().kind, TokKind::Dot) {
+                    return None;
+                }
+                self.bump();
+                let mut parts = Vec::new();
+                let Some(first) = self.bump_ident() else {
+                    return None;
                 };
-                parts.push(next);
-            }
-            let name = parts.pop().unwrap_or_default();
-            let module_path = parts.join(".");
-            ViewSource::Static {
-                module_path,
-                name,
-            }
-        } else {
-            let Some(name) = self.bump_ident() else {
-                return None;
+                parts.push(first);
+                while matches!(self.peek().kind, TokKind::Dot) {
+                    self.bump();
+                    let Some(next) = self.bump_ident() else {
+                        break;
+                    };
+                    parts.push(next);
+                }
+                let name = parts.pop().unwrap_or_default();
+                let module_path = parts.join(".");
+                ViewSource::Static { module_path, name }
+            } else {
+                let Some(name) = self.bump_ident() else {
+                    return None;
+                };
+                let index = ordinary.iter().position(|param| *param == name)?;
+                ViewSource::Parameter(index)
             };
-            let index = ordinary.iter().position(|param| *param == name)?;
-            ViewSource::Parameter(index)
-        };
         let mut projections = Vec::new();
         while matches!(self.peek().kind, TokKind::Dot) {
             self.bump();
@@ -153,17 +149,13 @@ impl<'a> Parser<'a> {
         if !self.peek_is_ident(Syntax::VIEW_FROM) {
             return None;
         }
-        if !matches!(
-            self.peek2().kind,
-            TokKind::Ident(_) | TokKind::KwSelf
-        ) {
+        if !matches!(self.peek2().kind, TokKind::Ident(_) | TokKind::KwSelf) {
             return None;
         }
         self.bump(); // `from`
         let mut names = Vec::new();
         loop {
-            if matches!(self.peek().kind, TokKind::KwSelf) || self.peek_is_ident(Syntax::KW_SELF)
-            {
+            if matches!(self.peek().kind, TokKind::KwSelf) || self.peek_is_ident(Syntax::KW_SELF) {
                 self.bump();
                 names.push(Syntax::KW_SELF.to_string());
             } else if let Some(name) = self.bump_ident() {

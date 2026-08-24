@@ -130,10 +130,10 @@ fn active_unreachable_parent_keeps_transitive_children_live() {
     let worker = std::thread::spawn(move || {
         parent_edge
             .read(|value| {
-            worker_entered.wait();
-            worker_release.wait();
-            *value
-        })
+                worker_entered.wait();
+                worker_release.wait();
+                *value
+            })
             .unwrap()
     });
 

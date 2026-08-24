@@ -9,10 +9,10 @@
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
 
-use crate::runtime_host::{jit_callable_parts, bind_jit_callable_handle, JitCallableSlot};
+use super::Concurrency;
+use crate::runtime_host::{bind_jit_callable_handle, jit_callable_parts, JitCallableSlot};
 use crate::JitRuntime;
 use crate::Marshal::{result_err_msg, result_ok};
-use super::Concurrency;
 
 #[allow(dead_code, unused_imports)]
 mod semantics {
@@ -213,7 +213,10 @@ mod semantics {
             if !jet_compute_metal::available() {
                 let error = result.expect_err("unavailable Metal must not fall back to CPU");
                 assert!(
-                    matches!(&error, JetComputeError::Unsupported(_) | JetComputeError::Device(_)),
+                    matches!(
+                        &error,
+                        JetComputeError::Unsupported(_) | JetComputeError::Device(_)
+                    ),
                     "unexpected unavailable Metal error: {error:?}"
                 );
                 return;
@@ -237,7 +240,10 @@ mod semantics {
             .unwrap();
             let transposed = jet_compute_transpose(&shaped).unwrap();
             let downloaded = jet_compute_transfer(&transposed, JetComputeDevice::Cpu).unwrap();
-            assert_eq!(jet_compute_tensor_values(&downloaded), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+            assert_eq!(
+                jet_compute_tensor_values(&downloaded),
+                vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]
+            );
             assert_eq!(downloaded.strides, vec![2, 1]);
 
             let stream = jet_compute_stream_new_on_device(JetComputeDevice::Metal).unwrap();
@@ -253,16 +259,12 @@ mod semantics {
                 eprintln!("SKIP metal autodiff: no system Metal device");
                 return;
             }
-            let prediction = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![3.0]),
-                JetComputeDevice::Metal,
-            )
-            .unwrap();
-            let target = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![1.0]),
-                JetComputeDevice::Metal,
-            )
-            .unwrap();
+            let prediction =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![3.0]), JetComputeDevice::Metal)
+                    .unwrap();
+            let target =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Metal)
+                    .unwrap();
             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
             let state = jet_compute_vjp_begin(loss, tape);
@@ -270,17 +272,14 @@ mod semantics {
             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
-            let tangent_prediction = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![1.0]),
-                JetComputeDevice::Metal,
-            )
-            .unwrap();
-            let tangent_target = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![0.0]),
-                JetComputeDevice::Metal,
-            )
-            .unwrap();
-            let tangent = jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+            let tangent_prediction =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Metal)
+                    .unwrap();
+            let tangent_target =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![0.0]), JetComputeDevice::Metal)
+                    .unwrap();
+            let tangent =
+                jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
             assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
         }
     }
@@ -309,7 +308,10 @@ mod semantics {
             if !jet_compute_cuda::available() {
                 let error = result.expect_err("unavailable CUDA must not fall back to CPU");
                 assert!(
-                    matches!(&error, JetComputeError::Unsupported(_) | JetComputeError::Device(_)),
+                    matches!(
+                        &error,
+                        JetComputeError::Unsupported(_) | JetComputeError::Device(_)
+                    ),
                     "unexpected unavailable CUDA error: {error:?}"
                 );
                 return;
@@ -366,16 +368,12 @@ mod semantics {
                 eprintln!("SKIP cuda autodiff: no CUDA device");
                 return;
             }
-            let prediction = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![3.0]),
-                JetComputeDevice::Cuda,
-            )
-            .unwrap();
-            let target = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![1.0]),
-                JetComputeDevice::Cuda,
-            )
-            .unwrap();
+            let prediction =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![3.0]), JetComputeDevice::Cuda)
+                    .unwrap();
+            let target =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Cuda)
+                    .unwrap();
             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
             let state = jet_compute_vjp_begin(loss, tape);
@@ -383,17 +381,14 @@ mod semantics {
             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
-            let tangent_prediction = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![1.0]),
-                JetComputeDevice::Cuda,
-            )
-            .unwrap();
-            let tangent_target = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![0.0]),
-                JetComputeDevice::Cuda,
-            )
-            .unwrap();
-            let tangent = jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+            let tangent_prediction =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Cuda)
+                    .unwrap();
+            let tangent_target =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![0.0]), JetComputeDevice::Cuda)
+                    .unwrap();
+            let tangent =
+                jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
             assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
         }
     }
@@ -425,7 +420,10 @@ mod semantics {
                 }
                 let error = result.expect_err("unavailable Vulkan must not fall back to CPU");
                 assert!(
-                    matches!(&error, JetComputeError::Unsupported(_) | JetComputeError::Device(_)),
+                    matches!(
+                        &error,
+                        JetComputeError::Unsupported(_) | JetComputeError::Device(_)
+                    ),
                     "unexpected unavailable Vulkan error: {error:?}"
                 );
                 return;
@@ -477,16 +475,12 @@ mod semantics {
                 eprintln!("SKIP Vulkan autodiff: no Vulkan device");
                 return;
             }
-            let prediction = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![3.0]),
-                JetComputeDevice::Vulkan,
-            )
-            .unwrap();
-            let target = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![1.0]),
-                JetComputeDevice::Vulkan,
-            )
-            .unwrap();
+            let prediction =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![3.0]), JetComputeDevice::Vulkan)
+                    .unwrap();
+            let target =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Vulkan)
+                    .unwrap();
             let (tape, traced) = jet_compute_trace_inputs(vec![prediction, target]);
             let loss = jet_compute_mse_loss(&traced[0], &traced[1]).unwrap();
             let state = jet_compute_vjp_begin(loss, tape);
@@ -494,17 +488,14 @@ mod semantics {
             let gradients = jet_compute_vjp_pull(&state, &seed, &[0, 1]).unwrap();
             assert_eq!(jet_compute_tensor_values(&gradients[0]), vec![4.0]);
             assert_eq!(jet_compute_tensor_values(&gradients[1]), vec![-4.0]);
-            let tangent_prediction = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![1.0]),
-                JetComputeDevice::Vulkan,
-            )
-            .unwrap();
-            let tangent_target = jet_compute_on_device(
-                &f32_tensor(vec![1], vec![0.0]),
-                JetComputeDevice::Vulkan,
-            )
-            .unwrap();
-            let tangent = jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
+            let tangent_prediction =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![1.0]), JetComputeDevice::Vulkan)
+                    .unwrap();
+            let tangent_target =
+                jet_compute_on_device(&f32_tensor(vec![1], vec![0.0]), JetComputeDevice::Vulkan)
+                    .unwrap();
+            let tangent =
+                jet_compute_jvp(&state, vec![tangent_prediction, tangent_target]).unwrap();
             assert_eq!(jet_compute_tensor_values(&tangent), vec![4.0]);
         }
 
@@ -513,7 +504,10 @@ mod semantics {
             let cpu = f32_tensor(vec![1], vec![2.0]);
             let result = jet_compute_on_device(&cpu, JetComputeDevice::WebGpu);
             assert!(
-                matches!(result, Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))),
+                matches!(
+                    result,
+                    Err(JetComputeError::Unsupported(_)) | Err(JetComputeError::Device(_))
+                ),
                 "native WebGPU must report its missing browser provider"
             );
         }
@@ -592,10 +586,7 @@ mod semantics {
         jet_compute_vjp_pull(state, seed, targets).map_err(|error| error.jet_show())
     }
 
-    pub(super) fn vjp_gradient(
-        state: &VjpState,
-        targets: &[i64],
-    ) -> Result<Vec<Tensor>, String> {
+    pub(super) fn vjp_gradient(state: &VjpState, targets: &[i64]) -> Result<Vec<Tensor>, String> {
         let seed = jet_compute_gradient_seed(state).map_err(|error| error.jet_show())?;
         vjp_pull(state, &seed, targets)
     }
@@ -791,7 +782,11 @@ mod semantics {
         jet_compute_mse_loss(left, right).map_err(|error| error.jet_show())
     }
 
-    pub(super) fn sgd_step(param: &Tensor, grad: &Tensor, learning_rate: f64) -> Result<Tensor, String> {
+    pub(super) fn sgd_step(
+        param: &Tensor,
+        grad: &Tensor,
+        learning_rate: f64,
+    ) -> Result<Tensor, String> {
         jet_compute_sgd_step(param, grad, learning_rate).map_err(|error| error.jet_show())
     }
 
@@ -866,8 +861,7 @@ mod semantics {
         end: i64,
         exclusive: bool,
     ) -> Result<Tensor, String> {
-        jet_compute_slice_checked(tensor, start, end, exclusive)
-            .map_err(|error| error.jet_show())
+        jet_compute_slice_checked(tensor, start, end, exclusive).map_err(|error| error.jet_show())
     }
 
     pub(super) fn view_values(
@@ -1050,7 +1044,10 @@ fn alloc_tensor(runtime: &mut JitRuntime, tensor: semantics::Tensor) -> i64 {
         return 0;
     };
     let list = alloc_float_list(runtime, &values);
-    runtime.compute.slots.push(Some(TensorSlot { tensor, list }));
+    runtime
+        .compute
+        .slots
+        .push(Some(TensorSlot { tensor, list }));
     runtime.compute.slots.len() as i64
 }
 
@@ -1236,11 +1233,7 @@ fn alloc_vjp_run(
     if grads == 0 {
         return 0;
     }
-    alloc_record_words(
-        runtime,
-        &[value_handle, pull, grads],
-        "core.compute.vjp",
-    )
+    alloc_record_words(runtime, &[value_handle, pull, grads], "core.compute.vjp")
 }
 
 fn run_transform(
@@ -1253,7 +1246,10 @@ fn run_transform(
     result_fields: usize,
 ) -> i64 {
     let Some(callable) = jit_callable_parts(runtime, base_handle) else {
-        return transform_failure(runtime, "core.compute transform received an invalid function");
+        return transform_failure(
+            runtime,
+            "core.compute transform received an invalid function",
+        );
     };
     let Some(inputs) = read_tensor_list(runtime, inputs_handle) else {
         return transform_failure(runtime, "core.compute transform expects Tensor arguments");
@@ -1270,7 +1266,10 @@ fn run_transform(
         return transform_failure(runtime, "core.compute transform argument count mismatch");
     }
     if base_arity > 6 {
-        return transform_failure(runtime, "core.compute transform function arity exceeds the resident ABI");
+        return transform_failure(
+            runtime,
+            "core.compute transform function arity exceeds the resident ABI",
+        );
     }
     let primal_handles = &inputs[..base_arity];
     let tangent_handles = if method == "jvp" {
@@ -1284,7 +1283,9 @@ fn run_transform(
         .collect::<Option<Vec<_>>>()
     {
         Some(values) => values,
-        None => return transform_failure(runtime, "core.compute transform received an invalid Tensor"),
+        None => {
+            return transform_failure(runtime, "core.compute transform received an invalid Tensor")
+        }
     };
     let tangent_tensors = match tangent_handles
         .iter()
@@ -1292,7 +1293,12 @@ fn run_transform(
         .collect::<Option<Vec<_>>>()
     {
         Some(values) => values,
-        None => return transform_failure(runtime, "core.compute.jvp received an invalid tangent Tensor"),
+        None => {
+            return transform_failure(
+                runtime,
+                "core.compute.jvp received an invalid tangent Tensor",
+            )
+        }
     };
     let (tape, traced) = semantics::trace_inputs(input_tensors);
     let mut originals = Vec::with_capacity(primal_handles.len());
@@ -1332,11 +1338,19 @@ fn run_transform(
         };
         let states = match fields
             .iter()
-            .map(|handle| slot(runtime, *handle).map(|slot| semantics::vjp_begin(slot.tensor.clone(), tape.clone())))
+            .map(|handle| {
+                slot(runtime, *handle)
+                    .map(|slot| semantics::vjp_begin(slot.tensor.clone(), tape.clone()))
+            })
             .collect::<Option<Vec<_>>>()
         {
             Some(states) => states,
-            None => return transform_failure(runtime, "core.compute.gradient tuple field is not a Tensor"),
+            None => {
+                return transform_failure(
+                    runtime,
+                    "core.compute.gradient tuple field is not a Tensor",
+                )
+            }
         };
         let nested = match semantics::nested_gradient(&states, targets) {
             Ok(values) => values,
@@ -1366,11 +1380,8 @@ fn run_transform(
         }
         semantics::TransformResult::ValueAndGradient { value, gradients } => {
             let value_handle = alloc_tensor(runtime, value);
-            let gradients_handle = alloc_tensor_record(
-                runtime,
-                &gradients,
-                "core.compute.value_and_gradient",
-            );
+            let gradients_handle =
+                alloc_tensor_record(runtime, &gradients, "core.compute.value_and_gradient");
             if value_handle == 0 || gradients_handle == 0 {
                 0
             } else {
@@ -1390,11 +1401,7 @@ fn run_transform(
             if value_handle == 0 || tangent_handle == 0 {
                 0
             } else {
-                alloc_record_words(
-                    runtime,
-                    &[value_handle, tangent_handle],
-                    "core.compute.jvp",
-                )
+                alloc_record_words(runtime, &[value_handle, tangent_handle], "core.compute.jvp")
             }
         }
     }
@@ -1429,7 +1436,8 @@ fn curried_base(
                 )));
             }
             if result_fields == 0 {
-                let Some(value) = slot(runtime, output_handle).map(|slot| slot.tensor.clone()) else {
+                let Some(value) = slot(runtime, output_handle).map(|slot| slot.tensor.clone())
+                else {
                     return Some(Err(semantics::JetComputeError::Unsupported(
                         "core.compute transform returned an invalid Tensor".to_string(),
                     )));
@@ -1480,11 +1488,7 @@ fn alloc_curried_gradient(
     alloc_record_words(runtime, &outer, context)
 }
 
-fn run_curried_handle(
-    runtime: &mut JitRuntime,
-    handle: i64,
-    inputs: &[i64],
-) -> i64 {
+fn run_curried_handle(runtime: &mut JitRuntime, handle: i64, inputs: &[i64]) -> i64 {
     let Some(tensors) = inputs
         .iter()
         .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
@@ -1505,11 +1509,8 @@ fn run_curried_handle(
         }
         semantics::JetComputeCurriedResult::ValueAndGradient { value, gradients } => {
             let value_handle = alloc_tensor(runtime, value);
-            let gradients_handle = alloc_curried_gradient(
-                runtime,
-                &gradients,
-                "core.compute.value_and_gradient",
-            );
+            let gradients_handle =
+                alloc_curried_gradient(runtime, &gradients, "core.compute.value_and_gradient");
             if value_handle == 0 || gradients_handle == 0 {
                 0
             } else {
@@ -1555,11 +1556,7 @@ fn run_curried_handle(
             if value_handle == 0 || tangent_handle == 0 {
                 0
             } else {
-                alloc_record_words(
-                    runtime,
-                    &[value_handle, tangent_handle],
-                    "core.compute.jvp",
-                )
+                alloc_record_words(runtime, &[value_handle, tangent_handle], "core.compute.jvp")
             }
         }
     }
@@ -1595,13 +1592,7 @@ fn run_curried_call_adapter(runtime: &mut JitRuntime, env: i64, inputs: &[i64]) 
 }
 
 fn jet_jit_compute_curried_pull(env: i64, seed: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| {
-        run_curried_handle(
-            runtime,
-            env,
-            &[seed],
-        )
-    })
+    Concurrency::with_runtime_mut(|runtime| run_curried_handle(runtime, env, &[seed]))
 }
 
 fn jet_jit_compute_vjp_grads_value(env: i64) -> i64 {
@@ -1616,7 +1607,12 @@ fn jet_jit_compute_curried_grads(env: i64) -> i64 {
         );
         let values = match result {
             Ok(semantics::JetComputeCurriedResult::Gradient(values)) => values,
-            Ok(_) => return transform_failure(runtime, "core.compute.vjp.grads returned the wrong result"),
+            Ok(_) => {
+                return transform_failure(
+                    runtime,
+                    "core.compute.vjp.grads returned the wrong result",
+                )
+            }
             Err(error) => return transform_failure(runtime, &semantics::error_message(&error)),
         };
         alloc_curried_gradient(runtime, &values, "core.compute.vjp.grads")
@@ -1639,37 +1635,20 @@ fn jet_jit_compute_curried_call_3(env: i64, a: i64, b: i64, c: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c]))
 }
 
-fn jet_jit_compute_curried_call_4(
-    env: i64,
-    a: i64,
-    b: i64,
-    c: i64,
-    d: i64,
-) -> i64 {
+fn jet_jit_compute_curried_call_4(env: i64, a: i64, b: i64, c: i64, d: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d]))
 }
 
-fn jet_jit_compute_curried_call_5(
-    env: i64,
-    a: i64,
-    b: i64,
-    c: i64,
-    d: i64,
-    e: i64,
-) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d, e]))
+fn jet_jit_compute_curried_call_5(env: i64, a: i64, b: i64, c: i64, d: i64, e: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        run_curried_call_adapter(runtime, env, &[a, b, c, d, e])
+    })
 }
 
-fn jet_jit_compute_curried_call_6(
-    env: i64,
-    a: i64,
-    b: i64,
-    c: i64,
-    d: i64,
-    e: i64,
-    f: i64,
-) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| run_curried_call_adapter(runtime, env, &[a, b, c, d, e, f]))
+fn jet_jit_compute_curried_call_6(env: i64, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> i64 {
+    Concurrency::with_runtime_mut(|runtime| {
+        run_curried_call_adapter(runtime, env, &[a, b, c, d, e, f])
+    })
 }
 
 fn jet_jit_compute_vjp_pull(env: i64, seed: i64) -> i64 {
@@ -1723,7 +1702,10 @@ fn jet_jit_compute_transform(
                 result_fields,
             );
         }
-        transform_failure(runtime, "core.compute curried transform needs its constructor seam")
+        transform_failure(
+            runtime,
+            "core.compute curried transform needs its constructor seam",
+        )
     })
 }
 
@@ -1774,7 +1756,12 @@ fn jet_jit_compute_curried_new(
             4 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_4) as i64,
             5 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_5) as i64,
             6 => crate::host_seam::guarded_addr(jet_jit_compute_curried_call_6) as i64,
-            _ => return transform_failure(runtime, "core.compute transform function arity exceeds the resident ABI"),
+            _ => {
+                return transform_failure(
+                    runtime,
+                    "core.compute transform function arity exceeds the resident ABI",
+                )
+            }
         };
         bind_jit_callable_handle(runtime, fn_ptr, plan, true)
     })
@@ -2111,7 +2098,10 @@ fn jet_jit_compute_to_sparse(tensor: i64) -> i64 {
 fn jet_jit_compute_sparse_nnz(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| match sparse(runtime, handle) {
         Some(sparse) => semantics::sparse_nnz(sparse),
-        None => trap(runtime, "core.compute.sparse_nnz received an invalid sparse handle"),
+        None => trap(
+            runtime,
+            "core.compute.sparse_nnz received an invalid sparse handle",
+        ),
     })
 }
 
@@ -2140,8 +2130,15 @@ fn jet_jit_compute_sparse_show(handle: i64) -> i64 {
     })
 }
 
-fn clone_tensor_pair(runtime: &JitRuntime, left: i64, right: i64) -> Option<(semantics::Tensor, semantics::Tensor)> {
-    Some((slot(runtime, left)?.tensor.clone(), slot(runtime, right)?.tensor.clone()))
+fn clone_tensor_pair(
+    runtime: &JitRuntime,
+    left: i64,
+    right: i64,
+) -> Option<(semantics::Tensor, semantics::Tensor)> {
+    Some((
+        slot(runtime, left)?.tensor.clone(),
+        slot(runtime, right)?.tensor.clone(),
+    ))
 }
 
 fn jet_jit_compute_add(left: i64, right: i64) -> i64 {
@@ -2188,7 +2185,9 @@ fn compute_binary_op(
 ) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some((left, right)) = clone_tensor_pair(runtime, left, right) else {
-            return result_err_msg(&format!("core.compute.{name} received an invalid Tensor handle"));
+            return result_err_msg(&format!(
+                "core.compute.{name} received an invalid Tensor handle"
+            ));
         };
         match op(&left, &right) {
             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
@@ -2212,7 +2211,9 @@ fn jet_jit_compute_minimum(left: i64, right: i64) -> i64 {
 fn compute_unary_op(tensor: i64, op: &str, name: &str) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
-            return result_err_msg(&format!("core.compute.{name} received an invalid Tensor handle"));
+            return result_err_msg(&format!(
+                "core.compute.{name} received an invalid Tensor handle"
+            ));
         };
         match semantics::unary(op, &tensor) {
             Ok(tensor) => result_ok(alloc_tensor(runtime, tensor) as u64),
@@ -2363,7 +2364,9 @@ fn jet_jit_compute_set(tensor: i64, indices: i64, value: f64) -> i64 {
                         Ok(values) => values,
                         Err(message) => return result_err_msg(&message),
                     },
-                    None => return result_err_msg("core.compute.set received an invalid Tensor handle"),
+                    None => {
+                        return result_err_msg("core.compute.set received an invalid Tensor handle")
+                    }
                 };
                 let Some(list) = slot(runtime, tensor).map(|slot| slot.list) else {
                     return result_err_msg("core.compute.set received an invalid Tensor handle");
@@ -2381,7 +2384,10 @@ fn jet_jit_compute_set(tensor: i64, indices: i64, value: f64) -> i64 {
 fn jet_jit_compute_shape(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
-            return trap(runtime, "core.compute.shape received an invalid Tensor handle");
+            return trap(
+                runtime,
+                "core.compute.shape received an invalid Tensor handle",
+            );
         };
         alloc_int_list(runtime, &semantics::tensor_shape(&tensor))
     })
@@ -2390,21 +2396,30 @@ fn jet_jit_compute_shape(tensor: i64) -> i64 {
 fn jet_jit_compute_rank(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| match slot(runtime, tensor) {
         Some(slot) => semantics::tensor_rank(&slot.tensor),
-        None => trap(runtime, "core.compute.rank received an invalid Tensor handle"),
+        None => trap(
+            runtime,
+            "core.compute.rank received an invalid Tensor handle",
+        ),
     })
 }
 
 fn jet_jit_compute_numel(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| match slot(runtime, tensor) {
         Some(slot) => semantics::tensor_numel(&slot.tensor),
-        None => trap(runtime, "core.compute.numel received an invalid Tensor handle"),
+        None => trap(
+            runtime,
+            "core.compute.numel received an invalid Tensor handle",
+        ),
     })
 }
 
 fn jet_jit_compute_device(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
-            return trap(runtime, "core.compute.device received an invalid Tensor handle");
+            return trap(
+                runtime,
+                "core.compute.device received an invalid Tensor handle",
+            );
         };
         runtime.heap.alloc_string(semantics::tensor_device(&tensor))
     })
@@ -2413,9 +2428,14 @@ fn jet_jit_compute_device(tensor: i64) -> i64 {
 fn jet_jit_compute_placement(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(tensor) = slot(runtime, tensor).map(|slot| slot.tensor.clone()) else {
-            return trap(runtime, "core.compute.placement received an invalid Tensor handle");
+            return trap(
+                runtime,
+                "core.compute.placement received an invalid Tensor handle",
+            );
         };
-        runtime.heap.alloc_string(semantics::tensor_placement(&tensor))
+        runtime
+            .heap
+            .alloc_string(semantics::tensor_placement(&tensor))
     })
 }
 
@@ -2427,7 +2447,12 @@ fn jet_jit_compute_copy(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let copied = match slot(runtime, tensor) {
             Some(slot) => semantics::copy(&slot.tensor),
-            None => return trap(runtime, "core.compute.copy received an invalid Tensor handle"),
+            None => {
+                return trap(
+                    runtime,
+                    "core.compute.copy received an invalid Tensor handle",
+                )
+            }
         };
         alloc_tensor(runtime, copied)
     })
@@ -2437,7 +2462,12 @@ fn jet_jit_compute_clone(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let cloned = match slot(runtime, tensor) {
             Some(slot) => semantics::clone(&slot.tensor),
-            None => return trap(runtime, "core.compute.clone received an invalid Tensor handle"),
+            None => {
+                return trap(
+                    runtime,
+                    "core.compute.clone received an invalid Tensor handle",
+                )
+            }
         };
         alloc_tensor(runtime, cloned)
     })
@@ -2446,7 +2476,10 @@ fn jet_jit_compute_clone(tensor: i64) -> i64 {
 fn jet_jit_compute_tensor_to_list(tensor: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(slot) = slot(runtime, tensor) else {
-            return trap(runtime, "core.compute.to_list received an invalid Tensor handle");
+            return trap(
+                runtime,
+                "core.compute.to_list received an invalid Tensor handle",
+            );
         };
         let values = match semantics::tensor_values(&slot.tensor) {
             Ok(values) => values,
@@ -2456,15 +2489,13 @@ fn jet_jit_compute_tensor_to_list(tensor: i64) -> i64 {
     })
 }
 
-fn jet_jit_compute_slice(
-    tensor: i64,
-    start: i64,
-    end: i64,
-    exclusive: i8,
-) -> i64 {
+fn jet_jit_compute_slice(tensor: i64, start: i64, end: i64, exclusive: i8) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(slot) = slot(runtime, tensor) else {
-            return trap(runtime, "core.compute slice received an invalid Tensor handle");
+            return trap(
+                runtime,
+                "core.compute slice received an invalid Tensor handle",
+            );
         };
         let sliced = match semantics::slice(&slot.tensor, start, end, exclusive != 0) {
             Ok(tensor) => tensor,
@@ -2474,15 +2505,13 @@ fn jet_jit_compute_slice(
     })
 }
 
-fn jet_jit_compute_view(
-    tensor: i64,
-    start: i64,
-    end: i64,
-    exclusive: i8,
-) -> i64 {
+fn jet_jit_compute_view(tensor: i64, start: i64, end: i64, exclusive: i8) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let Some(slot) = slot(runtime, tensor) else {
-            return trap(runtime, "core.compute view received an invalid Tensor handle");
+            return trap(
+                runtime,
+                "core.compute view received an invalid Tensor handle",
+            );
         };
         let values = match semantics::view_values(&slot.tensor, start, end, exclusive != 0) {
             Ok(values) => values,
@@ -2492,31 +2521,21 @@ fn jet_jit_compute_view(
     })
 }
 
-fn jet_jit_compute_view_mut(
-    tensor: i64,
-    start: i64,
-    end: i64,
-    exclusive: i8,
-) -> i64 {
+fn jet_jit_compute_view_mut(tensor: i64, start: i64, end: i64, exclusive: i8) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
         let values = {
             let Some(slot) = slot_mut(runtime, tensor) else {
-                return trap(runtime, "core.compute mutable view received an invalid Tensor handle");
+                return trap(
+                    runtime,
+                    "core.compute mutable view received an invalid Tensor handle",
+                );
             };
-            if let Err(message) = semantics::validate_mut(
-                &mut slot.tensor,
-                start,
-                end,
-                exclusive != 0,
-            ) {
+            if let Err(message) =
+                semantics::validate_mut(&mut slot.tensor, start, end, exclusive != 0)
+            {
                 return trap(runtime, &message);
             }
-            match semantics::view_values(
-                &slot.tensor,
-                start,
-                end,
-                exclusive != 0,
-            ) {
+            match semantics::view_values(&slot.tensor, start, end, exclusive != 0) {
                 Ok(values) => values,
                 Err(message) => return trap(runtime, &message),
             }
@@ -2606,11 +2625,7 @@ pub(crate) fn try_set_list_f64(
     true
 }
 
-pub(crate) fn try_get_list_f64(
-    runtime: &mut JitRuntime,
-    list: i64,
-    index: i64,
-) -> Option<f64> {
+pub(crate) fn try_get_list_f64(runtime: &mut JitRuntime, list: i64, index: i64) -> Option<f64> {
     let window = runtime
         .compute
         .windows

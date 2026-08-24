@@ -433,12 +433,20 @@ fn assert_projected_paths(value: &JSONValue, scratch: &DogfoodScratch, contract:
     assert_eq!(probes.len(), PROBES.len());
     let roots = Store::Roots::at(scratch.root.clone());
     let entries = Store::list_checked(&roots).expect("list admitted Hangar packages");
-    assert_eq!(entries.len(), contract.all_packages.len());
+    let package_entries: Vec<_> = entries
+        .iter()
+        .filter(|entry| contract.all_packages.iter().any(|name| entry.name == *name))
+        .collect();
+    assert_eq!(
+        package_entries.len(),
+        contract.all_packages.len(),
+        "every declared package must have one projected Hangar record"
+    );
     let ordered: Vec<_> = contract
         .all_packages
         .iter()
         .map(|name| {
-            entries
+            package_entries
                 .iter()
                 .find(|entry| entry.name == *name)
                 .unwrap_or_else(|| panic!("Hangar package {name} missing"))

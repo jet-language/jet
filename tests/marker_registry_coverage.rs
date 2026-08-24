@@ -9,9 +9,7 @@
 
 mod common;
 
-use jet_foundation::Policy::{
-    self, AppliedRule, RuleArgType, RuleSite, RuleStatus,
-};
+use jet_foundation::Policy::{self, AppliedRule, RuleArgType, RuleSite, RuleStatus};
 use jet_foundation::{Registry, Syntax};
 
 /// Sites that describe a position with no source spelling of its own.
@@ -171,7 +169,8 @@ fn sema_diagnostics(source: &str, path: &std::path::Path) -> Vec<jet::Diagnostic
         .unwrap_or_default();
     }
     std::fs::write(path, source).expect("write marker coverage source");
-    let mut bundle = jet::Loader::load_entry(path.to_str().expect("coverage path")).expect("load marker coverage source");
+    let mut bundle = jet::Loader::load_entry(path.to_str().expect("coverage path"))
+        .expect("load marker coverage source");
     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check)
 }
 
@@ -224,7 +223,9 @@ fn format_for_coverage(source: &str) -> Result<String, Vec<jet::Diagnostics::Dia
 fn every_active_row_is_reachable_at_a_declared_site() {
     let mut ghosts = Vec::new();
     for registered in Registry::marker_rows() {
-        let row = registered.rule.expect("marker rows carry their applied rule");
+        let row = registered
+            .rule
+            .expect("marker rows carry their applied rule");
         if !matches!(row.status, RuleStatus::Active) {
             continue;
         }
@@ -280,7 +281,9 @@ fn every_active_row_walks_parse_validate_format_highlight_reflect() {
     let scratch = common::Scratch::new("marker-registry-coverage");
     let validation_path = scratch.join("main.jet");
     for registered in Registry::marker_rows() {
-        let row = registered.rule.expect("marker rows carry their applied rule");
+        let row = registered
+            .rule
+            .expect("marker rows carry their applied rule");
         if !matches!(row.status, RuleStatus::Active) {
             continue;
         }
@@ -320,7 +323,10 @@ fn every_active_row_walks_parse_validate_format_highlight_reflect() {
         } else {
             jet::Lexer::lex(&source)
         };
-        assert!(lex_diagnostics.is_empty(), "`{marker}` lex: {lex_diagnostics:?}");
+        assert!(
+            lex_diagnostics.is_empty(),
+            "`{marker}` lex: {lex_diagnostics:?}"
+        );
         let (_, parse_diagnostics) = jet::Parser::parse_for_check(&tokens)
             .unwrap_or_else(|diagnostics| panic!("`{marker}` parse: {diagnostics:?}"));
         assert!(
@@ -331,12 +337,10 @@ fn every_active_row_walks_parse_validate_format_highlight_reflect() {
         );
         let validation_diagnostics = sema_diagnostics(&source, &validation_path);
         assert!(
-            validation_diagnostics
-                .iter()
-                .all(|diagnostic| {
-                    !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
-                        || (source.contains("#Bindgen") && diagnostic.code == "E3201")
-                }),
+            validation_diagnostics.iter().all(|diagnostic| {
+                !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
+                    || (source.contains("#Bindgen") && diagnostic.code == "E3201")
+            }),
             "`{marker}` failed semantic validation: {validation_diagnostics:?}"
         );
 
@@ -362,7 +366,9 @@ fn every_active_row_walks_parse_validate_format_highlight_reflect() {
 #[test]
 fn every_retired_row_teaches_a_replacement() {
     for registered in Registry::marker_rows() {
-        let row = registered.rule.expect("marker rows carry their applied rule");
+        let row = registered
+            .rule
+            .expect("marker rows carry their applied rule");
         if let RuleStatus::Retired { replacement } = row.status {
             assert!(
                 !replacement.trim().is_empty(),
@@ -424,7 +430,9 @@ fn the_one_table_holds_every_kind() {
     // A marker row is exactly a row whose target is written code, and it is the
     // same row the marker registry holds.
     for registered in Registry::marker_rows() {
-        let row = registered.rule.expect("marker rows carry their applied rule");
+        let row = registered
+            .rule
+            .expect("marker rows carry their applied rule");
         let registered = Registry::row(row.name)
             .unwrap_or_else(|| panic!("`#{}` is not in the one table", row.name));
         assert_eq!(registered.target, RowTarget::Code(row.sites));
@@ -454,15 +462,19 @@ fn the_one_table_holds_every_kind() {
 
 #[test]
 fn every_registered_plane_is_reflectable() {
-    use jet_foundation::Registry::{self, RowKind};
     use jet::Comptime::CtValue;
+    use jet_foundation::Registry::{self, RowKind};
 
     let planes: Vec<_> = Registry::fact_rows()
         .filter(|row| row.kind() == RowKind::Plane)
         .collect();
     for row in &planes {
         assert_eq!(row.kind(), RowKind::Plane);
-        assert!(Registry::row(row.name).is_some(), "plane `{}` has no home", row.name);
+        assert!(
+            Registry::row(row.name).is_some(),
+            "plane `{}` has no home",
+            row.name
+        );
         let read = Registry::registered_fact_read(row.name)
             .unwrap_or_else(|| panic!("plane `{}` has no FactRead projection", row.name));
         assert!(
@@ -509,7 +521,11 @@ fn every_registered_plane_is_reflectable() {
         else {
             panic!("plane `{}` has an untyped FactValue.kind", row.name);
         };
-        assert_eq!(info_kind, value_kind, "aggregate kind drifted for `{}`", row.name);
+        assert_eq!(
+            info_kind, value_kind,
+            "aggregate kind drifted for `{}`",
+            row.name
+        );
         assert_eq!(
             Some(info_kind.as_str()),
             read.reflection_kind(),
@@ -553,11 +569,18 @@ fn every_registered_truth_names_a_home_and_a_guard_that_exist() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut violations = Vec::new();
     for row in jet_foundation::Registry::truths() {
-        let home = row.home.expect("law_violations refuses a truth with no home");
+        let home = row
+            .home
+            .expect("law_violations refuses a truth with no home");
         if !root.join(home).is_file() {
-            violations.push(format!("`{}` names the home `{home}`, which is not a file", row.name));
+            violations.push(format!(
+                "`{}` names the home `{home}`, which is not a file",
+                row.name
+            ));
         }
-        let guard = row.guard.expect("law_violations refuses a truth with no guard");
+        let guard = row
+            .guard
+            .expect("law_violations refuses a truth with no guard");
         match std::fs::read_to_string(root.join(guard.file)) {
             Ok(source) => {
                 if !source.contains(&format!("fn {}(", guard.test)) {
@@ -592,7 +615,10 @@ fn a_prover_publishes_read_only_rows() {
             .unwrap_or_else(|| panic!("the ownership prover publishes no `{name}` row"));
         assert!(row.is_prover_supplied(), "`{name}` names no prover");
         assert_eq!(row.safe_direction, SafeDirection::None);
-        assert!(row.gates.is_empty(), "`{name}` is read-only, so it has no gate");
+        assert!(
+            row.gates.is_empty(),
+            "`{name}` is read-only, so it has no gate"
+        );
     }
 }
 
@@ -711,8 +737,15 @@ fn marker_name_literals_stay_in_the_registry() {
     );
 
     let seeded = marker_name_literal_offenders(
-        [("synthetic.rs".to_string(), "if marker_name == \"Inline\" {}".to_string())],
+        [(
+            "synthetic.rs".to_string(),
+            "if marker_name == \"Inline\" {}".to_string(),
+        )],
         &["Inline"],
     );
-    assert_eq!(seeded.len(), 1, "the seeded drift case must fail this guard");
+    assert_eq!(
+        seeded.len(),
+        1,
+        "the seeded drift case must fail this guard"
+    );
 }

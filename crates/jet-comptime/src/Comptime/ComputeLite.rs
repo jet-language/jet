@@ -1148,8 +1148,7 @@ fn ct_to_stream(value: &CtValue, span: Span) -> Result<JetComputeStream, Diagnos
     let device = ct_to_device(field("device")?, span)?;
     let cuda = if device == JetComputeDevice::Cuda {
         Some(std::sync::Arc::new(
-            jet_compute_cuda::stream_new()
-                .map_err(|_| unsupported("CUDA compute stream", span))?,
+            jet_compute_cuda::stream_new().map_err(|_| unsupported("CUDA compute stream", span))?,
         ))
     } else {
         None
@@ -1611,12 +1610,12 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             },
         ),
         "stream_new" => Ok(stream_to_ct(&jet_compute_stream_new())),
-        "stream_new_on" => Ok(match jet_compute_stream_new_on_device(ct_to_device(
-            one(0)?, span,
-        )?) {
-            Ok(stream) => stream_to_ct(&stream),
-            Err(e) => err_compute(e),
-        }),
+        "stream_new_on" => Ok(
+            match jet_compute_stream_new_on_device(ct_to_device(one(0)?, span)?) {
+                Ok(stream) => stream_to_ct(&stream),
+                Err(e) => err_compute(e),
+            },
+        ),
         "stream_sync" => Ok(
             match jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) {
                 Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),

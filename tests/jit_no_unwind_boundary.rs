@@ -102,8 +102,8 @@ fn jit_crate_sources() -> Vec<(String, String)> {
                 .unwrap_or(path.as_path())
                 .to_string_lossy()
                 .into_owned();
-            let text = fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+            let text =
+                fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
             (label, text)
         })
         .collect()
@@ -136,11 +136,17 @@ fn code_lines(sources: &[(String, String)]) -> Vec<(String, usize, String)> {
 fn extern_fn_definitions(sources: &[(String, String)]) -> Vec<(String, usize, String, String)> {
     let mut out = Vec::new();
     for (label, number, line) in code_lines(sources) {
-        let Some(at) = line.find("extern \"") else { continue };
+        let Some(at) = line.find("extern \"") else {
+            continue;
+        };
         let rest = &line[at + 8..];
-        let Some(close) = rest.find('"') else { continue };
+        let Some(close) = rest.find('"') else {
+            continue;
+        };
         let tail = rest[close + 1..].trim_start();
-        let Some(tail) = tail.strip_prefix("fn ") else { continue };
+        let Some(tail) = tail.strip_prefix("fn ") else {
+            continue;
+        };
         // `$` is a name here too: `extern "C" fn $name(…)` inside a macro is the
         // same unguardable body wearing a metavariable, and it must not read as
         // an anonymous `fn`-pointer type and slip past.
@@ -217,8 +223,7 @@ const SIGNAL_HANDLER_STATEMENTS: &[&str] = &[
 /// scanners above take.
 fn signal_handler_owner_source() -> Vec<(String, String)> {
     let path = repo_root().join(SIGNAL_HANDLER_OWNER);
-    let text =
-        fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+    let text = fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
     vec![(SIGNAL_HANDLER_OWNER.to_string(), text)]
 }
 
@@ -386,8 +391,8 @@ fn exactly_one_signal_mechanism_owns_the_interrupt_count() {
                 .unwrap_or(path.as_path())
                 .to_string_lossy()
                 .into_owned();
-            let text = fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+            let text =
+                fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
             sources.push((label, text));
         }
     }
@@ -435,9 +440,7 @@ fn exactly_one_signal_mechanism_owns_the_interrupt_count() {
     // here.
     let includers: Vec<_> = code_lines(&sources)
         .into_iter()
-        .filter(|(_, _, line)| {
-            line.contains("include!(") && line.contains("Top/Interrupt.rs")
-        })
+        .filter(|(_, _, line)| line.contains("include!(") && line.contains("Top/Interrupt.rs"))
         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
         .collect();
     assert_eq!(
@@ -476,9 +479,15 @@ fn the_interrupt_drain_cannot_consult_shield_or_task_state() {
     let leaks: Vec<_> = code_lines(&owner)
         .into_iter()
         .filter(|(_, _, line)| {
-            ["shield", "SHIELD", "task_cancelled", "current_task", "panicking"]
-                .iter()
-                .any(|probe| line.contains(probe))
+            [
+                "shield",
+                "SHIELD",
+                "task_cancelled",
+                "current_task",
+                "panicking",
+            ]
+            .iter()
+            .any(|probe| line.contains(probe))
         })
         .map(|(label, number, line)| format!("{label}:{number}: {}", line.trim()))
         .collect();
@@ -516,8 +525,7 @@ fn no_jit_host_address_escapes_the_generated_boundary() {
 #[test]
 fn concurrency_host_bodies_have_no_bare_panic_sites() {
     let path = repo_root().join("crates/jet-jit/src/Concurrency.rs");
-    let source = fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+    let source = fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}"));
     let marker = "\n#[cfg(test)]\nmod tests {";
     let (production, _) = source.split_once(marker).unwrap_or_else(|| {
         panic!(
@@ -532,9 +540,7 @@ fn concurrency_host_bodies_have_no_bare_panic_sites() {
             if trimmed.starts_with("//") {
                 return None;
             }
-            (line.contains("panic!(")
-                || line.contains(".expect(")
-                || line.contains(".unwrap("))
+            (line.contains("panic!(") || line.contains(".expect(") || line.contains(".unwrap("))
                 .then(|| format!("Concurrency.rs:{}: {}", index + 1, line.trim()))
         })
         .collect();
@@ -817,7 +823,10 @@ fn a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal() {
 
     for (tier, args) in [
         ("default jet run", vec!["run", shown.as_str()]),
-        ("forced interpreter", vec!["run", "--interpret", shown.as_str()]),
+        (
+            "forced interpreter",
+            vec!["run", "--interpret", shown.as_str()],
+        ),
     ] {
         let cache = cache_root.join(tier.replace(' ', "_"));
         fs::create_dir_all(&cache).expect("cache dir");
@@ -878,10 +887,8 @@ fn a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal() {
 /// was bypassed.
 #[test]
 fn cancelled_interpreter_wait_inside_deopt_is_a_diagnostic_not_a_signal() {
-    let root = std::env::temp_dir().join(format!(
-        "jet_no_unwind_deopt_cancel_{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("jet_no_unwind_deopt_cancel_{}", std::process::id()));
     fs::create_dir_all(&root).expect("deopt cancellation fixture dir");
     let file = root.join("cancel_deopt.jet");
     fs::write(

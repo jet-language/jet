@@ -187,8 +187,7 @@ fn llm_digest_regenerates_byte_identically() {
         Some(1)
     );
     assert_eq!(
-        jet_foundation::JSON::json_get(&report, "digest")
-            .and_then(jet_foundation::JSON::json_str),
+        jet_foundation::JSON::json_get(&report, "digest").and_then(jet_foundation::JSON::json_str),
         Some(generated.as_str())
     );
 
@@ -223,7 +222,11 @@ fn llm_digest_regenerates_byte_identically() {
         );
         composed.extend_from_slice(&slice.stdout);
     }
-    assert_eq!(composed, generated.as_bytes(), "digest topic slices drifted");
+    assert_eq!(
+        composed,
+        generated.as_bytes(),
+        "digest topic slices drifted"
+    );
 
     let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["inspect", "digest", "--topic", "diagnostcs"])
@@ -583,8 +586,10 @@ fn cargo_and_flake_versions_match() {
 fn cli_rs_is_declared_module() {
     let root = root();
     let lib_src = fs::read_to_string(root.join("Source/lib.rs")).expect("Source/lib.rs missing");
-    assert!(lib_src.contains("pub use jet_cli::{CLI, Explain, Help};"),
-        "Source/lib.rs must re-export the real jet-cli seam");
+    assert!(
+        lib_src.contains("pub use jet_cli::{CLI, Explain, Help};"),
+        "Source/lib.rs must re-export the real jet-cli seam"
+    );
     assert!(
         !lib_src.contains("mod CLISpec;"),
         "Source/lib.rs declares mod CLISpec — jet-cli owns the only CLI registry"
@@ -600,8 +605,10 @@ fn cli_has_no_second_command_registry() {
     );
 
     let mut registries = Vec::new();
-    for path in rs_files(&root.join("Source")).into_iter()
-        .chain(rs_files(&root.join("crates/jet-cli/src"))) {
+    for path in rs_files(&root.join("Source"))
+        .into_iter()
+        .chain(rs_files(&root.join("crates/jet-cli/src")))
+    {
         if path.extension().and_then(|x| x.to_str()) != Some("rs") {
             continue;
         }
@@ -646,7 +653,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         ("<root>", &["D-DEP1"]),
         ("jet-jit", &["D-JITDEP1", "D-JIT2", "D-DEP1"]),
         ("jet-net", &["D-DEP1"]),
-        ("jetpack", &["D-DEP-CRYPTO1=A"]),
+        ("jetpack", &["D-DEP-CRYPTO1=A", "D-CODECS1"]),
         // D-DX5-HOOK1: compiler-extension Wasmtime host runs only in the
         // sibling binary package; jetpack's compiler-linked library stays clean.
         ("jetpack-bin", &["D-DEP1", "D-DX5-HOOK1"]),
@@ -662,8 +669,8 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // history.json while remaining law (Tower archive / #461).
     let tower_live = fs::read_to_string(root.join("plugins/tower/.tower/tower.json"))
         .expect("plugins/tower/.tower/tower.json missing");
-    let tower_history = fs::read_to_string(root.join("plugins/tower/.tower/history.json"))
-        .unwrap_or_default();
+    let tower_history =
+        fs::read_to_string(root.join("plugins/tower/.tower/history.json")).unwrap_or_default();
     let tower = format!("{tower_live}\n{tower_history}");
 
     for (crate_name, ids) in EXEMPTIONS {
@@ -697,7 +704,13 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // D-ARCH-SOURCE1=A: CLI/interactive seams are not optional aliases hidden in
     // the root crate. Their manifests must exist and therefore pass this same
     // path-only dependency audit.
-    for required in ["jet-repl", "jet-debug", "jet-cli", "jet-canvas", "jet-devserver"] {
+    for required in [
+        "jet-repl",
+        "jet-debug",
+        "jet-cli",
+        "jet-canvas",
+        "jet-devserver",
+    ] {
         assert!(
             crate_manifests.iter().any(|(name, _)| name == required),
             "D-ARCH-SOURCE1 requires the {required} workspace seam"
@@ -705,8 +718,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     }
     let root_lib = fs::read_to_string(root.join("Source/lib.rs")).expect("Source/lib.rs missing");
     assert!(
-        root_lib.contains("pub use jet_debug as Debug;")
-            && !root.join("Source/Debug").exists(),
+        root_lib.contains("pub use jet_debug as Debug;") && !root.join("Source/Debug").exists(),
         "D-ARCH-SOURCE1 requires jet-debug ownership, not a root Debug wrapper"
     );
     assert!(
@@ -723,11 +735,12 @@ fn compiler_seam_crates_have_only_path_dependencies() {
             && !root.join("Source/Canvas").exists(),
         "D-ARCH-SOURCE1 requires jet-devserver ownership of Canvas semantics, not root wrappers"
     );
-    let root_main = fs::read_to_string(root.join("Source/main.rs")).expect("Source/main.rs missing");
-    let root_compile =
-        fs::read_to_string(root.join("Source/CmdCompile.rs")).expect("Source/CmdCompile.rs missing");
-    let devserver =
-        fs::read_to_string(root.join("crates/jet-devserver/src/lib.rs")).expect("jet-devserver missing");
+    let root_main =
+        fs::read_to_string(root.join("Source/main.rs")).expect("Source/main.rs missing");
+    let root_compile = fs::read_to_string(root.join("Source/CmdCompile.rs"))
+        .expect("Source/CmdCompile.rs missing");
+    let devserver = fs::read_to_string(root.join("crates/jet-devserver/src/lib.rs"))
+        .expect("jet-devserver missing");
     assert!(
         !root.join("Source/CmdDevWeb.rs").exists()
             && !root_main.contains("mod CmdDevWeb;")
@@ -759,17 +772,17 @@ fn compiler_seam_crates_have_only_path_dependencies() {
 
     let mut offenders = Vec::new();
     for (name, manifest) in &crate_manifests {
-        let text = fs::read_to_string(manifest).unwrap_or_else(|_| panic!("{} missing", manifest.display()));
+        let text = fs::read_to_string(manifest)
+            .unwrap_or_else(|_| panic!("{} missing", manifest.display()));
         let exemption = EXEMPTIONS.iter().find(|(n, _)| n == name);
         for (line, context, has_path) in dependency_lines_with_context(&text) {
             if has_path {
                 continue;
             }
             match exemption {
-                Some((_, ids))
-                    if ids
-                        .iter()
-                        .any(|id| exact_decision_token(&context, id)) => continue,
+                Some((_, ids)) if ids.iter().any(|id| exact_decision_token(&context, id)) => {
+                    continue
+                }
                 Some((_, ids)) => offenders.push(format!(
                     "{name}: {} — external dep must cite one of {ids:?} in a comment \
                      directly above the dependency line",
@@ -778,7 +791,8 @@ fn compiler_seam_crates_have_only_path_dependencies() {
                 None => offenders.push(format!(
                     "{name}: {} — not an exempted crate; I6 forbids external \
                      dependencies in compiler seam crates (add to EXEMPTIONS with a \
-                     ratified decision ID if this is intentional)", line
+                     ratified decision ID if this is intentional)",
+                    line
                 )),
             }
         }
@@ -793,7 +807,9 @@ fn compiler_seam_crates_have_only_path_dependencies() {
 
 /// Returns the `## Ratified` section of syntax-decisions.md (up to the next `## ` heading).
 fn section_between_pub(docs: &str) -> &str {
-    let from = docs.find("## Ratified").expect("docs/spec/syntax-decisions.md missing ## Ratified");
+    let from = docs
+        .find("## Ratified")
+        .expect("docs/spec/syntax-decisions.md missing ## Ratified");
     let rest = &docs[from + "## Ratified".len()..];
     let to = rest[..].find("\n## ").unwrap_or(rest.len());
     &rest[..to]
@@ -971,7 +987,10 @@ fn preceding_comments(lines: &[&str], index: usize) -> String {
         .take_while(|line| line.starts_with('#'))
         .collect();
     comments.reverse();
-    comments.into_iter().map(|line| format!("{line}\n")).collect()
+    comments
+        .into_iter()
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 fn inline_table_has_key(value: &str, wanted: &str) -> bool {
@@ -1058,7 +1077,11 @@ fn dependency_scanner_covers_target_tables_and_one_dependency_per_comment() {
                 "# D-FIVE=E\n".into(),
                 false,
             ),
-            ("target_remote: version = \"2\"".into(), String::new(), false),
+            (
+                "target_remote: version = \"2\"".into(),
+                String::new(),
+                false
+            ),
         ]
     );
 }
@@ -1219,9 +1242,7 @@ fn diagnostic_constructor_lines(source: &str) -> Vec<usize> {
             i = end;
             continue;
         }
-        let string_prefix = if bytes[i..].starts_with(b"b\"")
-            || bytes[i..].starts_with(b"c\"")
-        {
+        let string_prefix = if bytes[i..].starts_with(b"b\"") || bytes[i..].starts_with(b"c\"") {
             Some(2)
         } else if bytes[i] == b'"' {
             Some(1)
@@ -1248,9 +1269,7 @@ fn diagnostic_constructor_lines(source: &str) -> Vec<usize> {
         if bytes[i] == b'_' || bytes[i].is_ascii_alphabetic() {
             let start = i;
             i += 1;
-            while i < bytes.len()
-                && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric())
-            {
+            while i < bytes.len() && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric()) {
                 i += 1;
             }
             if &source[start..i] == "Diagnostic" {
@@ -1324,7 +1343,10 @@ fn compiler_code_has_no_include_splices() {
     );
 
     let mut dirs = vec![root.join("Source")];
-    for entry in fs::read_dir(root.join("crates")).expect("crates/ missing").flatten() {
+    for entry in fs::read_dir(root.join("crates"))
+        .expect("crates/ missing")
+        .flatten()
+    {
         let path = entry.path();
         if path.is_dir() {
             dirs.push(path);
@@ -1405,8 +1427,8 @@ fn stdlib_api_laws_doc_exists() {
 
     let doc = fs::read_to_string(&path).expect("stdlib API law doc must be readable");
     let rule_ids = [
-        "C1", "C2", "C3", "D1", "D2", "D3", "D4", "F1", "F2", "F3", "T1", "T2",
-        "T3", "N1", "N2", "L-A", "L-B", "L-C", "L-D", "E1", "E2",
+        "C1", "C2", "C3", "D1", "D2", "D3", "D4", "F1", "F2", "F3", "T1", "T2", "T3", "N1", "N2",
+        "L-A", "L-B", "L-C", "L-D", "E1", "E2",
     ];
 
     let doctrine = doc
@@ -1428,20 +1450,25 @@ fn stdlib_api_laws_doc_exists() {
             continue;
         }
         saw_table_row = true;
-        let cells: Vec<_> = line
-            .trim_matches('|')
-            .split('|')
-            .map(str::trim)
-            .collect();
+        let cells: Vec<_> = line.trim_matches('|').split('|').map(str::trim).collect();
         let id = cells.first().copied().unwrap_or_default();
         if id == "---" {
             continue;
         }
-        assert!(rule_ids.contains(&id), "unexpected extended-doctrine row `{id}`");
-        assert!(table_ids.insert(id), "duplicate extended-doctrine row `{id}`");
+        assert!(
+            rule_ids.contains(&id),
+            "unexpected extended-doctrine row `{id}`"
+        );
+        assert!(
+            table_ids.insert(id),
+            "duplicate extended-doctrine row `{id}`"
+        );
     }
     for id in rule_ids {
-        assert!(table_ids.contains(id), "missing extended-doctrine row `{id}`");
+        assert!(
+            table_ids.contains(id),
+            "missing extended-doctrine row `{id}`"
+        );
     }
 
     for required_text in [
@@ -1466,7 +1493,10 @@ fn stdlib_api_laws_doc_exists() {
         "#1472",
         "#1465",
     ] {
-        assert!(doc.contains(required_text), "stdlib API law doc is missing `{required_text}`");
+        assert!(
+            doc.contains(required_text),
+            "stdlib API law doc is missing `{required_text}`"
+        );
     }
     for relation in [
         "| L1 naming | N1, N2 |",
@@ -1475,7 +1505,10 @@ fn stdlib_api_laws_doc_exists() {
         "| L8 one way | D3, L-D, E1 |",
         "| new ground | C1–C3, D1, D2, D4, T1, T3, E2 |",
     ] {
-        assert!(doc.contains(relation), "Part A relation map is missing `{relation}`");
+        assert!(
+            doc.contains(relation),
+            "Part A relation map is missing `{relation}`"
+        );
     }
     assert!(
         !doc.contains("None recorded after the Core namespace cutover"),
@@ -1503,10 +1536,17 @@ fn stdlib_api_laws_doc_exists() {
                 .collect()
         })
         .expect("known drift must carry its table");
-    assert_eq!(drift_rows.len(), 9, "known drift inventory changed unexpectedly");
+    assert_eq!(
+        drift_rows.len(),
+        9,
+        "known drift inventory changed unexpectedly"
+    );
     for row in &drift_rows {
         assert!(row.len() >= 4, "known drift row must have four cells");
-        assert!(row[3].contains('#'), "known drift row must name a card: {row:?}");
+        assert!(
+            row[3].contains('#'),
+            "known drift row must name a card: {row:?}"
+        );
     }
 
     let audit = doc
@@ -1534,11 +1574,18 @@ fn stdlib_api_laws_doc_exists() {
                 .collect()
         })
         .expect("D4 audit must carry its table");
-    assert_eq!(audit_rows.len(), 7, "D4 audit inventory changed unexpectedly");
+    assert_eq!(
+        audit_rows.len(),
+        7,
+        "D4 audit inventory changed unexpectedly"
+    );
     for row in &audit_rows {
         assert!(row.len() >= 4, "D4 audit row must have four cells");
         if row[2].contains("Existing drift") {
-            assert!(row[3].contains('#'), "D4 drift row must name a card: {row:?}");
+            assert!(
+                row[3].contains('#'),
+                "D4 drift row must name a card: {row:?}"
+            );
         }
     }
     for surface in [
@@ -1574,10 +1621,17 @@ fn stdlib_api_laws_doc_exists() {
                 .collect()
         })
         .expect("defaults section must carry its table");
-    assert_eq!(default_rows.len(), 9, "defaults inventory changed unexpectedly");
+    assert_eq!(
+        default_rows.len(),
+        9,
+        "defaults inventory changed unexpectedly"
+    );
     for row in &default_rows {
         assert!(row.len() >= 3, "defaults row must have three cells");
-        assert!(!row[2].is_empty(), "defaults row must name explicit control: {row:?}");
+        assert!(
+            !row[2].is_empty(),
+            "defaults row must name explicit control: {row:?}"
+        );
     }
     for door in [
         "`files.read(path)`",
@@ -1590,7 +1644,10 @@ fn stdlib_api_laws_doc_exists() {
         "`time.now`",
         "`crypto`",
     ] {
-        assert!(defaults.contains(door), "defaults table is missing `{door}`");
+        assert!(
+            defaults.contains(door),
+            "defaults table is missing `{door}`"
+        );
     }
 
     let review = doc
@@ -1608,12 +1665,14 @@ fn stdlib_api_laws_doc_exists() {
         "Drift cards:",
         "Required evidence:",
     ] {
-        assert!(review.contains(field), "review template is missing `{field}`");
+        assert!(
+            review.contains(field),
+            "review template is missing `{field}`"
+        );
     }
     for id in [
-        "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "C1", "C2", "C3", "D1", "D2",
-        "D3", "D4", "F1", "F2", "F3", "T1", "T2", "T3", "N1", "N2", "L-A", "L-B", "L-C",
-        "L-D", "E1", "E2",
+        "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "C1", "C2", "C3", "D1", "D2", "D3", "D4",
+        "F1", "F2", "F3", "T1", "T2", "T3", "N1", "N2", "L-A", "L-B", "L-C", "L-D", "E1", "E2",
     ] {
         let marker = format!("`{id}`");
         assert_eq!(
@@ -1634,7 +1693,9 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
     let vocabulary = fs::read_to_string(&vocabulary_path).expect("vocabulary page is readable");
     for heading in ["Stream", "Reader", "Event", "Collecting loop"] {
         assert_eq!(
-            vocabulary.matches(&format!("## {heading}\n\nDefinition:")).count(),
+            vocabulary
+                .matches(&format!("## {heading}\n\nDefinition:"))
+                .count(),
             1,
             "vocabulary page must define `{heading}` exactly once"
         );
@@ -1678,7 +1739,9 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
     let docs_root = fs::canonicalize(docs_root).expect("docs path canonical");
     let mut targets = HashSet::new();
     for source in markdown {
-        let Ok(text) = fs::read_to_string(&source) else { continue };
+        let Ok(text) = fs::read_to_string(&source) else {
+            continue;
+        };
         for target in markdown_link_targets(&text) {
             let target = target.trim_matches('<').trim_matches('>');
             let target = target.split(['#', '?']).next().unwrap_or_default();
@@ -1686,7 +1749,9 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
                 continue;
             }
             let candidate = source.parent().unwrap_or(Path::new(".")).join(target);
-            let Ok(candidate) = fs::canonicalize(candidate) else { continue };
+            let Ok(candidate) = fs::canonicalize(candidate) else {
+                continue;
+            };
             if !candidate.starts_with(&docs_root)
                 || candidate.extension().and_then(|ext| ext.to_str()) != Some("md")
             {
@@ -1698,7 +1763,9 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
 
     let mut violations = Vec::new();
     for target in targets {
-        let Ok(text) = fs::read_to_string(&target) else { continue };
+        let Ok(text) = fs::read_to_string(&target) else {
+            continue;
+        };
         if target != vocabulary_path {
             let retired = retired_vocabulary_senses(&text);
             if !retired.is_empty() {
@@ -1731,8 +1798,8 @@ fn vocabulary_page_has_one_definition_and_no_retired_senses() {
 #[test]
 fn concurrency_spec_states_deadlock_stance() {
     let root = root();
-    let spec = fs::read_to_string(root.join("docs/spec/spec.md"))
-        .expect("language spec is readable");
+    let spec =
+        fs::read_to_string(root.join("docs/spec/spec.md")).expect("language spec is readable");
     let architecture = fs::read_to_string(root.join("docs/spec/architecture.md"))
         .expect("architecture spec is readable");
     let heading = "### Deadlock stance";
@@ -1770,7 +1837,9 @@ fn concurrency_spec_states_deadlock_stance() {
     }
 
     assert_eq!(
-        architecture.matches("[Deadlock stance](spec.md#deadlock-stance)").count(),
+        architecture
+            .matches("[Deadlock stance](spec.md#deadlock-stance)")
+            .count(),
         1,
         "architecture must link the canonical Deadlock section"
     );
@@ -1829,7 +1898,10 @@ fn accessibility_audit_findings_have_live_cards() {
             "accessibility findings row must have id, surface, screen_reader, state, and card: {line}"
         );
         for (name, cell) in expected_header.iter().zip(&cells) {
-            assert!(!cell.is_empty(), "accessibility finding {name} must not be empty: {line}");
+            assert!(
+                !cell.is_empty(),
+                "accessibility finding {name} must not be empty: {line}"
+            );
         }
         assert!(
             finding_ids.insert(cells[0].clone()),
@@ -1844,7 +1916,10 @@ fn accessibility_audit_findings_have_live_cards() {
         );
         rows.push(cells);
     }
-    assert!(!rows.is_empty(), "accessibility audit must list at least one finding");
+    assert!(
+        !rows.is_empty(),
+        "accessibility audit must list at least one finding"
+    );
 
     for row in rows {
         if row[3].trim().eq_ignore_ascii_case("pass") {
@@ -1870,13 +1945,7 @@ fn accessibility_audit_findings_have_live_cards() {
                 card
             );
             let output = Command::new("node")
-                .args([
-                    "plugins/tower/tower.mjs",
-                    "card",
-                    "show",
-                    card,
-                    "--json",
-                ])
+                .args(["plugins/tower/tower.mjs", "card", "show", card, "--json"])
                 .current_dir(&root)
                 .output()
                 .expect("Tower card lookup must run");
@@ -1891,9 +1960,7 @@ fn accessibility_audit_findings_have_live_cards() {
             let report = jet_foundation::JSON::parse_json(json.trim()).unwrap_or_else(|error| {
                 panic!(
                     "Tower lookup for {} returned invalid JSON: {:?}\n{}",
-                    row[0],
-                    error,
-                    json
+                    row[0], error, json
                 )
             });
             let resolved_num = jet_foundation::JSON::json_get(&report, "num")
@@ -1989,7 +2056,9 @@ fn markdown_table_cells(line: &str) -> Vec<String> {
     let line = line.trim();
     let line = line.strip_prefix('|').unwrap_or(line);
     let line = line.strip_suffix('|').unwrap_or(line);
-    line.split('|').map(|cell| cell.trim().to_string()).collect()
+    line.split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }
 
 fn audit_card_refs(cell: &str) -> Vec<&str> {
@@ -2003,7 +2072,9 @@ fn audit_card_refs(cell: &str) -> Vec<&str> {
 }
 
 fn collect_markdown_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {

@@ -11,8 +11,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Traits::TraitRegistry;
 use crate::AST::{
     AccessConvention, CallablePolicyChain, Deprecation, Expr, ExternFn, Func, KnowledgeVector,
-    Marker, QuantityKind, Stmt, StrPart, Type,
-    VariantPayload,
+    Marker, QuantityKind, Stmt, StrPart, Type, VariantPayload,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -201,27 +200,29 @@ impl UnitFact {
     }
 
     fn conversion_is_total_to(&self, destination: &Self) -> bool {
-        self.conversion_parts_to(destination).is_some_and(|(scale, offset)| {
-            scale == crate::AST::UnitRatio::integer(1)
-                && offset == crate::AST::UnitRatio::zero()
-        })
+        self.conversion_parts_to(destination)
+            .is_some_and(|(scale, offset)| {
+                scale == crate::AST::UnitRatio::integer(1)
+                    && offset == crate::AST::UnitRatio::zero()
+            })
     }
 
     fn conversion_is_finite_to(&self, destination: &Self) -> bool {
-        self.conversion_parts_to(destination).is_some_and(|(scale, offset)| {
-            [scale, offset].into_iter().all(|value| {
-                value
-                    .num
-                    .to_string()
-                    .parse::<f64>()
-                    .is_ok_and(f64::is_finite)
-                    && value
-                        .den
+        self.conversion_parts_to(destination)
+            .is_some_and(|(scale, offset)| {
+                [scale, offset].into_iter().all(|value| {
+                    value
+                        .num
                         .to_string()
                         .parse::<f64>()
                         .is_ok_and(f64::is_finite)
+                        && value
+                            .den
+                            .to_string()
+                            .parse::<f64>()
+                            .is_ok_and(f64::is_finite)
+                })
             })
-        })
     }
 
     fn converted_value_is_exact_to(&self, destination: &Self, value: f64) -> bool {
@@ -325,7 +326,9 @@ impl TypeRegistry {
     }
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
-        self.unit_facts.get(name).and_then(|fact| fact.dimension.clone())
+        self.unit_facts
+            .get(name)
+            .and_then(|fact| fact.dimension.clone())
     }
 
     pub(crate) fn is_unit_type(&self, name: &str) -> bool {
@@ -357,10 +360,7 @@ impl TypeRegistry {
     }
 
     /// D-DEFAULT-SHAPE1=B: default expressions for omitted struct-literal fields.
-    pub(crate) fn field_defaults(
-        &self,
-        name: &str,
-    ) -> Option<&HashMap<String, crate::AST::Expr>> {
+    pub(crate) fn field_defaults(&self, name: &str) -> Option<&HashMap<String, crate::AST::Expr>> {
         self.field_defaults.get(name)
     }
 
@@ -772,26 +772,29 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
 }
 
 fn foreign_thread_safe_expr(e: &Expr) -> bool {
-        match e {
-            Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Ident(..) => true,
-            Expr::Unary(_, a, _) | Expr::Copy(a, _) => foreign_thread_safe_expr(a),
-            Expr::Binary(_, a, b, _) => foreign_thread_safe_expr(a) && foreign_thread_safe_expr(b),
-            Expr::CompareChain { operands, .. } => operands.iter().all(foreign_thread_safe_expr),
-            _ => false,
-        }
+    match e {
+        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Ident(..) => true,
+        Expr::Unary(_, a, _) | Expr::Copy(a, _) => foreign_thread_safe_expr(a),
+        Expr::Binary(_, a, b, _) => foreign_thread_safe_expr(a) && foreign_thread_safe_expr(b),
+        Expr::CompareChain { operands, .. } => operands.iter().all(foreign_thread_safe_expr),
+        _ => false,
+    }
 }
 
 fn foreign_thread_safe_stmt(s: &Stmt) -> bool {
-        match s {
-            Stmt::Return(v, _) => v.as_ref().is_none_or(foreign_thread_safe_expr),
-            Stmt::Expr(e) => foreign_thread_safe_expr(e),
-            Stmt::Val(b) => foreign_thread_safe_expr(&b.init),
-            _ => false,
-        }
+    match s {
+        Stmt::Return(v, _) => v.as_ref().is_none_or(foreign_thread_safe_expr),
+        Stmt::Expr(e) => foreign_thread_safe_expr(e),
+        Stmt::Val(b) => foreign_thread_safe_expr(&b.init),
+        _ => false,
+    }
 }
 
 fn foreign_thread_safe_func(f: &Func) -> bool {
-    f.is_pure && f.type_params.is_empty() && f.pre.is_empty() && f.post.is_empty()
+    f.is_pure
+        && f.type_params.is_empty()
+        && f.pre.is_empty()
+        && f.post.is_empty()
         && f.body.iter().all(foreign_thread_safe_stmt)
 }
 
@@ -851,7 +854,10 @@ fn find_forward_refs_inner(
         let crate::AST::Expr::Ident(name, span) = node else {
             return;
         };
-        if let Some(idx) = all_param_names.iter().position(|candidate| candidate == name) {
+        if let Some(idx) = all_param_names
+            .iter()
+            .position(|candidate| candidate == name)
+        {
             if idx >= default_param_idx {
                 found.push((name.clone(), *span));
             }
@@ -978,7 +984,10 @@ pub(crate) struct ViewOwnerId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewProjection {
     Field(String),
-    Index { value: Option<i64>, span: Span },
+    Index {
+        value: Option<i64>,
+        span: Span,
+    },
     Range {
         start: Option<i64>,
         end: Option<i64>,
@@ -1081,18 +1090,41 @@ impl ViewPlace {
         for (left, right) in self.projections.iter().zip(&other.projections) {
             match (left, right) {
                 (ViewProjection::Field(a), ViewProjection::Field(b)) if a != b => return false,
-                (ViewProjection::Index { value: Some(a), .. }, ViewProjection::Index { value: Some(b), .. }) if a != b => return false,
                 (
-                    ViewProjection::Index { value: Some(index), .. },
-                    ViewProjection::Range { start: Some(start), end: Some(end), .. },
+                    ViewProjection::Index { value: Some(a), .. },
+                    ViewProjection::Index { value: Some(b), .. },
+                ) if a != b => return false,
+                (
+                    ViewProjection::Index {
+                        value: Some(index), ..
+                    },
+                    ViewProjection::Range {
+                        start: Some(start),
+                        end: Some(end),
+                        ..
+                    },
                 )
                 | (
-                    ViewProjection::Range { start: Some(start), end: Some(end), .. },
-                    ViewProjection::Index { value: Some(index), .. },
+                    ViewProjection::Range {
+                        start: Some(start),
+                        end: Some(end),
+                        ..
+                    },
+                    ViewProjection::Index {
+                        value: Some(index), ..
+                    },
                 ) if index < start || index > end => return false,
                 (
-                    ViewProjection::Range { start: Some(a_start), end: Some(a_end), .. },
-                    ViewProjection::Range { start: Some(b_start), end: Some(b_end), .. },
+                    ViewProjection::Range {
+                        start: Some(a_start),
+                        end: Some(a_end),
+                        ..
+                    },
+                    ViewProjection::Range {
+                        start: Some(b_start),
+                        end: Some(b_end),
+                        ..
+                    },
                 ) if a_end < b_start || b_end < a_start => return false,
                 (ViewProjection::Fresh(a), ViewProjection::Fresh(b)) if a != b => return false,
                 _ => {}
@@ -1173,7 +1205,12 @@ mod view_fact_graph_tests {
         push_view_fact(&mut graph, "outer", outer);
         push_view_fact(&mut graph, "inner", inner);
 
-        CheckerOwnership::invalidate_view_owner(&mut graph, &inner_owner, "reset", Span::new(40, 41));
+        CheckerOwnership::invalidate_view_owner(
+            &mut graph,
+            &inner_owner,
+            "reset",
+            Span::new(40, 41),
+        );
 
         assert!(current_view_fact(&graph, "outer")
             .unwrap()
@@ -1189,8 +1226,10 @@ mod view_fact_graph_tests {
     fn different_fields_do_not_alias() {
         let mut a = fact(1, 1, ViewKind::List).place;
         let mut b = a.clone();
-        a.projections.push(ViewProjection::Field("left".to_string()));
-        b.projections.push(ViewProjection::Field("right".to_string()));
+        a.projections
+            .push(ViewProjection::Field("left".to_string()));
+        b.projections
+            .push(ViewProjection::Field("right".to_string()));
         assert!(!a.overlaps(&b));
     }
 
@@ -1198,8 +1237,14 @@ mod view_fact_graph_tests {
     fn dynamic_indexes_are_conservatively_overlapping() {
         let mut a = fact(1, 1, ViewKind::List).place;
         let mut b = a.clone();
-        a.projections.push(ViewProjection::Index { value: None, span: Span::new(20, 21) });
-        b.projections.push(ViewProjection::Index { value: None, span: Span::new(30, 31) });
+        a.projections.push(ViewProjection::Index {
+            value: None,
+            span: Span::new(20, 21),
+        });
+        b.projections.push(ViewProjection::Index {
+            value: None,
+            span: Span::new(30, 31),
+        });
         assert!(a.overlaps(&b));
     }
 
@@ -1368,8 +1413,7 @@ pub(crate) struct ModuleState {
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
     /// marker and `apply` validation.
-    callable_policy_declarations:
-        BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
+    callable_policy_declarations: BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
     /// `math.double(x)` resolves to `__jet_math__double(x)` when `math` is in here.
@@ -1425,12 +1469,12 @@ pub(crate) fn type_uses_default_int(ty: &Type) -> bool {
         | Type::Tagged { inner, .. }
         | Type::InlineRange { base: inner, .. }
         | Type::Quantity { base: inner, .. } => type_uses_default_int(inner),
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            type_uses_default_int(key) || type_uses_default_int(value)
-        }
-        Type::Tuple(fields) => fields
-            .iter()
-            .any(|(_, field)| type_uses_default_int(field)),
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => type_uses_default_int(key) || type_uses_default_int(value),
+        Type::Tuple(fields) => fields.iter().any(|(_, field)| type_uses_default_int(field)),
         Type::Union(members) => members.iter().any(type_uses_default_int),
         Type::Fn { params, ret, .. } => {
             params.iter().any(type_uses_default_int)
@@ -1836,10 +1880,7 @@ impl<'a> Checker<'a> {
     /// Project every nominal leaf in a diagnostic type through the same
     /// source-name ledger used by hover and completion.
     pub(crate) fn display_type(&self, ty: &Type) -> Type {
-        ty.map_named_types(&|name| {
-            self.name_ledger
-                .display_path(self.module_idx, name, None)
-        })
+        ty.map_named_types(&|name| self.name_ledger.display_path(self.module_idx, name, None))
     }
 
     pub(crate) fn enter_source_nesting(&mut self, span: Span) -> bool {
@@ -1925,7 +1966,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn is_unit_type_name(&self, name: &str) -> bool {
-        self.unit_fact_for_type(&Type::Named(name.to_string())).is_some()
+        self.unit_fact_for_type(&Type::Named(name.to_string()))
+            .is_some()
     }
 
     pub(crate) fn is_unit_type(&self, ty: &Type) -> bool {
@@ -1945,15 +1987,16 @@ impl<'a> Checker<'a> {
             QuantityKind::Point => format!("{stem}Point"),
             QuantityKind::Delta => format!("{stem}Delta"),
         };
-        let candidate = Self::split_type_name(source_name)
-            .0
-            .map_or_else(|| leaf.clone(), |namespace| {
+        let candidate = Self::split_type_name(source_name).0.map_or_else(
+            || leaf.clone(),
+            |namespace| {
                 if namespace.contains("::") {
                     format!("{namespace}::{leaf}")
                 } else {
                     format!("{namespace}.{leaf}")
                 }
-            });
+            },
+        );
         self.unit_fact_for_type(&Type::Named(candidate.clone()))
             .filter(|(_, other)| {
                 other.package == fact.package && other.family == fact.family && other.kind == kind
@@ -1976,11 +2019,11 @@ impl<'a> Checker<'a> {
                         .flatten()
                         .flat_map(|module| module.registry.unit_facts.values()),
                 ))
-                    .any(|fact| {
-                        fact.family == dimension
-                            && fact.kind == QuantityKind::Linear
-                            && fact.dimension.as_ref() == Some(&actual_dimension)
-                    });
+                .any(|fact| {
+                    fact.family == dimension
+                        && fact.kind == QuantityKind::Linear
+                        && fact.dimension.as_ref() == Some(&actual_dimension)
+                });
         }
         self.trait_reg.type_implements_trait(ty, bound)
     }
@@ -2139,7 +2182,11 @@ impl<'a> Checker<'a> {
             })
     }
 
-    pub(crate) fn audited_gate_allowed(&mut self, key: crate::Policy::PolicyKey, span: Span) -> bool {
+    pub(crate) fn audited_gate_allowed(
+        &mut self,
+        key: crate::Policy::PolicyKey,
+        span: Span,
+    ) -> bool {
         let declarations = self
             .policy_declarations
             .iter()
@@ -2150,8 +2197,7 @@ impl<'a> Checker<'a> {
                         crate::Policy::PolicyScope::Organization
                             | crate::Policy::PolicyScope::Package
                             | crate::Policy::PolicyScope::Module
-                    )
-                        || declaration.target == Some(self.current_function_span)
+                    ) || declaration.target == Some(self.current_function_span)
                         || declaration.target == Some(span))
             })
             .cloned()
@@ -2169,7 +2215,11 @@ impl<'a> Checker<'a> {
             }
             Ok(_) => true,
             Err(_error) => {
-                let code = if self.gates.allows(key) { "E3415" } else { "E0355" };
+                let code = if self.gates.allows(key) {
+                    "E3415"
+                } else {
+                    "E0355"
+                };
                 self.diags.push(Diagnostic::error(
                     code,
                     format!("the `{}` gate is denied by effective policy", key.name()),
@@ -2209,7 +2259,11 @@ impl<'a> Checker<'a> {
         destination: &UnitFact,
         span: Span,
     ) -> Diagnostic {
-        let measured = if source.is_measured() { source } else { destination };
+        let measured = if source.is_measured() {
+            source
+        } else {
+            destination
+        };
         let crate::AST::UnitScaleProvenance::Measured {
             central_value,
             standard_uncertainty,
@@ -2275,11 +2329,8 @@ impl<'a> Checker<'a> {
             }
         }
         if self.explicit_units_enabled() && destination_name != source_name {
-            self.diags.push(self.explicit_units_diagnostic(
-                destination_name,
-                source_name,
-                span,
-            ));
+            self.diags
+                .push(self.explicit_units_diagnostic(destination_name, source_name, span));
             true
         } else {
             false
@@ -2317,8 +2368,8 @@ mod CheckerCoreLib;
 mod CheckerFieldPolicy;
 mod CheckerInfer;
 mod CheckerInline;
-mod CheckerKernel;
 mod CheckerItems;
+mod CheckerKernel;
 mod CheckerMarkers;
 mod CheckerOwnership;
 mod CheckerPatchable;
@@ -2326,45 +2377,47 @@ mod CheckerSchedule;
 mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod CheckerValidate;
-pub mod Diagnostics;
 mod CognitiveComplexity;
+pub mod Diagnostics;
 mod Edition;
 // The REPL's effect-name gate reads parse_effect_name and effect_covers
 // directly, the same way it reads ApiFreeze and GateLedger above.
+mod BudgetSpecs;
 pub mod Effects;
-mod FlowFacts;
-mod MemoryFacts;
-mod MemberSpread;
-pub mod UnsafeObligations;
-pub mod GateLedger;
 mod FFI;
+mod FlowFacts;
+pub mod GateLedger;
 pub mod HotSwap;
+mod MemberSpread;
+mod MemoryFacts;
 mod OSTarget;
+mod PolicyFacts;
+mod Prelude;
 mod Protocol;
 mod Purity;
 mod Registration;
 pub mod Schema;
-/// D-CONC-SHARE1=A: the one plain-access desugar for `Shared<T>`.
-mod SharedAccess;
 mod SchemaMigration;
 mod ScopeMembers;
-mod PolicyFacts;
-mod Prelude;
-mod BudgetSpecs;
-pub use BudgetSpecs::{collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle, BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity, BudgetRawQuantity, BudgetSpec, CompileWorkloadFact, LocatedBudgetSpec};
+/// D-CONC-SHARE1=A: the one plain-access desugar for `Shared<T>`.
+mod SharedAccess;
+pub mod UnsafeObligations;
+pub use BudgetSpecs::{
+    collect_budget_specs, collect_budget_specs_bundle, collect_located_budget_specs_bundle,
+    BudgetApplicability, BudgetAxis, BudgetComparisonFact, BudgetLimitFact, BudgetQuantity,
+    BudgetRawQuantity, BudgetSpec, CompileWorkloadFact, LocatedBudgetSpec,
+};
+mod App;
 mod CheckerReferences;
+mod KnowledgeLoss;
 mod State;
 mod Taint;
-mod KnowledgeLoss;
 mod TargetSurface;
-mod App;
 mod WebPartition;
 
 pub(crate) use KnowledgeLoss::{
-    allows_gate as knowledge_gate_allows,
-    requires_gate as knowledge_loss_requires_gate,
-    KnowledgeGate,
-    KnowledgePlane,
+    allows_gate as knowledge_gate_allows, requires_gate as knowledge_loss_requires_gate,
+    KnowledgeGate, KnowledgePlane,
 };
 
 pub(crate) use Bundle::*;
@@ -2387,16 +2440,16 @@ pub use CheckerCoreLib::*;
 pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
 pub(crate) use CheckerValidate::*;
-pub(crate) use Diagnostics::*;
 pub use CognitiveComplexity::{cognitive_complexity_reports, CognitiveComplexityReport};
 /// Shared by TIR lowering: a loop consumes any collection whose element type
 /// requires owned iteration.
 pub use Diagnostics::type_requires_owned_iteration;
+pub(crate) use Diagnostics::*;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
-pub use TargetSurface::check_target_surface;
 pub use Registration::*;
 pub(crate) use Taint::check_func_taint;
+pub use TargetSurface::check_target_surface;
 pub(crate) use FFI::*;
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{check_items_state, StateTable};
@@ -2409,19 +2462,17 @@ pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
-    bundle_has_comptime_evaluation, check_bundle, check_bundle_gates, check_bundle_for_output,
-    check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
-    check_bundle_freestanding_with_gates,
+    build_entry_signature_is_valid, bundle_has_comptime_evaluation, check_bundle,
+    check_bundle_for_output, check_bundle_for_output_opts, check_bundle_freestanding,
+    check_bundle_freestanding_with_gates, check_bundle_gates, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
-    build_entry_signature_is_valid, is_build_entry, specialize_function_types,
-    strip_build_only_entries,
-    IncrementalSemaCache, IncrementalSemaStats,
+    is_build_entry, specialize_function_types, strip_build_only_entries, IncrementalSemaCache,
+    IncrementalSemaStats,
 };
 pub use Effects::{EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{
     check_memory_facts, project_memory_fact, MemoryCall, MemoryEvent, MemoryEventKind, MemoryFact,
-    MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary,
-    OpenMemoryDispatch,
+    MemoryFactDeclaration, MemoryPolicyRegion, MemoryProjection, MemorySummary, OpenMemoryDispatch,
 };
 pub use PolicyFacts::{
     collect_policy_facts, collect_policy_facts_from_program, PolicyDomain, PolicyFact,

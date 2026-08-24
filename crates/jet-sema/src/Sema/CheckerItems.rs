@@ -1,7 +1,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Syntax;
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
+use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, Call, EnumLitArg, Expr, Pattern, StrMatchPart, StructPatField, Type,
     VariantPayload,
@@ -20,7 +20,10 @@ pub(crate) fn bin_bits_type(width: u8) -> Type {
     } else {
         64
     };
-    Type::IntN { signed: false, bits }
+    Type::IntN {
+        signed: false,
+        bits,
+    }
 }
 
 impl<'a> Checker<'a> {
@@ -28,11 +31,7 @@ impl<'a> Checker<'a> {
     /// the registry, so the foundation predicate handles only structural
     /// shapes and scalar leaves; this checker owns the recursive nominal walk.
     pub(crate) fn map_key_type_eligible(&self, ty: &Type) -> bool {
-        fn visit(
-            checker: &Checker<'_>,
-            ty: &Type,
-            active: &mut HashSet<String>,
-        ) -> bool {
+        fn visit(checker: &Checker<'_>, ty: &Type, active: &mut HashSet<String>) -> bool {
             if crate::Collections::is_map_key_type(ty) {
                 return true;
             }
@@ -140,9 +139,9 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|param| self.qualify_method_type(owner_mod, param, generic_names))
                     .collect(),
-                ret: ret.as_ref().map(|ret| {
-                    Box::new(self.qualify_method_type(owner_mod, ret, generic_names))
-                }),
+                ret: ret
+                    .as_ref()
+                    .map(|ret| Box::new(self.qualify_method_type(owner_mod, ret, generic_names))),
                 effect_bound: effect_bound.clone(),
                 param_contract: param_contract.clone(),
                 call_metadata: call_metadata.clone(),
@@ -187,12 +186,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn qualify_method_signature(
-        &self,
-        owner_mod: usize,
-        owner_name: &str,
-        sig: &mut MethodSig,
-    ) {
+    fn qualify_method_signature(&self, owner_mod: usize, owner_name: &str, sig: &mut MethodSig) {
         if owner_mod == self.module_idx {
             return;
         }
@@ -321,8 +315,7 @@ impl<'a> Checker<'a> {
             return false;
         }
         if !self.copies_explicit()
-            && ty
-                .is_some_and(|ty| owned_type_for_read_view(ty).is_none())
+            && ty.is_some_and(|ty| owned_type_for_read_view(ty).is_none())
             && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
         {
             self.insert_implicit_copy(expr, ty.expect("cloneable borrowed subplace has a type"));
@@ -333,7 +326,10 @@ impl<'a> Checker<'a> {
             format!("`{root}` was not moved here, so this part cannot {destination}"),
             "the function can access this parameter, but it does not own any part of it"
                 .to_string(),
-            format!("copy the selected value explicitly by prefixing it with `{}`", Syntax::SIGIL_COPY),
+            format!(
+                "copy the selected value explicitly by prefixing it with `{}`",
+                Syntax::SIGIL_COPY
+            ),
             Some(expr.span()),
         ));
         true
@@ -367,27 +363,62 @@ impl<'a> Checker<'a> {
         }
         if type_name == "EncodingLimits" && method == "safe" {
             if !args.is_empty() {
-                self.diags.push(Diagnostic::error("E0101", format!("`EncodingLimits.safe` takes 0 arguments, got {}", args.len()), "the safe encoding limits are fixed defaults".to_string(), "remove the arguments".to_string(), Some(span)));
-                for arg in args { self.infer(&mut arg.expr); }
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!(
+                        "`EncodingLimits.safe` takes 0 arguments, got {}",
+                        args.len()
+                    ),
+                    "the safe encoding limits are fixed defaults".to_string(),
+                    "remove the arguments".to_string(),
+                    Some(span),
+                ));
+                for arg in args {
+                    self.infer(&mut arg.expr);
+                }
             }
             return Some(Type::Named("EncodingLimits".to_string()));
         }
         if type_name == "CBOROptions" && method == "safe" {
             if !args.is_empty() {
-                self.diags.push(Diagnostic::error("E0101", format!("`CBOROptions.safe` takes 0 arguments, got {}", args.len()), "safe CBOR limits and interoperability defaults are fixed".to_string(), "remove the arguments".to_string(), Some(span)));
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!("`CBOROptions.safe` takes 0 arguments, got {}", args.len()),
+                    "safe CBOR limits and interoperability defaults are fixed".to_string(),
+                    "remove the arguments".to_string(),
+                    Some(span),
+                ));
             }
             return Some(Type::Named("CBOROptions".to_string()));
         }
-        if matches!(type_name, "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions") && method == "safe" {
+        if matches!(
+            type_name,
+            "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions"
+        ) && method == "safe"
+        {
             if !args.is_empty() {
-                self.diags.push(Diagnostic::error("E0101", format!("`{type_name}.safe` takes 0 arguments, got {}", args.len()), "safe XML limits and entity defaults are fixed".to_string(), "remove the arguments".to_string(), Some(span)));
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!("`{type_name}.safe` takes 0 arguments, got {}", args.len()),
+                    "safe XML limits and entity defaults are fixed".to_string(),
+                    "remove the arguments".to_string(),
+                    Some(span),
+                ));
             }
             return Some(Type::Named(type_name.to_string()));
         }
         if type_name == "Limits" && method == "safe" {
             if !args.is_empty() {
-                self.diags.push(Diagnostic::error("E0101", format!("`Limits.safe` takes 0 arguments, got {}", args.len()), "safe SMTP limits are fixed defaults".to_string(), "remove the arguments".to_string(), Some(span)));
-                for arg in args { self.infer(&mut arg.expr); }
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!("`Limits.safe` takes 0 arguments, got {}", args.len()),
+                    "safe SMTP limits are fixed defaults".to_string(),
+                    "remove the arguments".to_string(),
+                    Some(span),
+                ));
+                for arg in args {
+                    self.infer(&mut arg.expr);
+                }
             }
             return Some(Type::Named("Limits".to_string()));
         }
@@ -414,7 +445,10 @@ impl<'a> Checker<'a> {
             if args.len() != 1 {
                 self.diags.push(Diagnostic::error(
                     "E0101",
-                    format!("`Abilities.from_rights` takes 1 argument, got {}", args.len()),
+                    format!(
+                        "`Abilities.from_rights` takes 1 argument, got {}",
+                        args.len()
+                    ),
                     "a grant set is one list of named rights".to_string(),
                     "pass one `[String]` rights list".to_string(),
                     Some(span),
@@ -431,7 +465,10 @@ impl<'a> Checker<'a> {
             if got.as_ref() != Some(&expected) {
                 self.diags.push(Diagnostic::error(
                     "E0101",
-                    format!("`Abilities.from_rights` expects `[String]`, got `{}`", got.map_or_else(|| "unknown".to_string(), |ty| ty.name())),
+                    format!(
+                        "`Abilities.from_rights` expects `[String]`, got `{}`",
+                        got.map_or_else(|| "unknown".to_string(), |ty| ty.name())
+                    ),
                     "rights are named strings carried by one authority value".to_string(),
                     "pass a list of string rights".to_string(),
                     Some(args[0].expr.span()),
@@ -603,9 +640,7 @@ impl<'a> Checker<'a> {
                                 if let Some(bound) = param
                                     .bounds
                                     .iter()
-                                    .find(|bound| {
-                                        !self.type_satisfies_bound(concrete, bound)
-                                    })
+                                    .find(|bound| !self.type_satisfies_bound(concrete, bound))
                                 {
                                     let concrete_name = concrete.name();
                                     self.diags.push(crate::Generics::e0905(
@@ -655,7 +690,10 @@ impl<'a> Checker<'a> {
         if !msig.is_static {
             self.diags.push(Diagnostic::error(
                 "E0311",
-                format!("`{}` is an instance method on `{}`", method, display_type_name),
+                format!(
+                    "`{}` is an instance method on `{}`",
+                    method, display_type_name
+                ),
                 "instance methods need a value before the dot".to_string(),
                 format!("call it on a `{display_type_name}` value: `x.{method}(...)`"),
                 Some(span),
@@ -668,9 +706,7 @@ impl<'a> Checker<'a> {
             None,
             args,
             span,
-            pre_inferred_method
-                .as_deref()
-                .or(pre_inferred.as_deref()),
+            pre_inferred_method.as_deref().or(pre_inferred.as_deref()),
             Some(call_access),
         )
     }
@@ -728,12 +764,8 @@ impl<'a> Checker<'a> {
                 self.check_declared_type(&actual, span);
                 for bound in &param.bounds {
                     if !self.type_satisfies_bound(&actual, bound) {
-                        self.diags.push(crate::Generics::e0905(
-                            &actual.name(),
-                            bound,
-                            span,
-                            false,
-                        ));
+                        self.diags
+                            .push(crate::Generics::e0905(&actual.name(), bound, span, false));
                     }
                 }
                 subst.insert(param.name.clone(), actual);
@@ -781,28 +813,24 @@ impl<'a> Checker<'a> {
             &sig.type_params,
             self.expected_type.as_ref(),
         ) {
-                    Ok(subst) => {
-                        for param in &sig.type_params {
-                            let Some(concrete) = subst.get(&param.name) else {
-                                continue;
-                            };
-                            if let Some(bound) = param
-                                .bounds
-                                .iter()
-                                .find(|bound| !self.type_satisfies_bound(concrete, bound))
-                            {
-                                let concrete_name = concrete.name();
-                                self.diags.push(crate::Generics::e0905(
-                                    &concrete_name,
-                                    bound,
-                                    span,
-                                    false,
-                                ));
-                                return None;
-                            }
-                        }
-                        subst
+            Ok(subst) => {
+                for param in &sig.type_params {
+                    let Some(concrete) = subst.get(&param.name) else {
+                        continue;
+                    };
+                    if let Some(bound) = param
+                        .bounds
+                        .iter()
+                        .find(|bound| !self.type_satisfies_bound(concrete, bound))
+                    {
+                        let concrete_name = concrete.name();
+                        self.diags
+                            .push(crate::Generics::e0905(&concrete_name, bound, span, false));
+                        return None;
                     }
+                }
+                subst
+            }
             Err(param) => {
                 self.diags.push(crate::Generics::e0904(span, &param));
                 return Some(pre_inferred);
@@ -815,12 +843,8 @@ impl<'a> Checker<'a> {
                     .iter()
                     .find(|bound| !self.type_satisfies_bound(actual, bound))
                 {
-                    self.diags.push(crate::Generics::e0905(
-                        &actual.name(),
-                        bound,
-                        span,
-                        false,
-                    ));
+                    self.diags
+                        .push(crate::Generics::e0905(&actual.name(), bound, span, false));
                 }
             }
         }
@@ -1022,12 +1046,8 @@ impl<'a> Checker<'a> {
                     })
                 };
                 if let Some(arg_ty) = arg_ty {
-                    let arg_ty = self.widen_numeric_argument(
-                        &mut arg.expr,
-                        arg_ty,
-                        param_ty,
-                        *param_conv,
-                    );
+                    let arg_ty =
+                        self.widen_numeric_argument(&mut arg.expr, arg_ty, param_ty, *param_conv);
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     // S48: a concrete value meets a trait-typed parameter; the
                     // box is materialised at lowering, not spelled by the caller,
@@ -1053,13 +1073,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                self.check_callable_argument_ownership(
-                    method,
-                    arg_idx,
-                    *param_conv,
-                    param_ty,
-                    arg,
-                );
+                self.check_callable_argument_ownership(method, arg_idx, *param_conv, param_ty, arg);
                 arg_idx += 1;
             }
         }
@@ -1222,9 +1236,11 @@ impl<'a> Checker<'a> {
             });
         }
         for (index, arg) in args.iter_mut().enumerate() {
-            let Some(param) = params
-                .get(if variadic && index >= fixed { fixed } else { index })
-            else {
+            let Some(param) = params.get(if variadic && index >= fixed {
+                fixed
+            } else {
+                index
+            }) else {
                 continue;
             };
             let param_ty = if variadic && homogeneous_variadic && index >= fixed {
@@ -1245,14 +1261,9 @@ impl<'a> Checker<'a> {
             });
             self.expected_type = saved_expected;
             if let Some(arg_ty) = arg_ty {
-                let arg_ty = self.widen_numeric_argument(
-                    &mut arg.expr,
-                    arg_ty,
-                    &param_ty,
-                    param.convention,
-                );
-                let reported =
-                    self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                let arg_ty =
+                    self.widen_numeric_argument(&mut arg.expr, arg_ty, &param_ty, param.convention);
+                let reported = self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
                 if !reported && arg_ty != param_ty {
                     self.diags.push(Diagnostic::error(
                         "E0112",
@@ -1267,13 +1278,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
-            self.check_callable_argument_ownership(
-                method,
-                index,
-                param.convention,
-                &param_ty,
-                arg,
-            );
+            self.check_callable_argument_ownership(method, index, param.convention, &param_ty, arg);
         }
         self.activate_call_reservations(&call_access, span);
         sig.return_type.clone()
@@ -1341,7 +1346,9 @@ impl<'a> Checker<'a> {
         type_name
             .rsplit_once("::")
             .or_else(|| type_name.rsplit_once('.'))
-            .map_or((None, type_name), |(namespace, leaf)| (Some(namespace), leaf))
+            .map_or((None, type_name), |(namespace, leaf)| {
+                (Some(namespace), leaf)
+            })
     }
 
     pub(crate) fn struct_type_name_parts<'b>(
@@ -1373,11 +1380,7 @@ impl<'a> Checker<'a> {
         self.struct_fields_of(owner, leaf)
     }
 
-    pub(crate) fn type_implements_trait_for_name(
-        &self,
-        type_name: &str,
-        trait_name: &str,
-    ) -> bool {
+    pub(crate) fn type_implements_trait_for_name(&self, type_name: &str, trait_name: &str) -> bool {
         let (import_ns, leaf) = self.struct_type_name_parts(type_name);
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return self.trait_reg.implements_trait(type_name, trait_name);
@@ -1432,21 +1435,15 @@ impl<'a> Checker<'a> {
     pub(crate) fn is_equatable_type(&self, ty: &Type) -> bool {
         match ty {
             Type::List(inner) | Type::Option(inner) => self.is_equatable_type(inner),
-            Type::Result { ok, err } => {
-                self.is_equatable_type(ok) && self.is_equatable_type(err)
-            }
+            Type::Result { ok, err } => self.is_equatable_type(ok) && self.is_equatable_type(err),
             Type::Tuple(fields) => fields
                 .iter()
                 .all(|(_, field)| self.is_equatable_type(field)),
             Type::FixedList { elem, .. }
             | Type::Tagged { inner: elem, .. }
             | Type::InlineRange { base: elem, .. } => self.is_equatable_type(elem),
-            Type::Union(members) => members
-                .iter()
-                .all(|member| self.is_equatable_type(member)),
-            Type::Apply { args, .. }
-                if !args.iter().all(|arg| self.is_equatable_type(arg)) =>
-            {
+            Type::Union(members) => members.iter().all(|member| self.is_equatable_type(member)),
+            Type::Apply { args, .. } if !args.iter().all(|arg| self.is_equatable_type(arg)) => {
                 false
             }
             _ => {
@@ -1467,9 +1464,7 @@ impl<'a> Checker<'a> {
             Type::Map { key, value, .. } => {
                 self.is_cloneable_type(key) && self.is_cloneable_type(value)
             }
-            Type::Result { ok, err } => {
-                self.is_cloneable_type(ok) && self.is_cloneable_type(err)
-            }
+            Type::Result { ok, err } => self.is_cloneable_type(ok) && self.is_cloneable_type(err),
             Type::Tuple(fields) => fields
                 .iter()
                 .all(|(_, field)| self.is_cloneable_type(field)),
@@ -1477,12 +1472,8 @@ impl<'a> Checker<'a> {
             | Type::Tagged { inner: elem, .. }
             | Type::InlineRange { base: elem, .. }
             | Type::Quantity { base: elem, .. } => self.is_cloneable_type(elem),
-            Type::Union(members) => members
-                .iter()
-                .all(|member| self.is_cloneable_type(member)),
-            Type::Apply { args, .. }
-                if !args.iter().all(|arg| self.is_cloneable_type(arg)) =>
-            {
+            Type::Union(members) => members.iter().all(|member| self.is_cloneable_type(member)),
+            Type::Apply { args, .. } if !args.iter().all(|arg| self.is_cloneable_type(arg)) => {
                 false
             }
             Type::Named(_) | Type::Apply { .. } => {
@@ -1492,7 +1483,6 @@ impl<'a> Checker<'a> {
             _ => crate::Sema::Diagnostics::is_cloneable(ty, self.registry),
         }
     }
-
 
     pub(crate) fn types_comparable_type(&self, ty: &Type) -> bool {
         let (normalized, registry, _) = self.capability_type_context(ty);
@@ -1528,8 +1518,12 @@ impl<'a> Checker<'a> {
         ) -> bool {
             match ty {
                 Type::Tagged { marker, inner }
-                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
-                        && crate::Sema::Diagnostics::is_clock_type(inner) =>
+                    if matches!(
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::DeterministicClock
+                        )
+                    ) && crate::Sema::Diagnostics::is_clock_type(inner) =>
                 {
                     false
                 }
@@ -1551,15 +1545,14 @@ impl<'a> Checker<'a> {
                             .and_then(|modules| modules.get(context_mod))
                             .map(|state| &state.registry)
                     };
-                    let owner_mod = if context_registry
-                        .is_some_and(|registry| registry.contains(name))
-                    {
-                        context_mod
-                    } else if let Some(owner) = checker.struct_owner_module(name, None) {
-                        owner
-                    } else {
-                        return false;
-                    };
+                    let owner_mod =
+                        if context_registry.is_some_and(|registry| registry.contains(name)) {
+                            context_mod
+                        } else if let Some(owner) = checker.struct_owner_module(name, None) {
+                            owner
+                        } else {
+                            return false;
+                        };
                     if !seen.insert((owner_mod, name.clone())) {
                         return false;
                     }
@@ -1575,20 +1568,18 @@ impl<'a> Checker<'a> {
                         return false;
                     };
                     let result = match registry.types.get(name) {
-                        Some(TypeDef::Struct { fields, .. }) => fields.iter().any(
-                            |(_, _, field_ty)| {
-                                contains(checker, field_ty, owner_mod, seen)
-                            },
-                        ),
+                        Some(TypeDef::Struct { fields, .. }) => fields
+                            .iter()
+                            .any(|(_, _, field_ty)| contains(checker, field_ty, owner_mod, seen)),
                         Some(TypeDef::Enum { variants, .. }) => {
                             variants.values().any(|(_, payload)| match payload {
                                 VariantPayload::Unit => false,
                                 VariantPayload::Single(payload_ty, _) => {
                                     contains(checker, payload_ty, owner_mod, seen)
                                 }
-                                VariantPayload::Named(fields) => fields.iter().any(|field| {
-                                    contains(checker, &field.ty, owner_mod, seen)
-                                }),
+                                VariantPayload::Named(fields) => fields
+                                    .iter()
+                                    .any(|field| contains(checker, &field.ty, owner_mod, seen)),
                             })
                         }
                         Some(TypeDef::Distinct { base, .. }) => {
@@ -1675,7 +1666,15 @@ impl<'a> Checker<'a> {
         if enum_name == Syntax::DURATION_UNIT_TYPE {
             return true;
         }
-        if matches!(enum_name, "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome") {
+        if matches!(
+            enum_name,
+            "Overflow"
+                | "FailurePolicy"
+                | "DispatchState"
+                | "HookPolicy"
+                | "HookDecision"
+                | "HookOutcome"
+        ) {
             return true;
         }
         if matches!(enum_name, "NetShutdown" | "NetReadyInterest") {
@@ -1693,7 +1692,10 @@ impl<'a> Checker<'a> {
         if enum_name == "AuthError" {
             return true;
         }
-        if matches!(enum_name, "ServiceReceipt" | "ServiceError" | "TaskOutcome" | "TaskStatus") {
+        if matches!(
+            enum_name,
+            "ServiceReceipt" | "ServiceError" | "TaskOutcome" | "TaskStatus"
+        ) {
             return true;
         }
         false
@@ -1863,7 +1865,8 @@ impl<'a> Checker<'a> {
         if owner_mod == self.module_idx {
             return true;
         }
-        self.name_ledger.visible(self.module_idx, owner_mod, type_name)
+        self.name_ledger
+            .visible(self.module_idx, owner_mod, type_name)
     }
 
     pub(crate) fn check_struct_lit(
@@ -1879,17 +1882,18 @@ impl<'a> Checker<'a> {
         // keyed by the owner-local leaf, while the returned type below keeps
         // the canonical identity. Split only for this local lookup; never
         // reintroduce the short name as semantic identity.
-        let (qualified_namespace, leaf_name) = if import_ns.is_none()
-            && self.registry.contains(type_name)
-        {
-            (None, type_name)
-        } else {
-            Self::split_type_name(type_name)
-        };
+        let (qualified_namespace, leaf_name) =
+            if import_ns.is_none() && self.registry.contains(type_name) {
+                (None, type_name)
+            } else {
+                Self::split_type_name(type_name)
+            };
         let import_ns = import_ns.or(qualified_namespace);
         let type_name = leaf_name;
-        let deprecation_name = import_ns
-            .map_or_else(|| type_name.to_string(), |namespace| format!("{namespace}.{type_name}"));
+        let deprecation_name = import_ns.map_or_else(
+            || type_name.to_string(),
+            |namespace| format!("{namespace}.{type_name}"),
+        );
         self.warn_deprecated_type_name(&deprecation_name, span);
         let display_type_name = self.display_type_name(type_name, None);
         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
@@ -2101,10 +2105,7 @@ impl<'a> Checker<'a> {
                             expr,
                             Expr::Ident(name, _) if self.is_string_view(name)
                         ) || self.string_view_call_source(expr).is_some());
-                    if string_view_field
-                        && et == Type::String
-                        && !string_view_compatible
-                    {
+                    if string_view_field && et == Type::String && !string_view_compatible {
                         // #1164: owned String into View<str> is a teaching
                         // ceiling, not a missing-provenance case.
                         self.report_owned_string_as_view_str(expr.span());
@@ -2144,7 +2145,10 @@ impl<'a> Checker<'a> {
                 );
                 let mut diagnostic = Diagnostic::error(
                     "E0303",
-                    format!("struct literal for `{}` has no field `{}`", display_type_name, name),
+                    format!(
+                        "struct literal for `{}` has no field `{}`",
+                        display_type_name, name
+                    ),
                     "struct literals may only set fields that exist on the type".to_string(),
                     fix,
                     Some(*name_span),
@@ -2165,9 +2169,7 @@ impl<'a> Checker<'a> {
             .collect();
         // D-DEFAULT-SHAPE1=B: omitted fields with `{}` defaults are filled in.
         let defaults = if owner_mod == self.module_idx {
-            self.registry
-                .field_defaults(type_name)
-                .map(|d| d.clone())
+            self.registry.field_defaults(type_name).map(|d| d.clone())
         } else {
             self.modules
                 .and_then(|mods| mods.get(owner_mod))
@@ -2242,10 +2244,7 @@ impl<'a> Checker<'a> {
             .expect("generic struct parameters exist");
             Type::Apply {
                 name: nominal_name,
-                args: params
-                    .iter()
-                    .map(|p| Type::Named(p.name.clone()))
-                    .collect(),
+                args: params.iter().map(|p| Type::Named(p.name.clone())).collect(),
             }
         } else {
             Type::Named(nominal_name)
@@ -2364,10 +2363,13 @@ impl<'a> Checker<'a> {
         variant_span: Option<Span>,
     ) -> Type {
         self.warn_deprecated_type_name(type_name, span);
-        let contextual_ty = self.expected_type.clone().filter(|ty| {
-            matches!(ty, Type::Apply { name, .. } if name == type_name)
-        });
-        let ty = contextual_ty.clone().unwrap_or_else(|| Type::Named(type_name.to_string()));
+        let contextual_ty = self
+            .expected_type
+            .clone()
+            .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == type_name));
+        let ty = contextual_ty
+            .clone()
+            .unwrap_or_else(|| Type::Named(type_name.to_string()));
         let display_type_name = self.display_type_name(type_name, None);
         let Some(variants) = self.resolve_enum_variants_cloned(type_name) else {
             self.diags.push(Diagnostic::error(
@@ -2415,8 +2417,7 @@ impl<'a> Checker<'a> {
                 }
                 return ty;
             }
-            let suggestion =
-                suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>());
+            let suggestion = suggest_field(variant, &variants.keys().cloned().collect::<Vec<_>>());
             let fix = suggestion.as_ref().map_or_else(
                 || "check the variant name".to_string(),
                 |s| format!("did you mean `{s}`?"),
@@ -2458,8 +2459,14 @@ impl<'a> Checker<'a> {
             }
             VariantPayload::Single(expected, _) => {
                 let contextual_payload = match (&contextual_ty, type_name, variant) {
-                    (Some(Type::Apply { args, .. }), "HookDecision" | "HookOutcome", "Transform" | "Continue") => args.first(),
-                    (Some(Type::Apply { args, .. }), "HookDecision" | "HookOutcome", "Fail") => args.get(1),
+                    (
+                        Some(Type::Apply { args, .. }),
+                        "HookDecision" | "HookOutcome",
+                        "Transform" | "Continue",
+                    ) => args.first(),
+                    (Some(Type::Apply { args, .. }), "HookDecision" | "HookOutcome", "Fail") => {
+                        args.get(1)
+                    }
                     _ => None,
                 };
                 let expected = contextual_payload.unwrap_or(expected);
@@ -2518,7 +2525,9 @@ impl<'a> Checker<'a> {
                                 "named-payload variants construct with the dot-brace form \
                                  (D-UITREE1/D-DOTCTOR1), matching struct construction"
                                     .to_string(),
-                                format!("write `{display_type_name}.{variant}.{{ w: 1.0, h: 2.0 }}`"),
+                                format!(
+                                    "write `{display_type_name}.{variant}.{{ w: 1.0, h: 2.0 }}`"
+                                ),
                                 Some(span),
                             ));
                         }
@@ -2867,7 +2876,10 @@ impl<'a> Checker<'a> {
     ) -> Type {
         match ty {
             None => Type::String,
-            Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String | Type::InlineRange { .. })) => t.clone(),
+            Some(
+                t
+                @ (Type::Int | Type::Float | Type::Bool | Type::String | Type::InlineRange { .. }),
+            ) => t.clone(),
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0305",
@@ -2910,21 +2922,26 @@ impl<'a> Checker<'a> {
                     }
                     off += bytes.len() * 8;
                 }
-                crate::AST::BinMatchPart::Hole { name, spec, span: hole_span } => {
-                    match spec {
-                        crate::AST::BinSpec::Rest => {
-                            if off % 8 != 0 {
-                                self.diags.push(self.bin_align_diag(*hole_span));
-                            }
-                            holes.push((
-                                name.clone(),
-                                Type::List(Box::new(Type::IntN { signed: false, bits: 8 })),
-                            ));
+                crate::AST::BinMatchPart::Hole {
+                    name,
+                    spec,
+                    span: hole_span,
+                } => match spec {
+                    crate::AST::BinSpec::Rest => {
+                        if off % 8 != 0 {
+                            self.diags.push(self.bin_align_diag(*hole_span));
                         }
-                        crate::AST::BinSpec::Bits { width, endian } => {
-                            if matches!(endian, crate::AST::BinEndian::Little) && *width % 8 != 0
-                            {
-                                self.diags.push(Diagnostic::error(
+                        holes.push((
+                            name.clone(),
+                            Type::List(Box::new(Type::IntN {
+                                signed: false,
+                                bits: 8,
+                            })),
+                        ));
+                    }
+                    crate::AST::BinSpec::Bits { width, endian } => {
+                        if matches!(endian, crate::AST::BinEndian::Little) && *width % 8 != 0 {
+                            self.diags.push(Diagnostic::error(
                                     "E1008",
                                     format!(
                                         "a little-endian read `U{width}le` must be a whole number of bytes"
@@ -2934,12 +2951,11 @@ impl<'a> Checker<'a> {
                                     "use a multiple-of-8 width (`U16le`, `U32le`) or big-endian `be`".to_string(),
                                     Some(*hole_span),
                                 ));
-                            }
-                            holes.push((name.clone(), bin_bits_type(*width)));
-                            off += *width as usize;
                         }
+                        holes.push((name.clone(), bin_bits_type(*width)));
+                        off += *width as usize;
                     }
-                }
+                },
             }
         }
         holes
@@ -3002,9 +3018,7 @@ impl<'a> Checker<'a> {
             (
                 Type::Union(members),
                 Pattern::Variant {
-                    variant,
-                    bindings,
-                    ..
+                    variant, bindings, ..
                 },
             ) => {
                 let Some(member_ty) = members
@@ -3134,7 +3148,10 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0327",
                             "this `..` is redundant".to_string(),
-                            format!("the pattern already names every field of `{}`", display_type_name),
+                            format!(
+                                "the pattern already names every field of `{}`",
+                                display_type_name
+                            ),
                             "remove `..` or leave out at least one field".to_string(),
                             Some(*rest_span),
                         ));
@@ -3156,18 +3173,26 @@ impl<'a> Checker<'a> {
                 HashMap::new()
             }
             (
-                Type::Apply { name: enum_name, args },
-                Pattern::Variant { variant, bindings, .. },
+                Type::Apply {
+                    name: enum_name,
+                    args,
+                },
+                Pattern::Variant {
+                    variant, bindings, ..
+                },
             ) if matches!(enum_name.as_str(), "HookDecision" | "HookOutcome") => {
                 let payload_ty = match (enum_name.as_str(), variant.as_str()) {
                     ("HookDecision", "Continue" | "Cancel") | ("HookOutcome", "Cancel") => None,
-                    ("HookDecision", "Transform") | ("HookOutcome", "Continue") => args.first().cloned(),
+                    ("HookDecision", "Transform") | ("HookOutcome", "Continue") => {
+                        args.first().cloned()
+                    }
                     ("HookDecision" | "HookOutcome", "Fail") => args.get(1).cloned(),
                     _ => {
                         self.diags.push(Diagnostic::error(
                             "E0305",
                             format!("pattern `{variant}` doesn't belong to `{enum_name}`"),
-                            "pattern tests must name a variant on the value's enum type".to_string(),
+                            "pattern tests must name a variant on the value's enum type"
+                                .to_string(),
                             "check the variant spelling".to_string(),
                             Some(span),
                         ));
@@ -3178,14 +3203,24 @@ impl<'a> Checker<'a> {
                 if bindings.len() != expected_count {
                     self.diags.push(Diagnostic::error(
                         "E0306",
-                        format!("pattern `{variant}` expects {expected_count} binding{}, got {}", if expected_count == 1 { "" } else { "s" }, bindings.len()),
+                        format!(
+                            "pattern `{variant}` expects {expected_count} binding{}, got {}",
+                            if expected_count == 1 { "" } else { "s" },
+                            bindings.len()
+                        ),
                         "each payload field needs its own binding name".to_string(),
-                        if expected_count == 1 { format!("write `{variant}(value)`") } else { format!("write `{variant}`") },
+                        if expected_count == 1 {
+                            format!("write `{variant}(value)`")
+                        } else {
+                            format!("write `{variant}`")
+                        },
                         Some(span),
                     ));
                 }
                 let mut result = HashMap::new();
-                if let (Some(ty), Some(crate::AST::PatSlot::Bind { name, .. })) = (payload_ty, bindings.first()) {
+                if let (Some(ty), Some(crate::AST::PatSlot::Bind { name, .. })) =
+                    (payload_ty, bindings.first())
+                {
                     result.insert(name.clone(), ty);
                 }
                 result
@@ -3352,7 +3387,10 @@ impl<'a> Checker<'a> {
                     }
                     self.diags.push(Diagnostic::error(
                         "E0305",
-                        format!("pattern `{}` doesn't belong to `{}`", variant, display_enum_name),
+                        format!(
+                            "pattern `{}` doesn't belong to `{}`",
+                            variant, display_enum_name
+                        ),
                         "pattern tests must name a variant on the value's enum type".to_string(),
                         "check the variant spelling".to_string(),
                         Some(span),
@@ -3465,7 +3503,10 @@ impl<'a> Checker<'a> {
             }
             // D-PATR (ratified 2026-06-19): arm-head range pattern.
             (_, Pattern::Range { lo, hi, .. }) => {
-                if !matches!(subject_ty, Type::Int | Type::InlineRange { .. } | Type::Char) {
+                if !matches!(
+                    subject_ty,
+                    Type::Int | Type::InlineRange { .. } | Type::Char
+                ) {
                     self.diags.push(Diagnostic::error(
                         "E0316",
                         format!(

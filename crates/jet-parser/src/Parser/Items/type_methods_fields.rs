@@ -4,150 +4,150 @@ use super::super::{
 };
 
 impl<'a> Parser<'a> {
-        pub(super) fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
-            let start = self.peek().span;
-            self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
-            let (name, name_span) = self.expect_ident("after `fn`")?;
-            self.expect(TokKind::LParen, "after the method name")?;
-            let params = self.parse_param_list()?;
-            self.validate_variadic_params(&params);
-            self.validate_param_labels(&params);
-            self.reject_root_method_params(&params);
-            let (
-                mut return_type,
-                _return_type_span,
-                mut declared_effects,
-                _effect_via,
-                prefix_effect_span,
-            ) = self.parse_callable_result_and_prefix_effects()?;
-            // A retired `-> Type` trait signature has no body marker after the
-            // result, so the shared callable lookahead cannot distinguish it
-            // from a concise body. Trait declarations have no concise-body
-            // form; recover that result here so fmt can emit bare `Type`.
-            if return_type.is_none() && self.at_unified_arrow() {
-                let arrow = self.expect_unified_arrow("before a trait result type")?;
-                if self.type_starts_here() {
-                    let (ty, _) = self.return_type()?;
-                    self.diags.push(Self::retired_signature_shape(arrow.span));
-                    return_type = Some(ty);
-                } else {
-                    self.pos = self.pos.saturating_sub(1);
-                }
+    pub(super) fn trait_method_sig(&mut self, is_pure: bool) -> Result<TraitMethodSig, Diagnostic> {
+        let start = self.peek().span;
+        self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
+        let (name, name_span) = self.expect_ident("after `fn`")?;
+        self.expect(TokKind::LParen, "after the method name")?;
+        let params = self.parse_param_list()?;
+        self.validate_variadic_params(&params);
+        self.validate_param_labels(&params);
+        self.reject_root_method_params(&params);
+        let (
+            mut return_type,
+            _return_type_span,
+            mut declared_effects,
+            _effect_via,
+            prefix_effect_span,
+        ) = self.parse_callable_result_and_prefix_effects()?;
+        // A retired `-> Type` trait signature has no body marker after the
+        // result, so the shared callable lookahead cannot distinguish it
+        // from a concise body. Trait declarations have no concise-body
+        // form; recover that result here so fmt can emit bare `Type`.
+        if return_type.is_none() && self.at_unified_arrow() {
+            let arrow = self.expect_unified_arrow("before a trait result type")?;
+            if self.type_starts_here() {
+                let (ty, _) = self.return_type()?;
+                self.diags.push(Self::retired_signature_shape(arrow.span));
+                return_type = Some(ty);
+            } else {
+                self.pos = self.pos.saturating_sub(1);
             }
-            let declared_return_view_provenance =
-                self.parse_opt_declared_view_from(&params);
-            let effect_body_marker =
-                prefix_effect_span.is_some() || self.func_effect_starts_here();
-            if declared_effects.is_none() {
-                declared_effects = self.parse_opt_effect_annotation()?;
-            }
-            let is_pure = is_pure
-                || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
-            let body_marker_present = effect_body_marker || self.at_unified_arrow();
-            if self.at_unified_arrow() {
-                self.bump();
-            }
-            // D-LIB2: optional default body `{ … }` instead of `;`.
-            if !body_marker_present
-                && return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::return_type_has_value(ty))
-                && matches!(self.peek().kind, TokKind::LBrace)
+        }
+        let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
+        let effect_body_marker = prefix_effect_span.is_some() || self.func_effect_starts_here();
+        if declared_effects.is_none() {
+            declared_effects = self.parse_opt_effect_annotation()?;
+        }
+        let is_pure = is_pure
+            || declared_effects
+                .as_ref()
+                .is_some_and(|effects| effects.is_empty());
+        let body_marker_present = effect_body_marker || self.at_unified_arrow();
+        if self.at_unified_arrow() {
+            self.bump();
+        }
+        // D-LIB2: optional default body `{ … }` instead of `;`.
+        if !body_marker_present
+            && return_type
+                .as_ref()
+                .is_some_and(|ty| Self::return_type_has_value(ty))
+            && matches!(self.peek().kind, TokKind::LBrace)
+        {
+            self.diags
+                .push(Self::missing_callable_body_arrow(self.peek().span));
+        }
+        let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            let previous_tail_depth = self.callable_tail_block_depth;
+            if return_type
+                .as_ref()
+                .is_some_and(|ty| Self::return_type_has_value(ty))
             {
-                self.diags
-                    .push(Self::missing_callable_body_arrow(self.peek().span));
+                self.callable_tail_block_depth = Some(self.block_depth + 1);
             }
-            let default_body = if matches!(self.peek().kind, TokKind::LBrace) {
-                self.bump();
-                let previous_tail_depth = self.callable_tail_block_depth;
-                if return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::return_type_has_value(ty))
-                {
-                    self.callable_tail_block_depth = Some(self.block_depth + 1);
-                }
-                let stmts = self.block_stmts();
-                self.callable_tail_block_depth = previous_tail_depth;
-                Some(stmts)
-            } else {
-                let end = self.peek().span.end;
-                self.finish_stmt()?;
-                let _ = end;
-                None
-            };
+            let stmts = self.block_stmts();
+            self.callable_tail_block_depth = previous_tail_depth;
+            Some(stmts)
+        } else {
             let end = self.peek().span.end;
-            Ok(TraitMethodSig {
-                name,
-                name_span,
-                params,
-                return_type,
-                span: Span::new(start.start, end),
-                default_body,
-                is_pure,
-                declared_effects,
-                return_view_provenance: crate::AST::ViewProvenanceCell::new(),
-                declared_return_view_provenance,
-            })
-        }
-    
-        /// S27: method inside a type body or `impl` block.
-        pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
-            let markers = if matches!(self.peek().kind, TokKind::Hash) {
-                match self.parse_method_marker_sequence() {
-                    Ok(markers) => markers,
-                    Err(diagnostic) => {
-                        // Keep the method as the recovery target. The shared
-                        // marker gate already emitted the useful vocabulary
-                        // or site diagnostic; bubbling the error to the type
-                        // parser loses `fn` and creates a secondary E0003 at
-                        // the enclosing `}`.
-                        self.diags.push(diagnostic);
-                        Vec::new()
-                    }
+            self.finish_stmt()?;
+            let _ = end;
+            None
+        };
+        let end = self.peek().span.end;
+        Ok(TraitMethodSig {
+            name,
+            name_span,
+            params,
+            return_type,
+            span: Span::new(start.start, end),
+            default_body,
+            is_pure,
+            declared_effects,
+            return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+            declared_return_view_provenance,
+        })
+    }
+
+    /// S27: method inside a type body or `impl` block.
+    pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
+        let markers = if matches!(self.peek().kind, TokKind::Hash) {
+            match self.parse_method_marker_sequence() {
+                Ok(markers) => markers,
+                Err(diagnostic) => {
+                    // Keep the method as the recovery target. The shared
+                    // marker gate already emitted the useful vocabulary
+                    // or site diagnostic; bubbling the error to the type
+                    // parser loses `fn` and creates a secondary E0003 at
+                    // the enclosing `}`.
+                    self.diags.push(diagnostic);
+                    Vec::new()
                 }
-            } else {
-                Vec::new()
-            };
-            while matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
             }
-            let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-            self.expect_kw(TokKind::KwFn, "to start a method")?;
-            let function = self.func_after_fn(
-                is_pub,
-                is_package_pub,
-                false,
-                None,
-                None,
-                false,
-                false,
-                None,
-                None,
-                None,
-                false,
-                None,
-                false,
-                None,
-                None,
-                None,
-                false,
-                false,
-                None,
-                false,
-                None,
-            )?;
-            self.reject_root_method_params(&function.params);
-            self.apply_method_markers(function, markers)
+        } else {
+            Vec::new()
+        };
+        while matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
         }
-    
-        pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
-            let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-            let (name, name_span) = self.expect_ident("for a field name")?;
-            // D-META-STAGE1=B: the compile-time mark rides the name, so
-            // `@word` now lexes as one identifier. A field never carries it —
-            // the `@`-marked members belong to the compiler (`T.@layout`).
-            if Syntax::is_comptime_name(&name) {
-                return Err(Diagnostic::error(
+        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+        self.expect_kw(TokKind::KwFn, "to start a method")?;
+        let function = self.func_after_fn(
+            is_pub,
+            is_package_pub,
+            false,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            false,
+            None,
+            false,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            false,
+            None,
+        )?;
+        self.reject_root_method_params(&function.params);
+        self.apply_method_markers(function, markers)
+    }
+
+    pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
+        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+        let (name, name_span) = self.expect_ident("for a field name")?;
+        // D-META-STAGE1=B: the compile-time mark rides the name, so
+        // `@word` now lexes as one identifier. A field never carries it —
+        // the `@`-marked members belong to the compiler (`T.@layout`).
+        if Syntax::is_comptime_name(&name) {
+            return Err(Diagnostic::error(
                     "E0003",
                     format!("`{name}` is not a field name"),
                     "the compile-time mark `@` belongs to the compiler's own members and to compile-time bindings, never to a declared field"
@@ -155,211 +155,202 @@ impl<'a> Parser<'a> {
                     format!("drop the `@`, or read the compiler fact as `T.{name}`"),
                     Some(name_span),
                 ));
-            }
-            self.expect(TokKind::Colon, "after a field name")?;
-            let (ty, ty_span) = self.type_()?;
-            // D-FIELDPOL1: `name: T -> expr` — a computed field. `expr` is a
-            // single expression (no block); sibling field names inside it are
-            // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
-            // to `self.<field>` once every field of the struct is known.
-            // D-DEFAULT-SHAPE1=B: `name: T{expr}` — absence / construction default.
-            let (computed, default) = if self.at_unified_arrow() {
-                self.expect_unified_arrow("before a computed field expression")?;
-                (Some(Box::new(self.expr()?)), None)
-            } else if matches!(self.peek().kind, TokKind::LBrace) {
+        }
+        self.expect(TokKind::Colon, "after a field name")?;
+        let (ty, ty_span) = self.type_()?;
+        // D-FIELDPOL1: `name: T -> expr` — a computed field. `expr` is a
+        // single expression (no block); sibling field names inside it are
+        // still bare `Ident`s here — `Sema::CheckerFieldPolicy` rewrites them
+        // to `self.<field>` once every field of the struct is known.
+        // D-DEFAULT-SHAPE1=B: `name: T{expr}` — absence / construction default.
+        let (computed, default) = if self.at_unified_arrow() {
+            self.expect_unified_arrow("before a computed field expression")?;
+            (Some(Box::new(self.expr()?)), None)
+        } else if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            let default = Box::new(self.expr()?);
+            self.expect(TokKind::RBrace, "after a field default")?;
+            (None, Some(default))
+        } else if matches!(self.peek().kind, TokKind::Eq) {
+            let eq = self.bump().span;
+            self.diags
+                .push(Diagnostic::from_row("E0385", &[], Some(eq)));
+            (None, Some(Box::new(self.expr()?)))
+        } else {
+            (None, None)
+        };
+        Ok(Field {
+            is_pub,
+            is_package_pub,
+            name,
+            name_span,
+            ty,
+            ty_span,
+            serde_markers: Vec::new(),
+            redact: false,
+            computed,
+            default,
+            default_ct: None,
+        })
+    }
+
+    /// D-CLI-GLOBAL1=E: `name = callable` is a program-struct command
+    /// binding. It uses the existing field marker plane for `#Doc` and
+    /// the ordinary expression parser for the callable target.
+    pub(super) fn cli_binding_starts_here(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Ident(_)) && matches!(self.peek2().kind, TokKind::Eq)
+    }
+
+    pub(super) fn cli_binding(
+        &mut self,
+        markers: Vec<crate::AST::Marker>,
+    ) -> Result<CLICommandBinding, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for a CLI command name")?;
+        self.expect(TokKind::Eq, "between a CLI command name and callable")?;
+        let target = self.expr()?;
+        for marker in &markers {
+            self.bind_rule_fact(
+                marker.name_span,
+                Some(name_span),
+                crate::Policy::RuleSite::Field,
+            );
+        }
+        Ok(CLICommandBinding {
+            name,
+            name_span,
+            markers,
+            target,
+        })
+    }
+
+    /// D-PERSIST1: true at `#Persist` (module top level only — this
+    /// predicate is never consulted by the statement parser, so a local
+    /// binding's `#Persist` falls through to the E0145 teaching diagnostic
+    /// in `Statements.rs` instead).
+    pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST)
+    }
+
+    /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
+    /// immediately before a comptime binding.
+    pub(in crate::Parser) fn at_comptime_marker(&self) -> bool {
+        matches!(&self.peek().kind, TokKind::Hash)
+            && self.marker_head_is_followed_by_comptime_target()
+    }
+
+    /// D-CONST-RETIRE1 (E0146): `const` is retired — teach `comptime`, then
+    /// recover by parsing the rest as a comptime binding.
+    pub(in crate::Parser) fn retired_const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        self.comptime_def()
+    }
+
+    /// D-PERSIST1: `#Persist name (:: | :=) expr` — module-level bare
+    /// binding that survives a `jet dev` hot reload. Not `#Persist comptime`
+    /// and not `#Persist const`.
+    pub(in crate::Parser) fn persist_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let item_start = self.peek().span.start;
+        let meta = if self.at_meta_attr() {
+            let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Declaration)?;
+            while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
-                let default = Box::new(self.expr()?);
-                self.expect(TokKind::RBrace, "after a field default")?;
-                (None, Some(default))
-            } else if matches!(self.peek().kind, TokKind::Eq) {
-                let eq = self.bump().span;
-                self.diags
-                    .push(Diagnostic::from_row("E0385", &[], Some(eq)));
-                (None, Some(Box::new(self.expr()?)))
-            } else {
-                (None, None)
-            };
-            Ok(Field {
-                is_pub,
-                is_package_pub,
-                name,
-                name_span,
-                ty,
-                ty_span,
-                serde_markers: Vec::new(),
-                redact: false,
-                computed,
-                default,
-                default_ct: None,
-            })
-        }
-
-        /// D-CLI-GLOBAL1=E: `name = callable` is a program-struct command
-        /// binding. It uses the existing field marker plane for `#Doc` and
-        /// the ordinary expression parser for the callable target.
-        pub(super) fn cli_binding_starts_here(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Ident(_))
-                && matches!(self.peek2().kind, TokKind::Eq)
-        }
-
-        pub(super) fn cli_binding(
-            &mut self,
-            markers: Vec<crate::AST::Marker>,
-        ) -> Result<CLICommandBinding, Diagnostic> {
-            let (name, name_span) = self.expect_ident("for a CLI command name")?;
-            self.expect(TokKind::Eq, "between a CLI command name and callable")?;
-            let target = self.expr()?;
-            for marker in &markers {
-                self.bind_rule_fact(
-                    marker.name_span,
-                    Some(name_span),
-                    crate::Policy::RuleSite::Field,
-                );
             }
-            Ok(CLICommandBinding {
-                name,
-                name_span,
-                markers,
-                target,
-            })
+            Some(meta)
+        } else {
+            None
+        };
+        let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Declaration)?;
+        let persist_span = marker.span;
+        if matches!(self.peek().kind, TokKind::KwConst | TokKind::KwComptime) {
+            let bad = self.bump();
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "`#{}` marks a bare binding, not `{}`",
+                    Syntax::MARKER_PERSIST,
+                    match bad.kind {
+                        TokKind::KwConst => Syntax::KW_CONST,
+                        _ => Syntax::KW_COMPTIME,
+                    }
+                ),
+                format!(
+                    "`#{}` attaches to `name :: …` or `name := …` (D-PERSIST1 / D-BIND-BARE1)",
+                    Syntax::MARKER_PERSIST
+                ),
+                format!(
+                    "write `#{} name := …` (or `::` for an immutable bare bind)",
+                    Syntax::MARKER_PERSIST
+                ),
+                Some(Span::new(persist_span.start, bad.span.end)),
+            ));
         }
-    
-        /// D-PERSIST1: true at `#Persist` (module top level only — this
-        /// predicate is never consulted by the statement parser, so a local
-        /// binding's `#Persist` falls through to the E0145 teaching diagnostic
-        /// in `Statements.rs` instead).
-        pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
-            matches!(&self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST)
-        }
-
-        /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
-        /// immediately before a comptime binding.
-        pub(in crate::Parser) fn at_comptime_marker(&self) -> bool {
-            matches!(&self.peek().kind, TokKind::Hash)
-                && self.marker_head_is_followed_by_comptime_target()
-        }
-
-        /// D-CONST-RETIRE1 (E0146): `const` is retired — teach `comptime`, then
-        /// recover by parsing the rest as a comptime binding.
-        pub(in crate::Parser) fn retired_const_def(&mut self) -> Result<ConstDef, Diagnostic> {
-            self.comptime_def()
-        }
-
-        /// D-PERSIST1: `#Persist name (:: | :=) expr` — module-level bare
-        /// binding that survives a `jet dev` hot reload. Not `#Persist comptime`
-        /// and not `#Persist const`.
-        pub(in crate::Parser) fn persist_def(&mut self) -> Result<ConstDef, Diagnostic> {
-            let item_start = self.peek().span.start;
-            let meta = if self.at_meta_attr() {
-                let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Declaration)?;
-                while matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
-                Some(meta)
-            } else {
-                None
-            };
-            let marker = self.parse_registered_marker_at_site(
-                crate::Policy::RuleSite::Declaration,
-            )?;
-            let persist_span = marker.span;
-            if matches!(self.peek().kind, TokKind::KwConst | TokKind::KwComptime) {
-                let bad = self.bump();
+        let (name, name_span) = self.expect_ident("after `#Persist`")?;
+        let mutable = match self.peek().kind {
+            TokKind::ColonColon => {
+                self.bump();
+                false
+            }
+            TokKind::ColonEq => {
+                self.bump();
+                true
+            }
+            _ => {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "`#{}` marks a bare binding, not `{}`",
-                        Syntax::MARKER_PERSIST,
-                        match bad.kind {
-                            TokKind::KwConst => Syntax::KW_CONST,
-                            _ => Syntax::KW_COMPTIME,
-                        }
-                    ),
-                    format!(
-                        "`#{}` attaches to `name :: …` or `name := …` (D-PERSIST1 / D-BIND-BARE1)",
+                        "expected `{}` or `{}` after the `#{}` name",
+                        Syntax::SIGIL_BIND_IMMUT,
+                        Syntax::SIGIL_BIND_MUT,
                         Syntax::MARKER_PERSIST
                     ),
                     format!(
-                        "write `#{} name := …` (or `::` for an immutable bare bind)",
+                        "`#{}` marks a bare binding (D-PERSIST1 / D-BIND-BARE1)",
                         Syntax::MARKER_PERSIST
                     ),
-                    Some(Span::new(persist_span.start, bad.span.end)),
+                    format!(
+                        "write `#{} {name} := …` (or `{name} :: …`)",
+                        Syntax::MARKER_PERSIST
+                    ),
+                    Some(self.peek().span),
                 ));
             }
-            let (name, name_span) = self.expect_ident("after `#Persist`")?;
-            let mutable = match self.peek().kind {
-                TokKind::ColonColon => {
-                    self.bump();
-                    false
-                }
-                TokKind::ColonEq => {
-                    self.bump();
-                    true
-                }
-                _ => {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!(
-                            "expected `{}` or `{}` after the `#{}` name",
-                            Syntax::SIGIL_BIND_IMMUT,
-                            Syntax::SIGIL_BIND_MUT,
-                            Syntax::MARKER_PERSIST
-                        ),
-                        format!(
-                            "`#{}` marks a bare binding (D-PERSIST1 / D-BIND-BARE1)",
-                            Syntax::MARKER_PERSIST
-                        ),
-                        format!(
-                            "write `#{} {name} := …` (or `{name} :: …`)",
-                            Syntax::MARKER_PERSIST
-                        ),
-                        Some(self.peek().span),
-                    ));
-                }
-            };
-            let value = self.expr()?;
-            self.expect(TokKind::Semi, "after a `#Persist` value")?;
-            Ok(ConstDef {
-                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-                name,
-                name_span,
-                value,
-                meta,
-                attrs: Vec::new(),
-                rust_kind: crate::AST::RustConstKind::Const,
-                is_comptime: false,
-                ct: None,
-                ty: None,
-                is_persist: true,
-                persist_span: Some(persist_span),
-                mutable,
-                resolved_output: None,
-            })
-        }
+        };
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after a `#Persist` value")?;
+        Ok(ConstDef {
+            span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
+            name,
+            name_span,
+            value,
+            meta,
+            attrs: Vec::new(),
+            rust_kind: crate::AST::RustConstKind::Const,
+            is_comptime: false,
+            ct: None,
+            ty: None,
+            is_persist: true,
+            persist_span: Some(persist_span),
+            mutable,
+            resolved_output: None,
+        })
+    }
 
-        fn parse_comptime_attrs(&mut self) -> Result<Vec<ConstAttr>, Diagnostic> {
-            let mut attrs = Vec::new();
-            while self.at_marker_head()
-                && self.marker_head_is_followed_by_comptime_target()
-            {
-                let marker = self.parse_registered_marker_at_site(
-                    crate::Policy::RuleSite::Constant,
-                )?;
-                let attr_name = marker.name.clone();
-                match attr_name.as_str() {
-                    Syntax::MARKER_STATIC => attrs.push(ConstAttr::ForceStatic),
-                    Syntax::MARKER_INLINE => attrs.push(ConstAttr::ForceInline),
-                    "static" | "inline" => {
-                        let replacement = crate::Policy::applied_rule(&attr_name)
-                            .and_then(|row| match row.status {
-                                crate::Policy::RuleStatus::Retired { replacement } => {
-                                    Some(replacement)
-                                }
-                                crate::Policy::RuleStatus::Active => None,
-                            })
-                            .unwrap_or("#Static");
-                        self.diags.push(Diagnostic::error(
+    fn parse_comptime_attrs(&mut self) -> Result<Vec<ConstAttr>, Diagnostic> {
+        let mut attrs = Vec::new();
+        while self.at_marker_head() && self.marker_head_is_followed_by_comptime_target() {
+            let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Constant)?;
+            let attr_name = marker.name.clone();
+            match attr_name.as_str() {
+                Syntax::MARKER_STATIC => attrs.push(ConstAttr::ForceStatic),
+                Syntax::MARKER_INLINE => attrs.push(ConstAttr::ForceInline),
+                "static" | "inline" => {
+                    let replacement = crate::Policy::applied_rule(&attr_name)
+                        .and_then(|row| match row.status {
+                            crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
+                            crate::Policy::RuleStatus::Active => None,
+                        })
+                        .unwrap_or("#Static");
+                    self.diags.push(Diagnostic::error(
                             "E0927",
                             format!("`#{attr_name}` is retired"),
                             "comptime markers use the same PascalCase marker plane as other declarations"
@@ -367,97 +358,99 @@ impl<'a> Parser<'a> {
                             format!("write `{replacement}`"),
                             Some(marker.span),
                         ));
-                        attrs.push(if attr_name == "static" {
-                            ConstAttr::ForceStatic
-                        } else {
-                            ConstAttr::ForceInline
-                        });
-                    }
-                    _ => unreachable!("the constant marker registry accepts only static attributes"),
+                    attrs.push(if attr_name == "static" {
+                        ConstAttr::ForceStatic
+                    } else {
+                        ConstAttr::ForceInline
+                    });
                 }
+                _ => unreachable!("the constant marker registry accepts only static attributes"),
             }
-            Ok(attrs)
         }
+        Ok(attrs)
+    }
 
-        /// D-SHAPE-OUTPUT-CALLABLE1: an Output is an ordinary typed immutable
-        /// top-level value; no wrapper declaration or string symbol path.
-        pub(in crate::Parser) fn output_def(&mut self) -> Result<ConstDef, Diagnostic> {
-            let start = self.peek().span.start;
-            let (name, name_span) = self.expect_ident("for the Output name")?;
-            self.expect(TokKind::Colon, "after the Output name")?;
-            let (ty, _) = self.type_()?;
-            self.expect(TokKind::ColonColon, "after `Output`")?;
-            let value = self.expr()?;
-            self.expect(TokKind::Semi, "after an Output value")?;
-            Ok(ConstDef {
-                span: Span::new(start, self.prev_end()),
-                name,
-                name_span,
-                value,
-                meta: None,
-                attrs: Vec::new(),
-                rust_kind: crate::AST::RustConstKind::Const,
-                is_comptime: false,
-                ct: None,
-                ty: Some(ty),
-                is_persist: false,
-                persist_span: None,
-                mutable: false,
-                resolved_output: None,
-            })
-        }
+    /// D-SHAPE-OUTPUT-CALLABLE1: an Output is an ordinary typed immutable
+    /// top-level value; no wrapper declaration or string symbol path.
+    pub(in crate::Parser) fn output_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let start = self.peek().span.start;
+        let (name, name_span) = self.expect_ident("for the Output name")?;
+        self.expect(TokKind::Colon, "after the Output name")?;
+        let (ty, _) = self.type_()?;
+        self.expect(TokKind::ColonColon, "after `Output`")?;
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after an Output value")?;
+        Ok(ConstDef {
+            span: Span::new(start, self.prev_end()),
+            name,
+            name_span,
+            value,
+            meta: None,
+            attrs: Vec::new(),
+            rust_kind: crate::AST::RustConstKind::Const,
+            is_comptime: false,
+            ct: None,
+            ty: Some(ty),
+            is_persist: false,
+            persist_span: None,
+            mutable: false,
+            resolved_output: None,
+        })
+    }
 
-        /// D-ECO-OUTPUT-DEFAULT1=A: checked Output defaults keep the ratified
-        /// `defaults: { run: address, ... }` source spelling.
-        pub(in crate::Parser) fn output_defaults_def(&mut self) -> Result<ConstDef, Diagnostic> {
-            let start = self.peek().span.start;
-            let (name, name_span) = self.expect_ident("for Output defaults")?;
-            self.expect(TokKind::Colon, "after `defaults`")?;
-            let value = self.expr()?;
-            self.expect(TokKind::Semi, "after Output defaults")?;
-            Ok(ConstDef {
-                span: Span::new(start, self.prev_end()),
-                name,
-                name_span,
-                value,
-                meta: None,
-                attrs: Vec::new(),
-                rust_kind: crate::AST::RustConstKind::Const,
-                is_comptime: false,
-                ct: None,
-                ty: Some(crate::AST::Type::Named(Syntax::TYPE_OUTPUT_DEFAULTS.to_string())),
-                is_persist: false,
-                persist_span: None,
-                mutable: false,
-                resolved_output: None,
-            })
-        }
-    
-        /// S57 (M9.5): `@name :: expr;` — a compile-time constant binding.
-        /// D-CONSTMARK1: optional `#Static` / `#Inline` precede `comptime`.
-        /// D-CONST-RETIRE1: bare/`#Static`/`#Inline` `const` teaches E0146 and recovers.
-        pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
-            let item_start = self.peek().span.start;
-            let meta = if self.at_meta_attr() {
-                let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Constant)?;
-                while matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
-                Some(meta)
-            } else {
-                None
-            };
-            let attrs = self.parse_comptime_attrs()?;
-            let rust_kind = if attrs.contains(&crate::AST::ConstAttr::ForceStatic) {
-                crate::AST::RustConstKind::Static
-            } else {
-                crate::AST::RustConstKind::Const
-            };
-            let known = self.at_known_lead();
-            match self.peek().kind {
-                TokKind::KwComptime => {
-                    let span = self.bump().span;
-                    self.diags.push(Diagnostic::error(
+    /// D-ECO-OUTPUT-DEFAULT1=A: checked Output defaults keep the ratified
+    /// `defaults: { run: address, ... }` source spelling.
+    pub(in crate::Parser) fn output_defaults_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let start = self.peek().span.start;
+        let (name, name_span) = self.expect_ident("for Output defaults")?;
+        self.expect(TokKind::Colon, "after `defaults`")?;
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after Output defaults")?;
+        Ok(ConstDef {
+            span: Span::new(start, self.prev_end()),
+            name,
+            name_span,
+            value,
+            meta: None,
+            attrs: Vec::new(),
+            rust_kind: crate::AST::RustConstKind::Const,
+            is_comptime: false,
+            ct: None,
+            ty: Some(crate::AST::Type::Named(
+                Syntax::TYPE_OUTPUT_DEFAULTS.to_string(),
+            )),
+            is_persist: false,
+            persist_span: None,
+            mutable: false,
+            resolved_output: None,
+        })
+    }
+
+    /// S57 (M9.5): `@name :: expr;` — a compile-time constant binding.
+    /// D-CONSTMARK1: optional `#Static` / `#Inline` precede `comptime`.
+    /// D-CONST-RETIRE1: bare/`#Static`/`#Inline` `const` teaches E0146 and recovers.
+    pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
+        let item_start = self.peek().span.start;
+        let meta = if self.at_meta_attr() {
+            let meta = self.parse_meta_attr_at_site(crate::Policy::RuleSite::Constant)?;
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            Some(meta)
+        } else {
+            None
+        };
+        let attrs = self.parse_comptime_attrs()?;
+        let rust_kind = if attrs.contains(&crate::AST::ConstAttr::ForceStatic) {
+            crate::AST::RustConstKind::Static
+        } else {
+            crate::AST::RustConstKind::Const
+        };
+        let known = self.at_known_lead();
+        match self.peek().kind {
+            TokKind::KwComptime => {
+                let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
                         "E0374",
                         "`comptime` is retired".to_string(),
                         "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
@@ -466,67 +459,64 @@ impl<'a> Parser<'a> {
                             .to_string(),
                         Some(span),
                     ));
-                }
-                TokKind::KwConst => {
-                    let kw = self.bump();
-                    self.diags.push(Diagnostic::error(
-                        "E0146",
-                        format!("`{}` is retired — write `@`", Syntax::KW_CONST),
-                        "explicit compile-time demand is a marker on an immutable binding"
-                            .to_string(),
-                        "write `@name :: …` (or `#Persist name := …` for hot-reload state)"
-                            .to_string(),
-                        Some(kw.span),
-                    ));
-                }
-                // D-META-STAGE1=B: `#Known` is retired. Recover it so the rest
-                // of the file still parses, and teach the `@` form once.
-                TokKind::Hash if known => {
-                    let head = self.read_marker_head()?;
-                    let fix = match &self.peek().kind {
-                        TokKind::Ident(name) => format!("write `@{name} :: …`"),
-                        _ => "write the mark on the name: `@name :: …`".to_string(),
-                    };
-                    self.diags.push(self.retired_known_error(head.span, fix));
-                }
-                // D-META-STAGE1=B: `@name :: expr` — the mark rides the name.
-                // Additive new spelling from #1537's checkpoint; kept, not part
-                // of the B5 revert (it doesn't hard-error anything in the
-                // existing `@` corpus).
-                TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
-                _ => {
-                    self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
-                }
             }
-            let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
-            let (name, name_span) = self.expect_ident(if known || marked {
-                "after `@`"
-            } else {
-                "for the compile-time binding name"
-            })?;
-            if known || marked {
-                self.expect(TokKind::ColonColon, "after the `@` name")?;
-            } else {
-                self.expect(TokKind::Eq, "after the retired comptime name")?;
+            TokKind::KwConst => {
+                let kw = self.bump();
+                self.diags.push(Diagnostic::error(
+                    "E0146",
+                    format!("`{}` is retired — write `@`", Syntax::KW_CONST),
+                    "explicit compile-time demand is a marker on an immutable binding".to_string(),
+                    "write `@name :: …` (or `#Persist name := …` for hot-reload state)".to_string(),
+                    Some(kw.span),
+                ));
             }
-            let value = self.expr()?;
-            self.expect(TokKind::Semi, "after a comptime value")?;
-            Ok(ConstDef {
-                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-                name,
-                name_span,
-                value,
-                meta,
-                attrs,
-                rust_kind,
-                is_comptime: true,
-                ct: None,
-                ty: None,
-                is_persist: false,
-                persist_span: None,
-                mutable: false,
-                resolved_output: None,
-            })
+            // D-META-STAGE1=B: `#Known` is retired. Recover it so the rest
+            // of the file still parses, and teach the `@` form once.
+            TokKind::Hash if known => {
+                let head = self.read_marker_head()?;
+                let fix = match &self.peek().kind {
+                    TokKind::Ident(name) => format!("write `@{name} :: …`"),
+                    _ => "write the mark on the name: `@name :: …`".to_string(),
+                };
+                self.diags.push(self.retired_known_error(head.span, fix));
+            }
+            // D-META-STAGE1=B: `@name :: expr` — the mark rides the name.
+            // Additive new spelling from #1537's checkpoint; kept, not part
+            // of the B5 revert (it doesn't hard-error anything in the
+            // existing `@` corpus).
+            TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
+            _ => {
+                self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+            }
         }
-    
+        let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
+        let (name, name_span) = self.expect_ident(if known || marked {
+            "after `@`"
+        } else {
+            "for the compile-time binding name"
+        })?;
+        if known || marked {
+            self.expect(TokKind::ColonColon, "after the `@` name")?;
+        } else {
+            self.expect(TokKind::Eq, "after the retired comptime name")?;
+        }
+        let value = self.expr()?;
+        self.expect(TokKind::Semi, "after a comptime value")?;
+        Ok(ConstDef {
+            span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
+            name,
+            name_span,
+            value,
+            meta,
+            attrs,
+            rust_kind,
+            is_comptime: true,
+            ct: None,
+            ty: None,
+            is_persist: false,
+            persist_span: None,
+            mutable: false,
+            resolved_output: None,
+        })
+    }
 }

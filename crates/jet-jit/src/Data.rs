@@ -123,9 +123,9 @@ mod data_kernel {
 }
 
 mod data_plot_rt {
+    pub(crate) use super::data_kernel::jet_std;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    pub(crate) use super::data_kernel::jet_std;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
 }
 
@@ -213,9 +213,9 @@ fn jet_jit_data_error_show(handle: i64) -> i64 {
 
 fn result_unit(r: Result<(), DataError>) -> i64 {
     match r {
-        Ok(()) => Concurrency::with_runtime_mut(|rt| {
-            crate::runtime_host::alloc_jit_result(rt, true, 0)
-        }),
+        Ok(()) => {
+            Concurrency::with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, 0))
+        }
         Err(e) => result_data_err(e),
     }
 }
@@ -277,7 +277,7 @@ fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
 fn jet_jit_data_describe(values: i64) -> i64 {
     let vals = float_list(values);
     Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_describe_checked(&vals) {
-                Ok(s) => {
+        Ok(s) => {
             let h = rt.heap.alloc_record(8);
             let _ = rt.heap.record_set_int(h, 0, s.count);
             let _ = rt.heap.record_set_float(h, 1, s.sum);
@@ -378,9 +378,11 @@ fn load_line_options(options: i64) -> DataLineOptions {
             .record_get_string(options, 7)
             .and_then(|sid| rt.heap.clone_string(sid))
             .unwrap_or_default();
-        let reference = jet_outcome_of(rt.heap.record_get_int(options, 4).and_then(|raw| {
-            (raw != 0).then(|| f64::from_bits(raw.wrapping_sub(1) as u64))
-        }));
+        let reference = jet_outcome_of(
+            rt.heap
+                .record_get_int(options, 4)
+                .and_then(|raw| (raw != 0).then(|| f64::from_bits(raw.wrapping_sub(1) as u64))),
+        );
         let markers = rt.heap.record_get_bool(options, 3).unwrap_or(false);
         DataLineOptions {
             title,
@@ -406,15 +408,13 @@ fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
 fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
     let groups = load_groups(groups);
     let options = load_line_options(options);
-    Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_text_plot_checked(
-        &groups, &options,
-    ) {
-        Ok(s) => {
-            let sid = rt.heap.alloc_string(s);
-            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
-        }
-        Err(e) => {
-            result_data_plot_err(e)
+    Concurrency::with_runtime_mut(|rt| {
+        match data_plot_rt::jet_data_line_text_plot_checked(&groups, &options) {
+            Ok(s) => {
+                let sid = rt.heap.alloc_string(s);
+                crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+            }
+            Err(e) => result_data_plot_err(e),
         }
     })
 }
@@ -422,15 +422,13 @@ fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
 fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
     let groups = load_groups(groups);
     let options = load_line_options(options);
-    Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_svg_plot_checked(
-        &groups, &options,
-    ) {
-        Ok(s) => {
-            let sid = rt.heap.alloc_string(s);
-            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
-        }
-        Err(e) => {
-            result_data_plot_err(e)
+    Concurrency::with_runtime_mut(|rt| {
+        match data_plot_rt::jet_data_line_svg_plot_checked(&groups, &options) {
+            Ok(s) => {
+                let sid = rt.heap.alloc_string(s);
+                crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+            }
+            Err(e) => result_data_plot_err(e),
         }
     })
 }
@@ -455,25 +453,17 @@ fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i64 {
         }
         let mut out = Vec::new();
         for (key, (count, sum)) in map {
-            let mean = if count == 0 {
-                0.0
-            } else {
-                sum / count as f64
-            };
+            let mean = if count == 0 { 0.0 } else { sum / count as f64 };
             let h = rt.heap.alloc_record(4);
             let ks = rt.heap.alloc_string(key);
             let _ = rt.heap.record_set_string(h, 0, ks);
             let _ = rt.heap.record_set_int(h, 1, count);
-            let _ = rt.heap.record_set_float(
-                h,
-                2,
-                if mode == 0 { count as f64 } else { sum },
-            );
-            let _ = rt.heap.record_set_float(
-                h,
-                3,
-                if mode == 0 { count as f64 } else { mean },
-            );
+            let _ = rt
+                .heap
+                .record_set_float(h, 2, if mode == 0 { count as f64 } else { sum });
+            let _ = rt
+                .heap
+                .record_set_float(h, 3, if mode == 0 { count as f64 } else { mean });
             out.push(h);
         }
         let list = rt.heap.alloc_int_list(out);
@@ -481,12 +471,7 @@ fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i64 {
     })
 }
 
-fn jet_jit_data_inner_join(
-    left: i64,
-    right: i64,
-    left_keys: i64,
-    right_keys: i64,
-) -> i64 {
+fn jet_jit_data_inner_join(left: i64, right: i64, left_keys: i64, right_keys: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let ln = rt.heap.list_len(left).unwrap_or(0);
         let rn = rt.heap.list_len(right).unwrap_or(0);
@@ -516,12 +501,7 @@ fn jet_jit_data_inner_join(
     })
 }
 
-fn jet_jit_data_left_join(
-    left: i64,
-    right: i64,
-    left_keys: i64,
-    right_keys: i64,
-) -> i64 {
+fn jet_jit_data_left_join(left: i64, right: i64, left_keys: i64, right_keys: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let ln = rt.heap.list_len(left).unwrap_or(0);
         let rn = rt.heap.list_len(right).unwrap_or(0);
@@ -577,7 +557,11 @@ fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) -> i64 {
                 .unwrap_or_default();
             let v = rt.heap.list_get_float(values, i).unwrap_or(0.0);
             if !v.is_finite() {
-                let e = err(DataErrorKind::NonFinite, "pivot_sum", "pivot values must be finite");
+                let e = err(
+                    DataErrorKind::NonFinite,
+                    "pivot_sum",
+                    "pivot values must be finite",
+                );
                 let sid = rt.heap.alloc_string(e.to_string());
                 return crate::runtime_host::alloc_jit_result(rt, false, sid as u64);
             }
@@ -587,11 +571,7 @@ fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) -> i64 {
         }
         let mut out = Vec::new();
         for ((row_key, column_key), (count, sum)) in map {
-            let mean = if count == 0 {
-                0.0
-            } else {
-                sum / count as f64
-            };
+            let mean = if count == 0 { 0.0 } else { sum / count as f64 };
             let h = rt.heap.alloc_record(5);
             let rks = rt.heap.alloc_string(row_key);
             let cks = rt.heap.alloc_string(column_key);
@@ -656,7 +636,6 @@ pub(crate) fn note_lazy_callable(func_id: FuncId) {
 }
 
 pub(crate) fn bind_lazy_callables(module: &JITModule) {
-    
     let pending = LAZY_PENDING
         .lock()
         .map(|mut p| std::mem::take(&mut *p))
@@ -692,7 +671,9 @@ fn clone_frame_ops(src: i64, dst: i64) {
 fn jet_jit_data_lazy_push_op(frame: i64, kind: i64, func_id: i64) -> i64 {
     note_lazy_callable(FuncId::from_u32(func_id as u32));
     if let Ok(mut ops) = LAZY_FRAME_OPS.lock() {
-        ops.entry(frame).or_default().push((kind as u8, func_id as u32));
+        ops.entry(frame)
+            .or_default()
+            .push((kind as u8, func_id as u32));
     }
     frame
 }
@@ -716,19 +697,24 @@ fn materialize_lazy_rows(rt: &mut crate::JitRuntime, frame: i64) -> Result<i64, 
     let resolved = match LAZY_RESOLVED.lock() {
         Ok(g) => g,
         Err(_) => {
-            return Err(err(DataErrorKind::State, "collect", "lazy resolve lock poisoned"));
+            return Err(err(
+                DataErrorKind::State,
+                "collect",
+                "lazy resolve lock poisoned",
+            ));
         }
     };
     let table = match LAZY_FN_TABLE.lock() {
         Ok(g) => g,
         Err(_) => {
-            return Err(err(DataErrorKind::State, "collect", "lazy fn table lock poisoned"));
+            return Err(err(
+                DataErrorKind::State,
+                "collect",
+                "lazy fn table lock poisoned",
+            ));
         }
     };
-    let mut cur = rt
-        .heap
-        .clone_int_list(rows)
-        .unwrap_or_default();
+    let mut cur = rt.heap.clone_int_list(rows).unwrap_or_default();
     for (kind, fid) in ops {
         let Some(&idx) = resolved.get(&fid) else {
             return Err(err(
@@ -929,7 +915,11 @@ fn jet_jit_data_stream_rest(handle: i64) -> i64 {
         let idx = match (handle as usize).checked_sub(1) {
             Some(i) => i,
             None => {
-                let e = err(DataErrorKind::InvalidArgument, "group_mean", "bad DataStream");
+                let e = err(
+                    DataErrorKind::InvalidArgument,
+                    "group_mean",
+                    "bad DataStream",
+                );
                 let h = rt.heap.alloc_record(7);
                 let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
                 let _ = rt.heap.record_set_string(h, 0, kind);
@@ -945,7 +935,11 @@ fn jet_jit_data_stream_rest(handle: i64) -> i64 {
             }
         };
         let Some(stream) = rt.data_streams.get_mut(idx) else {
-            let e = err(DataErrorKind::InvalidArgument, "group_mean", "bad DataStream");
+            let e = err(
+                DataErrorKind::InvalidArgument,
+                "group_mean",
+                "bad DataStream",
+            );
             let h = rt.heap.alloc_record(7);
             let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
             let _ = rt.heap.record_set_string(h, 0, kind);
@@ -972,10 +966,7 @@ fn jet_jit_data_stream_max_groups(handle: i64) -> i64 {
             Some(i) => i,
             None => return 0,
         };
-        rt.data_streams
-            .get(idx)
-            .map(|s| s.max_groups)
-            .unwrap_or(0)
+        rt.data_streams.get(idx).map(|s| s.max_groups).unwrap_or(0)
     })
 }
 
@@ -1016,11 +1007,7 @@ fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_groups: i64) ->
         }
         let mut out = Vec::new();
         for (key, (count, sum)) in map {
-            let mean = if count == 0 {
-                0.0
-            } else {
-                sum / count as f64
-            };
+            let mean = if count == 0 { 0.0 } else { sum / count as f64 };
             let h = rt.heap.alloc_record(4);
             let ks = rt.heap.alloc_string(key);
             let _ = rt.heap.record_set_string(h, 0, ks);
@@ -1034,7 +1021,12 @@ fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_groups: i64) ->
     })
 }
 
-fn err_at(kind: DataErrorKind, op: &str, index: Option<i64>, reason: impl Into<String>) -> DataError {
+fn err_at(
+    kind: DataErrorKind,
+    op: &str,
+    index: Option<i64>,
+    reason: impl Into<String>,
+) -> DataError {
     let mut e = err(kind, op, reason);
     e.index = index.ok_or(JetAbsent);
     e
@@ -1085,8 +1077,3 @@ host_fns! {
     stream_rest: "jet_jit_data_stream_rest" => jet_jit_data_stream_rest: sig_unary;
     stream_max_groups: "jet_jit_data_stream_max_groups" => jet_jit_data_stream_max_groups: sig_unary;
 }
-
-
-
-
-

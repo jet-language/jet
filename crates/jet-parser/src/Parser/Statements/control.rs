@@ -154,14 +154,13 @@ impl<'a> Parser<'a> {
                     ..
                 } = &first
                 {
-                    let step = if self.at_yielding_loop_stride()
-                        && !self.at_yielding_loop_guard_comma()
-                    {
-                        self.take_loop_comma();
-                        Some(self.expr_no_struct_lit()?)
-                    } else {
-                        None
-                    };
+                    let step =
+                        if self.at_yielding_loop_stride() && !self.at_yielding_loop_guard_comma() {
+                            self.take_loop_comma();
+                            Some(self.expr_no_struct_lit()?)
+                        } else {
+                            None
+                        };
                     ForKind::Range {
                         start: (**start).clone(),
                         end: (**end).clone(),
@@ -172,14 +171,13 @@ impl<'a> Parser<'a> {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
-                    let step = if self.at_yielding_loop_stride()
-                        && !self.at_yielding_loop_guard_comma()
-                    {
-                        self.take_loop_comma();
-                        Some(self.expr_no_struct_lit()?)
-                    } else {
-                        None
-                    };
+                    let step =
+                        if self.at_yielding_loop_stride() && !self.at_yielding_loop_guard_comma() {
+                            self.take_loop_comma();
+                            Some(self.expr_no_struct_lit()?)
+                        } else {
+                            None
+                        };
                     ForKind::Range {
                         start: first,
                         end,
@@ -187,14 +185,13 @@ impl<'a> Parser<'a> {
                         exclusive,
                     }
                 } else {
-                    let step = if self.at_yielding_loop_stride()
-                        && !self.at_yielding_loop_guard_comma()
-                    {
-                        self.take_loop_comma();
-                        Some(self.expr_no_struct_lit()?)
-                    } else {
-                        None
-                    };
+                    let step =
+                        if self.at_yielding_loop_stride() && !self.at_yielding_loop_guard_comma() {
+                            self.take_loop_comma();
+                            Some(self.expr_no_struct_lit()?)
+                        } else {
+                            None
+                        };
                     ForKind::In {
                         collection: first,
                         step,
@@ -338,10 +335,7 @@ impl<'a> Parser<'a> {
         // A zero-width span distinguishes this compiler-private collection
         // marker from the user-written `yield` statement used by Stream
         // generators. Formatter and sema remove it before user-facing output.
-        body.push(Stmt::Yield(
-            value,
-            Span::new(start.start, start.start),
-        ));
+        body.push(Stmt::Yield(value, Span::new(start.start, start.start)));
         if let Some(cond) = guard {
             body = vec![Stmt::Switch {
                 subject: Expr::Bool(true, start),
@@ -383,8 +377,7 @@ impl<'a> Parser<'a> {
                     body: nested,
                     span: start,
                     arrow_body: false,
-                    label: (index + 1 == clause_count)
-                        .then(|| (collect_label.clone(), start)),
+                    label: (index + 1 == clause_count).then(|| (collect_label.clone(), start)),
                 }];
             }
             nested.pop().expect("a yielding loop has a source clause")
@@ -451,7 +444,10 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek3().kind, TokKind::Lt)
                 && matches!(self.peek4().kind, TokKind::Ident(_))
                 && matches!(self.peek5().kind, TokKind::Gt)
-                && matches!(self.toks.get(self.pos + 5).map(|token| &token.kind), Some(TokKind::LBrace)))
+                && matches!(
+                    self.toks.get(self.pos + 5).map(|token| &token.kind),
+                    Some(TokKind::LBrace)
+                ))
     }
 
     pub(in super::super) fn at_declared_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -533,10 +529,7 @@ impl<'a> Parser<'a> {
             }
             i += 1;
         }
-        while matches!(
-            self.toks.get(i).map(|t| &t.kind),
-            Some(TokKind::Semi)
-        ) {
+        while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
             i += 1;
         }
         if i < self.toks.len() {
@@ -591,10 +584,7 @@ impl<'a> Parser<'a> {
     /// `:=` is recognized so we can teach immutable `::` (not silent TypedLit fallthrough).
     fn looks_like_layout_ctor(&self) -> bool {
         matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(
-                self.peek2().kind,
-                TokKind::ColonColon | TokKind::ColonEq
-            )
+            && matches!(self.peek2().kind, TokKind::ColonColon | TokKind::ColonEq)
             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::LAYOUT_TYPE)
             && (matches!(self.peek4().kind, TokKind::LBrace)
                 || (matches!(self.peek4().kind, TokKind::Dot)
@@ -638,9 +628,7 @@ impl<'a> Parser<'a> {
         let elems = match lit_body {
             TypedLitBody::Elements(elems) => elems,
             TypedLitBody::Empty => Vec::new(),
-            TypedLitBody::Fields(_)
-            | TypedLitBody::Entries(_)
-            | TypedLitBody::Value(_) => {
+            TypedLitBody::Fields(_) | TypedLitBody::Entries(_) | TypedLitBody::Value(_) => {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
@@ -764,12 +752,7 @@ impl<'a> Parser<'a> {
             .map(|index| arguments.parameter_for_source(index))
             .collect::<Vec<_>>();
         let mut fields = Vec::new();
-        for (index, (value, label)) in marker
-            .args
-            .into_iter()
-            .zip(marker.arg_labels)
-            .enumerate()
-        {
+        for (index, (value, label)) in marker.args.into_iter().zip(marker.arg_labels).enumerate() {
             if label.is_none()
                 && matches!(&value, Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE)
             {
@@ -803,7 +786,8 @@ impl<'a> Parser<'a> {
                                 "E0352",
                                 "`#Meta` maturity needs a known maturity value".to_string(),
                                 "maturity metadata is a closed documentation scale".to_string(),
-                                "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
+                                "write `maturity: .Experimental`, `.Tested`, or `.Hardened`"
+                                    .to_string(),
                                 Some(value.span()),
                             ));
                         }
@@ -845,7 +829,11 @@ impl<'a> Parser<'a> {
         })
     }
 
-    pub(in super::super) fn meta_attr_wrong_place_diag(&self, span: Span, target: &str) -> Diagnostic {
+    pub(in super::super) fn meta_attr_wrong_place_diag(
+        &self,
+        span: Span,
+        target: &str,
+    ) -> Diagnostic {
         Diagnostic::error(
             "E0349",
             "`#Meta` attaches to a binding or function".to_string(),
@@ -924,9 +912,15 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         let start = declarations.first().map(|d| d.span.start).unwrap_or(end);
         let span = Span::new(start, end);
-        for declaration in &mut declarations { declaration.target = Some(span); }
+        for declaration in &mut declarations {
+            declaration.target = Some(span);
+        }
         self.policy_declarations.extend(declarations.clone());
-        Ok(Stmt::Policy { declarations, body, span })
+        Ok(Stmt::Policy {
+            declarations,
+            body,
+            span,
+        })
     }
 
     /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
@@ -1006,9 +1000,19 @@ impl<'a> Parser<'a> {
         }
         if let Some(value) = arguments.parameter(1) {
             let (mode, mode_span) = match value {
-                Expr::EnumLit { type_name, variant, span, args, .. }
-                    if type_name.is_empty() && args.is_empty() => (variant, span),
-                _ => return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
+                Expr::EnumLit {
+                    type_name,
+                    variant,
+                    span,
+                    args,
+                    ..
+                } if type_name.is_empty() && args.is_empty() => (variant, span),
+                _ => {
+                    return Err(crate::Policy::marker_argument_shape_error(
+                        Syntax::KW_UNSAFE,
+                        value.span(),
+                    ))
+                }
             };
             obligation_mode = Some(match mode.as_str() {
                     "Track" => crate::Policy::PolicyValue::Track,
@@ -1022,14 +1026,15 @@ impl<'a> Parser<'a> {
         let span = Span::new(start.start, end);
         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
         if let Some(value) = obligation_mode {
-            self.policy_declarations.push(crate::Policy::PolicyDeclaration {
-                key: crate::Policy::PolicyKey::Unsafe,
-                value,
-                scope: crate::Policy::PolicyScope::Block,
-                span: Span::new(start.start, self.toks[self.pos - 1].span.end),
-                target: Some(span),
-                source: "<source>".to_string(),
-            });
+            self.policy_declarations
+                .push(crate::Policy::PolicyDeclaration {
+                    key: crate::Policy::PolicyKey::Unsafe,
+                    value,
+                    scope: crate::Policy::PolicyScope::Block,
+                    span: Span::new(start.start, self.toks[self.pos - 1].span.end),
+                    target: Some(span),
+                    source: "<source>".to_string(),
+                });
         }
         Ok(Stmt::Unsafe {
             audit,
@@ -1078,10 +1083,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(marker.span.start, end);
         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
-        Ok(Stmt::Reactive {
-            body,
-            span,
-        })
+        Ok(Stmt::Reactive { body, span })
     }
 
     /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `#Shield { … }` in statement
@@ -1106,10 +1108,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(marker.span.start, end);
         self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
-        Ok(Stmt::Shield {
-            body,
-            span,
-        })
+        Ok(Stmt::Shield { body, span })
     }
 
     /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
@@ -1117,7 +1116,10 @@ impl<'a> Parser<'a> {
         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let Some(Expr::Ident(name, name_span)) = arguments.parameter(0) else {
-            return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_REGION, marker.span));
+            return Err(crate::Policy::marker_argument_shape_error(
+                Syntax::MARKER_REGION,
+                marker.span,
+            ));
         };
         self.expect(TokKind::LBrace, "after `#Region(name)`")?;
         let body = self.block_stmts();
@@ -1127,7 +1129,12 @@ impl<'a> Parser<'a> {
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Block,
         );
-        Ok(Stmt::Region { name: name.clone(), name_span: *name_span, body, span: Span::new(marker.span.start, end) })
+        Ok(Stmt::Region {
+            name: name.clone(),
+            name_span: *name_span,
+            body,
+            span: Span::new(marker.span.start, end),
+        })
     }
 
     /// D-BLOCKPLANE1=A: `#Live { … }`.
@@ -1145,14 +1152,15 @@ impl<'a> Parser<'a> {
     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
-        let reason_expr = arguments.parameter(0).cloned().expect("bound reason argument");
+        let reason_expr = arguments
+            .parameter(0)
+            .cloned()
+            .expect("bound reason argument");
         let reason = match &reason_expr {
-            Expr::Str(parts, _) if parts.len() == 1 => {
-                match &parts[0] {
-                    StrPart::Lit(reason) => reason.clone(),
-                    StrPart::Interp(..) => String::new(),
-                }
-            }
+            Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                StrPart::Lit(reason) => reason.clone(),
+                StrPart::Interp(..) => String::new(),
+            },
             _ => String::new(),
         };
         self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
@@ -1187,11 +1195,8 @@ impl<'a> Parser<'a> {
         }
         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let marker_span = marker.span;
-        if let Some((field_name, field_name_span)) = marker
-            .arg_labels
-            .iter()
-            .flatten()
-            .find(|(field_name, _)| {
+        if let Some((field_name, field_name_span)) =
+            marker.arg_labels.iter().flatten().find(|(field_name, _)| {
                 field_name != Syntax::CTX_FIELD_ALLOCATOR
                     && field_name != Syntax::CTX_FIELD_LOGGER
                     && field_name != Syntax::CTX_FIELD_DEADLINE
@@ -1215,12 +1220,7 @@ impl<'a> Parser<'a> {
             .map(|index| arguments.parameter_for_source(index))
             .collect::<Vec<_>>();
         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
-        for (index, (value, label)) in marker
-            .args
-            .into_iter()
-            .zip(marker.arg_labels)
-            .enumerate()
-        {
+        for (index, (value, label)) in marker.args.into_iter().zip(marker.arg_labels).enumerate() {
             let (field_name, field_name_span) = match label {
                 Some(label) => label,
                 None => {
@@ -1250,7 +1250,11 @@ impl<'a> Parser<'a> {
                     Some(field_name_span),
                 ));
             }
-            fields.push((field_name, value.clone(), Span::new(field_name_span.start, value.span().end)));
+            fields.push((
+                field_name,
+                value.clone(),
+                Span::new(field_name_span.start, value.span().end),
+            ));
         }
         self.expect(
             TokKind::LBrace,
@@ -1296,7 +1300,9 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokKind::Comma, "between capped effects")?;
             }
-            let caps_start = caps.first().map_or(binding_span.end, |(_, span)| span.start);
+            let caps_start = caps
+                .first()
+                .map_or(binding_span.end, |(_, span)| span.start);
             self.expect(TokKind::RParen, "to close `#Abilities`")?;
             let caps_end = self.toks[self.pos - 1].span.end;
             self.record_rule_fact(
@@ -1334,7 +1340,10 @@ impl<'a> Parser<'a> {
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
             let Some(name) = Self::marker_enum_path(argument, "Ability") else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
+                return Err(crate::Policy::marker_argument_shape_error(
+                    Syntax::KW_CAPS,
+                    argument.span(),
+                ));
             };
             caps.push((name, argument.span()));
         }
@@ -1438,9 +1447,9 @@ impl<'a> Parser<'a> {
         let span = self.bump().span; // `loop`
                                      // S19-amend: `loop` handles all three loop forms by header.
                                      //   loop { }               → infinite
-        //   loop cond { }          → conditional (was `while`)
-        //   loop x in ... { }      → iteration (was `for`)
-        //   loop (k, v) in ... { } → key-value iteration
+                                     //   loop cond { }          → conditional (was `while`)
+                                     //   loop x in ... { }      → iteration (was `for`)
+                                     //   loop (k, v) in ... { } → key-value iteration
         if self.at_unified_arrow() {
             // D-ONELINE-BODY1=B: an infinite effect loop may use the same
             // one-statement arrow body as conditional and source loops.
@@ -1511,7 +1520,10 @@ impl<'a> Parser<'a> {
                 label,
             })
         } else if (matches!(&self.peek().kind, TokKind::Ident(_))
-            && matches!(&self.peek2().kind, TokKind::Semi | TokKind::Comma | TokKind::KwIn))
+            && matches!(
+                &self.peek2().kind,
+                TokKind::Semi | TokKind::Comma | TokKind::KwIn
+            ))
             || matches!(&self.peek().kind, TokKind::LParen)
         {
             // D-LOOP-IN1=A: `loop x in source [, stride]`; two-name iteration
@@ -1559,7 +1571,10 @@ impl<'a> Parser<'a> {
                 } else {
                     None
                 };
-                ForKind::In { collection: first, step }
+                ForKind::In {
+                    collection: first,
+                    step,
+                }
             };
             let (body, arrow_body) = self.effect_loop_body()?;
             Ok(Stmt::For {
@@ -1657,9 +1672,7 @@ impl<'a> Parser<'a> {
         }
 
         let expression = self.expr()?;
-        if matches!(self.peek().kind, TokKind::Eq)
-            || self.peek().kind.compound_op().is_some()
-        {
+        if matches!(self.peek().kind, TokKind::Eq) || self.peek().kind.compound_op().is_some() {
             let op_tok = self.bump();
             let op = op_tok.kind.compound_op();
             let value = self.expr()?;
@@ -1676,7 +1689,9 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Expr(expression))
     }
 
-    fn loop_source_binding(&mut self) -> Result<(String, Span, Option<(String, Span)>), Diagnostic> {
+    fn loop_source_binding(
+        &mut self,
+    ) -> Result<(String, Span, Option<(String, Span)>), Diagnostic> {
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump();
             let (first, first_span) = self.expect_ident("as the first loop variable")?;
@@ -1761,8 +1776,7 @@ impl<'a> Parser<'a> {
     }
 
     fn at_yielding_loop_guard_comma(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Comma)
-            && matches!(self.peek2().kind, TokKind::KwIf)
+        matches!(self.peek().kind, TokKind::Comma) && matches!(self.peek2().kind, TokKind::KwIf)
     }
 
     fn at_yielding_loop_clause(&self) -> bool {
@@ -1787,8 +1801,9 @@ impl<'a> Parser<'a> {
                 TokKind::LBracket => brackets += 1,
                 TokKind::RBracket => brackets = brackets.saturating_sub(1),
                 TokKind::LBrace if parens == 0 && brackets == 0 => return true,
-                TokKind::Semi | TokKind::RBrace | TokKind::Eof
-                    if parens == 0 && brackets == 0 => return false,
+                TokKind::Semi | TokKind::RBrace | TokKind::Eof if parens == 0 && brackets == 0 => {
+                    return false
+                }
                 _ => {}
             }
         }
@@ -1846,7 +1861,9 @@ impl<'a> Parser<'a> {
             1
         };
         if !matches!(
-            self.toks.get(self.pos + name_offset).map(|token| &token.kind),
+            self.toks
+                .get(self.pos + name_offset)
+                .map(|token| &token.kind),
             Some(TokKind::Ident(_))
         ) {
             return false;
@@ -1876,12 +1893,14 @@ impl<'a> Parser<'a> {
                 self.foreign_loop_has_block()
             }
             Some(ForeignKeywordKind::Continue) => {
-                matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof)
-                    || (matches!(self.peek2().kind, TokKind::Ident(_))
-                        && matches!(
-                            self.peek3().kind,
-                            TokKind::Semi | TokKind::RBrace | TokKind::Eof
-                        ))
+                matches!(
+                    self.peek2().kind,
+                    TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                ) || (matches!(self.peek2().kind, TokKind::Ident(_))
+                    && matches!(
+                        self.peek3().kind,
+                        TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    ))
             }
             Some(ForeignKeywordKind::Do) => matches!(self.peek2().kind, TokKind::LBrace),
             _ => false,
@@ -1904,8 +1923,7 @@ impl<'a> Parser<'a> {
             && matches!(
                 self.toks.get(word_pos + 1).map(|token| &token.kind),
                 Some(TokKind::Ident(name)) if name == "mut"
-            )
-        {
+            ) {
             2
         } else {
             1
@@ -2241,7 +2259,9 @@ impl<'a> Parser<'a> {
                     span: Span::new(defer_span.start, close_span.end),
                 })
             }
-            TokKind::Ident(n) if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) => {
+            TokKind::Ident(n)
+                if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) =>
+            {
                 let assert_span = self.bump().span;
                 let mut args = Vec::new();
                 loop {
@@ -2254,7 +2274,9 @@ impl<'a> Parser<'a> {
                         label: None,
                         spread: false,
                     });
-                    if !matches!(self.peek().kind, TokKind::Comma) { break; }
+                    if !matches!(self.peek().kind, TokKind::Comma) {
+                        break;
+                    }
                     self.bump();
                 }
                 self.finish_stmt()?;
@@ -2371,7 +2393,10 @@ impl<'a> Parser<'a> {
                     self.finish_stmt()?;
                     return Ok(Stmt::BreakLabel(name, span));
                 }
-                if matches!(self.peek().kind, TokKind::Semi | TokKind::RBrace | TokKind::Eof) {
+                if matches!(
+                    self.peek().kind,
+                    TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                ) {
                     self.finish_stmt()?;
                     Ok(Stmt::Break(span))
                 } else {
@@ -2505,9 +2530,8 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
                     Syntax::MARKER_TRACK | Syntax::MARKER_LOCAL | Syntax::MARKER_SHARED)) =>
             {
-                let marker = self.parse_registered_marker_at_site(
-                    crate::Policy::RuleSite::Declaration,
-                )?;
+                let marker =
+                    self.parse_registered_marker_at_site(crate::Policy::RuleSite::Declaration)?;
                 let mut binding = self.sigil_binding()?;
                 self.bind_rule_fact(
                     marker.name_span,
@@ -2565,8 +2589,7 @@ impl<'a> Parser<'a> {
             }
             // D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching
             // error E0426 points at `name := Type{ uninit }`.
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNINIT) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNINIT) =>
             {
                 return self.retired_uninit_marker();
             }
@@ -2613,7 +2636,8 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LIVE) {
                     return self.at_live_stmt();
                 }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NONDETERMINISTIC) {
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NONDETERMINISTIC)
+                {
                     return self.at_nondeterministic_stmt();
                 }
                 // D-EFF1 / D-QUAL1: `#Abilities(Net, DB) { … }` effect-restriction region.
@@ -2621,7 +2645,8 @@ impl<'a> Parser<'a> {
                     return self.at_caps_stmt();
                 }
                 // D-AUTHORITY-SCOPE1: retired Grant marker tombstone.
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::RETIRED_MARKER_GRANT) {
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::RETIRED_MARKER_GRANT)
+                {
                     return self.retired_grant_stmt();
                 }
                 // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
@@ -2660,9 +2685,8 @@ impl<'a> Parser<'a> {
             TokKind::Hash
                 if self.at_marker_head() && self.marker_head_is_followed_by(TokKind::LBrace) =>
             {
-                let marker = self.parse_registered_marker_at_site(
-                    crate::Policy::RuleSite::Block,
-                )?;
+                let marker =
+                    self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
                 self.expect(TokKind::LBrace, "after a marker block")?;
                 let body = self.block_stmts();
                 let end = self.toks[self.pos.saturating_sub(1)].span.end;
@@ -2702,12 +2726,15 @@ impl<'a> Parser<'a> {
             // rows whose site is not Statement with the shared E0927/E0355
             // families; `#allow` is the current generic statement marker.
             TokKind::Hash if self.at_marker_head() => {
-                let marker = self.parse_registered_marker_at_site(
-                    crate::Policy::RuleSite::Statement,
-                )?;
+                let marker =
+                    self.parse_registered_marker_at_site(crate::Policy::RuleSite::Statement)?;
                 let expression = self.expr()?;
                 let target = expression.span();
-                self.bind_rule_fact(marker.name_span, Some(target), crate::Policy::RuleSite::Statement);
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(target),
+                    crate::Policy::RuleSite::Statement,
+                );
                 self.finish_stmt()?;
                 Ok(Stmt::Expr(expression))
             }
@@ -2743,7 +2770,10 @@ impl<'a> Parser<'a> {
                 if n == Syntax::KW_CONC_TASK
                     && matches!(self.peek2().kind, TokKind::Dot)
                     && matches!(&self.peek3().kind, TokKind::Ident(selector) if selector == "group")
-                    && matches!(self.toks.get(self.pos + 3).map(|t| &t.kind), Some(TokKind::Ident(_)))
+                    && matches!(
+                        self.toks.get(self.pos + 3).map(|t| &t.kind),
+                        Some(TokKind::Ident(_))
+                    )
                     && matches!(
                         self.toks.get(self.pos + 4).map(|t| &t.kind),
                         Some(TokKind::LBrace | TokKind::LParen)
@@ -2792,9 +2822,7 @@ impl<'a> Parser<'a> {
             {
                 return self.retired_layout_keyword();
             }
-            TokKind::Ident(word)
-                if self.at_foreign_declaration() || self.at_foreign_binding() =>
-            {
+            TokKind::Ident(word) if self.at_foreign_declaration() || self.at_foreign_binding() => {
                 let word = word.clone();
                 let span = self.bump().span;
                 Err(self.foreign_keyword_diagnostic(&word, span))
@@ -2925,9 +2953,7 @@ impl<'a> Parser<'a> {
                 }
                 Err(Diagnostic::error(
                     "E0003",
-                    format!(
-                        "expected a call, binding, assignment, or `return`, found {found}"
-                    ),
+                    format!("expected a call, binding, assignment, or `return`, found {found}"),
                     "inside a function body, write a call, binding, assignment, or `return`"
                         .to_string(),
                     format!(
@@ -2979,7 +3005,10 @@ impl<'a> Parser<'a> {
                 kind if Self::at_unified_arrow_token(&kind)
                     && braces == 0
                     && parens == 0
-                    && brackets == 0 => return true,
+                    && brackets == 0 =>
+                {
+                    return true
+                }
                 TokKind::KwLoop if braces >= 1 => nested_loop_pending = true,
                 TokKind::KwBreak if parens == 0 && brackets == 0 => {
                     let next = self.toks.get(index + 1).map(|token| &token.kind);
@@ -3013,7 +3042,6 @@ impl<'a> Parser<'a> {
         }
         false
     }
-
 }
 
 fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_depth: usize) {

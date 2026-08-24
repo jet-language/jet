@@ -197,9 +197,8 @@ fn parse_suite_ledger(text: &str) -> Vec<SuiteRow> {
             Some((target, observed)) => (target.to_string(), observed.to_string()),
             None => (trimmed.to_string(), String::new()),
         };
-        let set = section.unwrap_or_else(|| {
-            panic!("tests/suites.txt row outside any section: {trimmed}")
-        });
+        let set = section
+            .unwrap_or_else(|| panic!("tests/suites.txt row outside any section: {trimmed}"));
         rows.push(SuiteRow {
             target,
             set,
@@ -215,8 +214,7 @@ fn parse_suite_ledger(text: &str) -> Vec<SuiteRow> {
 /// real ledger and the real filesystem; this half takes both sides as arguments
 /// so a synthetic inventory with a target no section names can be handed to it.
 fn audit_suite_ledger(ledger: &[SuiteRow], discovered: &[String]) -> SuiteLedgerAudit {
-    let existing: std::collections::HashSet<&str> =
-        discovered.iter().map(String::as_str).collect();
+    let existing: std::collections::HashSet<&str> = discovered.iter().map(String::as_str).collect();
 
     let mut claims: BTreeMap<&str, Vec<&'static str>> = BTreeMap::new();
     for row in ledger {
@@ -241,7 +239,12 @@ fn audit_suite_ledger(ledger: &[SuiteRow], discovered: &[String]) -> SuiteLedger
     let reasonless: Vec<String> = ledger
         .iter()
         .filter(|row| row.set == HOST_GATED && row.observed.is_empty())
-        .map(|row| format!("  {}: parked in `{HOST_GATED}:` with no gate named", row.target))
+        .map(|row| {
+            format!(
+                "  {}: parked in `{HOST_GATED}:` with no gate named",
+                row.target
+            )
+        })
         .collect();
     let empty_sets: Vec<&'static str> = SUITE_ORDER
         .into_iter()
@@ -627,11 +630,15 @@ fn suite_budget_audit_fires_on_a_row_that_should_not_exist() {
         "one row at the default, one naming no target, one duplicated: {violations:?}"
     );
     assert!(
-        violations.iter().any(|v| v.contains("some_unit_suite") && v.contains("900s default")),
+        violations
+            .iter()
+            .any(|v| v.contains("some_unit_suite") && v.contains("900s default")),
         "a row at the default must be named: {violations:?}"
     );
     assert!(
-        violations.iter().any(|v| v.contains("deleted_suite") && v.contains("no test target")),
+        violations
+            .iter()
+            .any(|v| v.contains("deleted_suite") && v.contains("no test target")),
         "a row naming no target must be named: {violations:?}"
     );
     assert!(

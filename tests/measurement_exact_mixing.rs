@@ -1,6 +1,6 @@
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 #[test]
 fn exact_values_enter_measurement_with_zero_uncertainty() {

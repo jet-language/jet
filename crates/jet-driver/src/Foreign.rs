@@ -8,14 +8,14 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
-use crate::AST::{
-    ForeignAbiContract, ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule,
-    ProgramBundle,
-};
 pub use crate::AST::{
     BinderCapability, BinderCapabilityReport, BinderDescriptor, BinderRuntime, BinderStatus,
     BinderSurface, BindingStubKind, ForeignProvider, ForeignSafety, ForeignScalar, ForeignStubFile,
     FOREIGN_BINDERS as BINDERS,
+};
+use crate::AST::{
+    ForeignAbiContract, ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule,
+    ProgramBundle,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -97,12 +97,12 @@ pub fn type_stub_file(
     let descriptor = binder_for(language)?;
     match descriptor.type_stub_file {
         ForeignStubFile::None => None,
-        ForeignStubFile::Suffix(extension) => Some(
-            binding_cache_dir(project_root, language).join(format!("{lib}.{extension}")),
-        ),
-        ForeignStubFile::StemSuffix(suffix) => Some(
-            binding_cache_dir(project_root, language).join(format!("{lib}{suffix}")),
-        ),
+        ForeignStubFile::Suffix(extension) => {
+            Some(binding_cache_dir(project_root, language).join(format!("{lib}.{extension}")))
+        }
+        ForeignStubFile::StemSuffix(suffix) => {
+            Some(binding_cache_dir(project_root, language).join(format!("{lib}{suffix}")))
+        }
     }
 }
 
@@ -352,7 +352,8 @@ pub fn assemble_active_namespaces_with_provenance(
                     let idx = match materialize_namespace(bundle, ns.language, &ns.lib) {
                         Ok(idx) => idx,
                         Err(diagnostics) => {
-                            let path = binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
+                            let path =
+                                binding_cache_file(&bundle.project_root, ns.language, &ns.lib);
                             let source = std::fs::read_to_string(&path).unwrap_or_default();
                             return Err(diagnostics
                                 .into_iter()
@@ -386,7 +387,10 @@ fn materialize_namespace(
     let Some(descriptor) = binder_for(language) else {
         return Err(vec![Diagnostic::error(
             "E3208",
-            format!("no foreign binder descriptor is registered for `{}`", language.root()),
+            format!(
+                "no foreign binder descriptor is registered for `{}`",
+                language.root()
+            ),
             "generated foreign stubs require a registered typed ABI descriptor".to_string(),
             "register the language binder before importing its namespace".to_string(),
             None,
@@ -473,7 +477,9 @@ fn mark_cpp_callback_abi(items: &mut [Item]) {
         for param in &mut function.params {
             if matches!(param.ty, crate::AST::Type::Fn { .. }) {
                 param.ty = crate::AST::Type::Tagged {
-                    marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi),
+                    marker: crate::AST::TagMarker::Internal(
+                        crate::AST::InternalTag::CppCallbackAbi,
+                    ),
                     inner: Box::new(param.ty.clone()),
                 };
             }

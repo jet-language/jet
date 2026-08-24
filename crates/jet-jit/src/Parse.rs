@@ -4,15 +4,15 @@
 //! AOT prelude) and `jet_foundation::MatchScan` — no second parser.
 
 use super::Concurrency;
+use crate::Marshal::result_err_msg;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_foundation::AST::{BinMatchPart, StrMatchPart, Type};
 use jet_foundation::MatchScan::{
     bin_match_consumed, bin_match_scan, str_match_consumed, str_match_scan, BinBind,
 };
 use jet_foundation::StreamCursor as kernel;
+use jet_foundation::AST::{BinMatchPart, StrMatchPart, Type};
 use std::sync::Mutex;
-use crate::Marshal::result_err_msg;
 
 /// Pattern tables live outside `Runtime` so ids baked into Cranelift IR during
 /// lowering survive Runtime resets between compile and execute.
@@ -62,7 +62,9 @@ fn result_err(msg: String) -> i64 {
 
 fn result_ok_bytes(bytes: Vec<u8>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_int_list(bytes.into_iter().map(|b| b as i64).collect());
+        let list = rt
+            .heap
+            .alloc_int_list(bytes.into_iter().map(|b| b as i64).collect());
         crate::runtime_host::alloc_jit_result(rt, true, list as u64)
     })
 }
@@ -126,9 +128,7 @@ fn jet_jit_cursor_skip_ws(handle: i64) {
 }
 
 fn jet_jit_cursor_take_until(handle: i64, delim: i64) -> i64 {
-    let delim = Concurrency::with_runtime_mut(|rt| {
-        rt.heap.clone_string(delim).unwrap_or_default()
-    });
+    let delim = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(delim).unwrap_or_default());
     match with_cursor_mut(handle, |c| kernel::jet_cursor_take_until(c, &delim)) {
         Some(Ok(s)) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
@@ -168,15 +168,19 @@ fn pack_str_binds(binds: &[(String, Type, String)]) -> i64 {
                     let _ = rt.heap.record_set_int(handle, idx, value);
                 }
                 Type::IntN { .. } => {
-                    let _ = rt.heap.record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
-                }
-                Type::InlineRange { .. } => {
-                    let _ = rt.heap.record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
-                }
-                Type::Float | Type::Float32 => {
                     let _ = rt
                         .heap
-                        .record_set_float(handle, idx, raw.parse::<f64>().unwrap_or(0.0));
+                        .record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
+                }
+                Type::InlineRange { .. } => {
+                    let _ = rt
+                        .heap
+                        .record_set_int(handle, idx, raw.parse::<i64>().unwrap_or(0));
+                }
+                Type::Float | Type::Float32 => {
+                    let _ =
+                        rt.heap
+                            .record_set_float(handle, idx, raw.parse::<f64>().unwrap_or(0.0));
                 }
                 Type::Bool => {
                     let _ = rt.heap.record_set_bool(
@@ -201,9 +205,10 @@ fn pack_bin_binds(binds: &[(String, Type, BinBind)]) -> i64 {
         for (i, (_, _, bind)) in binds.iter().enumerate() {
             let v = match bind {
                 BinBind::Int(v) => *v,
-                BinBind::Rest(bytes) => {
-                    rt.heap.alloc_int_list(bytes.iter().map(|b| *b as i64).collect()) as i64
-                }
+                BinBind::Rest(bytes) => rt
+                    .heap
+                    .alloc_int_list(bytes.iter().map(|b| *b as i64).collect())
+                    as i64,
             };
             let _ = rt.heap.record_set_int(handle, i as i64, v);
         }
@@ -225,7 +230,8 @@ fn bin_pattern(pattern: i64) -> Option<Vec<BinMatchPart>> {
 
 /// Full-match probe: 1 = Some, 0 = None.
 fn jet_jit_str_match_is_some(subject: i64, pattern: i64) -> i8 {
-    let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(subject).unwrap_or_default());
+    let text =
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(subject).unwrap_or_default());
     let Some(parts) = str_pattern(pattern) else {
         return 0;
     };
@@ -234,7 +240,8 @@ fn jet_jit_str_match_is_some(subject: i64, pattern: i64) -> i8 {
 
 /// Full-match unwrap → tuple struct handle (caller proved Some).
 fn jet_jit_str_match_unwrap(subject: i64, pattern: i64) -> i64 {
-    let text = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(subject).unwrap_or_default());
+    let text =
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(subject).unwrap_or_default());
     let Some(parts) = str_pattern(pattern) else {
         return 0;
     };
@@ -354,6 +361,3 @@ host_fns! {
     cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_binary;
     reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_binary;
 }
-
-
-

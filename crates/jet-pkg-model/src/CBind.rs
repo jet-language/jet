@@ -110,11 +110,8 @@ pub fn generate_with_descriptor(
         ));
     }
 
-    let module_lib = crate::Syntax::sanitize_generated_name(
-        lib,
-        crate::Syntax::NameCase::Snake,
-        "library",
-    );
+    let module_lib =
+        crate::Syntax::sanitize_generated_name(lib, crate::Syntax::NameCase::Snake, "library");
     let descriptor_stamp = descriptor.stamp();
     let source = format!(
         "// jet-ffi-descriptor={descriptor_stamp}\n#Bindgen module c.{}.__bindgen__ {{\n{}}}\n",
@@ -338,7 +335,10 @@ fn render_binding(
 }
 
 /// Map a C return type to `Some(JetType)` / `None` for `void`. Err if unbindable.
-fn map_return_type(c: &str, contract: crate::AST::ForeignAbiContract) -> Result<Option<String>, String> {
+fn map_return_type(
+    c: &str,
+    contract: crate::AST::ForeignAbiContract,
+) -> Result<Option<String>, String> {
     let norm = normalize_type(c);
     if norm == "void" {
         return Ok(None);
@@ -507,7 +507,11 @@ impl SchemaBuilder {
 }
 
 fn unique_name(used: &mut BTreeSet<String>, preferred: &str) -> String {
-    let preferred = if preferred.is_empty() { "value" } else { preferred };
+    let preferred = if preferred.is_empty() {
+        "value"
+    } else {
+        preferred
+    };
     if used.insert(preferred.to_string()) {
         return preferred.to_string();
     }
@@ -538,10 +542,7 @@ fn input_stem_type_name(input_path: &str) -> String {
         .rsplit(|ch| ch == '/' || ch == '\\')
         .next()
         .unwrap_or(input_path);
-    let stem = base
-        .rsplit_once('.')
-        .map(|(stem, _)| stem)
-        .unwrap_or(base);
+    let stem = base.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(base);
     sanitize_type_name(stem)
 }
 
@@ -624,7 +625,10 @@ impl JsonBindParser {
                             let first = self.hex_quad()?;
                             if (0xD800..=0xDBFF).contains(&first) {
                                 if self.peek() != Some('\\') {
-                                    return Err("JSON high surrogate is not followed by a low surrogate".to_string());
+                                    return Err(
+                                        "JSON high surrogate is not followed by a low surrogate"
+                                            .to_string(),
+                                    );
                                 }
                                 self.pos += 1;
                                 if self.peek() != Some('u') {
@@ -633,21 +637,23 @@ impl JsonBindParser {
                                 self.pos += 1;
                                 let second = self.hex_quad()?;
                                 if !(0xDC00..=0xDFFF).contains(&second) {
-                                    return Err("JSON surrogate pair has an invalid low surrogate".to_string());
+                                    return Err("JSON surrogate pair has an invalid low surrogate"
+                                        .to_string());
                                 }
-                                let codepoint = 0x1_0000
-                                    + ((first - 0xD800) << 10)
-                                    + (second - 0xDC00);
+                                let codepoint =
+                                    0x1_0000 + ((first - 0xD800) << 10) + (second - 0xDC00);
                                 value.push(
-                                    char::from_u32(codepoint)
-                                        .ok_or_else(|| "JSON unicode escape is invalid".to_string())?,
+                                    char::from_u32(codepoint).ok_or_else(|| {
+                                        "JSON unicode escape is invalid".to_string()
+                                    })?,
                                 );
                             } else if (0xDC00..=0xDFFF).contains(&first) {
                                 return Err("JSON low surrogate has no high surrogate".to_string());
                             } else {
                                 value.push(
-                                    char::from_u32(first)
-                                        .ok_or_else(|| "JSON unicode escape is invalid".to_string())?,
+                                    char::from_u32(first).ok_or_else(|| {
+                                        "JSON unicode escape is invalid".to_string()
+                                    })?,
                                 );
                             }
                         }
@@ -829,7 +835,9 @@ fn json_values_type(
     values: &[&JsonBindValue],
     hint: &str,
 ) -> Result<(BoundType, bool), String> {
-    let nullable = values.iter().any(|value| matches!(value, JsonBindValue::Null));
+    let nullable = values
+        .iter()
+        .any(|value| matches!(value, JsonBindValue::Null));
     let nonnull: Vec<&JsonBindValue> = values
         .iter()
         .copied()
@@ -841,7 +849,10 @@ fn json_values_type(
 
     let ty = match nonnull[0] {
         JsonBindValue::Object(_) => {
-            if !nonnull.iter().all(|value| matches!(value, JsonBindValue::Object(_))) {
+            if !nonnull
+                .iter()
+                .all(|value| matches!(value, JsonBindValue::Object(_)))
+            {
                 BoundType::Dynamic
             } else {
                 let objects: Vec<&JsonBindValue> = nonnull;
@@ -850,7 +861,10 @@ fn json_values_type(
             }
         }
         JsonBindValue::Array(_) => {
-            if !nonnull.iter().all(|value| matches!(value, JsonBindValue::Array(_))) {
+            if !nonnull
+                .iter()
+                .all(|value| matches!(value, JsonBindValue::Array(_)))
+            {
                 BoundType::Dynamic
             } else {
                 let mut elements = Vec::new();
@@ -873,14 +887,20 @@ fn json_values_type(
             }
         }
         JsonBindValue::Bool => {
-            if nonnull.iter().all(|value| matches!(value, JsonBindValue::Bool)) {
+            if nonnull
+                .iter()
+                .all(|value| matches!(value, JsonBindValue::Bool))
+            {
                 BoundType::Scalar("Bool")
             } else {
                 BoundType::Dynamic
             }
         }
         JsonBindValue::String => {
-            if nonnull.iter().all(|value| matches!(value, JsonBindValue::String)) {
+            if nonnull
+                .iter()
+                .all(|value| matches!(value, JsonBindValue::String))
+            {
                 BoundType::Scalar("String")
             } else {
                 BoundType::Dynamic
@@ -920,7 +940,9 @@ fn add_json_record(
     let mut keys = BTreeSet::new();
     for value in objects {
         let JsonBindValue::Object(object) = value else {
-            return Err("JSON schema contains a non-object where an object was inferred".to_string());
+            return Err(
+                "JSON schema contains a non-object where an object was inferred".to_string(),
+            );
         };
         keys.extend(object.keys().cloned());
     }
@@ -1167,9 +1189,7 @@ fn strip_sql_comments(input: &str) -> Result<String, String> {
         } else if ch == '/' && chars.get(index + 1) == Some(&'*') {
             index += 2;
             let start = index;
-            while index + 1 < chars.len()
-                && !(chars[index] == '*' && chars[index + 1] == '/')
-            {
+            while index + 1 < chars.len() && !(chars[index] == '*' && chars[index + 1] == '/') {
                 index += 1;
             }
             if index + 1 >= chars.len() {
@@ -1343,8 +1363,24 @@ fn sql_is_name(token: &str) -> bool {
     !token.is_empty()
         && !matches!(
             token,
-            "(" | ")" | "," | "." | "<" | ">" | "*" | "%" | "+" | "=" | "|"
-                | "&" | "!" | "~" | "^" | ":" | "[" | "]" | "-"
+            "(" | ")"
+                | ","
+                | "."
+                | "<"
+                | ">"
+                | "*"
+                | "%"
+                | "+"
+                | "="
+                | "|"
+                | "&"
+                | "!"
+                | "~"
+                | "^"
+                | ":"
+                | "["
+                | "]"
+                | "-"
         )
 }
 
@@ -1422,10 +1458,9 @@ fn sql_numeric_modifiers(tokens: &[String], index: &mut usize) -> Result<(), Str
     let mut signedness = false;
     let mut zerofill = false;
     loop {
-        if tokens
-            .get(*index)
-            .is_some_and(|value| value.eq_ignore_ascii_case("SIGNED") || value.eq_ignore_ascii_case("UNSIGNED"))
-        {
+        if tokens.get(*index).is_some_and(|value| {
+            value.eq_ignore_ascii_case("SIGNED") || value.eq_ignore_ascii_case("UNSIGNED")
+        }) {
             if signedness {
                 return Err("SQL numeric type repeats its signedness modifier".to_string());
             }
@@ -1479,8 +1514,8 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
             "Decimal"
         }
         "BOOL" | "BOOLEAN" => "Bool",
-        "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "VARCHAR" | "NVARCHAR"
-        | "CHAR" | "CHARACTER" | "CLOB" => {
+        "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "VARCHAR" | "NVARCHAR" | "CHAR"
+        | "CHARACTER" | "CLOB" => {
             if first == "CHARACTER"
                 && tokens
                     .get(*index)
@@ -1488,7 +1523,10 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
             {
                 *index += 1;
             }
-            if matches!(first.as_str(), "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER") {
+            if matches!(
+                first.as_str(),
+                "VARCHAR" | "NVARCHAR" | "CHAR" | "CHARACTER"
+            ) {
                 sql_parenthesized_digits(tokens, index, "character width", false)?;
             } else if tokens.get(*index).map(String::as_str) == Some("(") {
                 return Err(format!("SQL type {first} does not accept a width modifier"));
@@ -1498,10 +1536,9 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
         "DATE" => "LocalDate",
         "TIME" => {
             sql_parenthesized_digits(tokens, index, "time precision", false)?;
-            if tokens
-                .get(*index)
-                .is_some_and(|value| value.eq_ignore_ascii_case("WITH") || value.eq_ignore_ascii_case("WITHOUT"))
-            {
+            if tokens.get(*index).is_some_and(|value| {
+                value.eq_ignore_ascii_case("WITH") || value.eq_ignore_ascii_case("WITHOUT")
+            }) {
                 *index += 1;
                 if !tokens
                     .get(*index)
@@ -1523,9 +1560,9 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
         "TIMESTAMP" | "DATETIME" => {
             sql_parenthesized_digits(tokens, index, "timestamp precision", false)?;
             if first == "TIMESTAMP"
-                && tokens
-                    .get(*index)
-                    .is_some_and(|value| value.eq_ignore_ascii_case("WITH") || value.eq_ignore_ascii_case("WITHOUT"))
+                && tokens.get(*index).is_some_and(|value| {
+                    value.eq_ignore_ascii_case("WITH") || value.eq_ignore_ascii_case("WITHOUT")
+                })
             {
                 *index += 1;
                 if !tokens
@@ -1558,11 +1595,7 @@ fn sql_type(tokens: &[String], index: &mut usize, column: &str) -> Result<&'stat
     Ok(ty)
 }
 
-fn sql_balanced_expression(
-    tokens: &[String],
-    index: &mut usize,
-    what: &str,
-) -> Result<(), String> {
+fn sql_balanced_expression(tokens: &[String], index: &mut usize, what: &str) -> Result<(), String> {
     if tokens.get(*index).map(String::as_str) != Some("(") {
         return Err(format!("SQL {what} needs an open parenthesis"));
     }
@@ -1619,7 +1652,9 @@ fn sql_reference(tokens: &[String], index: &mut usize) -> Result<(), String> {
         sql_name_list(tokens, index, "referenced column")?;
     }
     loop {
-        let Some(token) = tokens.get(*index) else { break };
+        let Some(token) = tokens.get(*index) else {
+            break;
+        };
         match token.to_ascii_uppercase().as_str() {
             "MATCH" => {
                 *index += 1;
@@ -1628,7 +1663,10 @@ fn sql_reference(tokens: &[String], index: &mut usize) -> Result<(), String> {
             "ON" => {
                 *index += 1;
                 let action_kind = sql_take_name(tokens, index, "foreign-key action")?;
-                if !matches!(action_kind.to_ascii_uppercase().as_str(), "DELETE" | "UPDATE") {
+                if !matches!(
+                    action_kind.to_ascii_uppercase().as_str(),
+                    "DELETE" | "UPDATE"
+                ) {
                     return Err("SQL foreign-key action needs DELETE or UPDATE".to_string());
                 }
                 let action = sql_take_name(tokens, index, "foreign-key action")?;
@@ -1642,7 +1680,9 @@ fn sql_reference(tokens: &[String], index: &mut usize) -> Result<(), String> {
                     "SET" => {
                         let next = sql_take_name(tokens, index, "foreign-key action")?;
                         if !matches!(next.to_ascii_uppercase().as_str(), "NULL" | "DEFAULT") {
-                            return Err("SQL foreign-key SET action needs NULL or DEFAULT".to_string());
+                            return Err(
+                                "SQL foreign-key SET action needs NULL or DEFAULT".to_string()
+                            );
                         }
                     }
                     "RESTRICT" | "CASCADE" => {}
@@ -1650,9 +1690,11 @@ fn sql_reference(tokens: &[String], index: &mut usize) -> Result<(), String> {
                 }
             }
             "DEFERRABLE" => *index += 1,
-            "NOT" if tokens
-                .get(*index + 1)
-                .is_some_and(|value| value.eq_ignore_ascii_case("DEFERRABLE")) => {
+            "NOT"
+                if tokens
+                    .get(*index + 1)
+                    .is_some_and(|value| value.eq_ignore_ascii_case("DEFERRABLE")) =>
+            {
                 *index += 2;
             }
             "INITIALLY" => {
@@ -1710,11 +1752,7 @@ fn sql_default(tokens: &[String], index: &mut usize) -> Result<(), String> {
     Ok(())
 }
 
-fn sql_constraint(
-    tokens: &[String],
-    index: &mut usize,
-    required: &mut bool,
-) -> Result<(), String> {
+fn sql_constraint(tokens: &[String], index: &mut usize, required: &mut bool) -> Result<(), String> {
     if tokens
         .get(*index)
         .is_some_and(|value| value.eq_ignore_ascii_case("CONSTRAINT"))
@@ -1759,10 +1797,9 @@ fn sql_constraint(
         }
         "UNIQUE" => {
             *index += 1;
-            if tokens
-                .get(*index)
-                .is_some_and(|value| value.eq_ignore_ascii_case("KEY") || value.eq_ignore_ascii_case("INDEX"))
-            {
+            if tokens.get(*index).is_some_and(|value| {
+                value.eq_ignore_ascii_case("KEY") || value.eq_ignore_ascii_case("INDEX")
+            }) {
                 *index += 1;
             }
             if tokens.get(*index).is_some_and(|value| {
@@ -1833,10 +1870,9 @@ fn sql_constraint(
                 }
             } else {
                 sql_balanced_expression(tokens, index, "GENERATED expression")?;
-                if tokens
-                    .get(*index)
-                    .is_some_and(|value| value.eq_ignore_ascii_case("VIRTUAL") || value.eq_ignore_ascii_case("STORED"))
-                {
+                if tokens.get(*index).is_some_and(|value| {
+                    value.eq_ignore_ascii_case("VIRTUAL") || value.eq_ignore_ascii_case("STORED")
+                }) {
                     *index += 1;
                 } else {
                     return Err("SQL GENERATED constraint needs VIRTUAL or STORED".to_string());
@@ -1899,10 +1935,9 @@ fn sql_table_constraint(
         }
         "UNIQUE" => {
             index += 1;
-            if segment
-                .get(index)
-                .is_some_and(|value| value.eq_ignore_ascii_case("KEY") || value.eq_ignore_ascii_case("INDEX"))
-            {
+            if segment.get(index).is_some_and(|value| {
+                value.eq_ignore_ascii_case("KEY") || value.eq_ignore_ascii_case("INDEX")
+            }) {
                 index += 1;
                 if segment.get(index).is_some_and(|value| sql_is_name(value)) {
                     index += 1;
@@ -1996,7 +2031,8 @@ fn parse_sql_table(statement: &str) -> Result<(String, Vec<FieldSeed>), String> 
         }
         index += 1;
     }
-    let close = close.ok_or_else(|| "SQL table declaration is missing a close parenthesis".to_string())?;
+    let close =
+        close.ok_or_else(|| "SQL table declaration is missing a close parenthesis".to_string())?;
     if tokens.get(close + 1).is_some() {
         return Err("SQL has tokens after the table declaration".to_string());
     }
@@ -2164,10 +2200,10 @@ impl XmlParser {
     }
 
     fn read_name(&mut self) -> Result<String, String> {
-        let valid_start = |ch: char| ch == '_' || ch == ':' || ch.is_ascii_alphabetic() || ch.is_alphabetic();
-        let valid_rest = |ch: char| {
-            valid_start(ch) || ch == '-' || ch == '.' || ch.is_ascii_digit()
-        };
+        let valid_start =
+            |ch: char| ch == '_' || ch == ':' || ch.is_ascii_alphabetic() || ch.is_alphabetic();
+        let valid_rest =
+            |ch: char| valid_start(ch) || ch == '-' || ch == '.' || ch.is_ascii_digit();
         let Some(first) = self.peek() else {
             return Err("XML name is missing".to_string());
         };
@@ -2185,7 +2221,9 @@ impl XmlParser {
             || name.matches(':').count() > 1
             || name.contains("::")
         {
-            return Err(format!("XML name {name} has an invalid namespace separator"));
+            return Err(format!(
+                "XML name {name} has an invalid namespace separator"
+            ));
         }
         Ok(name)
     }
@@ -2241,7 +2279,9 @@ impl XmlParser {
             let namespace = namespaces
                 .get(prefix)
                 .filter(|namespace| !namespace.is_empty())
-                .ok_or_else(|| format!("XML name {name} uses an undeclared namespace prefix {prefix}"))?;
+                .ok_or_else(|| {
+                    format!("XML name {name} uses an undeclared namespace prefix {prefix}")
+                })?;
             return Ok(format!("{{{namespace}}}{local}"));
         }
         if element {
@@ -2293,7 +2333,9 @@ impl XmlParser {
         }
         self.skip_space();
         if self.peek() != Some('=') {
-            return Err(format!("XML declaration field {expected} has no equals sign"));
+            return Err(format!(
+                "XML declaration field {expected} has no equals sign"
+            ));
         }
         self.pos += 1;
         self.skip_space();
@@ -2409,7 +2451,10 @@ impl XmlParser {
                 validate_xml_entities(&text)?;
                 if let Some(parent) = stack.last_mut() {
                     parent.content.push(XmlContent::Text);
-                } else if text.chars().any(|ch| !matches!(ch, ' ' | '\t' | '\r' | '\n')) {
+                } else if text
+                    .chars()
+                    .any(|ch| !matches!(ch, ' ' | '\t' | '\r' | '\n'))
+                {
                     return Err("XML has text outside its root element".to_string());
                 }
                 continue;
@@ -2580,8 +2625,7 @@ fn validate_xml_characters(text: &str) -> Result<(), String> {
 fn xml_character_allowed(ch: char) -> bool {
     let codepoint = ch as u32;
     matches!(ch, '\t' | '\n' | '\r')
-        || (0x20..=0xD7FF).contains(&codepoint)
-            && !(0x7F..=0x9F).contains(&codepoint)
+        || (0x20..=0xD7FF).contains(&codepoint) && !(0x7F..=0x9F).contains(&codepoint)
         || (0xE000..=0xFFFD).contains(&codepoint)
         || (0x10000..=0x10FFFF).contains(&codepoint)
 }
@@ -2634,11 +2678,7 @@ fn validate_xml_entities(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn add_xml_record(
-    builder: &mut SchemaBuilder,
-    preferred: &str,
-    nodes: &[&XmlNode],
-) -> String {
+fn add_xml_record(builder: &mut SchemaBuilder, preferred: &str, nodes: &[&XmlNode]) -> String {
     let (name, index) = builder.begin_record(preferred);
     let mut attr_names = BTreeSet::new();
     let mut child_names = BTreeSet::new();
@@ -2760,9 +2800,7 @@ fn lex_proto(input: &str) -> Result<Vec<ProtoToken>, String> {
         }
         if ch == '/' && chars.get(index + 1) == Some(&'*') {
             index += 2;
-            while index + 1 < chars.len()
-                && !(chars[index] == '*' && chars[index + 1] == '/')
-            {
+            while index + 1 < chars.len() && !(chars[index] == '*' && chars[index + 1] == '/') {
                 index += 1;
             }
             if index + 1 >= chars.len() {
@@ -2785,7 +2823,11 @@ fn lex_proto(input: &str) -> Result<Vec<ProtoToken>, String> {
         if ch.is_ascii_digit() {
             let start = index;
             index += 1;
-            if ch == '0' && chars.get(index).is_some_and(|value| *value == 'x' || *value == 'X') {
+            if ch == '0'
+                && chars
+                    .get(index)
+                    .is_some_and(|value| *value == 'x' || *value == 'X')
+            {
                 index += 1;
                 let digits = index;
                 while index < chars.len() && chars[index].is_ascii_hexdigit() {
@@ -2868,12 +2910,16 @@ fn lex_proto(input: &str) -> Result<Vec<ProtoToken>, String> {
                                     return Err("proto hex escape needs two digits".to_string());
                                 };
                                 if !first.is_ascii_hexdigit() || !second.is_ascii_hexdigit() {
-                                    return Err("proto hex escape needs two hexadecimal digits".to_string());
+                                    return Err(
+                                        "proto hex escape needs two hexadecimal digits".to_string()
+                                    );
                                 }
                                 index += 2;
                                 let digits = [first, second].iter().collect::<String>();
                                 char::from_u32(u32::from_str_radix(&digits, 16).unwrap_or(0))
-                                    .ok_or_else(|| "proto hex escape is not a character".to_string())?
+                                    .ok_or_else(|| {
+                                        "proto hex escape is not a character".to_string()
+                                    })?
                             }
                             '0'..='7' => {
                                 let start = index;
@@ -2887,7 +2933,9 @@ fn lex_proto(input: &str) -> Result<Vec<ProtoToken>, String> {
                                 let digits: String = chars[start..end].iter().collect();
                                 index = end - 1;
                                 char::from_u32(u32::from_str_radix(&digits, 8).unwrap_or(0))
-                                    .ok_or_else(|| "proto octal escape is not a character".to_string())?
+                                    .ok_or_else(|| {
+                                        "proto octal escape is not a character".to_string()
+                                    })?
                             }
                             _ => return Err(format!("proto escape \\{escaped} is unsupported")),
                         };
@@ -2932,7 +2980,10 @@ fn proto_range_has_prohibited_number(range: (i64, i64)) -> bool {
 }
 
 fn parse_proto_integer_literal(value: &str) -> Option<i64> {
-    if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+    if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
         i64::from_str_radix(hex, 16).ok()
     } else {
         value.parse::<i64>().ok()
@@ -3130,7 +3181,10 @@ impl ProtoParser {
             match value {
                 ProtoToken::StringLiteral(_) => {
                     self.pos += 1;
-                    while matches!(self.tokens.get(self.pos), Some(ProtoToken::StringLiteral(_))) {
+                    while matches!(
+                        self.tokens.get(self.pos),
+                        Some(ProtoToken::StringLiteral(_))
+                    ) {
                         self.pos += 1;
                     }
                     Ok(OptionValue::String)
@@ -3229,11 +3283,7 @@ impl ProtoParser {
             .ok_or_else(|| format!("proto {what} is out of range"))
     }
 
-    fn parse_reserved(
-        &mut self,
-        signed: bool,
-        maximum: i64,
-    ) -> Result<ProtoReserved, String> {
+    fn parse_reserved(&mut self, signed: bool, maximum: i64) -> Result<ProtoReserved, String> {
         let _ = self.take_word("reserved")?;
         let mut reserved = ProtoReserved::default();
         loop {
@@ -3241,9 +3291,9 @@ impl ProtoParser {
                 self.pos += 1;
                 if name.is_empty()
                     || name.contains('.')
-                    || name.split('.').any(|part| {
-                        !is_proto_identifier(part) || is_proto_keyword(part)
-                    })
+                    || name
+                        .split('.')
+                        .any(|part| !is_proto_identifier(part) || is_proto_keyword(part))
                 {
                     return Err(format!("proto reserved name {name:?} is invalid"));
                 }
@@ -3377,14 +3427,18 @@ impl ProtoParser {
     }
 
     fn declare_message(&mut self, source_name: &str) -> Result<(), String> {
-        if self.enum_names.contains(source_name) || !self.message_names.insert(source_name.to_string()) {
+        if self.enum_names.contains(source_name)
+            || !self.message_names.insert(source_name.to_string())
+        {
             return Err(format!("proto has duplicate declaration {source_name}"));
         }
         Ok(())
     }
 
     fn declare_enum(&mut self, source_name: &str) -> Result<(), String> {
-        if self.message_names.contains(source_name) || !self.enum_names.insert(source_name.to_string()) {
+        if self.message_names.contains(source_name)
+            || !self.enum_names.insert(source_name.to_string())
+        {
             return Err(format!("proto has duplicate declaration {source_name}"));
         }
         Ok(())
@@ -3422,9 +3476,10 @@ impl ProtoParser {
                 }
                 if fields.iter().any(|field| {
                     reserved.names.contains(&field.wire_name)
-                        || reserved.ranges.iter().any(|range| {
-                            (range.0..=range.1).contains(&(field.number as i64))
-                        })
+                        || reserved
+                            .ranges
+                            .iter()
+                            .any(|range| (range.0..=range.1).contains(&(field.number as i64)))
                 }) {
                     return Err("proto field uses a reserved name or number".to_string());
                 }
@@ -3474,8 +3529,13 @@ impl ProtoParser {
                 self.pos += 1;
                 continue;
             }
-            if matches!(self.word_at(0), Some("oneof") | Some("group") | Some("extend")) {
-                return Err("proto oneof, group, and extend declarations are unsupported".to_string());
+            if matches!(
+                self.word_at(0),
+                Some("oneof") | Some("group") | Some("extend")
+            ) {
+                return Err(
+                    "proto oneof, group, and extend declarations are unsupported".to_string(),
+                );
             }
             let field = self.parse_field()?;
             if !field_names.insert(field.wire_name.clone()) {
@@ -3559,7 +3619,9 @@ impl ProtoParser {
                 return Err(format!("proto enum value name {value_name} is invalid"));
             }
             if value_name == short_name || !names.insert(value_name.clone()) {
-                return Err(format!("proto enum has a duplicate or colliding value {value_name}"));
+                return Err(format!(
+                    "proto enum has a duplicate or colliding value {value_name}"
+                ));
             }
             self.expect_symbol('=', "an enum value equals sign")?;
             let number = self.parse_integer("an enum value number", true)?;
@@ -3627,17 +3689,23 @@ impl ProtoParser {
         while self.pos < self.tokens.len() {
             if self.word_at(0) == Some("syntax") {
                 if self.body_started {
-                    return Err("proto syntax declaration must precede messages and enums".to_string());
+                    return Err(
+                        "proto syntax declaration must precede messages and enums".to_string()
+                    );
                 }
                 self.parse_syntax()?;
             } else if self.word_at(0) == Some("package") {
                 if self.body_started {
-                    return Err("proto package declaration must precede messages and enums".to_string());
+                    return Err(
+                        "proto package declaration must precede messages and enums".to_string()
+                    );
                 }
                 self.parse_package()?;
             } else if self.word_at(0) == Some("import") {
                 if self.body_started {
-                    return Err("proto import declaration must precede messages and enums".to_string());
+                    return Err(
+                        "proto import declaration must precede messages and enums".to_string()
+                    );
                 }
                 self.parse_import()?;
             } else if self.word_at(0) == Some("option") {
@@ -3729,10 +3797,14 @@ fn is_proto_keyword(value: &str) -> bool {
 }
 
 fn proto_scalar(type_name: &str) -> Option<&'static str> {
-    match type_name.trim_start_matches('.').to_ascii_lowercase().as_str() {
+    match type_name
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "double" | "float" => Some("Float"),
-        "int32" | "sint32" | "sfixed32" | "int64" | "sint64" | "sfixed64" | "uint32"
-        | "uint64" | "fixed32" | "fixed64" => Some("Int"),
+        "int32" | "sint32" | "sfixed32" | "int64" | "sint64" | "sfixed64" | "uint32" | "uint64"
+        | "fixed32" | "fixed64" => Some("Int"),
         "bool" => Some("Bool"),
         "string" => Some("String"),
         "bytes" => Some("[U8]"),
@@ -3799,8 +3871,7 @@ fn bind_proto(input: &str, root_name: Option<&str>) -> Result<SchemaBuilder, Str
                 let reference = field.type_name.trim_start_matches('.');
                 let leaf = reference.rsplit('.').next().unwrap_or(reference);
                 if enum_names.contains(reference)
-                    || (!ambiguous_enum_leaves.contains(leaf)
-                        && enum_leaf_names.contains_key(leaf))
+                    || (!ambiguous_enum_leaves.contains(leaf) && enum_leaf_names.contains_key(leaf))
                 {
                     BoundType::Scalar("Int")
                 } else {
@@ -3998,9 +4069,7 @@ mod tests {
 
         let valid = generate("int foo(int value);", "valid").unwrap();
         assert_eq!(valid.bound, vec!["foo"]);
-        assert!(valid
-            .source
-            .contains("fn foo(value: Int) Int = \"foo\";"));
+        assert!(valid.source.contains("fn foo(value: Int) Int = \"foo\";"));
 
         let leading_underscore = generate("int _foo(int value);", "underscore").unwrap();
         assert_eq!(leading_underscore.bound, vec!["_foo"]);
@@ -4061,12 +4130,16 @@ mod tests {
             .source
             .contains(&format!("jet-ffi-descriptor={}", descriptor.stamp())));
         let (tokens, diagnostics) = crate::Lexer::lex_generated(&base.source);
-        assert!(diagnostics.is_empty(), "generated descriptor header lexed: {diagnostics:?}");
+        assert!(
+            diagnostics.is_empty(),
+            "generated descriptor header lexed: {diagnostics:?}"
+        );
         crate::Parser::parse(&tokens).expect("generated descriptor header parses");
 
         let mut changed = descriptor;
         changed.effect_root = "FFI.changed";
-        let rebound = generate_with_descriptor("int ping(int value);", "identity", changed).unwrap();
+        let rebound =
+            generate_with_descriptor("int ping(int value);", "identity", changed).unwrap();
         assert_ne!(base.descriptor_stamp, rebound.descriptor_stamp);
         assert!(rebound
             .source

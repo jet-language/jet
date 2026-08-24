@@ -37,8 +37,7 @@ fn is_cli_scalar(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Int | Type::InlineRange { .. } | Type::Float | Type::Bool | Type::String
-    )
-        || matches!(ty, Type::Named(n) if n == "Path")
+    ) || matches!(ty, Type::Named(n) if n == "Path")
 }
 
 /// D-DEFAULT-SHAPE1: does `f` carry the declaration-owned `{expr}` field default?
@@ -57,10 +56,7 @@ fn has_flag_marker(f: &Field) -> bool {
         .any(|m| m.name == Syntax::MARKER_FLAG)
 }
 
-fn marker_string<'a>(
-    f: &'a Field,
-    name: &str,
-) -> Option<(&'a crate::AST::Marker, String)> {
+fn marker_string<'a>(f: &'a Field, name: &str) -> Option<(&'a crate::AST::Marker, String)> {
     let marker = f.serde_markers.iter().find(|marker| marker.name == name)?;
     match marker.args.first() {
         Some(Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
@@ -137,10 +133,7 @@ fn e1306(flag: &str, span: Span) -> Diagnostic {
 fn e1309(field_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1309",
-        format!(
-            "`#[Flag]` on `{}` has nothing to opt out of",
-            field_name
-        ),
+        format!("`#[Flag]` on `{}` has nothing to opt out of", field_name),
         "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields \
          (`T?`), and fields with a `{expr}` default already stay flag-only."
             .to_string(),
@@ -154,9 +147,7 @@ fn e1309(field_name: &str, span: Span) -> Diagnostic {
 fn e1318(short: &str, first: &str, second: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1318",
-        format!(
-            "`#Short(\"{short}\")` is used by both `{first}` and `{second}`"
-        ),
+        format!("`#Short(\"{short}\")` is used by both `{first}` and `{second}`"),
         "each short option must select only one `#CLI` field.".to_string(),
         format!("give `{first}` or `{second}` a different `#Short` value"),
         Some(span),
@@ -191,8 +182,7 @@ pub(crate) fn e1308(span: Option<Span>) -> Diagnostic {
         "`run`'s parameter isn't a CLI-derived type".to_string(),
         "a typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived program struct."
             .to_string(),
-        "mark the program struct `#[CLI]` (or `#CLI(Standard)` for the standard pack)"
-            .to_string(),
+        "mark the program struct `#[CLI]` (or `#CLI(Standard)` for the standard pack)".to_string(),
         span,
     )
 }
@@ -278,10 +268,11 @@ fn validate_callable_params(
             }
             continue;
         }
-        if shared
-            .as_ref()
-            .is_some_and(|params| params.iter().any(|(shared_index, _)| *shared_index == index))
-        {
+        if shared.as_ref().is_some_and(|params| {
+            params
+                .iter()
+                .any(|(shared_index, _)| *shared_index == index)
+        }) {
             if param.convention != AccessConvention::Read {
                 out.push(e1345(
                     command_name,
@@ -331,9 +322,9 @@ fn named_leaf(ty: &Type) -> Option<&str> {
 }
 
 fn has_codable_shape(s: &crate::AST::StructDef) -> bool {
-    s.derives.iter().any(|(name, _)| {
-        matches!(name.as_str(), Syntax::MARKER_CODABLE | "Encode" | "Decode")
-    })
+    s.derives
+        .iter()
+        .any(|(name, _)| matches!(name.as_str(), Syntax::MARKER_CODABLE | "Encode" | "Decode"))
 }
 
 fn binding_target<'a>(
@@ -390,9 +381,10 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
         seen_flags.insert("help".to_string(), s.name_span);
         let standard = s.type_markers.iter().any(|marker| {
             marker.name == Syntax::MARKER_CLI
-                && marker.args.iter().any(|arg| {
-                    matches!(arg, Expr::Ident(name, _) if name == "Standard")
-                })
+                && marker
+                    .args
+                    .iter()
+                    .any(|arg| matches!(arg, Expr::Ident(name, _) if name == "Standard"))
         });
         if standard {
             for name in ["verbose", "quiet", "color", "version"] {
@@ -443,9 +435,10 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
             std::collections::HashMap::new();
         let mut command_count = 0usize;
         for function in &s.methods {
-            if s.fields.iter().any(|field| {
-                field.computed.is_some() && field.name == function.name
-            }) {
+            if s.fields
+                .iter()
+                .any(|field| field.computed.is_some() && field.name == function.name)
+            {
                 continue;
             }
             command_count += 1;

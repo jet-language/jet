@@ -17,7 +17,11 @@ fn run() {
 }
 "#;
     let output = jet::compile(source).expect("Abilities type should compile");
-    assert!(output.rust.contains("pub struct JetAuthority"), "{}", output.rust);
+    assert!(
+        output.rust.contains("pub struct JetAuthority"),
+        "{}",
+        output.rust
+    );
     assert!(
         output
             .rust
@@ -32,7 +36,11 @@ fn run() {
         output.rust
     );
     assert!(output.rust.contains("FS.Read:repo"), "{}", output.rust);
-    assert!(output.rust.contains("FS.Write:.jet/build"), "{}", output.rust);
+    assert!(
+        output.rust.contains("FS.Write:.jet/build"),
+        "{}",
+        output.rust
+    );
 }
 
 fn host_executable(name: &str) -> String {
@@ -59,8 +67,16 @@ fn run() {
 #[test]
 fn authority_with_and_without_are_the_only_narrowing_family() {
     let output = jet::compile(AUTHORITY_VALUE_SOURCE).expect("Abilities operations should compile");
-    assert!(output.rust.contains("jet_authority_with"), "{}", output.rust);
-    assert!(output.rust.contains("jet_authority_without"), "{}", output.rust);
+    assert!(
+        output.rust.contains("jet_authority_with"),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("jet_authority_without"),
+        "{}",
+        output.rust
+    );
     tir_support::assert_tiers_agree("authority_narrowing", AUTHORITY_VALUE_SOURCE, "abilities\n");
 }
 
@@ -103,7 +119,11 @@ fn run() {
     );
     assert!(output.rust.contains("jet_plugin_load"), "{}", output.rust);
     assert!(output.rust.contains("JetAuthority"), "{}", output.rust);
-    assert!(output.rust.contains("jet_authority_to_wire"), "{}", output.rust);
+    assert!(
+        output.rust.contains("jet_authority_to_wire"),
+        "{}",
+        output.rust
+    );
     assert!(!output.rust.contains("let _authority"), "{}", output.rust);
 }
 
@@ -124,7 +144,8 @@ fn run() {
 
 #[test]
 fn authority_plan_refuses_before_spawn_on_all_hosted_tiers() {
-    let marker = std::env::temp_dir().join(format!("jet-authority-plan-marker-{}", std::process::id()));
+    let marker =
+        std::env::temp_dir().join(format!("jet-authority-plan-marker-{}", std::process::id()));
     let _ = std::fs::remove_file(&marker);
     let source = r#"
 use core.process as process
@@ -140,8 +161,16 @@ fn run() {
 "#
     .replace("__MARKER__", &marker.to_string_lossy());
     let output = jet::compile(&source).expect("authority plan API should compile");
-    assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
-    assert!(output.rust.contains("jet_process_spec_plan"), "{}", output.rust);
+    assert!(
+        output.rust.contains("jet_std_process_spec_under"),
+        "{}",
+        output.rust
+    );
+    assert!(
+        output.rust.contains("jet_process_spec_plan"),
+        "{}",
+        output.rust
+    );
     let native_backend = jetpack::RuntimePolicy::detect_sandbox().level
         == jetpack::RuntimePolicy::SandboxLevel::Strong;
     let expected = if cfg!(any(target_os = "linux", target_os = "macos")) && native_backend {
@@ -150,7 +179,10 @@ fn run() {
         "refused\n"
     };
     tir_support::assert_tiers_agree("authority_plan_no_spawn", &source, expected);
-    assert!(!marker.exists(), "plan() spawned the authority-bound command");
+    assert!(
+        !marker.exists(),
+        "plan() spawned the authority-bound command"
+    );
 }
 
 #[test]
@@ -179,7 +211,11 @@ fn run() {
         "{}",
         output.rust
     );
-    assert!(output.rust.contains("jet_std_process_spec_under"), "{}", output.rust);
+    assert!(
+        output.rust.contains("jet_std_process_spec_under"),
+        "{}",
+        output.rust
+    );
     let native_backend = jetpack::RuntimePolicy::detect_sandbox().level
         == jetpack::RuntimePolicy::SandboxLevel::Strong;
     let expected = if cfg!(any(target_os = "linux", target_os = "macos")) && native_backend {
@@ -392,7 +428,11 @@ fn run() {
     }
 }
 "#;
-    tir_support::assert_tiers_agree("authority_windows_appcontainer_success", success, "sandboxed\n");
+    tir_support::assert_tiers_agree(
+        "authority_windows_appcontainer_success",
+        success,
+        "sandboxed\n",
+    );
 
     let marker = std::env::temp_dir().join(format!(
         "jet-authority-windows-host-secret-{}.txt",
@@ -414,7 +454,11 @@ fn run() {{
 }}
 "#
     );
-    tir_support::assert_tiers_agree("authority_windows_appcontainer_host_read", &hostile, "blocked\n");
+    tir_support::assert_tiers_agree(
+        "authority_windows_appcontainer_host_read",
+        &hostile,
+        "blocked\n",
+    );
     let _ = std::fs::remove_file(marker);
 }
 
@@ -454,13 +498,21 @@ fn run() {
     }
 }
 "#;
-    let diagnostics = jet::compile(source).expect_err("Abilities must not act as an effect/type fact");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930"), "{diagnostics:#?}");
+    let diagnostics =
+        jet::compile(source).expect_err("Abilities must not act as an effect/type fact");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0930"),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]
 fn authority_parser_accepts_the_named_value() {
-    let (tokens, diagnostics) = jet::Lexer::lex("fn run() { #Abilities(abilities: FS.Read) { value :: abilities.with(\"FS.Read\") } }");
+    let (tokens, diagnostics) = jet::Lexer::lex(
+        "fn run() { #Abilities(abilities: FS.Read) { value :: abilities.with(\"FS.Read\") } }",
+    );
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     jet::Parser::parse(&tokens).expect("parser must accept Abilities");
 }
@@ -478,7 +530,11 @@ fn authority_tir_runs_the_same_value() {
 
 #[test]
 fn authority_aot_runs_the_same_value() {
-    let (code, stdout, stderr) = tir_support::build_and_run_full("jet_authority_aot", "authority_aot", AUTHORITY_VALUE_SOURCE);
+    let (code, stdout, stderr) = tir_support::build_and_run_full(
+        "jet_authority_aot",
+        "authority_aot",
+        AUTHORITY_VALUE_SOURCE,
+    );
     assert_eq!(code, 0, "AOT failed: {stderr}");
     assert_eq!(stdout, "abilities\n");
 }
@@ -492,7 +548,8 @@ fn authority_jit_runs_the_same_value() {
 
 #[test]
 fn authority_dev_runs_the_same_value() {
-    let (code, stdout, stderr) = tir_support::interpreter_run("authority_dev", AUTHORITY_VALUE_SOURCE);
+    let (code, stdout, stderr) =
+        tir_support::interpreter_run("authority_dev", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "dev/interpreter failed: {stderr}");
     assert_eq!(stdout, "abilities\n");
 }
@@ -516,7 +573,10 @@ fn authority_repl_accepts_the_same_value() {
         ],
         None,
     );
-    assert!(transcript.contains("abilities"), "REPL changed Abilities meaning: {transcript}");
+    assert!(
+        transcript.contains("abilities"),
+        "REPL changed Abilities meaning: {transcript}"
+    );
 }
 
 #[test]

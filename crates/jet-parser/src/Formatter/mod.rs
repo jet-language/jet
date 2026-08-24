@@ -312,13 +312,7 @@ pub fn format_synthetic_program(prog: &Program) -> String {
         .saturating_add(1);
     let src = " ".repeat(source_len);
     let (source_toks, _) = crate::Lexer::lex(&src);
-    format_program_with_tokens(
-        prog,
-        &src,
-        &[],
-        &source_toks,
-        FormatOptions::default(),
-    )
+    format_program_with_tokens(prog, &src, &[], &source_toks, FormatOptions::default())
 }
 
 /// D-ONCE-RETIRE1=C: collect mechanical edits for the retired interpolation
@@ -392,8 +386,7 @@ fn collect_retired_print_calls(
             continue;
         };
         if !aliases.contains(alias)
-            || (index > 0
-                && matches!(&code[index - 1].kind, TokKind::Dot | TokKind::QuestionDot))
+            || (index > 0 && matches!(&code[index - 1].kind, TokKind::Dot | TokKind::QuestionDot))
         {
             continue;
         }
@@ -467,8 +460,10 @@ fn print_family_edits(
     let mut edits = Vec::new();
     for call in calls {
         let inside_replacement = calls.iter().any(|outer| {
-            matches!(outer.kind, RetiredPrintKind::Sprint | RetiredPrintKind::Repr)
-                && outer.receiver_start < call.receiver_start
+            matches!(
+                outer.kind,
+                RetiredPrintKind::Sprint | RetiredPrintKind::Repr
+            ) && outer.receiver_start < call.receiver_start
                 && outer.close_span.end >= call.close_span.end
         });
         match call.kind {
@@ -495,9 +490,7 @@ fn print_family_edits(
                     new_text: format!("print(\"{{{argument}{format}}}\")"),
                 });
             }
-            RetiredPrintKind::Println
-            | RetiredPrintKind::Sprint
-            | RetiredPrintKind::Repr => {}
+            RetiredPrintKind::Println | RetiredPrintKind::Sprint | RetiredPrintKind::Repr => {}
         }
     }
     edits.sort_by_key(|edit| edit.span.start);
@@ -803,7 +796,12 @@ fn format_program_with_tokens(
     // D-POLICY-WORD1=A: module-scoped non-memory `#Policy(...)` — fixed
     // post-import position, same single-instance-marker treatment as `#PubFile`/
     // `#Target(…)`/`#HTML(…)` above (no span to preserve original placement).
-    let module_policies = prog.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
+    let module_policies = prog
+        .policy_declarations
+        .iter()
+        .filter(|d| d.scope == crate::Policy::PolicyScope::Module)
+        .cloned()
+        .collect::<Vec<_>>();
     if let Some(policy_span) = module_policies.first().map(|d| d.span) {
         if !first {
             f.blank_line_between_items();
@@ -1469,7 +1467,7 @@ impl<'a> Fmt<'a> {
             if top_level
                 && matches!(
                     token.kind,
-                        TokKind::Comma
+                    TokKind::Comma
                         | TokKind::Semi
                         | TokKind::UnifiedArrow
                         | TokKind::LambdaArrow
@@ -1718,12 +1716,7 @@ fn compound_spell(op: BinOp) -> &'static str {
 /// the source slice at the literal's span. Falls back to plain decimal when
 /// the slice doesn't round-trip to the same value (synthesized Int nodes
 /// borrow a nearby span whose text isn't a number).
-pub(crate) fn int_literal_spelling(
-    src: &str,
-    span: Span,
-    n: i64,
-    raw: Option<&str>,
-) -> String {
+pub(crate) fn int_literal_spelling(src: &str, span: Span, n: i64, raw: Option<&str>) -> String {
     if let Some(raw) = raw {
         return raw.to_string();
     }
@@ -1902,7 +1895,9 @@ fn canonical_formatted(formatted: &str) -> Result<Vec<u8>, Vec<crate::Diagnostic
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    Ok(canonical_simplify_program(&crate::Parser::parse_for_fmt(&toks)?))
+    Ok(canonical_simplify_program(&crate::Parser::parse_for_fmt(
+        &toks,
+    )?))
 }
 
 /// Simple unified diff for `jet fmt --check`.
@@ -2033,7 +2028,10 @@ mod tests {
         let formatted = format_source(source).expect("source should format");
         let comment = formatted.find("/* go */").expect("comment should survive");
         let inner_close = formatted.find('}').expect("if body should close");
-        assert!(comment < inner_close, "comment left its block:\n{formatted}");
+        assert!(
+            comment < inner_close,
+            "comment left its block:\n{formatted}"
+        );
         assert_eq!(
             formatted,
             format_source(&formatted).expect("formatted source should re-format")
@@ -2081,8 +2079,7 @@ fn run() {
 "#;
         let once = format_source(source).expect("lambda interface should format");
         assert!(
-            once.contains("(n: Int) Int LambdaError! -[]>")
-                && !once.contains("(n: Int) ->"),
+            once.contains("(n: Int) Int LambdaError! -[]>") && !once.contains("(n: Int) ->"),
             "lambda interface was lost or respelled incorrectly:\n{once}"
         );
         assert_eq!(

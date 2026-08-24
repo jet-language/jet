@@ -200,7 +200,13 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
             "control",
             "node",
         ),
-        palette: palette(true, true, "Execution", 78, &["switch", "match", "dispatch"]),
+        palette: palette(
+            true,
+            true,
+            "Execution",
+            78,
+            &["switch", "match", "dispatch"],
+        ),
         transaction: Some("insert_switch"),
         default_editor: "pattern_arm",
     },
@@ -219,7 +225,13 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
             "control",
             "node",
         ),
-        palette: palette(true, true, "Execution", 76, &["loop", "repeat", "for", "while"]),
+        palette: palette(
+            true,
+            true,
+            "Execution",
+            76,
+            &["loop", "repeat", "for", "while"],
+        ),
         transaction: Some("insert_loop"),
         default_editor: "inline_expr",
     },
@@ -448,9 +460,7 @@ pub(in crate::Canvas) fn insert_descriptor_id(transaction: &str, pure: bool) -> 
         NODE_DESCRIPTORS
             .iter()
             .find(|descriptor| descriptor.transaction == Some(transaction))
-            .unwrap_or_else(|| {
-                panic!("missing Canvas node descriptor transaction `{transaction}`")
-            })
+            .unwrap_or_else(|| panic!("missing Canvas node descriptor transaction `{transaction}`"))
     };
     assert!(
         descriptor.palette.insertable,
@@ -472,7 +482,10 @@ pub(in crate::Canvas) fn palette_rank_fields(id: &str) -> String {
         .map(|term| json_str(term))
         .collect::<Vec<_>>()
         .join(",");
-    format!(",\"rank\":{},\"rank_terms\":[{}]", descriptor.palette.rank, terms)
+    format!(
+        ",\"rank\":{},\"rank_terms\":[{}]",
+        descriptor.palette.rank, terms
+    )
 }
 
 pub(in crate::Canvas) fn catalog_json() -> String {
@@ -512,7 +525,10 @@ fn validate_catalog() -> Result<(), String> {
         if descriptor.palette.insertable
             && (!descriptor.palette.visible || descriptor.palette.category.is_empty())
         {
-            return Err(format!("non-visible insertable descriptor `{}`", descriptor.id));
+            return Err(format!(
+                "non-visible insertable descriptor `{}`",
+                descriptor.id
+            ));
         }
         if let Some(transaction) = descriptor.transaction {
             if !matches!(

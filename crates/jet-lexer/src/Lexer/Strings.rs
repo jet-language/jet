@@ -80,7 +80,9 @@ impl<'a> Lexer<'a> {
                         }
                     } else {
                         let esc = self.at(self.i + 1);
-                        if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+                        if let Some(&(_, decoded)) =
+                            Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
+                        {
                             lit.push(decoded);
                             self.i += 2;
                         } else {
@@ -359,7 +361,9 @@ impl<'a> Lexer<'a> {
                         }
                     } else {
                         let esc = self.at(k + 1);
-                        if let Some(&(_, decoded)) = Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc) {
+                        if let Some(&(_, decoded)) =
+                            Syntax::ESCAPES.iter().find(|&&(e, _)| e == esc)
+                        {
                             lit.push(decoded);
                         } else {
                             self.diags.push(Diagnostic::error(

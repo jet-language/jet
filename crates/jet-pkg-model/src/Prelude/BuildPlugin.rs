@@ -72,9 +72,12 @@ pub fn run(path: &str, component_bytes: &[u8], request: &[u8]) -> Result<Vec<u8>
             guest_name(path)
         )
     })?;
-    let func = instance
-        .get_func(&mut store, BUILD_EXPORT)
-        .ok_or_else(|| format!("build plugin {} has no exported {BUILD_EXPORT}", guest_name(path)))?;
+    let func = instance.get_func(&mut store, BUILD_EXPORT).ok_or_else(|| {
+        format!(
+            "build plugin {} has no exported {BUILD_EXPORT}",
+            guest_name(path)
+        )
+    })?;
 
     store.set_epoch_deadline(1);
     let cancel = Arc::new(AtomicBool::new(false));
@@ -113,7 +116,9 @@ pub fn run(path: &str, component_bytes: &[u8], request: &[u8]) -> Result<Vec<u8>
         .iter()
         .map(|value| match value {
             Val::U8(byte) => Ok(*byte),
-            _ => Err(format!("build plugin {BUILD_EXPORT} returned a non-byte list")),
+            _ => Err(format!(
+                "build plugin {BUILD_EXPORT} returned a non-byte list"
+            )),
         })
         .collect()
 }

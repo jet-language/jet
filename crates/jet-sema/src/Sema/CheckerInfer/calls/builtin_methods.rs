@@ -1,12 +1,12 @@
-use crate::AST::{Call, CallArg, Expr, StrPart, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
-use crate::Sema::{Checker, SendCrossing, SendProblemKind, SendabilityProblem};
+use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::CheckerCoreLib::{unit_ty, wrong_core_arity};
 use crate::Sema::Diagnostics::{is_cloneable, suggest_field, type_fix_hint, type_is_copy};
+use crate::Sema::{Checker, SendCrossing, SendProblemKind, SendabilityProblem};
 use crate::Syntax;
+use crate::AST::{Call, CallArg, Expr, StrPart, Type};
 use std::collections::HashSet;
 
 fn cell_inner(ty: &Type) -> Type {
@@ -17,399 +17,433 @@ fn cell_inner(ty: &Type) -> Type {
 }
 
 impl<'a> Checker<'a> {
-        fn check_builtin_method_labels(&mut self, method: &str, args: &[CallArg]) {
-            // Zip labels name output fields rather than parameters. Map.merge's
-            // optional conflict callback is the only labelled builtin-method
-            // parameter; every other builtin method is positional.
-            if Self::zip_family_name(method) {
-                return;
+    fn check_builtin_method_labels(&mut self, method: &str, args: &[CallArg]) {
+        // Zip labels name output fields rather than parameters. Map.merge's
+        // optional conflict callback is the only labelled builtin-method
+        // parameter; every other builtin method is positional.
+        if Self::zip_family_name(method) {
+            return;
+        }
+        for (index, arg) in args.iter().enumerate() {
+            let Some((label, label_span)) = &arg.label else {
+                continue;
+            };
+            if method == "merge" && index == 1 && label == "conflict" {
+                continue;
             }
-            for (index, arg) in args.iter().enumerate() {
-                let Some((label, label_span)) = &arg.label else {
-                    continue;
-                };
-                if method == "merge" && index == 1 && label == "conflict" {
-                    continue;
-                }
+            self.diags.push(Diagnostic::error(
+                "E0764",
+                format!("`{method}` has no parameter labelled `{label}`"),
+                "a label binds an argument to the parameter of that name".to_string(),
+                if method == "merge" && args.len() == 2 {
+                    format!("`{method}` accepts `conflict`")
+                } else {
+                    format!("`{method}` takes no labelled arguments")
+                },
+                Some(*label_span),
+            ));
+        }
+    }
+
+    fn zip_sequence_elem(ty: &Type) -> Option<Type> {
+        match ty {
+            Type::Tagged { inner, .. } => Self::zip_sequence_elem(inner),
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+            Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+                Some(args[0].clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn zip_field_name(index: usize, label: Option<&str>) -> String {
+        if let Some(label) = label {
+            return label.to_string();
+        }
+        ["a", "b", "c", "d", "e", "f"]
+            .get(index)
+            .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
+    }
+
+    fn zip_family_name(name: &str) -> bool {
+        matches!(name, "zip" | "zip_short" | "zip_pad")
+    }
+
+    fn infer_zip_arg(&mut self, arg: &mut CallArg) -> Option<Type> {
+        let saved = self.expected_type.take();
+        let ty = self.infer(&mut arg.expr);
+        self.expected_type = saved;
+        self.check_call_argument_captures(&arg.expr);
+        ty
+    }
+
+    fn zip_type_error(&mut self, message: String, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E0128",
+            message,
+            "zip inputs and fill values must have one statically known column type".to_string(),
+            "pass lists or iterators with matching element types, or use a typed fill value"
+                .to_string(),
+            Some(span),
+        ));
+    }
+
+    fn finish_zip_family(
+        &mut self,
+        method: &str,
+        input_tys: &[Type],
+        labels: &[Option<String>],
+        fill_ty: Option<&Type>,
+        fills_ty: Option<&Type>,
+        span: Span,
+    ) -> Type {
+        let elems: Vec<Type> = input_tys
+            .iter()
+            .map(|ty| {
+                Self::zip_sequence_elem(ty).unwrap_or_else(|| {
+                    self.zip_type_error(
+                        format!("`{method}` expects a list or `Iter`, got `{}`", ty.name()),
+                        span,
+                    );
+                    Type::Int
+                })
+            })
+            .collect();
+        let names: Vec<String> = labels
+            .iter()
+            .enumerate()
+            .map(|(index, label)| Self::zip_field_name(index, label.as_deref()))
+            .collect();
+        let mut seen = HashSet::new();
+        for name in &names {
+            if !seen.insert(name.clone()) {
                 self.diags.push(Diagnostic::error(
-                    "E0764",
-                    format!("`{method}` has no parameter labelled `{label}`"),
-                    "a label binds an argument to the parameter of that name".to_string(),
-                    if method == "merge" && args.len() == 2 {
-                        format!("`{method}` accepts `conflict`")
-                    } else {
-                        format!("`{method}` takes no labelled arguments")
-                    },
-                    Some(*label_span),
+                    "E0765",
+                    format!("zip output field `{name}` is repeated"),
+                    "each input column needs one distinct row-field name".to_string(),
+                    "rename the repeated input label".to_string(),
+                    Some(span),
                 ));
             }
         }
 
-        fn zip_sequence_elem(ty: &Type) -> Option<Type> {
-            match ty {
-                Type::Tagged { inner, .. } => Self::zip_sequence_elem(inner),
-                Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
-                Type::Apply { name, args }
-                    if name == Syntax::TYPE_ITER && args.len() == 1 =>
-                {
-                    Some(args[0].clone())
-                }
-                _ => None,
-            }
+        // D-ZIPPAD1: zero columns is an empty `Iter<Unit>` and one column
+        // is the identity sequence. Tuple rows begin only at two columns.
+        if elems.len() <= 1 {
+            return Collections::iter_ty(elems.into_iter().next().unwrap_or_else(unit_ty));
         }
 
-        fn zip_field_name(index: usize, label: Option<&str>) -> String {
-            if let Some(label) = label {
-                return label.to_string();
-            }
-            ["a", "b", "c", "d", "e", "f"]
-                .get(index)
-                .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
-        }
-
-        fn zip_family_name(name: &str) -> bool {
-            matches!(name, "zip" | "zip_short" | "zip_pad")
-        }
-
-        fn infer_zip_arg(&mut self, arg: &mut CallArg) -> Option<Type> {
-            let saved = self.expected_type.take();
-            let ty = self.infer(&mut arg.expr);
-            self.expected_type = saved;
-            self.check_call_argument_captures(&arg.expr);
-            ty
-        }
-
-        fn zip_type_error(&mut self, message: String, span: Span) {
-            self.diags.push(Diagnostic::error(
-                "E0128",
-                message,
-                "zip inputs and fill values must have one statically known column type".to_string(),
-                "pass lists or iterators with matching element types, or use a typed fill value".to_string(),
-                Some(span),
-            ));
-        }
-
-        fn finish_zip_family(
-            &mut self,
-            method: &str,
-            input_tys: &[Type],
-            labels: &[Option<String>],
-            fill_ty: Option<&Type>,
-            fills_ty: Option<&Type>,
-            span: Span,
-        ) -> Type {
-            let elems: Vec<Type> = input_tys
-                .iter()
-                .map(|ty| {
-                    Self::zip_sequence_elem(ty).unwrap_or_else(|| {
-                        self.zip_type_error(format!("`{method}` expects a list or `Iter`, got `{}`", ty.name()), span);
-                        Type::Int
-                    })
-                })
-                .collect();
-            let names: Vec<String> = labels
-                .iter()
-                .enumerate()
-                .map(|(index, label)| Self::zip_field_name(index, label.as_deref()))
-                .collect();
-            let mut seen = HashSet::new();
-            for name in &names {
-                if !seen.insert(name.clone()) {
-                    self.diags.push(Diagnostic::error(
-                        "E0765",
-                        format!("zip output field `{name}` is repeated"),
-                        "each input column needs one distinct row-field name".to_string(),
-                        "rename the repeated input label".to_string(),
-                        Some(span),
-                    ));
-                }
-            }
-
-            // D-ZIPPAD1: zero columns is an empty `Iter<Unit>` and one column
-            // is the identity sequence. Tuple rows begin only at two columns.
-            if elems.len() <= 1 {
-                return Collections::iter_ty(elems.into_iter().next().unwrap_or_else(unit_ty));
-            }
-
-            let mut output_tys = elems.clone();
-            if method == "zip_pad" {
-                if fill_ty.is_some() && fills_ty.is_some() {
-                    self.zip_type_error("`zip_pad` accepts either `fill:` or `fills:`, not both".to_string(), span);
-                }
-                if let Some(fill) = fill_ty {
-                    if !is_cloneable(fill, self.registry) && !type_is_copy(fill) {
-                        self.zip_type_error(format!("zip fill type `{}` is not cloneable", fill.name()), span);
-                    }
-                    for elem in &elems {
-                        if elem != fill && fill.numeric_widening_to(elem).is_none() {
-                            self.zip_type_error(format!("common zip fill `{}` does not fit column `{}`", fill.name(), elem.name()), span);
-                        } else if elem != fill && matches!(fill, Type::InlineRange { .. }) {
-                            self.require_knowledge_gate(
-                                crate::Sema::KnowledgePlane::Range,
-                                crate::Sema::KnowledgeGate::BoundedArithmetic,
-                                span,
-                            );
-                        }
-                    }
-                }
-                if let Some(Type::Tuple(fill_fields)) = fills_ty {
-                    let by_name: std::collections::HashMap<_, _> = fill_fields
-                        .iter()
-                        .map(|(name, ty)| (name.as_str(), ty.as_ref()))
-                        .collect();
-                    for (index, (name, elem)) in names.iter().zip(&elems).enumerate() {
-                        let Some(fill) = by_name.get(name.as_str()) else {
-                            self.zip_type_error(format!("per-column fills omit `{name}`"), span);
-                            continue;
-                        };
-                        if !is_cloneable(fill, self.registry) && !type_is_copy(fill) {
-                            self.zip_type_error(format!("zip fill `{name}` has non-cloneable type `{}`", fill.name()), span);
-                        }
-                        if **fill != *elem && fill.numeric_widening_to(elem).is_none() {
-                            self.zip_type_error(format!("fill `{name}` does not fit column {}", index + 1), span);
-                        } else if **fill != *elem && matches!(fill, Type::InlineRange { .. }) {
-                            self.require_knowledge_gate(
-                                crate::Sema::KnowledgePlane::Range,
-                                crate::Sema::KnowledgeGate::BoundedArithmetic,
-                                span,
-                            );
-                        }
-                    }
-                } else if fills_ty.is_some() {
-                    self.zip_type_error("`fills:` expects a named tuple of column values".to_string(), span);
-                }
-                if fill_ty.is_none() && fills_ty.is_none() {
-                    output_tys = elems.iter().cloned().map(|ty| Type::Option(Box::new(ty))).collect();
-                }
-            }
-            Collections::iter_ty(Type::Tuple(
-                names
-                    .into_iter()
-                    .zip(output_tys)
-                    .map(|(name, ty)| (name, Box::new(ty)))
-                    .collect(),
-            ))
-        }
-
-        pub(crate) fn check_zip_family_free(&mut self, call: &mut Call) -> Option<Option<Type>> {
-            if !Self::zip_family_name(&call.name)
-                || self.funcs.contains_key(&call.name)
-                || self.lookup(&call.name).is_some()
-            {
-                return None;
-            }
-            let is_pad = call.name == "zip_pad";
-            let mut input_indices = Vec::new();
-            let mut fill_index = None;
-            let mut fills_index = None;
-            for (index, arg) in call.args.iter().enumerate() {
-                match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
-                    (true, Some("fill")) => fill_index = Some(index),
-                    (true, Some("fills")) => fills_index = Some(index),
-                    _ => input_indices.push(index),
-                }
-            }
-            let mut input_tys = Vec::with_capacity(input_indices.len());
-            let mut labels = Vec::with_capacity(input_indices.len());
-            for index in input_indices {
-                let arg = &mut call.args[index];
-                input_tys.push(self.infer_zip_arg(arg).unwrap_or(Type::List(Box::new(Type::Int))));
-                labels.push(arg.label.as_ref().map(|(name, _)| name.clone()));
-            }
-            let fill_ty = fill_index
-                .map(|index| self.infer_zip_arg(&mut call.args[index]).unwrap_or(Type::Int));
-            let fills_ty = fills_index
-                .map(|index| self.infer_zip_arg(&mut call.args[index]).unwrap_or(Type::Int));
-            let ret = self.finish_zip_family(
-                &call.name,
-                &input_tys,
-                &labels,
-                fill_ty.as_ref(),
-                fills_ty.as_ref(),
-                call.name_span,
-            );
-            call.resolved_ret = Some(ret.clone());
-            Some(Some(ret))
-        }
-
-        pub(crate) fn check_zip_family_method(
-            &mut self,
-            receiver: &Expr,
-            method: &str,
-            recv_ty: &Type,
-            args: &mut Vec<CallArg>,
-            span: Span,
-            resolved_ret_out: &mut Option<Type>,
-        ) -> Option<Type> {
-            if !Self::zip_family_name(method) || Self::zip_sequence_elem(recv_ty).is_none() {
-                return None;
-            }
-            let is_pad = method == "zip_pad";
-            let mut input_tys = vec![recv_ty.clone()];
-            let mut labels = vec![None];
-            let mut fill_ty = None;
-            let mut fills_ty = None;
-            for arg in args.iter_mut() {
-                match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
-                    (true, Some("fill")) => fill_ty = self.infer_zip_arg(arg),
-                    (true, Some("fills")) => fills_ty = self.infer_zip_arg(arg),
-                    _ => {
-                        let ty = self.infer_zip_arg(arg).unwrap_or(Type::List(Box::new(Type::Int)));
-                        input_tys.push(ty);
-                        labels.push(arg.label.as_ref().map(|(name, _)| name.clone()));
-                    }
-                }
-            }
-            let ret = self.finish_zip_family(method, &input_tys, &labels, fill_ty.as_ref(), fills_ty.as_ref(), span);
-            self.finish_builtin_method(receiver, method, recv_ty, args, span, Some(ret.clone()));
-            if Collections::is_iter_type(recv_ty) {
-                self.consume_builtin_receiver(receiver, method);
-            }
-            *resolved_ret_out = Some(ret.clone());
-            Some(ret)
-        }
-
-        fn reject_para_type(&mut self, role: &str, ty: &Type, span: Span) {
-            if let Some(problem) = self.crossing_problem(ty, SendCrossing::ParallelWorker, true) {
-                self.report_unsendable(
-                    &format!("parallel {role}"),
-                    ty,
-                    problem,
-                    SendCrossing::ParallelWorker,
+        let mut output_tys = elems.clone();
+        if method == "zip_pad" {
+            if fill_ty.is_some() && fills_ty.is_some() {
+                self.zip_type_error(
+                    "`zip_pad` accepts either `fill:` or `fills:`, not both".to_string(),
                     span,
                 );
             }
-        }
-
-        fn check_para_lambda(&mut self, expr: &Expr) {
-            let Expr::Lambda(lam) = expr else {
-                if matches!(expr, Expr::Ident(name, _) if self.funcs.contains_key(name)) {
-                    return;
-                }
-                self.report_unsendable(
-                    "parallel callback",
-                    &Type::Named("callback".to_string()),
-                    SendabilityProblem {
-                        root: None,
-                        path: Vec::new(),
-                        kind: SendProblemKind::ClosureCaptures,
-                    },
-                    SendCrossing::ParallelWorker,
-                    expr.span(),
-                );
-                return;
-            };
-            for name in &lam.meta.mut_captures {
-                self.report_concurrent_write(name, "parallel worker", lam.span);
-            }
-
-            let params = lam.params.iter().map(|param| param.name.clone()).collect::<HashSet<_>>();
-            let mut read = HashSet::new();
-            let mut changed = HashSet::new();
-            lambda_collect_captures(&lam.body, &params, &mut read, &mut changed);
-            // Direct-call syntax carries its callee as `Call::name`, rather
-            // than an `Expr::Ident`. Add only matching outer bindings here so
-            // top-level/builtin calls stay non-captures while stored function
-            // values receive the same worker-sharing check as every other read.
-            for name in self.visible_names() {
-                if !params.contains(&name) && lambda_body_refs_name(&lam.body, &name) {
-                    read.insert(name);
-                }
-            }
-            for name in read {
-                if changed.contains(&name)
-                    || self.imports.contains_key(&name)
-                    || self.core_imports.contains_key(&name)
-                {
-                    continue;
-                }
-                let captured = self
-                    .lookup(&name)
-                    .map(|info| info.ty.clone())
-                    .or_else(|| self.consts.get(&name).cloned());
-                let Some(ty) = captured else { continue };
-                if super::super::is_reactive_handle_ty(&ty)
-                    && !self.lookup(&name).is_some_and(|info| info.reactive_local)
-                {
-                    self.note_reactive_upgrade(&name, &ty, "parallel");
-                }
-                if let Some(problem) = self.crossing_problem_for_name(
-                    &name,
-                    &ty,
-                    SendCrossing::ParallelWorker,
-                    true,
-                ) {
-                    self.report_unsendable(
-                        &name,
-                        &ty,
-                        problem,
-                        SendCrossing::ParallelWorker,
-                        lam.span,
+            if let Some(fill) = fill_ty {
+                if !is_cloneable(fill, self.registry) && !type_is_copy(fill) {
+                    self.zip_type_error(
+                        format!("zip fill type `{}` is not cloneable", fill.name()),
+                        span,
                     );
                 }
+                for elem in &elems {
+                    if elem != fill && fill.numeric_widening_to(elem).is_none() {
+                        self.zip_type_error(
+                            format!(
+                                "common zip fill `{}` does not fit column `{}`",
+                                fill.name(),
+                                elem.name()
+                            ),
+                            span,
+                        );
+                    } else if elem != fill && matches!(fill, Type::InlineRange { .. }) {
+                        self.require_knowledge_gate(
+                            crate::Sema::KnowledgePlane::Range,
+                            crate::Sema::KnowledgeGate::BoundedArithmetic,
+                            span,
+                        );
+                    }
+                }
+            }
+            if let Some(Type::Tuple(fill_fields)) = fills_ty {
+                let by_name: std::collections::HashMap<_, _> = fill_fields
+                    .iter()
+                    .map(|(name, ty)| (name.as_str(), ty.as_ref()))
+                    .collect();
+                for (index, (name, elem)) in names.iter().zip(&elems).enumerate() {
+                    let Some(fill) = by_name.get(name.as_str()) else {
+                        self.zip_type_error(format!("per-column fills omit `{name}`"), span);
+                        continue;
+                    };
+                    if !is_cloneable(fill, self.registry) && !type_is_copy(fill) {
+                        self.zip_type_error(
+                            format!("zip fill `{name}` has non-cloneable type `{}`", fill.name()),
+                            span,
+                        );
+                    }
+                    if **fill != *elem && fill.numeric_widening_to(elem).is_none() {
+                        self.zip_type_error(
+                            format!("fill `{name}` does not fit column {}", index + 1),
+                            span,
+                        );
+                    } else if **fill != *elem && matches!(fill, Type::InlineRange { .. }) {
+                        self.require_knowledge_gate(
+                            crate::Sema::KnowledgePlane::Range,
+                            crate::Sema::KnowledgeGate::BoundedArithmetic,
+                            span,
+                        );
+                    }
+                }
+            } else if fills_ty.is_some() {
+                self.zip_type_error(
+                    "`fills:` expects a named tuple of column values".to_string(),
+                    span,
+                );
+            }
+            if fill_ty.is_none() && fills_ty.is_none() {
+                output_tys = elems
+                    .iter()
+                    .cloned()
+                    .map(|ty| Type::Option(Box::new(ty)))
+                    .collect();
             }
         }
+        Collections::iter_ty(Type::Tuple(
+            names
+                .into_iter()
+                .zip(output_tys)
+                .map(|(name, ty)| (name, Box::new(ty)))
+                .collect(),
+        ))
+    }
 
-        pub(crate) fn finish_builtin_method(
-            &mut self,
-            receiver: &Expr,
-            method: &str,
-            recv_ty: &Type,
-            args: &mut [crate::AST::CallArg],
-            span: Span,
-            ret: Option<Type>,
-        ) -> Option<Type> {
-            self.check_builtin_method_labels(method, args);
-            let mut call_access = self.call_access_frame();
-            let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
-            self.with_call_access(&mut call_access, |checker| {
-                match receiver_borrow {
-                    Collections::BuiltinReceiverBorrow::TwoPhaseWrite => {
-                        checker.record_call_receiver_reservation(receiver, span);
-                    }
-                    Collections::BuiltinReceiverBorrow::EagerWrite => checker
-                        .record_call_receiver_access(
-                            receiver,
-                            crate::AST::AccessConvention::Write,
-                            span,
-                        ),
-                    Collections::BuiltinReceiverBorrow::Read => checker
-                        .record_call_receiver_access(
-                            receiver,
-                            crate::AST::AccessConvention::Read,
-                            span,
-                        ),
-                    Collections::BuiltinReceiverBorrow::Move => checker
-                        .record_call_receiver_access(
-                            receiver,
-                            crate::AST::AccessConvention::Move,
-                            span,
-                        ),
-                }
-            });
-            if Collections::builtin_needs_mut_receiver(recv_ty, method) {
-                self.check_mutating_method_receiver(receiver, method, receiver.span());
+    pub(crate) fn check_zip_family_free(&mut self, call: &mut Call) -> Option<Option<Type>> {
+        if !Self::zip_family_name(&call.name)
+            || self.funcs.contains_key(&call.name)
+            || self.lookup(&call.name).is_some()
+        {
+            return None;
+        }
+        let is_pad = call.name == "zip_pad";
+        let mut input_indices = Vec::new();
+        let mut fill_index = None;
+        let mut fills_index = None;
+        for (index, arg) in call.args.iter().enumerate() {
+            match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                (true, Some("fill")) => fill_index = Some(index),
+                (true, Some("fills")) => fills_index = Some(index),
+                _ => input_indices.push(index),
             }
-            // D-PROCESS-SESSION2=D: the capability report stays an open
-            // Set<String>, but a close literal typo of a stable fact gets a
-            // nearest-key diagnostic. Dynamic and non-close preview keys stay
-            // open.
-            if matches!(
-                recv_ty,
-                Type::Tagged { marker, .. }
-                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet))
-            ) && method == "has"
+        }
+        let mut input_tys = Vec::with_capacity(input_indices.len());
+        let mut labels = Vec::with_capacity(input_indices.len());
+        for index in input_indices {
+            let arg = &mut call.args[index];
+            input_tys.push(
+                self.infer_zip_arg(arg)
+                    .unwrap_or(Type::List(Box::new(Type::Int))),
+            );
+            labels.push(arg.label.as_ref().map(|(name, _)| name.clone()));
+        }
+        let fill_ty = fill_index.map(|index| {
+            self.infer_zip_arg(&mut call.args[index])
+                .unwrap_or(Type::Int)
+        });
+        let fills_ty = fills_index.map(|index| {
+            self.infer_zip_arg(&mut call.args[index])
+                .unwrap_or(Type::Int)
+        });
+        let ret = self.finish_zip_family(
+            &call.name,
+            &input_tys,
+            &labels,
+            fill_ty.as_ref(),
+            fills_ty.as_ref(),
+            call.name_span,
+        );
+        call.resolved_ret = Some(ret.clone());
+        Some(Some(ret))
+    }
+
+    pub(crate) fn check_zip_family_method(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        recv_ty: &Type,
+        args: &mut Vec<CallArg>,
+        span: Span,
+        resolved_ret_out: &mut Option<Type>,
+    ) -> Option<Type> {
+        if !Self::zip_family_name(method) || Self::zip_sequence_elem(recv_ty).is_none() {
+            return None;
+        }
+        let is_pad = method == "zip_pad";
+        let mut input_tys = vec![recv_ty.clone()];
+        let mut labels = vec![None];
+        let mut fill_ty = None;
+        let mut fills_ty = None;
+        for arg in args.iter_mut() {
+            match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                (true, Some("fill")) => fill_ty = self.infer_zip_arg(arg),
+                (true, Some("fills")) => fills_ty = self.infer_zip_arg(arg),
+                _ => {
+                    let ty = self
+                        .infer_zip_arg(arg)
+                        .unwrap_or(Type::List(Box::new(Type::Int)));
+                    input_tys.push(ty);
+                    labels.push(arg.label.as_ref().map(|(name, _)| name.clone()));
+                }
+            }
+        }
+        let ret = self.finish_zip_family(
+            method,
+            &input_tys,
+            &labels,
+            fill_ty.as_ref(),
+            fills_ty.as_ref(),
+            span,
+        );
+        self.finish_builtin_method(receiver, method, recv_ty, args, span, Some(ret.clone()));
+        if Collections::is_iter_type(recv_ty) {
+            self.consume_builtin_receiver(receiver, method);
+        }
+        *resolved_ret_out = Some(ret.clone());
+        Some(ret)
+    }
+
+    fn reject_para_type(&mut self, role: &str, ty: &Type, span: Span) {
+        if let Some(problem) = self.crossing_problem(ty, SendCrossing::ParallelWorker, true) {
+            self.report_unsendable(
+                &format!("parallel {role}"),
+                ty,
+                problem,
+                SendCrossing::ParallelWorker,
+                span,
+            );
+        }
+    }
+
+    fn check_para_lambda(&mut self, expr: &Expr) {
+        let Expr::Lambda(lam) = expr else {
+            if matches!(expr, Expr::Ident(name, _) if self.funcs.contains_key(name)) {
+                return;
+            }
+            self.report_unsendable(
+                "parallel callback",
+                &Type::Named("callback".to_string()),
+                SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ClosureCaptures,
+                },
+                SendCrossing::ParallelWorker,
+                expr.span(),
+            );
+            return;
+        };
+        for name in &lam.meta.mut_captures {
+            self.report_concurrent_write(name, "parallel worker", lam.span);
+        }
+
+        let params = lam
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
+        let mut read = HashSet::new();
+        let mut changed = HashSet::new();
+        lambda_collect_captures(&lam.body, &params, &mut read, &mut changed);
+        // Direct-call syntax carries its callee as `Call::name`, rather
+        // than an `Expr::Ident`. Add only matching outer bindings here so
+        // top-level/builtin calls stay non-captures while stored function
+        // values receive the same worker-sharing check as every other read.
+        for name in self.visible_names() {
+            if !params.contains(&name) && lambda_body_refs_name(&lam.body, &name) {
+                read.insert(name);
+            }
+        }
+        for name in read {
+            if changed.contains(&name)
+                || self.imports.contains_key(&name)
+                || self.core_imports.contains_key(&name)
             {
-                if let [arg] = args {
-                    if let Expr::Str(parts, _) = &arg.expr {
-                        if let [StrPart::Lit(key)] = parts.as_slice() {
-                            if Syntax::terminal_fact(key).is_none() {
-                                let candidates = Syntax::TERMINAL_FACTS
-                                    .iter()
-                                    .map(|fact| (*fact).to_string())
-                                    .collect::<Vec<_>>();
-                                if let Some(fact) = suggest_field(key, &candidates) {
-                                    let mut diagnostic = Diagnostic::error(
+                continue;
+            }
+            let captured = self
+                .lookup(&name)
+                .map(|info| info.ty.clone())
+                .or_else(|| self.consts.get(&name).cloned());
+            let Some(ty) = captured else { continue };
+            if super::super::is_reactive_handle_ty(&ty)
+                && !self.lookup(&name).is_some_and(|info| info.reactive_local)
+            {
+                self.note_reactive_upgrade(&name, &ty, "parallel");
+            }
+            if let Some(problem) =
+                self.crossing_problem_for_name(&name, &ty, SendCrossing::ParallelWorker, true)
+            {
+                self.report_unsendable(&name, &ty, problem, SendCrossing::ParallelWorker, lam.span);
+            }
+        }
+    }
+
+    pub(crate) fn finish_builtin_method(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        recv_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+        ret: Option<Type>,
+    ) -> Option<Type> {
+        self.check_builtin_method_labels(method, args);
+        let mut call_access = self.call_access_frame();
+        let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
+        self.with_call_access(&mut call_access, |checker| match receiver_borrow {
+            Collections::BuiltinReceiverBorrow::TwoPhaseWrite => {
+                checker.record_call_receiver_reservation(receiver, span);
+            }
+            Collections::BuiltinReceiverBorrow::EagerWrite => checker.record_call_receiver_access(
+                receiver,
+                crate::AST::AccessConvention::Write,
+                span,
+            ),
+            Collections::BuiltinReceiverBorrow::Read => checker.record_call_receiver_access(
+                receiver,
+                crate::AST::AccessConvention::Read,
+                span,
+            ),
+            Collections::BuiltinReceiverBorrow::Move => checker.record_call_receiver_access(
+                receiver,
+                crate::AST::AccessConvention::Move,
+                span,
+            ),
+        });
+        if Collections::builtin_needs_mut_receiver(recv_ty, method) {
+            self.check_mutating_method_receiver(receiver, method, receiver.span());
+        }
+        // D-PROCESS-SESSION2=D: the capability report stays an open
+        // Set<String>, but a close literal typo of a stable fact gets a
+        // nearest-key diagnostic. Dynamic and non-close preview keys stay
+        // open.
+        if matches!(
+            recv_ty,
+            Type::Tagged { marker, .. }
+                if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet))
+        ) && method == "has"
+        {
+            if let [arg] = args {
+                if let Expr::Str(parts, _) = &arg.expr {
+                    if let [StrPart::Lit(key)] = parts.as_slice() {
+                        if Syntax::terminal_fact(key).is_none() {
+                            let candidates = Syntax::TERMINAL_FACTS
+                                .iter()
+                                .map(|fact| (*fact).to_string())
+                                .collect::<Vec<_>>();
+                            if let Some(fact) = suggest_field(key, &candidates) {
+                                let mut diagnostic = Diagnostic::error(
                                         "E0302",
                                         format!(
                                             "terminal fact key `{key}` looks like `{fact}`"
@@ -419,34 +453,34 @@ impl<'a> Checker<'a> {
                                         format!("write `TerminalFact.{fact}`"),
                                         Some(arg.span),
                                     );
-                                    diagnostic = diagnostic.with_edit(TextEdit {
-                                        span: arg.span,
-                                        new_text: format!("TerminalFact.{fact}"),
-                                    });
-                                    self.diags.push(diagnostic);
-                                }
+                                diagnostic = diagnostic.with_edit(TextEdit {
+                                    span: arg.span,
+                                    new_text: format!("TerminalFact.{fact}"),
+                                });
+                                self.diags.push(diagnostic);
                             }
                         }
                     }
                 }
             }
-            if let Type::Apply { name, .. } = recv_ty {
-                match (name.as_str(), method) {
-                    ("Task", "join") => {
-                        self.consume_builtin_receiver(receiver, method);
-                        let _ = span;
-                        return ret;
-                    }
-                    ("Task", "detach") => {
-                        // D-DETACH1: consume the Task handle (marks it moved → L1101 won't fire).
-                        // Two error cases:
-                        //   E1106: task captured a `view` borrow — a detached task can outlive
-                        //          the borrow; fix-it is to pass an owned `copy` or `Shared<T>`.
-                        //   E1103: task had a general sendability failure at spawn (E1102 already
-                        //          fired); detaching an unsound task is doubly dangerous.
-                        if let Expr::Ident(name, _) = receiver {
-                            if self.view_borrow_escape_tasks.contains(name.as_str()) {
-                                self.diags.push(Diagnostic::error(
+        }
+        if let Type::Apply { name, .. } = recv_ty {
+            match (name.as_str(), method) {
+                ("Task", "join") => {
+                    self.consume_builtin_receiver(receiver, method);
+                    let _ = span;
+                    return ret;
+                }
+                ("Task", "detach") => {
+                    // D-DETACH1: consume the Task handle (marks it moved → L1101 won't fire).
+                    // Two error cases:
+                    //   E1106: task captured a `view` borrow — a detached task can outlive
+                    //          the borrow; fix-it is to pass an owned `copy` or `Shared<T>`.
+                    //   E1103: task had a general sendability failure at spawn (E1102 already
+                    //          fired); detaching an unsound task is doubly dangerous.
+                    if let Expr::Ident(name, _) = receiver {
+                        if self.view_borrow_escape_tasks.contains(name.as_str()) {
+                            self.diags.push(Diagnostic::error(
                                     "E1106",
                                     format!(
                                         "can't detach task `{}` — it captured a `view` borrow that may not live long enough",
@@ -456,8 +490,8 @@ impl<'a> Checker<'a> {
                                     "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`".to_string(),
                                     Some(span),
                                 ));
-                            } else if self.view_capture_tasks.contains(name.as_str()) {
-                                self.diags.push(Diagnostic::error(
+                        } else if self.view_capture_tasks.contains(name.as_str()) {
+                            self.diags.push(Diagnostic::error(
                                     "E1103",
                                     format!(
                                         "can't detach task `{}` — it captured a value that can't cross a thread boundary",
@@ -467,130 +501,130 @@ impl<'a> Checker<'a> {
                                     "fix the E1102 error at the spawn site first, then `.detach()` is safe".to_string(),
                                     Some(span),
                                 ));
-                            }
                         }
-                        self.consume_builtin_receiver(receiver, method);
-                        let _ = span;
-                        return None; // detach() returns nothing
                     }
-                    ("Sender", "send") => {
-                        return self.finish_sender_send(recv_ty, args, span);
-                    }
-                    // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — generational arena.
-                    ("Pool", "add") => {
-                        return self.finish_pool_add(recv_ty, args, span);
-                    }
-                    ("Pool", "remove") => {
-                        return self.finish_pool_remove(recv_ty, args, span);
-                    }
-                    ("Pool", "ids") => {
-                        if !args.is_empty() {
-                            self.diags
-                                .push(wrong_core_arity("ids", 0, args.len(), span));
-                            for a in args.iter_mut() {
-                                self.with_call_access(&mut call_access, |checker| {
-                                    let inferred = checker.infer(&mut a.expr);
-                                    checker.check_call_argument_captures(&a.expr);
-                                    inferred
-                                });
-                            }
-                        }
-                        let elem_ty = match recv_ty {
-                            Type::Apply { name, args } if name == "Pool" => {
-                                args.first().cloned().unwrap_or(Type::Int)
-                            }
-                            _ => Type::Int,
-                        };
-                        let id_ty = Type::Apply {
-                            name: "Id".to_string(),
-                            args: vec![elem_ty],
-                        };
-                        return Some(Type::List(Box::new(id_ty)));
-                    }
-                    // D-LOCALCELL1=A: local cells mutate through read receivers.
-                    // Guard mapping/splitting consumes the source guard so only
-                    // projected guards retain the original dynamic loan.
-                    ("Cell", "get") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_get(&inner, span);
-                    }
-                    ("Cell", "set" | "replace") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_write(method, &inner, args, span);
-                    }
-                    ("Cell", "get_or_set") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_get_or_set(&inner, args, span);
-                    }
-                    ("Cell", "read") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_read(&inner, args, span);
-                    }
-                    ("Cell", "edit") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_edit(&inner, args, span);
-                    }
-                    ("CellReadGuard" | "CellEditGuard", "get") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_get(&inner, span);
-                    }
-                    ("CellEditGuard", "set") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_write("set", &inner, args, span);
-                    }
-                    ("CellReadGuard" | "CellEditGuard", "read") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_read(&inner, args, span);
-                    }
-                    ("CellEditGuard", "edit") => {
-                        let inner = cell_inner(recv_ty);
-                        return self.finish_cell_edit(&inner, args, span);
-                    }
-                    ("CellReadGuard" | "CellEditGuard", "map") => {
-                        let inner = cell_inner(recv_ty);
-                        self.consume_builtin_receiver(receiver, method);
-                        return self.finish_cell_guard_map(name, &inner, args, span);
-                    }
-                    ("CellReadGuard" | "CellEditGuard", "split") => {
-                        let inner = cell_inner(recv_ty);
-                        self.consume_builtin_receiver(receiver, method);
-                        return self.finish_cell_guard_split(name, &inner, args, span);
-                    }
-                    _ => {}
+                    self.consume_builtin_receiver(receiver, method);
+                    let _ = span;
+                    return None; // detach() returns nothing
                 }
-            }
-            // D-ITERTOOLS1=A: every method on `Iter<T>` consumes the view (move).
-            // Driving a consumed lazy value twice is E0121, not a runtime throw.
-            if Collections::is_iter_type(recv_ty) {
-                self.consume_builtin_receiver(receiver, method);
-            }
-            // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not
-            // `Type::Apply` (it predates this stage — see the type's own doc
-            // comment) — a separate receiver match, same shape as the block above.
-            if let Type::Shared(inner) = recv_ty {
-                match method {
-                    // D-CONC-SHARE1=A (card #1561): the closure forms are
-                    // retired at the source surface. The compiler's own
-                    // plain-access desugar carries the same shape into this
-                    // one seam, tagged, so only a user-typed closure is
-                    // rejected. Typing continues either way, so a rejected
-                    // file still reports the rest of its errors.
-                    "read" | "edit" => {
-                        if !crate::Sema::SharedAccess::is_shared_access_desugar(args) {
-                            self.diags.push(Diagnostic::from_row(
-                                "E1116",
-                                &[("method", method)],
-                                Some(span),
-                            ));
+                ("Sender", "send") => {
+                    return self.finish_sender_send(recv_ty, args, span);
+                }
+                // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>` — generational arena.
+                ("Pool", "add") => {
+                    return self.finish_pool_add(recv_ty, args, span);
+                }
+                ("Pool", "remove") => {
+                    return self.finish_pool_remove(recv_ty, args, span);
+                }
+                ("Pool", "ids") => {
+                    if !args.is_empty() {
+                        self.diags
+                            .push(wrong_core_arity("ids", 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.with_call_access(&mut call_access, |checker| {
+                                let inferred = checker.infer(&mut a.expr);
+                                checker.check_call_argument_captures(&a.expr);
+                                inferred
+                            });
                         }
-                        return if method == "read" {
-                            self.finish_shared_read(inner, args, span)
-                        } else {
-                            self.finish_shared_edit(inner, args, span)
-                        };
                     }
-                    "guard_read" | "guard_edit" if self.lexical_tail_len() >= 8 => {
-                        self.diags.push(Diagnostic::lint(
+                    let elem_ty = match recv_ty {
+                        Type::Apply { name, args } if name == "Pool" => {
+                            args.first().cloned().unwrap_or(Type::Int)
+                        }
+                        _ => Type::Int,
+                    };
+                    let id_ty = Type::Apply {
+                        name: "Id".to_string(),
+                        args: vec![elem_ty],
+                    };
+                    return Some(Type::List(Box::new(id_ty)));
+                }
+                // D-LOCALCELL1=A: local cells mutate through read receivers.
+                // Guard mapping/splitting consumes the source guard so only
+                // projected guards retain the original dynamic loan.
+                ("Cell", "get") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_get(&inner, span);
+                }
+                ("Cell", "set" | "replace") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_write(method, &inner, args, span);
+                }
+                ("Cell", "get_or_set") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_get_or_set(&inner, args, span);
+                }
+                ("Cell", "read") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_read(&inner, args, span);
+                }
+                ("Cell", "edit") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_edit(&inner, args, span);
+                }
+                ("CellReadGuard" | "CellEditGuard", "get") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_get(&inner, span);
+                }
+                ("CellEditGuard", "set") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_write("set", &inner, args, span);
+                }
+                ("CellReadGuard" | "CellEditGuard", "read") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_read(&inner, args, span);
+                }
+                ("CellEditGuard", "edit") => {
+                    let inner = cell_inner(recv_ty);
+                    return self.finish_cell_edit(&inner, args, span);
+                }
+                ("CellReadGuard" | "CellEditGuard", "map") => {
+                    let inner = cell_inner(recv_ty);
+                    self.consume_builtin_receiver(receiver, method);
+                    return self.finish_cell_guard_map(name, &inner, args, span);
+                }
+                ("CellReadGuard" | "CellEditGuard", "split") => {
+                    let inner = cell_inner(recv_ty);
+                    self.consume_builtin_receiver(receiver, method);
+                    return self.finish_cell_guard_split(name, &inner, args, span);
+                }
+                _ => {}
+            }
+        }
+        // D-ITERTOOLS1=A: every method on `Iter<T>` consumes the view (move).
+        // Driving a consumed lazy value twice is E0121, not a runtime throw.
+        if Collections::is_iter_type(recv_ty) {
+            self.consume_builtin_receiver(receiver, method);
+        }
+        // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not
+        // `Type::Apply` (it predates this stage — see the type's own doc
+        // comment) — a separate receiver match, same shape as the block above.
+        if let Type::Shared(inner) = recv_ty {
+            match method {
+                // D-CONC-SHARE1=A (card #1561): the closure forms are
+                // retired at the source surface. The compiler's own
+                // plain-access desugar carries the same shape into this
+                // one seam, tagged, so only a user-typed closure is
+                // rejected. Typing continues either way, so a rejected
+                // file still reports the rest of its errors.
+                "read" | "edit" => {
+                    if !crate::Sema::SharedAccess::is_shared_access_desugar(args) {
+                        self.diags.push(Diagnostic::from_row(
+                            "E1116",
+                            &[("method", method)],
+                            Some(span),
+                        ));
+                    }
+                    return if method == "read" {
+                        self.finish_shared_read(inner, args, span)
+                    } else {
+                        self.finish_shared_edit(inner, args, span)
+                    };
+                }
+                "guard_read" | "guard_edit" if self.lexical_tail_len() >= 8 => {
+                    self.diags.push(Diagnostic::lint(
                             "L0206",
                             format!(
                                 "`Shared.{method}()` keeps its lock through a long lexical scope"
@@ -599,45 +633,45 @@ impl<'a> Checker<'a> {
                             "move the guarded work into a smaller block; when nesting guards is necessary, acquire them in one stable order".to_string(),
                             Some(span),
                         ));
-                    }
-                    _ => {}
                 }
+                _ => {}
             }
-            // D-SHAPE-DURATION1=A: all type-owned unit constructors share one
-            // numeric contract. Int stays exact; Float is checked at runtime for
-            // finiteness and range after unit scaling.
-            if matches!(recv_ty, Type::Named(n) if n == Syntax::DURATION_TYPE)
-                && Syntax::DURATION_CONSTRUCTORS.contains(&method)
-            {
-                for arg in args.iter_mut() {
-                    let typed_numeric_head = match &arg.expr {
-                        Expr::TypedLit {
-                            head: Some(Type::Float32),
-                            ..
-                        } => Some(Type::Float32),
-                        Expr::TypedLit {
-                            head: Some(Type::Float),
-                            ..
-                        } => Some(Type::Float),
-                        _ => None,
-                    };
-                    let got = self.with_call_access(&mut call_access, |checker| {
-                        // A scalar typed literal carries its numeric target in
-                        // the head. Preserve that target through this special
-                        // constructor path, which has no ordinary parameter
-                        // signature to provide an expected type.
-                        let inferred = typed_numeric_head
-                            .as_ref()
-                            .map(|expected| checker.infer_with_expected(&mut arg.expr, expected))
-                            .unwrap_or_else(|| checker.infer(&mut arg.expr));
-                        checker.check_call_argument_captures(&arg.expr);
-                        inferred
-                    });
-                    if !matches!(
-                        got,
-                        Some(Type::Int | Type::InlineRange { .. } | Type::Float)
-                    ) {
-                        self.diags.push(Diagnostic::error(
+        }
+        // D-SHAPE-DURATION1=A: all type-owned unit constructors share one
+        // numeric contract. Int stays exact; Float is checked at runtime for
+        // finiteness and range after unit scaling.
+        if matches!(recv_ty, Type::Named(n) if n == Syntax::DURATION_TYPE)
+            && Syntax::DURATION_CONSTRUCTORS.contains(&method)
+        {
+            for arg in args.iter_mut() {
+                let typed_numeric_head = match &arg.expr {
+                    Expr::TypedLit {
+                        head: Some(Type::Float32),
+                        ..
+                    } => Some(Type::Float32),
+                    Expr::TypedLit {
+                        head: Some(Type::Float),
+                        ..
+                    } => Some(Type::Float),
+                    _ => None,
+                };
+                let got = self.with_call_access(&mut call_access, |checker| {
+                    // A scalar typed literal carries its numeric target in
+                    // the head. Preserve that target through this special
+                    // constructor path, which has no ordinary parameter
+                    // signature to provide an expected type.
+                    let inferred = typed_numeric_head
+                        .as_ref()
+                        .map(|expected| checker.infer_with_expected(&mut arg.expr, expected))
+                        .unwrap_or_else(|| checker.infer(&mut arg.expr));
+                    checker.check_call_argument_captures(&arg.expr);
+                    inferred
+                });
+                if !matches!(
+                    got,
+                    Some(Type::Int | Type::InlineRange { .. } | Type::Float)
+                ) {
+                    self.diags.push(Diagnostic::error(
                             "E0108",
                             format!(
                                 "argument to `Duration.{method}()` should be Int or Float"
@@ -646,361 +680,352 @@ impl<'a> Checker<'a> {
                             "pass an Int or Float value".to_string(),
                             Some(arg.expr.span()),
                         ));
+                }
+            }
+            return ret;
+        }
+        if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT)
+            && method == "generate"
+        {
+            let template_count = args
+                .iter()
+                .filter(|arg| arg.flags.template_items.is_some())
+                .count();
+            if args.len() != 2 || template_count != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E3502",
+                    "`b.generate` requires a name followed by a typed item block".to_string(),
+                    "generated bodies are Jet items checked by the ordinary semantic path"
+                        .to_string(),
+                    "write `b.generate(\"name\") { ... }?`; source strings are retired".to_string(),
+                    Some(span),
+                ));
+            }
+        }
+        let mut refined_ret = ret.clone();
+        let build_expected = if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT)
+        {
+            Collections::build_context_method_arg_types(method, args.len())
+        } else {
+            None
+        };
+        if let Some(mut expected) =
+            build_expected.or_else(|| Collections::builtin_method_arg_types(recv_ty, method))
+        {
+            // D-CMP3WAY1=B / #1435: `sort_by` also accepts one binary
+            // comparator whose result is the core `Ordering` type.
+            if method == "sort_by"
+                && matches!(
+                    args.first().map(|arg| &arg.expr),
+                    Some(Expr::Lambda(lambda)) if lambda.params.len() == 2
+                )
+            {
+                if let Type::List(inner) | Type::FixedList { elem: inner, .. } = recv_ty {
+                    if let Some(callback) = expected.first_mut() {
+                        *callback = Collections::sort_by_callback_type(inner, true);
                     }
                 }
-                return ret;
             }
-            if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT)
-                && method == "generate"
+            // D-LISTREMOVE1/F: `.Slot` changes the first argument from the
+            // list element type to an Int position. The selector is a
+            // closed enum, so a literal is enough to resolve this
+            // dependent argument type before normal inference.
+            if method == "remove"
+                && args.len() == 2
+                && matches!(
+                    &args[1].expr,
+                    Expr::EnumLit { variant, .. } if variant == "Slot"
+                )
             {
-                let template_count = args
-                    .iter()
-                    .filter(|arg| arg.flags.template_items.is_some())
-                    .count();
-                if args.len() != 2 || template_count != 1 {
-                    self.diags.push(Diagnostic::error(
-                        "E3502",
-                        "`b.generate` requires a name followed by a typed item block".to_string(),
-                        "generated bodies are Jet items checked by the ordinary semantic path".to_string(),
-                        "write `b.generate(\"name\") { ... }?`; source strings are retired".to_string(),
-                        Some(span),
-                    ));
+                if let Some(first) = expected.first_mut() {
+                    *first = Type::Int;
                 }
             }
-            let mut refined_ret = ret.clone();
-            let build_expected = if matches!(recv_ty, Type::Named(name) if name == Syntax::TYPE_BUILD_CONTEXT) {
-                Collections::build_context_method_arg_types(method, args.len())
+            let inferred_seed = if matches!(method, "reduce" | "fold" | "scan") {
+                let saved_exp = self.expected_type.take();
+                let seed = args.first_mut().and_then(|arg| {
+                    self.with_call_access(&mut call_access, |checker| {
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    })
+                });
+                self.expected_type = saved_exp;
+                if let Some(seed_ty) = &seed {
+                    if let Some(slot) = expected.first_mut() {
+                        *slot = seed_ty.clone();
+                    }
+                    if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
+                        if let Some(acc) = params.first_mut() {
+                            *acc = seed_ty.clone();
+                        }
+                        *ret = Some(Box::new(seed_ty.clone()));
+                    }
+                    refined_ret = Some(if method == "scan" {
+                        Collections::iter_ty(seed_ty.clone())
+                    } else {
+                        seed_ty.clone()
+                    });
+                }
+                seed
             } else {
                 None
             };
-            if let Some(mut expected) = build_expected.or_else(|| Collections::builtin_method_arg_types(recv_ty, method)) {
-                // D-CMP3WAY1=B / #1435: `sort_by` also accepts one binary
-                // comparator whose result is the core `Ordering` type.
-                if method == "sort_by"
-                    && matches!(
-                        args.first().map(|arg| &arg.expr),
-                        Some(Expr::Lambda(lambda)) if lambda.params.len() == 2
-                    )
-                {
-                    if let Type::List(inner) | Type::FixedList { elem: inner, .. } = recv_ty {
-                        if let Some(callback) = expected.first_mut() {
-                            *callback = Collections::sort_by_callback_type(inner, true);
-                        }
-                    }
+            for (i, arg) in args.iter_mut().enumerate() {
+                // D-META-BODY1=A: `b.generate(name) { … }` carries its
+                // second slot as typed AST metadata. It has no value type
+                // to infer and must not be mistaken for the retired source
+                // string argument.
+                if arg.flags.template_items.is_some() {
+                    continue;
                 }
-                // D-LISTREMOVE1/F: `.Slot` changes the first argument from the
-                // list element type to an Int position. The selector is a
-                // closed enum, so a literal is enough to resolve this
-                // dependent argument type before normal inference.
-                if method == "remove"
-                    && args.len() == 2
-                    && matches!(
-                        &args[1].expr,
-                        Expr::EnumLit { variant, .. } if variant == "Slot"
-                    )
-                {
-                    if let Some(first) = expected.first_mut() {
-                        *first = Type::Int;
-                    }
+                let saved_esc = self.lambda_escapes;
+                let saved_lending_params = self.lambda_params_are_lending_views;
+                if Collections::is_closure_method(method) {
+                    self.lambda_escapes = false;
                 }
-                let inferred_seed = if matches!(
-                    method,
-                    "reduce" | "fold" | "scan"
-                ) {
-                    let saved_exp = self.expected_type.take();
-                    let seed = args.first_mut().and_then(|arg| {
-                        self.with_call_access(&mut call_access, |checker| {
-                            let inferred = checker.infer(&mut arg.expr);
-                            checker.check_call_argument_captures(&arg.expr);
-                            inferred
-                        })
-                    });
-                    self.expected_type = saved_exp;
-                    if let Some(seed_ty) = &seed {
-                        if let Some(slot) = expected.first_mut() {
-                            *slot = seed_ty.clone();
-                        }
-                        if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
-                            if let Some(acc) = params.first_mut() {
-                                *acc = seed_ty.clone();
-                            }
-                            *ret = Some(Box::new(seed_ty.clone()));
-                        }
-                        refined_ret = Some(if method == "scan" {
-                            Collections::iter_ty(seed_ty.clone())
-                        } else {
-                            seed_ty.clone()
-                        });
-                    }
-                    seed
+                self.lambda_params_are_lending_views = method == "edit_disjoint" && i == 1;
+                let saved_exp = self.expected_type.clone();
+                if let Some(et) = expected.get(i) {
+                    self.expected_type = Some(et.clone());
+                }
+                let got = if i == 0 && inferred_seed.is_some() {
+                    inferred_seed.clone()
                 } else {
-                    None
+                    self.with_call_access(&mut call_access, |checker| {
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    })
                 };
-                for (i, arg) in args.iter_mut().enumerate() {
-                    // D-META-BODY1=A: `b.generate(name) { … }` carries its
-                    // second slot as typed AST metadata. It has no value type
-                    // to infer and must not be mistaken for the retired source
-                    // string argument.
-                    if arg.flags.template_items.is_some() {
-                        continue;
+                self.expected_type = saved_exp;
+                self.lambda_escapes = saved_esc;
+                self.lambda_params_are_lending_views = saved_lending_params;
+                if Syntax::PARA_METHODS.contains(&method) {
+                    self.check_para_lambda(&arg.expr);
+                }
+                if method == "para_fold" && i == 0 {
+                    if let Some(Type::Fn { ret: Some(acc), .. }) = &got {
+                        let acc = (**acc).clone();
+                        if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
+                            params[0] = acc.clone();
+                            *ret = Some(Box::new(acc.clone()));
+                        }
+                        if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(2) {
+                            params[0] = acc.clone();
+                            params[1] = acc.clone();
+                            *ret = Some(Box::new(acc.clone()));
+                        }
+                        refined_ret = Some(acc);
                     }
-                    let saved_esc = self.lambda_escapes;
-                    let saved_lending_params = self.lambda_params_are_lending_views;
-                    if Collections::is_closure_method(method) {
-                        self.lambda_escapes = false;
-                    }
-                    self.lambda_params_are_lending_views =
-                        method == "edit_disjoint" && i == 1;
-                    let saved_exp = self.expected_type.clone();
-                    if let Some(et) = expected.get(i) {
-                        self.expected_type = Some(et.clone());
-                    }
-                    let got = if i == 0 && inferred_seed.is_some() {
-                        inferred_seed.clone()
-                    } else {
-                        self.with_call_access(&mut call_access, |checker| {
-                            let inferred = checker.infer(&mut arg.expr);
-                            checker.check_call_argument_captures(&arg.expr);
-                            inferred
-                        })
+                }
+                if method == "zip" && i == 0 {
+                    let recv_elem = match recv_ty {
+                        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                            Some((**inner).clone())
+                        }
+                        Type::Apply { name, args }
+                            if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                        {
+                            Some(args[0].clone())
+                        }
+                        _ => None,
                     };
-                    self.expected_type = saved_exp;
-                    self.lambda_escapes = saved_esc;
-                    self.lambda_params_are_lending_views = saved_lending_params;
-                    if Syntax::PARA_METHODS.contains(&method) {
-                        self.check_para_lambda(&arg.expr);
+                    let arg_elem = match &got {
+                        Some(Type::List(inner)) | Some(Type::FixedList { elem: inner, .. }) => {
+                            Some((**inner).clone())
+                        }
+                        Some(Type::Apply { name, args })
+                            if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                        {
+                            Some(args[0].clone())
+                        }
+                        _ => None,
+                    };
+                    if let (Some(a), Some(b)) = (recv_elem, arg_elem) {
+                        refined_ret = Some(Collections::iter_ty(Collections::zip_elem_ty(&a, &b)));
                     }
-                    if method == "para_fold" && i == 0 {
-                        if let Some(Type::Fn { ret: Some(acc), .. }) = &got {
-                            let acc = (**acc).clone();
-                            if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
-                                params[0] = acc.clone();
-                                *ret = Some(Box::new(acc.clone()));
+                }
+                if let (Some(et), Some(gt)) = (expected.get(i), got) {
+                    let gt = self.widen_numeric_argument(
+                        &mut arg.expr,
+                        gt,
+                        et,
+                        crate::AST::AccessConvention::Read,
+                    );
+                    if Collections::is_closure_method(method) && i == 0 && method == "map" {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            match recv_ty {
+                                Type::List(inner) => {
+                                    // D-LOOPMAP1=B: List.map returns [R]; Iter.map stays lazy.
+                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                    let _ = inner;
+                                }
+                                Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
+                                    refined_ret = Some(Collections::iter_ty((**r).clone()));
+                                }
+                                // D-HOLE1: `opt.map(f: T -> R) -> R?`.
+                                Type::Option(_) => {
+                                    refined_ret = Some(Type::Option(Box::new((**r).clone())));
+                                }
+                                // D-DYNARRAY1: `view.map(f: T -> R) -> [R]` — map-to-owned;
+                                // the result is a fresh owned list, never another View.
+                                Type::Apply { name, .. }
+                                    if matches!(name.as_str(), "View" | "ViewMut") =>
+                                {
+                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                }
+                                // #1478: `Set.map(f: T -> R) -> [R]` — same shape as
+                                // `List.map`; a Set's uniqueness doesn't carry through
+                                // an arbitrary mapping, so the result is a plain list.
+                                Type::Apply { name, .. }
+                                    if name == "Set" || name == Syntax::TYPE_RANK =>
+                                {
+                                    refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                }
+                                _ => {}
                             }
-                            if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(2) {
-                                params[0] = acc.clone();
-                                params[1] = acc.clone();
-                                *ret = Some(Box::new(acc.clone()));
-                            }
-                            refined_ret = Some(acc);
                         }
                     }
-                    if method == "zip" && i == 0 {
-                        let recv_elem = match recv_ty {
-                            Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-                                Some((**inner).clone())
+                    // D-FAILCOMP1: filter_map(f: T->V?E) → Iter<V>; refine from closure's ok type.
+                    if Collections::is_closure_method(method) && i == 0 && method == "filter_map" {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            if let Type::Result { ok, .. } = r.as_ref() {
+                                refined_ret = Some(Collections::iter_ty(*ok.clone()));
                             }
-                            Type::Apply { name, args }
-                                if name == Syntax::TYPE_ITER && args.len() == 1 =>
-                            {
-                                Some(args[0].clone())
-                            }
-                            _ => None,
-                        };
-                        let arg_elem = match &got {
-                            Some(Type::List(inner)) | Some(Type::FixedList { elem: inner, .. }) => {
-                                Some((**inner).clone())
-                            }
-                            Some(Type::Apply { name, args })
-                                if name == Syntax::TYPE_ITER && args.len() == 1 =>
-                            {
-                                Some(args[0].clone())
-                            }
-                            _ => None,
-                        };
-                        if let (Some(a), Some(b)) = (recv_elem, arg_elem) {
-                            refined_ret = Some(Collections::iter_ty(Collections::zip_elem_ty(&a, &b)));
                         }
                     }
-                    if let (Some(et), Some(gt)) = (expected.get(i), got) {
-                        let gt = self.widen_numeric_argument(
-                            &mut arg.expr,
-                            gt,
-                            et,
-                            crate::AST::AccessConvention::Read,
-                        );
-                        if Collections::is_closure_method(method) && i == 0 && method == "map" {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
+                    if Collections::is_closure_method(method) && i == 0 && method == "flat_map" {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
+                                r.as_ref()
                             {
+                                let mapped_inner = (**inner).clone();
                                 match recv_ty {
-                                    Type::List(inner) => {
-                                        // D-LOOPMAP1=B: List.map returns [R]; Iter.map stays lazy.
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
-                                        let _ = inner;
+                                    Type::List(_) | Type::FixedList { .. } => {
+                                        // D-CORE-EAGER2=A: concrete List.flat_map
+                                        // returns [U]; `.lazy()` stays Iter.
+                                        refined_ret = Some(Type::List(Box::new(mapped_inner)));
                                     }
-                                    Type::Apply { name, .. }
-                                        if name == Syntax::TYPE_ITER =>
-                                    {
-                                        refined_ret = Some(Collections::iter_ty((**r).clone()));
-                                    }
-                                    // D-HOLE1: `opt.map(f: T -> R) -> R?`.
-                                    Type::Option(_) => {
-                                        refined_ret = Some(Type::Option(Box::new((**r).clone())));
-                                    }
-                                    // D-DYNARRAY1: `view.map(f: T -> R) -> [R]` — map-to-owned;
-                                    // the result is a fresh owned list, never another View.
-                                    Type::Apply { name, .. }
-                                        if matches!(name.as_str(), "View" | "ViewMut") => {
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
-                                    }
-                                    // #1478: `Set.map(f: T -> R) -> [R]` — same shape as
-                                    // `List.map`; a Set's uniqueness doesn't carry through
-                                    // an arbitrary mapping, so the result is a plain list.
-                                    Type::Apply { name, .. }
-                                        if name == "Set" || name == Syntax::TYPE_RANK => {
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
+                                        refined_ret = Some(Collections::iter_ty(mapped_inner));
                                     }
                                     _ => {}
                                 }
                             }
                         }
-                        // D-FAILCOMP1: filter_map(f: T->V?E) → Iter<V>; refine from closure's ok type.
-                        if Collections::is_closure_method(method) && i == 0 && method == "filter_map" {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
-                            {
-                                if let Type::Result { ok, .. } = r.as_ref() {
-                                    refined_ret = Some(Collections::iter_ty(*ok.clone()));
-                                }
-                            }
-                        }
-                        if Collections::is_closure_method(method)
-                            && i == 0
-                            && method == "flat_map"
+                    }
+                    // D-PARCAPTURE1=D: para_map → [V].
+                    if Collections::is_closure_method(method) && i == 0 && method == "para_map" {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
                         {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
-                            {
-                                if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
-                                    r.as_ref()
-                                {
-                                    let mapped_inner = (**inner).clone();
-                                    match recv_ty {
-                                        Type::List(_) | Type::FixedList { .. } => {
-                                            // D-CORE-EAGER2=A: concrete List.flat_map
-                                            // returns [U]; `.lazy()` stays Iter.
-                                            refined_ret =
-                                                Some(Type::List(Box::new(mapped_inner)));
-                                        }
-                                        Type::Apply { name, .. }
-                                            if name == Syntax::TYPE_ITER =>
-                                        {
-                                            refined_ret =
-                                                Some(Collections::iter_ty(mapped_inner));
-                                        }
-                                        _ => {}
+                            refined_ret = Some(Type::List(Box::new((**r).clone())));
+                        }
+                    }
+                    if method == "reduce" && i == 1 {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            refined_ret = Some((**r).clone());
+                        }
+                    }
+                    if Collections::is_closure_method(method)
+                        && i == 0
+                        && matches!(method, "group_by" | "count_by")
+                    {
+                        if let Type::Fn {
+                            ret: Some(ref r), ..
+                        } = gt
+                        {
+                            let value = if method == "group_by" {
+                                match recv_ty {
+                                    Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                                        Type::List(Box::new((**inner).clone()))
                                     }
+                                    _ => Type::List(Box::new(Type::Int)),
                                 }
-                            }
-                        }
-                        // D-PARCAPTURE1=D: para_map → [V].
-                        if Collections::is_closure_method(method) && i == 0 && method == "para_map" {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
-                            {
-                                refined_ret = Some(Type::List(Box::new((**r).clone())));
-                            }
-                        }
-                        if method == "reduce" && i == 1 {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
-                            {
-                                refined_ret = Some((**r).clone());
-                            }
-                        }
-                        if Collections::is_closure_method(method)
-                            && i == 0
-                            && matches!(method, "group_by" | "count_by")
-                        {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
-                            {
-                                let value = if method == "group_by" {
-                                    match recv_ty {
-                                        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-                                            Type::List(Box::new((**inner).clone()))
-                                        }
-                                        _ => Type::List(Box::new(Type::Int)),
-                                    }
-                                } else {
-                                    Type::Int
-                                };
-                                refined_ret = Some(Type::Map {
-                                    key: Box::new((**r).clone()),
-                                    key_span: None,
-                                    value: Box::new(value),
-                                });
-                            }
-                        }
-                        // Skip E0108 for closure methods with ret: None (open return type).
-                        let open_ret =
-                            matches!(et, Type::Fn { ret: None, .. }) && matches!(gt, Type::Fn { .. });
-                        let union_match = matches!(et, Type::Union(members) if members.iter().any(|member| {
-                            member == &gt
-                                && if matches!(member, Type::Fn { .. }) && matches!(&gt, Type::Fn { .. }) {
-                                    fn_types_compatible(member, &gt)
-                                } else {
-                                    Type::obligations_satisfy(member, &gt)
-                                }
-                        }));
-                        let callable_mismatch = matches!(et, Type::Fn { .. })
-                            && matches!(gt, Type::Fn { .. })
-                            && !fn_types_compatible(et, &gt);
-                        let obligation_mismatch = gt == *et
-                            && !Type::obligations_satisfy(et, &gt);
-                        if !open_ret
-                            && !union_match
-                            && (callable_mismatch || obligation_mismatch || gt != *et)
-                        {
-                            self.diags.push(Diagnostic::error(
-                                "E0108",
-                                format!(
-                                    "argument {} to `.{}()` should be {}, not {}",
-                                    i + 1,
-                                    method,
-                                    et.show(),
-                                    gt.show()
-                                ),
-                                "built-in methods need arguments of the right type".to_string(),
-                                type_fix_hint(et, &gt),
-                                Some(arg.expr.span()),
-                            ));
+                            } else {
+                                Type::Int
+                            };
+                            refined_ret = Some(Type::Map {
+                                key: Box::new((**r).clone()),
+                                key_span: None,
+                                value: Box::new(value),
+                            });
                         }
                     }
-                }
-                if Syntax::PARA_METHODS.contains(&method) {
-                    let item = match recv_ty {
-                        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
-                            Some((**inner).clone())
-                        }
-                        _ => None,
-                    };
-                    if let Some(item) = item {
-                        self.reject_para_type("item", &item, span);
+                    // Skip E0108 for closure methods with ret: None (open return type).
+                    let open_ret =
+                        matches!(et, Type::Fn { ret: None, .. }) && matches!(gt, Type::Fn { .. });
+                    let union_match = matches!(et, Type::Union(members) if members.iter().any(|member| {
+                        member == &gt
+                            && if matches!(member, Type::Fn { .. }) && matches!(&gt, Type::Fn { .. }) {
+                                fn_types_compatible(member, &gt)
+                            } else {
+                                Type::obligations_satisfy(member, &gt)
+                            }
+                    }));
+                    let callable_mismatch = matches!(et, Type::Fn { .. })
+                        && matches!(gt, Type::Fn { .. })
+                        && !fn_types_compatible(et, &gt);
+                    let obligation_mismatch = gt == *et && !Type::obligations_satisfy(et, &gt);
+                    if !open_ret
+                        && !union_match
+                        && (callable_mismatch || obligation_mismatch || gt != *et)
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0108",
+                            format!(
+                                "argument {} to `.{}()` should be {}, not {}",
+                                i + 1,
+                                method,
+                                et.show(),
+                                gt.show()
+                            ),
+                            "built-in methods need arguments of the right type".to_string(),
+                            type_fix_hint(et, &gt),
+                            Some(arg.expr.span()),
+                        ));
                     }
-                    if let Some(result) = refined_ret.clone() {
-                        self.reject_para_type("result", &result, span);
-                    }
-                }
-            } else {
-                for a in args.iter_mut() {
-                    self.with_call_access(&mut call_access, |checker| {
-                        let inferred = checker.infer(&mut a.expr);
-                        checker.check_call_argument_captures(&a.expr);
-                        inferred
-                    });
                 }
             }
-            let _ = span;
-            self.activate_call_reservations(&call_access, span);
-            refined_ret
+            if Syntax::PARA_METHODS.contains(&method) {
+                let item = match recv_ty {
+                    Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                        Some((**inner).clone())
+                    }
+                    _ => None,
+                };
+                if let Some(item) = item {
+                    self.reject_para_type("item", &item, span);
+                }
+                if let Some(result) = refined_ret.clone() {
+                    self.reject_para_type("result", &result, span);
+                }
+            }
+        } else {
+            for a in args.iter_mut() {
+                self.with_call_access(&mut call_access, |checker| {
+                    let inferred = checker.infer(&mut a.expr);
+                    checker.check_call_argument_captures(&a.expr);
+                    inferred
+                });
+            }
         }
-    
+        let _ = span;
+        self.activate_call_reservations(&call_access, span);
+        refined_ret
+    }
 }

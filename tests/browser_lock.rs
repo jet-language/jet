@@ -72,10 +72,7 @@ fn run_jet_source(root: &Path, source: &str) -> (i32, String, String) {
 fn jetpack_browser_lock_resolve_list_success() {
     let root = temp_root("success");
     let binary = root.join("tools").join("chromium");
-    write_executable(
-        &binary,
-        "#!/bin/sh\necho 'Chromium 131.0.6778.0'\n",
-    );
+    write_executable(&binary, "#!/bin/sh\necho 'Chromium 131.0.6778.0'\n");
 
     let (code, _out, err) = run_jetpack(
         &root,

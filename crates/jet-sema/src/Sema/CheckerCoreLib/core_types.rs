@@ -1,9 +1,9 @@
-use crate::AST::{Expr, Type, VariantField, VariantPayload};
+use super::alloc_ptrs::{io_error_ty, result_ty};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::expr_root_ident;
 use crate::Syntax;
-use super::alloc_ptrs::{io_error_ty, result_ty};
+use crate::AST::{Expr, Type, VariantField, VariantPayload};
 
 /// D-MUSTUSE1 (c18iwxqx): built-in handle types whose bare statement result must
 /// not be silently ignored (E0419). `scope.guard` returns `ScopeGuard` — bind it
@@ -42,10 +42,12 @@ pub fn email_method_return(ty: &Type, method: &str, argc: usize) -> Option<Optio
             Some(Some(Type::Named("Envelope".to_string())))
         }
         (Type::Named(name), "with_envelope", 1) if name == "Message" => Some(Some(result_ty(
-            Type::Named("Message".to_string()), Type::Named("EmailError".to_string()),
+            Type::Named("Message".to_string()),
+            Type::Named("EmailError".to_string()),
         ))),
         (Type::Named(name), "send", 1) if name == "Mailer" => Some(Some(result_ty(
-            Type::Named("SendReport".to_string()), Type::Named("EmailError".to_string()),
+            Type::Named("SendReport".to_string()),
+            Type::Named("EmailError".to_string()),
         ))),
         _ => None,
     }
@@ -116,7 +118,11 @@ pub(crate) fn layout_handle_renamed_to_layout(span: Span) -> Diagnostic {
             Syntax::SIGIL_BIND_IMMUT,
             Syntax::LAYOUT_TYPE
         ),
-        format!("write `{}` instead of `{}`", Syntax::LAYOUT_TYPE, Syntax::LAYOUT_HANDLE_TYPE_RETIRED),
+        format!(
+            "write `{}` instead of `{}`",
+            Syntax::LAYOUT_TYPE,
+            Syntax::LAYOUT_HANDLE_TYPE_RETIRED
+        ),
         Some(span),
     )
 }
@@ -418,12 +424,7 @@ pub(crate) fn core_lang_variants(
         declaration
             .variants
             .iter()
-            .map(|variant| {
-                (
-                    (*variant).to_string(),
-                    (zero, VariantPayload::Unit),
-                )
-            })
+            .map(|variant| ((*variant).to_string(), (zero, VariantPayload::Unit)))
             .collect(),
     )
 }
@@ -459,15 +460,10 @@ pub fn core_fact_kind_variants(
             .into_iter()
             .map(str::to_string)
             .collect(),
-        "UnitScaleProvenanceKind" => [
-            "Rational",
-            "SymbolicPi",
-            "Conventional",
-            "Measured",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect(),
+        "UnitScaleProvenanceKind" => ["Rational", "SymbolicPi", "Conventional", "Measured"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
         _ => return None,
     };
     Some({
@@ -498,7 +494,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "message" => Some(Type::String),
             "code" => Some(Type::Option(Box::new(Type::String))),
-            "cause" => Some(Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string())))),
+            "cause" => Some(Type::Option(Box::new(Type::Named(
+                Syntax::TYPE_ERR.to_string(),
+            )))),
             _ => None,
         };
     }
@@ -515,7 +513,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "verified_server_name" => Some(Type::String),
             "leaf" => Some(Type::Named("TLSCertificate".to_string())),
-            "certificate_chain" => Some(Type::List(Box::new(Type::Named("TLSCertificate".to_string())))),
+            "certificate_chain" => Some(Type::List(Box::new(Type::Named(
+                "TLSCertificate".to_string(),
+            )))),
             "cipher_suite" => Some(Type::String),
             "tls_version" => Some(Type::Named("TLSVersion".to_string())),
             _ => None,
@@ -523,7 +523,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "TLSCertificate" {
         return match field {
-            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            }))),
             "dns_names" => Some(Type::List(Box::new(Type::String))),
             "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
             "subject" | "issuer" => Some(Type::String),
@@ -572,7 +575,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if type_name == "HTTPShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
+    if type_name == "HTTPShutdownReport"
+        && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled")
+    {
         return Some(Type::Int);
     }
     if type_name == "Envelope" {
@@ -592,13 +597,17 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if matches!(type_name, "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked")
-        && field == "source"
+    if matches!(
+        type_name,
+        "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
+    ) && field == "source"
     {
         return Some(Type::String);
     }
-    if matches!(type_name, "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap")
-        && field == "schema_version"
+    if matches!(
+        type_name,
+        "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked" | "CompilerSourceMap"
+    ) && field == "schema_version"
     {
         return Some(Type::Int);
     }
@@ -799,39 +808,59 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         };
     }
     match type_name {
-        "CompilerLexed" => return match field {
-            "schema_version" => Some(Type::Int),
-            "tokens" => Some(Type::List(Box::new(Type::Named("CompilerToken".to_string())))),
-            "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
-            _ => None,
-        },
-        "CompilerSyntaxTree" => return match field {
-            "schema_version" => Some(Type::Int),
-            "items" => Some(Type::List(Box::new(Type::Named("CompilerNode".to_string())))),
-            "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
-            _ => None,
-        },
-        "CompilerChecked" => return match field {
-            "schema_version" => Some(Type::Int),
-            "syntax" => Some(Type::Named("CompilerSyntaxTree".to_string())),
-            "diagnostics" => Some(Type::List(Box::new(Type::Named("CompilerDiagnostic".to_string())))),
-            "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
-            "effects" => Some(Type::List(Box::new(Type::Named("EffectInfo".to_string())))),
-            // A failed check has diagnostics but no trustworthy semantic
-            // index. Keep that absence explicit at the typed API boundary;
-            // callers must not mistake an empty index for a checked file.
-            "semantic_index" => Some(Type::Option(Box::new(Type::Named(
-                "CompilerSemanticIndex".to_string(),
-            )))),
-            _ => None,
-        },
+        "CompilerLexed" => {
+            return match field {
+                "schema_version" => Some(Type::Int),
+                "tokens" => Some(Type::List(Box::new(Type::Named(
+                    "CompilerToken".to_string(),
+                )))),
+                "diagnostics" => Some(Type::List(Box::new(Type::Named(
+                    "CompilerDiagnostic".to_string(),
+                )))),
+                _ => None,
+            }
+        }
+        "CompilerSyntaxTree" => {
+            return match field {
+                "schema_version" => Some(Type::Int),
+                "items" => Some(Type::List(Box::new(Type::Named(
+                    "CompilerNode".to_string(),
+                )))),
+                "diagnostics" => Some(Type::List(Box::new(Type::Named(
+                    "CompilerDiagnostic".to_string(),
+                )))),
+                _ => None,
+            }
+        }
+        "CompilerChecked" => {
+            return match field {
+                "schema_version" => Some(Type::Int),
+                "syntax" => Some(Type::Named("CompilerSyntaxTree".to_string())),
+                "diagnostics" => Some(Type::List(Box::new(Type::Named(
+                    "CompilerDiagnostic".to_string(),
+                )))),
+                "functions" => Some(Type::List(Box::new(Type::Named(
+                    "FunctionInfo".to_string(),
+                )))),
+                "effects" => Some(Type::List(Box::new(Type::Named("EffectInfo".to_string())))),
+                // A failed check has diagnostics but no trustworthy semantic
+                // index. Keep that absence explicit at the typed API boundary;
+                // callers must not mistake an empty index for a checked file.
+                "semantic_index" => Some(Type::Option(Box::new(Type::Named(
+                    "CompilerSemanticIndex".to_string(),
+                )))),
+                _ => None,
+            }
+        }
         _ => {}
     }
     if type_name == "CompilerSourceMap" {
         return match field {
             "schema_version" => Some(Type::Int),
             "sources" => Some(Type::List(Box::new(Type::String))),
-            "generated_lines" => Some(Type::List(Box::new(Type::Named("CompilerGeneratedLine".to_string())))),
+            "generated_lines" => Some(Type::List(Box::new(Type::Named(
+                "CompilerGeneratedLine".to_string(),
+            )))),
             _ => None,
         };
     }
@@ -848,14 +877,20 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
-            "type_params" => Some(Type::List(Box::new(Type::Named("TypeParamInfo".to_string())))),
+            "type_params" => Some(Type::List(Box::new(Type::Named(
+                "TypeParamInfo".to_string(),
+            )))),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "expanded_markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "implements" => Some(Type::List(Box::new(Type::String))),
             "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
-            "transitions" => Some(Type::List(Box::new(Type::Named("TransitionInfo".to_string())))),
+            "transitions" => Some(Type::List(Box::new(Type::Named(
+                "TransitionInfo".to_string(),
+            )))),
             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
-            "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
+            "dimensions" => Some(Type::List(Box::new(Type::Named(
+                "DimensionInfo".to_string(),
+            )))),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
         };
@@ -880,7 +915,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "MarkerInfo" {
         return match field {
             "name" => Some(Type::String),
-            "args" => Some(Type::List(Box::new(Type::Named("MarkerArgInfo".to_string())))),
+            "args" => Some(Type::List(Box::new(Type::Named(
+                "MarkerArgInfo".to_string(),
+            )))),
             _ => None,
         };
     }
@@ -1056,9 +1093,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "UnitScaleProvenanceInfo" {
         return match field {
             "kind" => Some(Type::Named("UnitScaleProvenanceKind".to_string())),
-            "value" | "source" | "uncertainty" => {
-                Some(Type::Option(Box::new(Type::String)))
-            }
+            "value" | "source" | "uncertainty" => Some(Type::Option(Box::new(Type::String))),
             _ => None,
         };
     }
@@ -1070,7 +1105,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "DimensionInfo" {
         return match field {
-            "axes" => Some(Type::List(Box::new(Type::Named("DimensionAxis".to_string())))),
+            "axes" => Some(Type::List(Box::new(Type::Named(
+                "DimensionAxis".to_string(),
+            )))),
             "identity" | "display" => Some(Type::String),
             _ => None,
         };
@@ -1089,9 +1126,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             "effects" => Some(Type::Named("EffectInfo".to_string())),
             "reaches_panic" => Some(Type::Bool),
-            "facts" => Some(Type::List(Box::new(Type::Named(
-                "FactInfo".to_string(),
-            )))),
+            "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
             _ => None,
         };
     }
@@ -1101,7 +1136,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "types" => Some(Type::List(Box::new(Type::Named(
                 Syntax::TYPE_TYPE_INFO.to_string(),
             )))),
-            "functions" => Some(Type::List(Box::new(Type::Named("FunctionInfo".to_string())))),
+            "functions" => Some(Type::List(Box::new(Type::Named(
+                "FunctionInfo".to_string(),
+            )))),
             _ => None,
         };
     }
@@ -1114,10 +1151,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "params" => Some(Type::List(Box::new(Type::String))),
             "effects" => Some(Type::Named("EffectInfo".to_string())),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
-            "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
-            "facts" => Some(Type::List(Box::new(Type::Named(
-                "FactInfo".to_string(),
+            "dimensions" => Some(Type::List(Box::new(Type::Named(
+                "DimensionInfo".to_string(),
             )))),
+            "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
@@ -1127,10 +1164,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         return match field {
             "name" | "ty" => Some(Type::String),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
-            "dimensions" => Some(Type::List(Box::new(Type::Named("DimensionInfo".to_string())))),
-            "facts" => Some(Type::List(Box::new(Type::Named(
-                "FactInfo".to_string(),
+            "dimensions" => Some(Type::List(Box::new(Type::Named(
+                "DimensionInfo".to_string(),
             )))),
+            "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
@@ -1186,9 +1223,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "DataLineOptions" {
         return match field {
-            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
-                Some(Type::String)
-            }
+            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => Some(Type::String),
             "markers" => Some(Type::Bool),
             "reference" => Some(Type::Option(Box::new(Type::Float))),
             _ => None,
@@ -1214,7 +1249,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "kind" => Some(Type::Named("DataErrorKind".to_string())),
             "operation" | "reason" => Some(Type::String),
             "row" | "column" | "index" => Some(Type::Option(Box::new(Type::Int))),
-            "cause" => Some(Type::Option(Box::new(Type::Named("EncodingError".to_string())))),
+            "cause" => Some(Type::Option(Box::new(Type::Named(
+                "EncodingError".to_string(),
+            )))),
             _ => None,
         };
     }
@@ -1235,9 +1272,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "DataSummary" {
         return match field {
             "count" => Some(Type::Int),
-            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
-                Some(Type::Float)
-            }
+            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => Some(Type::Float),
             _ => None,
         };
     }
@@ -1270,20 +1305,28 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessResult" | "ProcessReceipt", "success" | "timed_out" | "redacted") => {
             Some(Type::Bool)
         }
-        ("ProcessResult" | "ProcessReceipt", "signal") => {
-            Some(Type::Option(Box::new(Type::Int)))
-        }
+        ("ProcessResult" | "ProcessReceipt", "signal") => Some(Type::Option(Box::new(Type::Int))),
         ("ProcessResult" | "ProcessReceipt", "limit_hit") => Some(Type::Option(Box::new(
             Type::Named("ProcessResourceLimit".to_string()),
         ))),
-        ("ProcessResult" | "ProcessReceipt", "output" | "errors" | "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants") => Some(Type::String),
+        (
+            "ProcessResult" | "ProcessReceipt",
+            "output"
+            | "errors"
+            | "executable_identity"
+            | "input_digest"
+            | "policy_digest"
+            | "backend"
+            | "descendants",
+        ) => Some(Type::String),
         ("ProcessResult" | "ProcessReceipt", "argv" | "authority" | "limits" | "outputs") => {
             Some(Type::List(Box::new(Type::String)))
         }
         ("ProcessResult" | "ProcessReceipt", "pid") => Some(Type::Int),
-        ("ProcessPlan", "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants") => {
-            Some(Type::String)
-        }
+        (
+            "ProcessPlan",
+            "executable_identity" | "input_digest" | "policy_digest" | "backend" | "descendants",
+        ) => Some(Type::String),
         ("ProcessPlan", "argv" | "authority" | "limits" | "outputs") => {
             Some(Type::List(Box::new(Type::String)))
         }
@@ -1450,8 +1493,8 @@ pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
 /// the user registry. Mirrors `core_key_variants`.
 pub(crate) fn core_process_stream_mode_variants(
 ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
-    use crate::AST::VariantPayload;
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut m = std::collections::HashMap::new();
     for name in &["Stream", "Inherit", "Capture"] {
@@ -1464,8 +1507,8 @@ pub(crate) fn core_process_stream_mode_variants(
 /// resolved through the same dot-literal path as `ProcessStreamMode`.
 pub(crate) fn core_process_resource_limit_variants(
 ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
-    use crate::AST::VariantPayload;
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     Syntax::PROCESS_RESOURCE_LIMIT_VARIANTS
         .iter()
@@ -1477,8 +1520,8 @@ pub(crate) fn core_process_resource_limit_variants(
 /// variants. The portable default is Cooked; Raw is explicit.
 pub(crate) fn core_terminal_mode_variants(
 ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
-    use crate::AST::VariantPayload;
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     ["Raw", "Cooked"]
         .into_iter()
@@ -1488,8 +1531,8 @@ pub(crate) fn core_terminal_mode_variants(
 
 pub(crate) fn core_env_error_variants(
 ) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
-    use crate::AST::VariantPayload;
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     ["InvalidName", "InvalidValue", "NonUnicode"]
         .into_iter()
@@ -1499,9 +1542,10 @@ pub(crate) fn core_env_error_variants(
 
 pub(crate) fn core_net_control_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let names: &[&str] = match enum_name {
         "NetShutdown" => &["Read", "Write", "Both"],
         "NetReadyInterest" => &["Read", "Write", "ReadWrite"],
@@ -1517,41 +1561,65 @@ pub(crate) fn core_net_control_variants(
 
 pub(crate) fn core_net_error_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     if enum_name == "NetDnsError" {
         for name in ["NotFound", "Failure"] {
-            variants.insert(name.to_string(), (zero, VariantPayload::Single(Type::String, zero)));
+            variants.insert(
+                name.to_string(),
+                (zero, VariantPayload::Single(Type::String, zero)),
+            );
         }
         return Some(variants);
     }
-    if enum_name != "NetError" { return None; }
-    for name in [
-        "InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable",
-        "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout",
-        "Cancelled", "Unsupported", "TLS", "Protocol", "Other",
-    ] {
-        variants.insert(name.to_string(), (
-            zero,
-            VariantPayload::Single(Type::Named("NetErrorDetail".to_string()), zero),
-        ));
+    if enum_name != "NetError" {
+        return None;
     }
-    variants.insert("DNS".to_string(), (
-        zero,
-        VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
-    ));
+    for name in [
+        "InvalidInput",
+        "PermissionDenied",
+        "AddressInUse",
+        "AddressUnavailable",
+        "ConnectionRefused",
+        "ConnectionReset",
+        "NotConnected",
+        "Closed",
+        "Timeout",
+        "Cancelled",
+        "Unsupported",
+        "TLS",
+        "Protocol",
+        "Other",
+    ] {
+        variants.insert(
+            name.to_string(),
+            (
+                zero,
+                VariantPayload::Single(Type::Named("NetErrorDetail".to_string()), zero),
+            ),
+        );
+    }
+    variants.insert(
+        "DNS".to_string(),
+        (
+            zero,
+            VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
+        ),
+    );
     Some(variants)
 }
 
 /// D-HTTP-CORE2=A / D-HTTP-UNSUPPORTED1=A: the one closed HTTP error tree.
 pub(crate) fn core_http_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::{VariantField, VariantPayload};
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::{VariantField, VariantPayload};
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     if enum_name == "HTTPOperation" {
@@ -1662,8 +1730,14 @@ pub(crate) fn core_http_variants(
         return None;
     }
     for name in [
-        "InvalidMethod", "InvalidUrl", "InvalidHeader", "InvalidStatus", "BodyConsumed",
-        "InvalidFraming", "UnsupportedEncoding", "Cancelled",
+        "InvalidMethod",
+        "InvalidUrl",
+        "InvalidHeader",
+        "InvalidStatus",
+        "BodyConsumed",
+        "InvalidFraming",
+        "UnsupportedEncoding",
+        "Cancelled",
     ] {
         variants.insert(name.to_string(), (zero, VariantPayload::Unit));
     }
@@ -1681,23 +1755,34 @@ pub(crate) fn core_http_variants(
         ("Policy", "reason", Type::String),
         ("ResourceUnavailable", "resource", Type::String),
         ("Internal", "incident_id", Type::String),
-        ("UnsupportedTarget", "operation", Type::Named("HTTPOperation".to_string())),
+        (
+            "UnsupportedTarget",
+            "operation",
+            Type::Named("HTTPOperation".to_string()),
+        ),
     ] {
-        variants.insert(name.to_string(), (zero, VariantPayload::Named(vec![VariantField {
-            name: field.to_string(),
-            name_span: zero,
-            ty,
-            ty_span: zero,
-        }])));
+        variants.insert(
+            name.to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![VariantField {
+                    name: field.to_string(),
+                    name_span: zero,
+                    ty,
+                    ty_span: zero,
+                }]),
+            ),
+        );
     }
     Some(variants)
 }
 
 pub(crate) fn core_io_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     if enum_name == Syntax::TYPE_IO_OPERATION {
@@ -1706,7 +1791,9 @@ pub(crate) fn core_io_variants(
         }
         return Some(variants);
     }
-    if !is_io_error_type_name(enum_name) { return None; }
+    if !is_io_error_type_name(enum_name) {
+        return None;
+    }
     for name in Syntax::IO_ERROR_VARIANTS {
         let payload = if *name == "ResourceLimit" {
             VariantPayload::Single(
@@ -1714,10 +1801,7 @@ pub(crate) fn core_io_variants(
                 zero,
             )
         } else {
-            VariantPayload::Single(
-                Type::Named(Syntax::TYPE_IO_CONTEXT.to_string()),
-                zero,
-            )
+            VariantPayload::Single(Type::Named(Syntax::TYPE_IO_CONTEXT.to_string()), zero)
         };
         variants.insert((*name).to_string(), (zero, payload));
     }
@@ -1728,9 +1812,10 @@ pub(crate) fn core_io_variants(
 /// `.Zero`/`.Reject`) — synthesised the same way as `ProcessStreamMode`.
 pub(crate) fn core_text_width_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let names: &[&str] = match enum_name {
         "TextWidthAmbiguous" => &["Narrow", "Wide"],
@@ -1750,9 +1835,10 @@ pub(crate) fn core_text_width_variants(
 /// switch over `ev.domain`/`ev.kind` is exhaustive without a wildcard.
 pub(crate) fn core_watch_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let names: &[&str] = match enum_name {
         "WatchDomain" => &["File", "Process", "Port"],
@@ -1770,9 +1856,10 @@ pub(crate) fn core_watch_variants(
 /// `duration.in(unit)`.
 pub(crate) fn core_duration_unit_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     if enum_name != Syntax::DURATION_UNIT_TYPE {
         return None;
     }
@@ -1787,27 +1874,73 @@ pub(crate) fn core_duration_unit_variants(
 
 pub(crate) fn core_event_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
-    let unit = |names: &[&str]| names.iter().map(|name| ((*name).to_string(), (zero, VariantPayload::Unit))).collect();
+    let unit = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
+            .collect()
+    };
     match enum_name {
         "Overflow" => Some(unit(&["Block", "DropNewest", "DropOldest"])),
         "FailurePolicy" => Some(unit(&["StopFirst", "Collect", "Log", "Ignore"])),
-        "DispatchState" => Some(unit(&["Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded"])),
+        "DispatchState" => Some(unit(&[
+            "Delivered",
+            "HandlerFailed",
+            "DroppedNewest",
+            "DroppedOldest",
+            "Closed",
+            "Cancelled",
+            "DeadlineExceeded",
+        ])),
         "HookPolicy" => Some(unit(&["FirstCancelElseTransform"])),
-        "HookDecision" => Some([
-            ("Continue".to_string(), (zero, VariantPayload::Unit)),
-            ("Transform".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
-            ("Cancel".to_string(), (zero, VariantPayload::Unit)),
-            ("Fail".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
-        ].into_iter().collect()),
-        "HookOutcome" => Some([
-            ("Continue".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
-            ("Cancel".to_string(), (zero, VariantPayload::Unit)),
-            ("Fail".to_string(), (zero, VariantPayload::Single(Type::Named("Unknown".to_string()), zero))),
-        ].into_iter().collect()),
+        "HookDecision" => Some(
+            [
+                ("Continue".to_string(), (zero, VariantPayload::Unit)),
+                (
+                    "Transform".to_string(),
+                    (
+                        zero,
+                        VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+                    ),
+                ),
+                ("Cancel".to_string(), (zero, VariantPayload::Unit)),
+                (
+                    "Fail".to_string(),
+                    (
+                        zero,
+                        VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        "HookOutcome" => Some(
+            [
+                (
+                    "Continue".to_string(),
+                    (
+                        zero,
+                        VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+                    ),
+                ),
+                ("Cancel".to_string(), (zero, VariantPayload::Unit)),
+                (
+                    "Fail".to_string(),
+                    (
+                        zero,
+                        VariantPayload::Single(Type::Named("Unknown".to_string()), zero),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        ),
         _ => None,
     }
 }
@@ -1815,9 +1948,10 @@ pub(crate) fn core_event_variants(
 /// D-REDUCE-VALUE1=A: the closed Core enum passed to SIMD `reduce`.
 pub(crate) fn core_reduce_op_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     if enum_name != Syntax::TYPE_REDUCE_OP {
         return None;
     }
@@ -1875,9 +2009,10 @@ pub(crate) fn core_key_variants(
 /// executed, retained, dead-lettered, rejected, or unavailable.
 pub(crate) fn core_service_receipt_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::{VariantField, VariantPayload};
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::{VariantField, VariantPayload};
     if enum_name != "ServiceReceipt" {
         return None;
     }
@@ -1917,9 +2052,10 @@ pub(crate) fn core_service_receipt_variants(
 /// the same closed result and wait-state names on every execution tier.
 pub(crate) fn core_workflow_outcome_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let variants = match enum_name {
         "TaskOutcome" => vec![
@@ -1947,9 +2083,10 @@ pub(crate) fn core_workflow_outcome_variants(
 /// ambient, and persisted/comptime boundaries.
 pub(crate) fn core_service_error_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     if enum_name != "ServiceError" {
         return None;
     }
@@ -2107,12 +2244,20 @@ pub fn encoding_handle_method_return(
         ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
-        ("XMLReader", "next", 0) => Some(Some(result_ty(Type::Option(Box::new(Type::Named("DataTree".to_string()))),error))),
+        ("XMLReader", "next", 0) => Some(Some(result_ty(
+            Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+            error,
+        ))),
         ("XMLWriter", "write", 1) | ("XMLWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
-        ("CBORReader", "next", 0) => Some(Some(result_ty(Type::Option(Box::new(Type::Named("DataEvent".to_string()))), error))),
-        ("CBORWriter", "write", 1) | ("CBORWriter", "flush" | "finish", 0) => Some(Some(result_ty(unit, error))),
+        ("CBORReader", "next", 0) => Some(Some(result_ty(
+            Type::Option(Box::new(Type::Named("DataEvent".to_string()))),
+            error,
+        ))),
+        ("CBORWriter", "write", 1) | ("CBORWriter", "flush" | "finish", 0) => {
+            Some(Some(result_ty(unit, error)))
+        }
         _ => None,
     }
 }
@@ -2157,11 +2302,20 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         // (below), the same "core enum, not in the user registry" mechanism as
         // `ProcessStreamMode`.
         "TextWidth" => Some(vec![
-            ("ambiguous".to_string(), Type::Named("TextWidthAmbiguous".to_string())),
-            ("controls".to_string(), Type::Named("TextWidthControls".to_string())),
+            (
+                "ambiguous".to_string(),
+                Type::Named("TextWidthAmbiguous".to_string()),
+            ),
+            (
+                "controls".to_string(),
+                Type::Named("TextWidthControls".to_string()),
+            ),
         ]),
         "IOContext" => Some(vec![
-            ("operation".to_string(), Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
+            (
+                "operation".to_string(),
+                Type::Named(Syntax::TYPE_IO_OPERATION.to_string()),
+            ),
             ("resource".to_string(), Type::Option(Box::new(Type::String))),
             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
             ("cause".to_string(), Type::Option(Box::new(Type::String))),
@@ -2179,12 +2333,18 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("buffer_bytes".to_string(), Type::Int),
             ("max_depth".to_string(), Type::Int),
             ("max_item_bytes".to_string(), Type::Int),
-            ("max_total_bytes".to_string(), Type::Option(Box::new(Type::Int))),
+            (
+                "max_total_bytes".to_string(),
+                Type::Option(Box::new(Type::Int)),
+            ),
             ("max_expansion_depth".to_string(), Type::Int),
             ("max_expansion_bytes".to_string(), Type::Int),
         ]),
         "DataLimits" => Some(vec![
-            ("encoding".to_string(), Type::Named("EncodingLimits".to_string())),
+            (
+                "encoding".to_string(),
+                Type::Named("EncodingLimits".to_string()),
+            ),
             ("max_groups".to_string(), Type::Int),
             ("max_sort_rows".to_string(), Type::Int),
             ("max_join_rows".to_string(), Type::Int),
@@ -2207,7 +2367,10 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("column".to_string(), Type::Option(Box::new(Type::Int))),
             ("index".to_string(), Type::Option(Box::new(Type::Int))),
             ("reason".to_string(), Type::String),
-            ("cause".to_string(), Type::Option(Box::new(Type::Named("EncodingError".to_string())))),
+            (
+                "cause".to_string(),
+                Type::Option(Box::new(Type::Named("EncodingError".to_string()))),
+            ),
         ]),
         "DataPivotCell" => Some(vec![
             ("row_key".to_string(), Type::String),
@@ -2227,12 +2390,21 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         "SMTPConfig" => Some(vec![
             ("host".to_string(), Type::String),
             ("port".to_string(), Type::Int),
-            ("security".to_string(), Type::Named("SMTPSecurity".to_string())),
+            (
+                "security".to_string(),
+                Type::Named("SMTPSecurity".to_string()),
+            ),
             ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
-            ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
+            (
+                "recipient_policy".to_string(),
+                Type::Named("RecipientPolicy".to_string()),
+            ),
             ("trust".to_string(), Type::Named("TLSTrust".to_string())),
             ("limits".to_string(), Type::Named("Limits".to_string())),
-            ("dkim".to_string(), Type::Option(Box::new(Type::Named("DkimConfig".to_string())))),
+            (
+                "dkim".to_string(),
+                Type::Option(Box::new(Type::Named("DkimConfig".to_string()))),
+            ),
         ]),
         "DkimConfig" => Some(vec![
             ("domain".to_string(), Type::String),
@@ -2241,7 +2413,10 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
                 "private_key".to_string(),
                 crate::Sema::Diagnostics::core_crypto_nominal(Type::Named("Secret".to_string())),
             ),
-            ("signed_headers".to_string(), Type::List(Box::new(Type::String))),
+            (
+                "signed_headers".to_string(),
+                Type::List(Box::new(Type::String)),
+            ),
         ]),
         "EncodingCause" => Some(vec![
             ("kind".to_string(), Type::String),
@@ -2249,14 +2424,23 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("message".to_string(), Type::String),
         ]),
         "EncodingError" => Some(vec![
-            ("format".to_string(), Type::Named("EncodingFormat".to_string())),
-            ("kind".to_string(), Type::Named("EncodingErrorKind".to_string())),
+            (
+                "format".to_string(),
+                Type::Named("EncodingFormat".to_string()),
+            ),
+            (
+                "kind".to_string(),
+                Type::Named("EncodingErrorKind".to_string()),
+            ),
             ("byte_offset".to_string(), Type::Int),
             ("line".to_string(), Type::Option(Box::new(Type::Int))),
             ("column".to_string(), Type::Option(Box::new(Type::Int))),
             ("path".to_string(), Type::String),
             ("reason".to_string(), Type::String),
-            ("cause".to_string(), Type::Option(Box::new(Type::Named("EncodingCause".to_string())))),
+            (
+                "cause".to_string(),
+                Type::Option(Box::new(Type::Named("EncodingCause".to_string()))),
+            ),
         ]),
         "CBOROptions" => Some(vec![
             ("max_depth".to_string(), Type::Int),
@@ -2281,17 +2465,32 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_entity_replacement_bytes".to_string(), Type::Int),
         ]),
         "XMLParseOptions" => Some(vec![
-            ("entities".to_string(), Type::Named("XMLEntityPolicy".to_string())),
+            (
+                "entities".to_string(),
+                Type::Named("XMLEntityPolicy".to_string()),
+            ),
             ("limits".to_string(), Type::Named("XMLLimits".to_string())),
         ]),
         "XMLRenderOptions" => Some(vec![
-            ("encoding".to_string(), Type::Named("XMLEncoding".to_string())),
-            ("lexical".to_string(), Type::Named("XMLLexicalPolicy".to_string())),
+            (
+                "encoding".to_string(),
+                Type::Named("XMLEncoding".to_string()),
+            ),
+            (
+                "lexical".to_string(),
+                Type::Named("XMLLexicalPolicy".to_string()),
+            ),
         ]),
         "XMLCanonical" => Some(vec![
-            ("mode".to_string(), Type::Named("XMLCanonicalMode".to_string())),
+            (
+                "mode".to_string(),
+                Type::Named("XMLCanonicalMode".to_string()),
+            ),
             ("comments".to_string(), Type::Bool),
-            ("inclusive_prefixes".to_string(), Type::List(Box::new(Type::String))),
+            (
+                "inclusive_prefixes".to_string(),
+                Type::List(Box::new(Type::String)),
+            ),
         ]),
         "XMLError" => Some(vec![
             ("kind".to_string(), Type::Named("XMLReason".to_string())),
@@ -2309,8 +2508,14 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         ]),
         "SendReport" => Some(vec![
             ("server".to_string(), Type::String),
-            ("accepted".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
-            ("rejected".to_string(), Type::List(Box::new(Type::Named("RecipientReport".to_string())))),
+            (
+                "accepted".to_string(),
+                Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
+            ),
+            (
+                "rejected".to_string(),
+                Type::List(Box::new(Type::Named("RecipientReport".to_string()))),
+            ),
             ("response_code".to_string(), Type::Int),
             ("response".to_string(), Type::String),
             ("accepted_at".to_string(), Type::String),
@@ -2336,36 +2541,75 @@ pub(crate) fn core_email_variants(
     }
     if enum_name == "EmailError" {
         for name in [
-            "Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected",
-            "Transient", "TimedOut", "Cancelled", "DeliveryUnknown",
+            "Configuration",
+            "DNS",
+            "Connect",
+            "TLS",
+            "Auth",
+            "Protocol",
+            "Rejected",
+            "Transient",
+            "TimedOut",
+            "Cancelled",
+            "DeliveryUnknown",
         ] {
             let fields = [
                 ("operation", Type::String),
                 ("server", Type::Option(Box::new(Type::String))),
                 ("code", Type::Option(Box::new(Type::Int))),
                 ("reason", Type::String),
-            ].into_iter().map(|(field, ty)| VariantField {
-                name: field.to_string(), name_span: zero, ty, ty_span: zero,
-            }).collect();
+            ]
+            .into_iter()
+            .map(|(field, ty)| VariantField {
+                name: field.to_string(),
+                name_span: zero,
+                ty,
+                ty_span: zero,
+            })
+            .collect();
             variants.insert(name.to_string(), (zero, VariantPayload::Named(fields)));
         }
     } else if enum_name == "SMTPAuth" {
         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
-        variants.insert("Password".to_string(), (zero, VariantPayload::Named(vec![
-            VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
-            VariantField {
-                name: "password".to_string(),
-                name_span: zero,
-                ty: crate::Sema::Diagnostics::core_crypto_nominal(Type::Named("Secret".to_string())),
-                ty_span: zero,
-            },
-        ])));
+        variants.insert(
+            "Password".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "username".to_string(),
+                        name_span: zero,
+                        ty: Type::String,
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "password".to_string(),
+                        name_span: zero,
+                        ty: crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
+                            "Secret".to_string(),
+                        )),
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+        );
     } else if enum_name == "TLSTrust" {
         variants.insert("System".to_string(), (zero, VariantPayload::Unit));
-        variants.insert("SystemPlusCa".to_string(), (zero, VariantPayload::Named(vec![
-            VariantField { name: "pem".to_string(), name_span: zero,
-                ty: Type::List(Box::new(Type::IntN { signed: false, bits: 8 })), ty_span: zero },
-        ])));
+        variants.insert(
+            "SystemPlusCa".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![VariantField {
+                    name: "pem".to_string(),
+                    name_span: zero,
+                    ty: Type::List(Box::new(Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    })),
+                    ty_span: zero,
+                }]),
+            ),
+        );
     }
     Some(variants)
 }
@@ -2383,8 +2627,14 @@ pub(crate) fn core_tls_variants(
         }
         "TLSClientTrust" => {
             variants.insert("System".to_string(), (zero, VariantPayload::Unit));
-            variants.insert("SystemPlus".to_string(), (zero, VariantPayload::Single(roots.clone(), zero)));
-            variants.insert("CustomOnly".to_string(), (zero, VariantPayload::Single(roots, zero)));
+            variants.insert(
+                "SystemPlus".to_string(),
+                (zero, VariantPayload::Single(roots.clone(), zero)),
+            );
+            variants.insert(
+                "CustomOnly".to_string(),
+                (zero, VariantPayload::Single(roots, zero)),
+            );
         }
         _ => return None,
     }
@@ -2394,18 +2644,50 @@ pub(crate) fn core_tls_variants(
 /// D-ENCSTREAM-SURFACE1=A: closed shared stream enums.
 pub(crate) fn core_encoding_variants(
     enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
-    use crate::AST::VariantPayload;
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     let units: &[&str] = match enum_name {
         "EncodingFormat" => &["JSON", "JSONL", "CSV", "XML", "CBOR"],
         "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
-        "DataErrorKind" => &["Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge"],
+        "DataErrorKind" => &[
+            "Decode",
+            "Limit",
+            "IO",
+            "Empty",
+            "InvalidArgument",
+            "NonFinite",
+            "Overflow",
+            "State",
+            "Bridge",
+        ],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
-        "CBORErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "TypeMismatch", "TrailingData", "NonCanonical"],
-        "XMLReason" => &["InvalidEncoding", "Malformed", "MismatchedTag", "InvalidName", "Namespace", "DuplicateAttribute", "Entity", "EntityCycle", "Limit", "Canonicalization", "Shape", "Unsupported"],
+        "CBORErrorKind" => &[
+            "Syntax",
+            "Truncated",
+            "Unsupported",
+            "Limit",
+            "TypeMismatch",
+            "TrailingData",
+            "NonCanonical",
+        ],
+        "XMLReason" => &[
+            "InvalidEncoding",
+            "Malformed",
+            "MismatchedTag",
+            "InvalidName",
+            "Namespace",
+            "DuplicateAttribute",
+            "Entity",
+            "EntityCycle",
+            "Limit",
+            "Canonicalization",
+            "Shape",
+            "Unsupported",
+        ],
         "XMLEntityPolicy" => &["Preserve", "Reject"],
         "XMLEncoding" => &["UTF8", "UTF8BOM", "UTF16LE", "UTF16BE"],
         "XMLLexicalPolicy" => &["PreserveValid", "Deterministic"],
@@ -2417,17 +2699,31 @@ pub(crate) fn core_encoding_variants(
     }
     if enum_name == "DataEvent" {
         for (name, ty) in [
-            ("Bool", Type::Bool), ("Int", Type::Int), ("Float", Type::Float),
-            ("Text", Type::String), (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
+            ("Bool", Type::Bool),
+            ("Int", Type::Int),
+            ("Float", Type::Float),
+            ("Text", Type::String),
+            (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
             ("Key", Type::String),
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
         }
     }
     if enum_name == "XMLEntityPolicy" {
-        variants.insert("Resolve".to_string(), (zero, VariantPayload::Single(Type::Map {
-            key: Box::new(Type::String), key_span: None, value: Box::new(Type::String),
-        }, zero)));
+        variants.insert(
+            "Resolve".to_string(),
+            (
+                zero,
+                VariantPayload::Single(
+                    Type::Map {
+                        key: Box::new(Type::String),
+                        key_span: None,
+                        value: Box::new(Type::String),
+                    },
+                    zero,
+                ),
+            ),
+        );
     }
     Some(variants)
 }
@@ -2435,14 +2731,10 @@ pub(crate) fn core_encoding_variants(
 /// D-AUTH-TOKENPOLICY1=A: inspectable verifier failures.
 pub(crate) fn core_auth_variants(
     enum_name: &str,
-) -> Option<
-    std::collections::HashMap<
-        String,
-        (crate::Diagnostics::Span, crate::AST::VariantPayload),
-    >,
-> {
-    use crate::AST::{VariantField, VariantPayload};
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
     use crate::Diagnostics::Span;
+    use crate::AST::{VariantField, VariantPayload};
     if enum_name != "AuthError" {
         return None;
     }
@@ -2457,7 +2749,12 @@ pub(crate) fn core_auth_variants(
     for name in ["InvalidSignature", "WeakKey", "TokenExpired"] {
         variants.insert(name.to_string(), (zero, VariantPayload::Unit));
     }
-    for name in ["MalformedToken", "UnsupportedToken", "MissingClaim", "DecodeError"] {
+    for name in [
+        "MalformedToken",
+        "UnsupportedToken",
+        "MissingClaim",
+        "DecodeError",
+    ] {
         variants.insert(
             name.to_string(),
             (zero, VariantPayload::Single(Type::String, zero)),

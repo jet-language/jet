@@ -40,12 +40,18 @@ fn generic_add_bound_keeps_checked_overflow() {
         code, 70,
         "generic Add overflow should trap, stdout={stdout:?} stderr={stderr:?}"
     );
-    assert!(stderr.contains("overflow"), "panic should mention overflow: {stderr}");
+    assert!(
+        stderr.contains("overflow"),
+        "panic should mention overflow: {stderr}"
+    );
     assert!(
         stderr.contains("generic_u8_add_overflow.jet:1"),
         "generic Add must retain the Jet operator location: {stderr}"
     );
-    assert!(!stderr.contains("<built-in Add>"), "synthetic location leaked: {stderr}");
+    assert!(
+        !stderr.contains("<built-in Add>"),
+        "synthetic location leaked: {stderr}"
+    );
 }
 
 #[test]
@@ -55,13 +61,22 @@ fn generic_div_bound_keeps_source_location() {
     }
     let src = "fn divide<T: Div>(left: T, right: T) T { return left / right }\nfn run() {\n    print(divide(1, 0))\n}\n";
     let (code, stdout, stderr) = build_and_run("generic_int_div_zero", src);
-    assert_eq!(code, 70, "generic Div by zero should trap, stdout={stdout:?} stderr={stderr:?}");
-    assert!(stderr.contains("dividing by zero"), "panic should explain division: {stderr}");
+    assert_eq!(
+        code, 70,
+        "generic Div by zero should trap, stdout={stdout:?} stderr={stderr:?}"
+    );
+    assert!(
+        stderr.contains("dividing by zero"),
+        "panic should explain division: {stderr}"
+    );
     assert!(
         stderr.contains("generic_int_div_zero.jet:1"),
         "generic Div must retain the Jet operator location: {stderr}"
     );
-    assert!(!stderr.contains("<built-in Div>"), "synthetic location leaked: {stderr}");
+    assert!(
+        !stderr.contains("<built-in Div>"),
+        "synthetic location leaked: {stderr}"
+    );
 }
 
 #[test]

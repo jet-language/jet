@@ -1,14 +1,13 @@
 mod common;
 
 fn jet_string(path: &std::path::Path) -> String {
-    path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
 }
 
 fn unique_dir(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "jet-path-durability-{name}-{}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("jet-path-durability-{name}-{}", std::process::id()))
 }
 
 #[test]
@@ -53,7 +52,12 @@ fn run() {{
     } else {
         sep.to_string()
     };
-    let mut expected = vec![expected_relative, expected_absolute, String::new(), expected_root];
+    let mut expected = vec![
+        expected_relative,
+        expected_absolute,
+        String::new(),
+        expected_root,
+    ];
     if cfg!(windows) {
         expected.push(format!("C:..{sep}..{sep}leaf"));
         expected.push(format!(r"\\server{sep}share{sep}leaf"));
@@ -95,7 +99,10 @@ fn run() {
         "encoded.contains(&0)",
         "std::io::ErrorKind::InvalidInput",
     ] {
-        assert!(out.rust.contains(required), "missing atomic-write contract: {required}");
+        assert!(
+            out.rust.contains(required),
+            "missing atomic-write contract: {required}"
+        );
     }
 }
 
@@ -137,7 +144,9 @@ fn run() {
     fs.write_atomic("atomic.bin", bytes) ?? panic("atomic write failed")
 }
 "#;
-    let mut rust = jet::compile(src).expect("atomic-write fixture should compile").rust;
+    let mut rust = jet::compile(src)
+        .expect("atomic-write fixture should compile")
+        .rust;
     rust = rust.replacen("fn main()", "fn jet_original_main()", 1);
     rust.push_str(
         r#"
@@ -174,12 +183,26 @@ fn main() {
     let bin = dir.join("main.exe");
     std::fs::write(&rs, rust).unwrap();
     let built = Command::new("rustc")
-        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rs.to_str().unwrap(),
+            "-o",
+            bin.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(built.status.success(), "rustc failed: {}", String::from_utf8_lossy(&built.stderr));
+    assert!(
+        built.status.success(),
+        "rustc failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let ran = Command::new(&bin).output().unwrap();
-    assert!(ran.status.success(), "NUL regression failed: {}", String::from_utf8_lossy(&ran.stderr));
+    assert!(
+        ran.status.success(),
+        "NUL regression failed: {}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -219,19 +242,29 @@ fn run() {{
     );
     let (code, _stdout, _stderr) =
         common::build_and_run("jet_path_durability", "atomic_hostile", &src);
-    assert_eq!(code, 70, "directory replacement must fail through Jet panic");
+    assert_eq!(
+        code, 70,
+        "directory replacement must fail through Jet panic"
+    );
     assert_eq!(std::fs::read(&target).unwrap(), b"new");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
     }
     let debris: Vec<_> = std::fs::read_dir(&root)
         .unwrap()
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name().to_string_lossy().starts_with(".jet_tmp_"))
         .collect();
-    assert_eq!(debris.len(), 1, "only the forced stale collision may remain");
+    assert_eq!(
+        debris.len(),
+        1,
+        "only the forced stale collision may remain"
+    );
     assert_eq!(std::fs::read(debris[0].path()).unwrap(), b"stale");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -250,7 +283,13 @@ fn concurrent_atomic_writers_leave_one_whole_payload() {
     let b = vec![66u8; 263];
     let a_text = "A".repeat(a.len());
     let b_text = "B".repeat(b.len());
-    let list = |bytes: &[u8]| bytes.iter().map(u8::to_string).collect::<Vec<_>>().join(", ");
+    let list = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let src = format!(
         r#"
 use core.files as fs
@@ -298,11 +337,17 @@ fn run() {{
         common::build_and_run("jet_path_durability", "atomic_concurrent", &src);
     assert_eq!(code, 0, "concurrent atomic writers failed: {stderr}");
     let final_bytes = std::fs::read(&target).unwrap();
-    assert!(final_bytes == a || final_bytes == b, "observed torn atomic-write payload");
+    assert!(
+        final_bytes == a || final_bytes == b,
+        "observed torn atomic-write payload"
+    );
     let debris = std::fs::read_dir(&root)
         .unwrap()
         .filter_map(Result::ok)
         .any(|entry| entry.file_name().to_string_lossy().starts_with(".jet_tmp_"));
-    assert!(!debris, "successful concurrent writes left temporary debris");
+    assert!(
+        !debris,
+        "successful concurrent writes left temporary debris"
+    );
     let _ = std::fs::remove_dir_all(root);
 }

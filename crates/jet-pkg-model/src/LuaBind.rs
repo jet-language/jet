@@ -34,12 +34,16 @@ impl std::fmt::Display for BindError {
 
 pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
     if !ident(lib) {
-        return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name")));
+        return Err(BindError::Source(format!(
+            "`{lib}` is not a valid Jet library name"
+        )));
     }
     let luac = tool_path("luac").ok_or(BindError::ToolMissing("luac"))?;
     if let Err(error) = run(Command::new(&luac).arg("-p").arg(path), "luac") {
         return Err(match error {
-            BindError::ToolFailed(_, _) => BindError::Source("the Lua parser rejected the script".into()),
+            BindError::ToolFailed(_, _) => {
+                BindError::Source("the Lua parser rejected the script".into())
+            }
             other => other,
         });
     }
@@ -49,18 +53,37 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
             "the script has no top-level `function name(input)` declarations".into(),
         ));
     }
-    let root = tool_root(&luac).ok_or_else(|| BindError::Source("the provisioned Lua root could not be resolved".into()))?;
-    let include = find_header_dir(&root).ok_or_else(|| BindError::Source("the provisioned Lua runtime has no `lua.h` header".into()))?;
-    let lib_dir = find_library_dir(&root).ok_or_else(|| BindError::Source("the provisioned Lua runtime has no embeddable library".into()))?;
-    std::fs::create_dir_all(cache).map_err(|e| BindError::IO(format!("could not create Lua binding cache: {e}")))?;
+    let root = tool_root(&luac).ok_or_else(|| {
+        BindError::Source("the provisioned Lua root could not be resolved".into())
+    })?;
+    let include = find_header_dir(&root).ok_or_else(|| {
+        BindError::Source("the provisioned Lua runtime has no `lua.h` header".into())
+    })?;
+    let lib_dir = find_library_dir(&root).ok_or_else(|| {
+        BindError::Source("the provisioned Lua runtime has no embeddable library".into())
+    })?;
+    std::fs::create_dir_all(cache)
+        .map_err(|e| BindError::IO(format!("could not create Lua binding cache: {e}")))?;
     let abi = format!("jet_lua_{lib}");
     let c = cache.join(format!("{abi}.c"));
     let object = cache.join(format!("{abi}.o"));
     let archive = cache.join(format!("lib{abi}.a"));
-    std::fs::write(&c, render_c(&abi, source, &functions)).map_err(|e| BindError::IO(format!("could not write Lua bridge: {e}")))?;
-    run(Command::new("cc").args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I"]).arg(&include).arg(&c).arg("-o").arg(&object), "cc")?;
+    std::fs::write(&c, render_c(&abi, source, &functions))
+        .map_err(|e| BindError::IO(format!("could not write Lua bridge: {e}")))?;
+    run(
+        Command::new("cc")
+            .args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I"])
+            .arg(&include)
+            .arg(&c)
+            .arg("-o")
+            .arg(&object),
+        "cc",
+    )?;
     let _ = std::fs::remove_file(&archive);
-    run(Command::new("ar").arg("rcs").arg(&archive).arg(&object), "ar")?;
+    run(
+        Command::new("ar").arg("rcs").arg(&archive).arg(&object),
+        "ar",
+    )?;
     let _ = std::fs::remove_file(&c);
     let _ = std::fs::remove_file(&object);
     let mut identity = b"jet-lua-bind-v2\0".to_vec();
@@ -71,7 +94,13 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
         "schema=jet-lua-bind-v2\nsha256={}\nruntime={}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n",
         crate::SHA256::sha256_hex(&identity), root.display()
     );
-    Ok(BindResult { source: render_jet(&abi, &functions), bound: functions, archive, lib_dir, provenance })
+    Ok(BindResult {
+        source: render_jet(&abi, &functions),
+        bound: functions,
+        archive,
+        lib_dir,
+        provenance,
+    })
 }
 
 const GENERATED_FIXED_FUNCTIONS: &[(&str, &str)] = &[
@@ -79,8 +108,14 @@ const GENERATED_FIXED_FUNCTIONS: &[(&str, &str)] = &[
     ("take_error", "() => Int"),
     ("cancel", "(handle: Int)"),
     ("close", "(handle: Int)"),
-    ("view_get_int", "(handle: Int, table: Int, key: String) => Int"),
-    ("view_set_int", "(handle: Int, table: Int, key: String, value: Int)"),
+    (
+        "view_get_int",
+        "(handle: Int, table: Int, key: String) => Int",
+    ),
+    (
+        "view_set_int",
+        "(handle: Int, table: Int, key: String, value: Int)",
+    ),
     ("view_release", "(handle: Int, table: Int)"),
 ];
 
@@ -91,7 +126,9 @@ fn render_jet(abi: &str, functions: &[String]) -> String {
     }
     for name in functions {
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) => String = \"{abi}_invoke_{name}\"\n"));
-        out.push_str(&format!("    fn {name}_view(handle: Int, deadline_ms: Int) => Int = \"{abi}_view_{name}\"\n"));
+        out.push_str(&format!(
+            "    fn {name}_view(handle: Int, deadline_ms: Int) => Int = \"{abi}_view_{name}\"\n"
+        ));
     }
     out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub struct TableView {{ session: Int, table: Int }}\npub enum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nimpl TableView.Close {{\n    fn close(^self) {{ abi.view_release(self.session, self.table) }}\n}}\n\npub fn open() => Session LuaError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(LuaError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\npub fn view_get_int(view: TableView, key: String) => Int LuaError! {{\n    value :: abi.view_get_int(view.session, view.table, key)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(LuaError.NotRunning) }}\n    if code != 0 {{ return Err(LuaError.Protocol) }}\n    return Ok(value)\n}}\n\npub fn view_set_int(view: TableView, key: String, value: Int) => Bool LuaError! {{\n    abi.view_set_int(view.session, view.table, key, value)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(LuaError.NotRunning) }}\n    if code != 0 {{ return Err(LuaError.Protocol) }}\n    return Ok(true)\n}}\n\n"));
     for name in functions {
@@ -102,7 +139,8 @@ fn render_jet(abi: &str, functions: &[String]) -> String {
 
 fn render_c(abi: &str, source: &str, functions: &[String]) -> String {
     let wrappers = functions.iter().map(|name| format!("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")).collect::<String>();
-    format!(r#"#include <lua.h>
+    format!(
+        r#"#include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <stdint.h>
@@ -134,7 +172,11 @@ int64_t {abi}_take_error(void){{int64_t value=failed;failed=0;return value;}}
 int64_t {abi}_open(void){{failed=0;pthread_once(&once,initialize);pthread_mutex_lock(&registry);int index=-1;for(int n=0;n<SLOTS;n++)if(!slots[n].state&&!slots[n].reserved){{index=n;slots[n].reserved=1;break;}}if(index<0){{pthread_mutex_unlock(&registry);failed=5;return 0;}}Slot*s=&slots[index];pthread_mutex_unlock(&registry);pthread_mutex_lock(&s->use);atomic_store(&s->cancelled,0);lua_State*L=fresh(s);if(!L){{pthread_mutex_lock(&registry);s->reserved=0;pthread_mutex_unlock(&registry);pthread_mutex_unlock(&s->use);failed=s->hook_reason?s->hook_reason:4;return 0;}}pthread_mutex_lock(&registry);s->state=L;s->reserved=0;uint32_t generation=s->generation;pthread_mutex_unlock(&registry);pthread_mutex_unlock(&s->use);return ((int64_t)generation<<6)|(index+1);}}
 void {abi}_cancel(int64_t h){{int index=(int)(h&63)-1;uint32_t generation=(uint32_t)((uint64_t)h>>6);if(index<0||index>=SLOTS)return;pthread_mutex_lock(&registry);Slot*s=&slots[index];if(s->state&&s->generation==generation)atomic_store(&s->cancelled,1);pthread_mutex_unlock(&registry);}}
 void {abi}_close(int64_t h){{failed=0;int index=(int)(h&63)-1;uint32_t generation=(uint32_t)((uint64_t)h>>6);if(index<0||index>=SLOTS){{failed=1;return;}}pthread_mutex_lock(&registry);Slot*s=&slots[index];if(!s->state||s->generation!=generation){{pthread_mutex_unlock(&registry);failed=1;return;}}pthread_mutex_lock(&s->use);lua_State*L=s->state;s->state=0;s->generation++;if(!s->generation)s->generation=1;pthread_mutex_unlock(&registry);lua_close(L);pthread_mutex_unlock(&s->use);}}
-{}"#, c_escape(JSON_CODEC), c_escape(source), wrappers)
+{}"#,
+        c_escape(JSON_CODEC),
+        c_escape(source),
+        wrappers
+    )
 }
 
 const JSON_CODEC: &str = r#"
@@ -167,7 +209,10 @@ function __jet_encode(value) return encode(value,{},0) end
 "#;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Token { Word(String), Punct(char) }
+enum Token {
+    Word(String),
+    Punct(char),
+}
 
 fn discover(source: &str) -> Result<Vec<String>, BindError> {
     let tokens = lex(source)?;
@@ -177,17 +222,53 @@ fn discover(source: &str) -> Result<Vec<String>, BindError> {
     while i < tokens.len() {
         match &tokens[i] {
             Token::Word(word) if word == "function" && depth == 0 => {
-                if matches!(tokens.get(i.wrapping_sub(1)),Some(Token::Word(previous))if previous=="local") { depth=1;i+=1;continue }
-                let Some(Token::Word(name)) = tokens.get(i + 1) else { return Err(BindError::Source("only named top-level Lua functions can be bound".into())) };
-                if !ident(name) || reserved(name) { return Err(BindError::Source(format!("`{name}` cannot be exported as a Jet function"))) }
-                if tokens.get(i + 2) != Some(&Token::Punct('(')) { return Err(BindError::Source(format!("Lua function `{name}` has an unsupported declaration"))) }
-                let Some(Token::Word(_parameter)) = tokens.get(i + 3) else { return Err(BindError::Source(format!("Lua function `{name}` must take one input argument"))) };
-                if tokens.get(i + 4) != Some(&Token::Punct(')')) { return Err(BindError::Source(format!("Lua function `{name}` must take one input argument"))) }
-                if functions.contains(name) { return Err(BindError::Source(format!("Lua function `{name}` is declared more than once"))) }
-                functions.push(name.clone()); depth = 1; i += 5; continue;
+                if matches!(tokens.get(i.wrapping_sub(1)),Some(Token::Word(previous))if previous=="local")
+                {
+                    depth = 1;
+                    i += 1;
+                    continue;
+                }
+                let Some(Token::Word(name)) = tokens.get(i + 1) else {
+                    return Err(BindError::Source(
+                        "only named top-level Lua functions can be bound".into(),
+                    ));
+                };
+                if !ident(name) || reserved(name) {
+                    return Err(BindError::Source(format!(
+                        "`{name}` cannot be exported as a Jet function"
+                    )));
+                }
+                if tokens.get(i + 2) != Some(&Token::Punct('(')) {
+                    return Err(BindError::Source(format!(
+                        "Lua function `{name}` has an unsupported declaration"
+                    )));
+                }
+                let Some(Token::Word(_parameter)) = tokens.get(i + 3) else {
+                    return Err(BindError::Source(format!(
+                        "Lua function `{name}` must take one input argument"
+                    )));
+                };
+                if tokens.get(i + 4) != Some(&Token::Punct(')')) {
+                    return Err(BindError::Source(format!(
+                        "Lua function `{name}` must take one input argument"
+                    )));
+                }
+                if functions.contains(name) {
+                    return Err(BindError::Source(format!(
+                        "Lua function `{name}` is declared more than once"
+                    )));
+                }
+                functions.push(name.clone());
+                depth = 1;
+                i += 5;
+                continue;
             }
-            Token::Word(word) if matches!(word.as_str(), "function" | "do" | "then" | "repeat") => depth += 1,
-            Token::Word(word) if matches!(word.as_str(), "end" | "until") => depth = depth.saturating_sub(1),
+            Token::Word(word) if matches!(word.as_str(), "function" | "do" | "then" | "repeat") => {
+                depth += 1
+            }
+            Token::Word(word) if matches!(word.as_str(), "end" | "until") => {
+                depth = depth.saturating_sub(1)
+            }
             _ => {}
         }
         i += 1;
@@ -195,7 +276,9 @@ fn discover(source: &str) -> Result<Vec<String>, BindError> {
     for name in &functions {
         for suffix in ["typed", "view"] {
             if functions.contains(&format!("{name}_{suffix}")) {
-                return Err(BindError::Source(format!("Lua function `{name}` collides with generated adapter `{name}_{suffix}`")));
+                return Err(BindError::Source(format!(
+                    "Lua function `{name}` collides with generated adapter `{name}_{suffix}`"
+                )));
             }
         }
     }
@@ -203,30 +286,263 @@ fn discover(source: &str) -> Result<Vec<String>, BindError> {
 }
 
 fn lex(source: &str) -> Result<Vec<Token>, BindError> {
-    let bytes=source.as_bytes();let mut out=Vec::new();let mut i=0;
-    while i<bytes.len(){let b=bytes[i];if b.is_ascii_whitespace(){i+=1;continue}if b==b'-'&&bytes.get(i+1)==Some(&b'-'){i+=2;if bytes.get(i)==Some(&b'[')&&bytes.get(i+1)==Some(&b'['){i+=2;while i+1<bytes.len()&&(bytes[i]!=b']'||bytes[i+1]!=b']'){i+=1}if i+1>=bytes.len(){return Err(BindError::Source("unterminated Lua block comment".into()))}i+=2}else{while i<bytes.len()&&bytes[i]!=b'\n'{i+=1}}continue}if b==b'\''||b==b'"'{let q=b;i+=1;while i<bytes.len(){if bytes[i]==b'\\'{i+=2;continue}if bytes[i]==q{break}i+=1}if i>=bytes.len(){return Err(BindError::Source("unterminated Lua string".into()))}i+=1;continue}if b==b'['&&bytes.get(i+1)==Some(&b'['){i+=2;while i+1<bytes.len()&&(bytes[i]!=b']'||bytes[i+1]!=b']'){i+=1}if i+1>=bytes.len(){return Err(BindError::Source("unterminated Lua long string".into()))}i+=2;continue}if b.is_ascii_alphabetic()||b==b'_'{let start=i;i+=1;while i<bytes.len()&&(bytes[i].is_ascii_alphanumeric()||bytes[i]==b'_'){i+=1}out.push(Token::Word(source[start..i].into()));continue}if b"(),".contains(&b){out.push(Token::Punct(b as char));}i+=1}
+    let bytes = source.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if b == b'-' && bytes.get(i + 1) == Some(&b'-') {
+            i += 2;
+            if bytes.get(i) == Some(&b'[') && bytes.get(i + 1) == Some(&b'[') {
+                i += 2;
+                while i + 1 < bytes.len() && (bytes[i] != b']' || bytes[i + 1] != b']') {
+                    i += 1
+                }
+                if i + 1 >= bytes.len() {
+                    return Err(BindError::Source("unterminated Lua block comment".into()));
+                }
+                i += 2
+            } else {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1
+                }
+            }
+            continue;
+        }
+        if b == b'\'' || b == b'"' {
+            let q = b;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == q {
+                    break;
+                }
+                i += 1
+            }
+            if i >= bytes.len() {
+                return Err(BindError::Source("unterminated Lua string".into()));
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'[' && bytes.get(i + 1) == Some(&b'[') {
+            i += 2;
+            while i + 1 < bytes.len() && (bytes[i] != b']' || bytes[i + 1] != b']') {
+                i += 1
+            }
+            if i + 1 >= bytes.len() {
+                return Err(BindError::Source("unterminated Lua long string".into()));
+            }
+            i += 2;
+            continue;
+        }
+        if b.is_ascii_alphabetic() || b == b'_' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1
+            }
+            out.push(Token::Word(source[start..i].into()));
+            continue;
+        }
+        if b"(),".contains(&b) {
+            out.push(Token::Punct(b as char));
+        }
+        i += 1
+    }
     Ok(out)
 }
 
-fn tool_path(tool: &str) -> Option<PathBuf> { std::env::split_paths(&std::env::var_os("PATH")?).map(|p|p.join(tool)).find(|p|p.is_file()) }
-fn tool_root(tool: &Path) -> Option<PathBuf> { let exe=std::fs::canonicalize(tool).ok()?;exe.parent()?.parent().map(Path::to_path_buf) }
-fn find_header_dir(root:&Path)->Option<PathBuf>{[root.join("include"),root.join("include/lua5.4")].into_iter().find(|p|p.join("lua.h").is_file())}
-fn find_library_dir(root:&Path)->Option<PathBuf>{[root.join("lib"),root.join("lib64")].into_iter().find(|p|p.join(lib_name()).is_file())}
-fn ident(v:&str)->bool{let mut c=v.chars();matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')&&c.all(|x|x.is_ascii_alphanumeric()||x=='_')}
-fn reserved(v:&str)->bool{GENERATED_FIXED_FUNCTIONS.iter().any(|(name,_)|*name==v)||matches!(v,"Session"|"TableView"|"LuaError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
-fn c_escape(v:&str)->String{let mut o=String::new();for b in v.bytes(){match b{b'\\'=>o.push_str("\\\\"),b'"'=>o.push_str("\\\""),b'\n'=>o.push_str("\\n"),b'\r'=>o.push_str("\\r"),b'\t'=>o.push_str("\\t"),0x20..=0x7e=>o.push(b as char),_=>o.push_str(&format!("\\{:03o}",b))}}o}
-fn run(command:&mut Command,tool:&'static str)->Result<(),BindError>{const CAP:usize=64*1024;command.stdout(Stdio::null()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;let err=std::thread::spawn(move||drain(stderr,CAP));let deadline=Instant::now()+Duration::from_secs(60);let status=loop{match child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{Some(v)=>break v,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))},None=>std::thread::sleep(Duration::from_millis(10))}};let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(())}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}}
-fn drain(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=(limit-out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
-fn launder(v:&[u8])->String{String::from_utf8_lossy(v).lines().map(str::trim).find(|v|!v.is_empty()).map(|v|v.rsplit_once(": ").map_or(v,|x|x.1).chars().take(160).collect()).unwrap_or_else(||"the foreign tool returned a failure status".into())}
-#[cfg(target_os="linux")]fn lib_name()->&'static str{"liblua.so"}
-#[cfg(target_os="macos")]fn lib_name()->&'static str{"liblua.dylib"}
-#[cfg(target_os="windows")]fn lib_name()->&'static str{"lua54.dll"}
+fn tool_path(tool: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|p| p.join(tool))
+        .find(|p| p.is_file())
+}
+fn tool_root(tool: &Path) -> Option<PathBuf> {
+    let exe = std::fs::canonicalize(tool).ok()?;
+    exe.parent()?.parent().map(Path::to_path_buf)
+}
+fn find_header_dir(root: &Path) -> Option<PathBuf> {
+    [root.join("include"), root.join("include/lua5.4")]
+        .into_iter()
+        .find(|p| p.join("lua.h").is_file())
+}
+fn find_library_dir(root: &Path) -> Option<PathBuf> {
+    [root.join("lib"), root.join("lib64")]
+        .into_iter()
+        .find(|p| p.join(lib_name()).is_file())
+}
+fn ident(v: &str) -> bool {
+    let mut c = v.chars();
+    matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')
+        && c.all(|x| x.is_ascii_alphanumeric() || x == '_')
+}
+fn reserved(v: &str) -> bool {
+    GENERATED_FIXED_FUNCTIONS.iter().any(|(name, _)| *name == v)
+        || matches!(v, "Session" | "TableView" | "LuaError")
+        || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
+        || crate::Syntax::JET_TYPE_LIST.contains(&v)
+}
+fn c_escape(v: &str) -> String {
+    let mut o = String::new();
+    for b in v.bytes() {
+        match b {
+            b'\\' => o.push_str("\\\\"),
+            b'"' => o.push_str("\\\""),
+            b'\n' => o.push_str("\\n"),
+            b'\r' => o.push_str("\\r"),
+            b'\t' => o.push_str("\\t"),
+            0x20..=0x7e => o.push(b as char),
+            _ => o.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    o
+}
+fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
+    const CAP: usize = 64 * 1024;
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
+    })?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let err = std::thread::spawn(move || drain(stderr, CAP));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
+            Some(v) => break v,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = err.join();
+                return Err(BindError::ToolFailed(
+                    tool,
+                    "the tool exceeded the 60 second limit".into(),
+                ));
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    };
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(BindError::ToolFailed(tool, launder(&stderr)))
+    }
+}
+fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = input
+            .read(&mut buf)
+            .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        let keep = (limit - out.len()).min(n);
+        out.extend_from_slice(&buf[..keep]);
+    }
+    Ok(out)
+}
+fn launder(v: &[u8]) -> String {
+    String::from_utf8_lossy(v)
+        .lines()
+        .map(str::trim)
+        .find(|v| !v.is_empty())
+        .map(|v| {
+            v.rsplit_once(": ")
+                .map_or(v, |x| x.1)
+                .chars()
+                .take(160)
+                .collect()
+        })
+        .unwrap_or_else(|| "the foreign tool returned a failure status".into())
+}
+#[cfg(target_os = "linux")]
+fn lib_name() -> &'static str {
+    "liblua.so"
+}
+#[cfg(target_os = "macos")]
+fn lib_name() -> &'static str {
+    "liblua.dylib"
+}
+#[cfg(target_os = "windows")]
+fn lib_name() -> &'static str {
+    "lua54.dll"
+}
 
 #[cfg(test)]
 mod tests {
-    #[test] fn discovers_only_top_level_named_functions(){let source="-- function fake(x)\nfunction transform(x) return x end\nlocal function hidden(x) return x end\n";assert_eq!(super::discover(source).unwrap(),vec!["transform"]);}
-    #[test] fn rejects_wrong_arity(){assert!(super::discover("function bad(a,b) return a end").is_err());}
-    #[test] fn fixed_function_descriptors_drive_emission_and_reservation(){let abi="jet_lua_test";let jet=super::render_jet(abi,&["probe".into()]);for (name,signature) in super::GENERATED_FIXED_FUNCTIONS{assert!(jet.contains(&format!("fn {name}{signature} = \"{abi}_{name}\"")),"fixed helper `{name}` descriptor not emitted");assert!(super::reserved(name),"fixed helper `{name}` descriptor not reserved");let source=format!("function {name}(input) return input end");let error=super::discover(&source).unwrap_err();assert!(error.to_string().contains(&format!("`{name}` cannot be exported")));}}
-    #[test] fn codec_has_null_and_cycle_guards(){assert!(super::JSON_CODEC.contains("jet.null"));assert!(super::JSON_CODEC.contains("cycle"));}
-    #[test] fn table_view_reads_live_lua_without_json(){let c=super::render_c("jet_lua_test","function values(input) return { count = 1 } end",&["values".into()]);let body=c.split("_view_get_int").nth(1).unwrap().split("_view_set_int").next().unwrap();assert!(body.contains("lua_rawget"));assert!(!body.contains("decode(")&&!body.contains("encode(")&&!body.contains("DataTree"));}
+    #[test]
+    fn discovers_only_top_level_named_functions() {
+        let source="-- function fake(x)\nfunction transform(x) return x end\nlocal function hidden(x) return x end\n";
+        assert_eq!(super::discover(source).unwrap(), vec!["transform"]);
+    }
+    #[test]
+    fn rejects_wrong_arity() {
+        assert!(super::discover("function bad(a,b) return a end").is_err());
+    }
+    #[test]
+    fn fixed_function_descriptors_drive_emission_and_reservation() {
+        let abi = "jet_lua_test";
+        let jet = super::render_jet(abi, &["probe".into()]);
+        for (name, signature) in super::GENERATED_FIXED_FUNCTIONS {
+            assert!(
+                jet.contains(&format!("fn {name}{signature} = \"{abi}_{name}\"")),
+                "fixed helper `{name}` descriptor not emitted"
+            );
+            assert!(
+                super::reserved(name),
+                "fixed helper `{name}` descriptor not reserved"
+            );
+            let source = format!("function {name}(input) return input end");
+            let error = super::discover(&source).unwrap_err();
+            assert!(error
+                .to_string()
+                .contains(&format!("`{name}` cannot be exported")));
+        }
+    }
+    #[test]
+    fn codec_has_null_and_cycle_guards() {
+        assert!(super::JSON_CODEC.contains("jet.null"));
+        assert!(super::JSON_CODEC.contains("cycle"));
+    }
+    #[test]
+    fn table_view_reads_live_lua_without_json() {
+        let c = super::render_c(
+            "jet_lua_test",
+            "function values(input) return { count = 1 } end",
+            &["values".into()],
+        );
+        let body = c
+            .split("_view_get_int")
+            .nth(1)
+            .unwrap()
+            .split("_view_set_int")
+            .next()
+            .unwrap();
+        assert!(body.contains("lua_rawget"));
+        assert!(
+            !body.contains("decode(") && !body.contains("encode(") && !body.contains("DataTree")
+        );
+    }
 }

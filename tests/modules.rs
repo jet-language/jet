@@ -94,14 +94,20 @@ fn perf_role_captures_budget_expression_and_spans() {
         panic!("expected perf role module");
     };
     assert_eq!(module.name, "perf.release");
-    assert_eq!(&src[module.name_span.start..module.name_span.end], "perf.release");
+    assert_eq!(
+        &src[module.name_span.start..module.name_span.end],
+        "perf.release"
+    );
     let contribution = &module.contributions[0];
     assert_eq!(contribution.namespace, Namespace::Perf);
     assert_eq!(contribution.path, "release");
     let jet::AST::ContribValue::Perf(perf) = &contribution.value else {
         panic!("expected typed perf role AST");
     };
-    assert_eq!(&src[perf.budgets_span.start..perf.budgets_span.end], "budgets");
+    assert_eq!(
+        &src[perf.budgets_span.start..perf.budgets_span.end],
+        "budgets"
+    );
     assert_eq!(perf.budgets.len(), 1);
     assert_eq!(perf.budgets[0].fields.len(), 4);
     let limit = perf.budgets[0]
@@ -112,7 +118,13 @@ fn perf_role_captures_budget_expression_and_spans() {
     let Expr::EnumLit { args, .. } = &limit.value else {
         panic!("typed limit enum");
     };
-    let jet::AST::EnumLitArg::Positional(Expr::UnitLit { raw, suffix, suffix_span, .. }) = &args[0] else {
+    let jet::AST::EnumLitArg::Positional(Expr::UnitLit {
+        raw,
+        suffix,
+        suffix_span,
+        ..
+    }) = &args[0]
+    else {
         panic!("typed unit literal");
     };
     assert_eq!((raw.as_str(), suffix.as_str()), ("2", "MiB"));
@@ -153,7 +165,9 @@ fn perf_budget_sema_elaborates_defaults_and_field_spans() {
     }
 }
 
-fn collect_perf_specs(src: &str) -> Result<Vec<jet::Sema::BudgetSpec>, Vec<jet::Diagnostics::Diagnostic>> {
+fn collect_perf_specs(
+    src: &str,
+) -> Result<Vec<jet::Sema::BudgetSpec>, Vec<jet::Diagnostics::Diagnostic>> {
     let (tokens, lex_diags) = jet::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
     let program = jet::Parser::parse(&tokens).expect("parse");
@@ -306,7 +320,9 @@ fn perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes() {
 
 #[test]
 fn perf_budget_sema_normalizes_rate_and_retains_canonical_facts() {
-    let source = |baseline: &str, count: &str, seconds: i64| format!(r#"module env.dev {{
+    let source = |baseline: &str, count: &str, seconds: i64| {
+        format!(
+            r#"module env.dev {{
     services: {{ api: {{ enable: true }} }}
 }}
 module perf.release {{
@@ -320,34 +336,94 @@ module perf.release {{
         enforcement: .Warn,
     }}]
 }}
-"#);
-    let first = collect_perf_specs(&source("ci/linux-x64", "100", 2)).expect("valid Rate").remove(0);
+"#
+        )
+    };
+    let first = collect_perf_specs(&source("ci/linux-x64", "100", 2))
+        .expect("valid Rate")
+        .remove(0);
     assert_eq!(first.comparison, "AbsoluteFrom");
-    assert_eq!(first.comparison_fact.baseline.as_deref(), Some("ci/linux-x64"));
-    assert_eq!(first.limit_fact.quantity, jet::Sema::BudgetQuantity::Rate { numerator: 1, denominator_ns: 20_000_000 });
-    assert_eq!(first.limit_fact.raw, jet::Sema::BudgetRawQuantity::Rate { count_digits: "100".into(), per_digits: "2".into(), per_suffix: "s".into() });
-    let second = collect_perf_specs(&source("ci/macos-arm64", "75", 1)).expect("second valid Rate").remove(0);
+    assert_eq!(
+        first.comparison_fact.baseline.as_deref(),
+        Some("ci/linux-x64")
+    );
+    assert_eq!(
+        first.limit_fact.quantity,
+        jet::Sema::BudgetQuantity::Rate {
+            numerator: 1,
+            denominator_ns: 20_000_000
+        }
+    );
+    assert_eq!(
+        first.limit_fact.raw,
+        jet::Sema::BudgetRawQuantity::Rate {
+            count_digits: "100".into(),
+            per_digits: "2".into(),
+            per_suffix: "s".into()
+        }
+    );
+    let second = collect_perf_specs(&source("ci/macos-arm64", "75", 1))
+        .expect("second valid Rate")
+        .remove(0);
     assert_ne!(first.comparison_fact, second.comparison_fact);
     assert_ne!(first.limit_fact, second.limit_fact);
 
     let hostile = collect_perf_specs(&source("ci/linux-x64", "000_100", 2))
         .expect("Rate with legal leading zeroes and separators")
         .remove(0);
-    assert_eq!(hostile.limit_fact.quantity, jet::Sema::BudgetQuantity::Rate { numerator: 1, denominator_ns: 20_000_000 });
-    assert_eq!(hostile.limit_fact.raw, jet::Sema::BudgetRawQuantity::Rate { count_digits: "000_100".into(), per_digits: "2".into(), per_suffix: "s".into() });
+    assert_eq!(
+        hostile.limit_fact.quantity,
+        jet::Sema::BudgetQuantity::Rate {
+            numerator: 1,
+            denominator_ns: 20_000_000
+        }
+    );
+    assert_eq!(
+        hostile.limit_fact.raw,
+        jet::Sema::BudgetRawQuantity::Rate {
+            count_digits: "000_100".into(),
+            per_digits: "2".into(),
+            per_suffix: "s".into()
+        }
+    );
 }
 
 #[test]
 fn perf_budget_sema_rejects_named_and_extra_limit_arguments() {
     let cases = [
         ("BinarySize", "", "", "Absolute", "AtMost", "2MiB"),
-        ("StartupTime", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "RegressionAtMost", "3pct"),
-        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "ImprovementAtLeast", "3pct"),
-        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "AbsoluteFrom(\"ci/linux-x64\")", "AtLeast", "Rate{ count: 100, per: 1s }"),
+        (
+            "StartupTime",
+            "scope: .Service(\"api\"),",
+            "provider: .ServiceProbe(\"api\"),",
+            "RelativeTo(\"ci/linux-x64\")",
+            "RegressionAtMost",
+            "3pct",
+        ),
+        (
+            "Throughput",
+            "scope: .Service(\"api\"),",
+            "provider: .ServiceProbe(\"api\"),",
+            "RelativeTo(\"ci/linux-x64\")",
+            "ImprovementAtLeast",
+            "3pct",
+        ),
+        (
+            "Throughput",
+            "scope: .Service(\"api\"),",
+            "provider: .ServiceProbe(\"api\"),",
+            "AbsoluteFrom(\"ci/linux-x64\")",
+            "AtLeast",
+            "Rate{ count: 100, per: 1s }",
+        ),
     ];
     for (metric, scope, provider, comparison, constructor, value) in cases {
-        for limit_expr in [format!(".{constructor}{{ value: {value} }}"), format!(".{constructor}({value}, {value})")] {
-            let src = format!(r#"module env.dev {{ services: {{ api: {{ enable: true }} }} }}
+        for limit_expr in [
+            format!(".{constructor}{{ value: {value} }}"),
+            format!(".{constructor}({value}, {value})"),
+        ] {
+            let src = format!(
+                r#"module env.dev {{ services: {{ api: {{ enable: true }} }} }}
 module perf.release {{
     budgets: [Budget{{
         name: "hostile",
@@ -359,10 +435,16 @@ module perf.release {{
         enforcement: .Fail,
     }}]
 }}
-"#);
-            let diagnostics = collect_perf_specs(&src).expect_err("limit constructor arity must reject");
+"#
+            );
+            let diagnostics =
+                collect_perf_specs(&src).expect_err("limit constructor arity must reject");
             assert_eq!(diagnostics[0].code, "E2903", "{limit_expr}");
-            assert!(diagnostics[0].why.contains("exactly one positional"), "{:?}", diagnostics[0]);
+            assert!(
+                diagnostics[0].why.contains("exactly one positional"),
+                "{:?}",
+                diagnostics[0]
+            );
         }
     }
 }
@@ -526,7 +608,9 @@ fn bodyless_private_module_stays_hidden_outside_owner_file() {
     let entry = scratch.join("main.jet");
     let diagnostics = jet::check_with_path(entry.to_str().unwrap());
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0609"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0609"),
         "private bodyless module unexpectedly visible: {diagnostics:?}"
     );
 }

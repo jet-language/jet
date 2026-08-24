@@ -4,10 +4,10 @@
 //! Keeping the pure AST walk in the driver prevents either product from
 //! depending on the root host or inventing a second boundary vocabulary.
 
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
     core_import_maps, AccessConvention, CallArg, Expr, ImportKind, Item, ProgramBundle, Stmt,
 };
-use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{HashMap, HashSet};
 
 struct Boundary {
@@ -23,7 +23,8 @@ struct Boundary {
 }
 
 pub fn dev_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
-    boundary_scan(bundle, false).map(|boundary| dev_boundary_diagnostic(boundary.feature, boundary.span))
+    boundary_scan(bundle, false)
+        .map(|boundary| dev_boundary_diagnostic(boundary.feature, boundary.span))
 }
 
 /// Why/fix for every `jet dev` boundary report. `why` already carries the
@@ -37,7 +38,10 @@ const DEV_BOUNDARY_FIX: &str = "run `jet build` then the binary, or `jet run <fi
 pub fn dev_boundary_diagnostic(feature: impl Into<String>, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E2201",
-        format!("`jet dev` can't interpret this program yet — it uses {}", feature.into()),
+        format!(
+            "`jet dev` can't interpret this program yet — it uses {}",
+            feature.into()
+        ),
         DEV_BOUNDARY_WHY.to_string(),
         DEV_BOUNDARY_FIX.to_string(),
         span,
@@ -108,7 +112,10 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
         for import in &module.imports {
             if let ImportKind::Module(name, span) = &import.kind {
                 if let Some(feature) = native_module_feature(name, debug_impure) {
-                    return Some(Boundary { feature: feature.to_string(), span: Some(*span) });
+                    return Some(Boundary {
+                        feature: feature.to_string(),
+                        span: Some(*span),
+                    });
                 }
             }
             if debug_impure {
@@ -117,16 +124,21 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                     .values()
                     .find_map(|name| native_module_feature(name, true))
                 {
-                    return Some(Boundary { feature: feature.to_string(), span: Some(import.span) });
+                    return Some(Boundary {
+                        feature: feature.to_string(),
+                        span: Some(import.span),
+                    });
                 }
             }
         }
         for item in &module.items {
             match item {
-                Item::ExternRust(block) => return Some(Boundary {
-                    feature: "Rust code called through `extern rust`".to_string(),
-                    span: Some(block.span),
-                }),
+                Item::ExternRust(block) => {
+                    return Some(Boundary {
+                        feature: "Rust code called through `extern rust`".to_string(),
+                        span: Some(block.span),
+                    })
+                }
                 // An empty synthetic C module is only the resolution target for
                 // an unused `use c.[…]`; it carries no foreign call to execute.
                 // Supported hidden-bridge signatures are also runnable on tier
@@ -159,11 +171,9 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                         });
                     }
                     if !debug_impure {
-                        if let Some(boundary) = scan_stmts_for_process_edge(
-                            &function.body,
-                            &core_modules,
-                            &core_items,
-                        ) {
+                        if let Some(boundary) =
+                            scan_stmts_for_process_edge(&function.body, &core_modules, &core_items)
+                        {
                             return Some(boundary);
                         }
                     }
@@ -294,7 +304,11 @@ fn process_edge_boundary(
             let Expr::Ident(alias, _) = receiver.as_ref() else {
                 return None;
             };
-            (core_modules.get(alias)?.as_str(), method.as_str(), *method_span)
+            (
+                core_modules.get(alias)?.as_str(),
+                method.as_str(),
+                *method_span,
+            )
         }
         _ => return None,
     };
@@ -334,7 +348,9 @@ fn scan_stmt_for_mut_arg(
         Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
             scan_stmts_for_mut_arg(body, interpreted_functions, core_items)
         }
-        Stmt::Switch { arms, else_body, .. } => arms
+        Stmt::Switch {
+            arms, else_body, ..
+        } => arms
             .iter()
             .find_map(|arm| scan_stmts_for_mut_arg(&arm.body, interpreted_functions, core_items))
             .or_else(|| {
@@ -381,7 +397,8 @@ fn expr_mut_arg(
         interpreted_functions: &HashSet<&str>,
         core_items: &HashMap<String, String>,
     ) -> Option<Boundary> {
-        if matches!(arg.convention, AccessConvention::Write) && matches!(arg.expr, Expr::Ident(..)) {
+        if matches!(arg.convention, AccessConvention::Write) && matches!(arg.expr, Expr::Ident(..))
+        {
             return Some(Boundary {
                 feature: "a `&` writeback argument passed to a function".to_string(),
                 span: Some(arg.span),
@@ -417,8 +434,11 @@ fn expr_mut_arg(
                     .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions, core_items))
             })
         }
-        Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. }
-        | Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _)
+        Expr::Unary(_, inner, _)
+        | Expr::IncDec { operand: inner, .. }
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
         | Expr::Place(inner, _, _)
         | Expr::Field(inner, _, _) => expr_mut_arg(inner, interpreted_functions, core_items),
         Expr::Binary(_, left, right, _) => expr_mut_arg(left, interpreted_functions, core_items)

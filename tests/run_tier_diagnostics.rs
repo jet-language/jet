@@ -20,9 +20,7 @@ fn skip_if_cranelift_host_unsupported() -> bool {
              (JET_REQUIRE_CRANELIFT_HOST=1)"
         );
     } else {
-        eprintln!(
-            "note: cranelift-jit host path unsupported; skipping run-tier diag assertion"
-        );
+        eprintln!("note: cranelift-jit host path unsupported; skipping run-tier diag assertion");
         true
     }
 }
@@ -79,7 +77,11 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
     assert_eq!(expected.len(), 3);
     assert!(expected.iter().all(|(code, ..)| code == "E1112"));
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
-        assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+        assert_eq!(
+            shape(&diags),
+            expected,
+            "{tier} diagnostic drifted from AOT"
+        );
         assert_eq!(
             jet::render_all_json(
                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
@@ -117,8 +119,8 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/ui/comptime_panic.jet");
+    let file =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/comptime_panic.jet");
     let path = file.to_string_lossy().into_owned();
     let src = fs::read_to_string(&file).unwrap();
     let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
@@ -165,7 +167,11 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
     );
     assert!(!e0956.3.contains("jet run"));
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
-        assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+        assert_eq!(
+            shape(&diags),
+            expected,
+            "{tier} diagnostic drifted from AOT"
+        );
         assert_eq!(
             jet::render_all_json(
                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
@@ -240,10 +246,17 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
     );
     assert_eq!(expected.len(), 1);
     assert_eq!(expected[0].0, "E0999");
-    assert_eq!(expected[0].5.as_ref().map(|edit| edit.new_text.as_str()), Some("#Codable"));
+    assert_eq!(
+        expected[0].5.as_ref().map(|edit| edit.new_text.as_str()),
+        Some("#Codable")
+    );
 
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
-        assert_eq!(shape(&diags), expected, "{tier} diagnostic or recovery data drifted from AOT");
+        assert_eq!(
+            shape(&diags),
+            expected,
+            "{tier} diagnostic or recovery data drifted from AOT"
+        );
         assert_eq!(
             jet::render_all_json(
                 &jet::Diagnostics::ReportPath::from_path(file.as_path()),
@@ -278,14 +291,14 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter() {
 }
 
 fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
-    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/ui/map_method_typo.jet");
+    let file =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/map_method_typo.jet");
     let path = file.to_string_lossy().into_owned();
     let src = fs::read_to_string(&file).unwrap();
     let snapshot = fs::read_to_string(file.with_extension("stderr")).unwrap();
 
-    let aot = jet::compile_with_path(&src, &path)
-        .expect_err("AOT front end must reject missing methods");
+    let aot =
+        jet::compile_with_path(&src, &path).expect_err("AOT front end must reject missing methods");
     let run = match run_jit_once(&path) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("default jet run must reject E0311: {other:?}"),
@@ -320,8 +333,7 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
     assert_eq!(expected.len(), 4);
     assert!(expected.iter().all(|(code, ..)| code == "E0311"));
     assert!(expected.iter().all(|(_, _, _, _, _, edit, applicability)| {
-        edit.is_some()
-            && *applicability == Some(jet::Diagnostics::FixApplicability::Suggested)
+        edit.is_some() && *applicability == Some(jet::Diagnostics::FixApplicability::Suggested)
     }));
 
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
@@ -411,6 +423,10 @@ fn run() {}
         ("dev", dev),
         ("web", web),
     ] {
-        assert_eq!(shape(&diags), expected, "{tier} diagnostic drifted from AOT");
+        assert_eq!(
+            shape(&diags),
+            expected,
+            "{tier} diagnostic drifted from AOT"
+        );
     }
 }

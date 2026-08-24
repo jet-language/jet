@@ -262,11 +262,7 @@ impl DevStatus {
             *started = true;
         } else {
             // DECSC/DECRC save+restore the log cursor across the jump to row 1.
-            let _ = write!(
-                out,
-                "\x1b7\x1b[1;1H\x1b[2K{}\n\x1b[2K{}\x1b8",
-                line, detail
-            );
+            let _ = write!(out, "\x1b7\x1b[1;1H\x1b[2K{}\n\x1b[2K{}\x1b8", line, detail);
         }
         let _ = out.flush();
     }
@@ -396,7 +392,9 @@ impl DevStatus {
         let mut browser_relay = self.browser_relay.lock().unwrap();
         if self.browser_trace_enabled.load(Ordering::SeqCst) {
             browser_relay.take();
-            *browser_relay = fs::read_to_string("build/web.manifest.json").ok().and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
+            *browser_relay = fs::read_to_string("build/web.manifest.json")
+                .ok()
+                .and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
         }
         drop(browser_relay);
         if is_rebuild {
@@ -775,7 +773,10 @@ fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
                 } else {
                     String::new()
                 };
-                Err(format!("error: couldn't bind to port {}: {}{}", port, e, fix))
+                Err(format!(
+                    "error: couldn't bind to port {}: {}{}",
+                    port, e, fix
+                ))
             }
         };
     }
@@ -854,7 +855,9 @@ fn handle_connection(
         }
         let pid = query_param(target, "pid")
             .and_then(|value| value.parse::<u32>().ok())
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing live pid"))?;
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing live pid")
+            })?;
         return match crate::LiveInspect::read(pid) {
             Ok(snapshot) => write_response(
                 &mut stream,
@@ -871,7 +874,12 @@ fn handle_connection(
         };
     }
     if let Some(asset) = crate::canvas_asset(method, target, path) {
-        return write_response(&mut stream, asset.status, asset.content_type, asset.body.as_bytes());
+        return write_response(
+            &mut stream,
+            asset.status,
+            asset.content_type,
+            asset.body.as_bytes(),
+        );
     }
     if target == "/?jet_panel_graph=1" {
         if method != "GET" {
@@ -1012,12 +1020,7 @@ fn handle_connection(
             .and_then(|id| crate::Canvas::project_path_for_source_id(Path::new(canvas_file), id))
             .unwrap_or_else(|| PathBuf::from(canvas_file));
         return match fs::read(&source_path) {
-            Ok(body) => write_response(
-                &mut stream,
-                "200 OK",
-                "text/plain; charset=utf-8",
-                &body,
-            ),
+            Ok(body) => write_response(&mut stream, "200 OK", "text/plain; charset=utf-8", &body),
             Err(e) => write_response(
                 &mut stream,
                 "404 Not Found",
@@ -1057,7 +1060,7 @@ fn handle_connection(
         if method != "POST" {
             return method_not_allowed(&mut stream);
         }
-                let request = String::from_utf8_lossy(&body);
+        let request = String::from_utf8_lossy(&body);
         return match crate::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
             Ok(body) => {
                 status.version.fetch_add(1, Ordering::SeqCst);
@@ -1181,12 +1184,7 @@ fn handle_connection(
         if let Some(client) = query_param(target, "client") {
             status.drop_client(&client);
         }
-        return write_response(
-            &mut stream,
-            "200 OK",
-            "text/plain; charset=utf-8",
-            b"ok",
-        );
+        return write_response(&mut stream, "200 OK", "text/plain; charset=utf-8", b"ok");
     }
     if path == "/__jet_perf_browser" {
         if method != "POST" {
@@ -1269,13 +1267,13 @@ fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Res
     let file_path = match static_path(Path::new("build"), path) {
         Ok(path) => path,
         Err(()) => {
-        write_response(
-            stream,
-            "400 Bad Request",
-            "text/plain; charset=utf-8",
-            b"bad path",
-        )?;
-        return Ok(400);
+            write_response(
+                stream,
+                "400 Bad Request",
+                "text/plain; charset=utf-8",
+                b"bad path",
+            )?;
+            return Ok(400);
         }
     };
     let bytes = match fs::read(&file_path) {
@@ -1315,7 +1313,11 @@ fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Res
 /// reworded); a clean rebuild (browser strip is dumb — it just re-renders
 /// whatever the poll says) collapses it back to the pill.
 fn live_reload_script(nonce: &str) -> String {
-    let perf_script = if nonce.is_empty() { String::new() } else { format!(r#"  var jetPerfNonce = "{nonce}";
+    let perf_script = if nonce.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"  var jetPerfNonce = "{nonce}";
   self.__jetPerfNow = function () {{ return performance.now(); }};
   self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
     if (!symbol || typeof performance === "undefined") return;
@@ -1328,7 +1330,9 @@ fn live_reload_script(nonce: &str) -> String {
     }});
     try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce, body); }} catch (_) {{}}
   }};
-"#) };
+"#
+        )
+    };
     format!(
         r##"<script>
 (function () {{
@@ -1561,8 +1565,7 @@ mod tests {
         status.note_client("tab-a");
         status.clients.lock().unwrap().insert(
             "tab-a".to_string(),
-            std::time::Instant::now()
-                - std::time::Duration::from_millis(super::CLIENT_TTL_MS + 1),
+            std::time::Instant::now() - std::time::Duration::from_millis(super::CLIENT_TTL_MS + 1),
         );
         status.expire_clients();
         let reconnecting = status.json();
@@ -1610,9 +1613,8 @@ mod tests {
 
     #[test]
     fn blocked_verbose_refresh_cannot_reinstall_region_after_disable() {
-        let status = std::sync::Arc::new(DevStatus::new_with_terminal(
-            "app.jet", true, true, false,
-        ));
+        let status =
+            std::sync::Arc::new(DevStatus::new_with_terminal("app.jet", true, true, false));
         status.controls_ready.store(true, Ordering::SeqCst);
         let terminal_guard = status.term_lock.lock().unwrap();
         let waiter = std::sync::Arc::clone(&status);
@@ -1690,7 +1692,10 @@ mod tests {
     fn format_line_plain_uses_bracketed_state_word_no_color() {
         let line = format_line_plain("error", "E0102 · 2 clients");
         assert_eq!(line, "jet dev  [error] E0102 · 2 clients");
-        assert!(!line.contains('\x1b'), "NO_COLOR/CI floor must carry no ANSI: {line}");
+        assert!(
+            !line.contains('\x1b'),
+            "NO_COLOR/CI floor must carry no ANSI: {line}"
+        );
     }
 
     #[test]

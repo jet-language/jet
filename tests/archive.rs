@@ -65,12 +65,12 @@ fn make_tree_owner_writable(path: &Path) {
 #[test]
 fn archive_bridge_embeds_the_canonical_ring_source() {
     let ffi = include_str!("../crates/jet-pkg-model/src/FFI.rs");
-    let canonical = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("corelib/core.archive/pkgs/archive/src/lib.rs");
-    let source_package = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("corelib/core.archive/pkgs/archive/archive.jet");
-    let retired_copy = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/jet-pkg-model/src/Prelude/Archive.rs");
+    let canonical =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("corelib/core.archive/pkgs/archive/src/lib.rs");
+    let source_package =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("corelib/core.archive/pkgs/archive/archive.jet");
+    let retired_copy =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/jet-pkg-model/src/Prelude/Archive.rs");
 
     assert!(canonical.is_file(), "canonical archive source is missing");
     let source = fs::read_to_string(&source_package).unwrap();
@@ -81,7 +81,10 @@ fn archive_bridge_embeds_the_canonical_ring_source() {
         "pub fn tar_get",
         "pub fn tar_names_json",
     ] {
-        assert!(source.contains(function), "source package is missing `{function}`");
+        assert!(
+            source.contains(function),
+            "source package is missing `{function}`"
+        );
     }
     assert!(
         ffi.contains("../../../corelib/core.archive/pkgs/archive/src/lib.rs"),
@@ -103,7 +106,9 @@ fn archive_bridge_embeds_the_canonical_ring_source() {
         "reachable archive source module must be emitted"
     );
     assert!(
-        output.rust.contains("__jet_core_archive::__jet_zip_compress"),
+        output
+            .rust
+            .contains("__jet_core_archive::__jet_zip_compress"),
         "public archive calls must target the emitted source module"
     );
 }
@@ -125,8 +130,7 @@ fn run() {
     ar.gzip_compress(bytes)
 }
 "#;
-    let diags = jet::compile(src)
-        .expect_err("D-CORE-COMPRESS1=A removes gzip from core.archive");
+    let diags = jet::compile(src).expect_err("D-CORE-COMPRESS1=A removes gzip from core.archive");
     assert!(
         diags.iter().any(|d| d.code == "E1004"),
         "legacy archive gzip should be an ordinary unknown Core item: {diags:?}"
@@ -147,7 +151,10 @@ fn run_core_bridge(src: &str) -> String {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    assert!(out.ffi.is_some(), "Core codec/container call must produce an FFI bridge");
+    assert!(
+        out.ffi.is_some(),
+        "Core codec/container call must produce an FFI bridge"
+    );
     let user_rust = common::strip_vetted_prelude_modules(&out.rust);
     assert!(
         user_rust
@@ -192,7 +199,9 @@ fn rustc_bridge(
         .arg("--extern")
         .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
     for deps_dir in dependency_dirs {
-        rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", deps_dir.display()));
     }
     rustc.output().unwrap()
 }
@@ -264,7 +273,10 @@ data :: [U8]{ 1, 2, 3 }
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy();
     let out = jet::compile_with_path(src, &shown).unwrap();
-    let link = out.ffi.as_ref().expect("core.archive must build an FFI bridge");
+    let link = out
+        .ffi
+        .as_ref()
+        .expect("core.archive must build an FFI bridge");
 
     let dirs: Vec<_> = link.dependency_dirs().collect();
     assert_eq!(dirs, [&*link.target_deps_dir, &*link.host_deps_dir]);
@@ -274,12 +286,7 @@ data :: [U8]{ 1, 2, 3 }
 
     let rs = temp.0.join("archive_link_contract.rs");
     fs::write(&rs, out.rust).unwrap();
-    let complete = rustc_bridge(
-        &rs,
-        &temp.0.join("complete_bin"),
-        link,
-        &dirs,
-    );
+    let complete = rustc_bridge(&rs, &temp.0.join("complete_bin"), link, &dirs);
     assert!(
         complete.status.success(),
         "target + host dependency directories must link:\n{}",
@@ -315,7 +322,11 @@ fn archive_temp_cleanup_restores_permissions_on_success_and_unwind() {
             }
         });
         assert_eq!(result.is_err(), unwind);
-        assert!(!path.exists(), "archive fixture cleanup leaked {}", path.display());
+        assert!(
+            !path.exists(),
+            "archive fixture cleanup leaked {}",
+            path.display()
+        );
     }
 }
 
@@ -418,8 +429,8 @@ fn core_provider_compiles_ring_package_to_rlib() {
     permissions.set_readonly(false);
     fs::set_permissions(output_root, permissions).unwrap();
     fs::write(output_root.join("closure-tamper"), b"changed after commit").unwrap();
-    let error = Store::closure_graph(&roots)
-        .expect_err("changed output must invalidate closure proof");
+    let error =
+        Store::closure_graph(&roots).expect_err("changed output must invalidate closure proof");
     assert!(
         error
             .to_string()

@@ -1,14 +1,14 @@
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{
-    types, AbiParam, Endianness, InstBuilder, MemFlags, Signature, StackSlotData,
-    StackSlotKind, Value,
+    types, AbiParam, Endianness, InstBuilder, MemFlags, Signature, StackSlotData, StackSlotKind,
+    Value,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::Codegen::TIR::{
     self, JitProgram, TExpr, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda,
-    TLambdaBody, TirWorklist, TStmt,
+    TLambdaBody, TStmt, TirWorklist,
 };
 use jet_foundation::AST::Type;
 use std::collections::{HashMap, HashSet};
@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
 use super::types_meta::{
-    clif_ty, fn_value_signature, func_has_receiver, func_signature, receiver_clif_ty,
-    interrupt_callback_signature, jit_fn_name, JitMeta,
+    clif_ty, fn_value_signature, func_has_receiver, func_signature, interrupt_callback_signature,
+    jit_fn_name, receiver_clif_ty, JitMeta,
 };
 use super::JitRuntime;
 use crate::{Cell, Collections};
@@ -37,8 +37,12 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
         };
         let mut rows = Vec::new();
         for variant in variants {
-            let vname = variant.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(variant.as_str());
-            let payloads = meta.enum_variant_payload_types(enum_name, vname).unwrap_or(&[]);
+            let vname = variant
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(variant.as_str());
+            let payloads = meta
+                .enum_variant_payload_types(enum_name, vname)
+                .unwrap_or(&[]);
             let (kind, nested) = match payloads {
                 [] => (0u8, String::new()),
                 [Type::Int] => (1u8, String::new()),
@@ -53,11 +57,7 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
     }
 }
 
-fn pack_spawn_return(
-    b: &mut FunctionBuilder,
-    val: Value,
-    ret_ty: &Type,
-) -> Result<Value, String> {
+fn pack_spawn_return(b: &mut FunctionBuilder, val: Value, ret_ty: &Type) -> Result<Value, String> {
     match clif_ty(ret_ty) {
         Some(ty) if ty == types::F64 => Ok(b.ins().bitcast(
             types::I64,
@@ -67,7 +67,9 @@ fn pack_spawn_return(
         Some(ty) if ty == types::I8 || ty == types::I32 => Ok(b.ins().uextend(types::I64, val)),
         Some(ty) if ty == types::I64 => Ok(val),
         None => Ok(val),
-        other => Err(format!("jit spawn return unsupported: {ret_ty:?} ({other:?})")),
+        other => Err(format!(
+            "jit spawn return unsupported: {ret_ty:?} ({other:?})"
+        )),
     }
 }
 
@@ -85,7 +87,9 @@ fn unpack_memo_return(
         Some(ty) if ty == types::I8 => Ok(b.ins().ireduce(types::I8, raw)),
         Some(ty) if ty == types::I32 => Ok(b.ins().ireduce(types::I32, raw)),
         Some(ty) if ty == types::I64 => Ok(raw),
-        other => Err(format!("jit memo return unsupported: {ret_ty:?} ({other:?})")),
+        other => Err(format!(
+            "jit memo return unsupported: {ret_ty:?} ({other:?})"
+        )),
     }
 }
 
@@ -144,7 +148,10 @@ fn cli_target_args(
     }
     for (_, ty, convention) in &target.params {
         if matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
-            return Err(format!("jit CLI does not support Range parameter `{}`", target.name));
+            return Err(format!(
+                "jit CLI does not support Range parameter `{}`",
+                target.name
+            ));
         }
         // This predicate MUST be the same set `func_signature` uses to build
         // the slot it is about to fill (`types_meta.rs::func_signature`, and the
@@ -157,21 +164,22 @@ fn cli_target_args(
         // raw scalar, so the callee's `load(clif, MemFlags::trusted(), …)`
         // dereferenced an integer value: a wild load on a JIT frame that has no
         // unwind info to turn it into a diagnostic (#1997, I2).
-        let scalar_write = matches!(
-            convention,
-            jet_foundation::AST::AccessConvention::Write
-        ) && matches!(
-            ty,
-            Type::Int
-                | Type::IntN { .. }
-                | Type::InlineRange { .. }
-                | Type::Float
-                | Type::Float32
-                | Type::Bool
-                | Type::Char
-        );
+        let scalar_write = matches!(convention, jet_foundation::AST::AccessConvention::Write)
+            && matches!(
+                ty,
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::InlineRange { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::Bool
+                    | Type::Char
+            );
         let value_ty = clif_ty(ty).ok_or_else(|| {
-            format!("jit CLI parameter type unsupported in `{}`: {ty:?}", target.name)
+            format!(
+                "jit CLI parameter type unsupported in `{}`: {ty:?}",
+                target.name
+            )
         })?;
         let value = cli_frame_value(module, host, builder, frame, index, ty, value_ty)?;
         if scalar_write {
@@ -181,11 +189,9 @@ fn cli_target_args(
                 0,
             ));
             builder.ins().stack_store(value, slot, 0);
-            let pointer = builder.ins().stack_addr(
-                module.target_config().pointer_type(),
-                slot,
-                0,
-            );
+            let pointer = builder
+                .ins()
+                .stack_addr(module.target_config().pointer_type(), slot, 0);
             args.push(pointer);
         } else {
             args.push(value);
@@ -204,7 +210,10 @@ fn cli_pack_return(
         return Ok(builder.ins().iconst(types::I64, 0));
     };
     if matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
-        return Err(format!("jit CLI does not support Range return `{}`", target.name));
+        return Err(format!(
+            "jit CLI does not support Range return `{}`",
+            target.name
+        ));
     }
     let Some(result) = result else {
         return Ok(builder.ins().iconst(types::I64, 0));
@@ -261,10 +270,7 @@ fn define_cli_adapter(
         )?;
         let callee = module.declare_func_in_func(target_id, builder.func);
         let call = builder.ins().call(callee, &args);
-        let result = builder
-            .inst_results(call)
-            .first()
-            .copied();
+        let result = builder.inst_results(call).first().copied();
         let packed = cli_pack_return(&mut builder, target, result)?;
         builder.ins().return_(&[packed]);
         builder.finalize();
@@ -278,9 +284,7 @@ fn define_cli_adapter(
 
 fn memo_slot(tir: &TFunc, field: &str) -> i64 {
     let owner = match &tir.kind {
-        TFuncKind::Method { owner_type, .. } => {
-            owner_type.base_name().unwrap_or(tir.name.as_str())
-        }
+        TFuncKind::Method { owner_type, .. } => owner_type.base_name().unwrap_or(tir.name.as_str()),
         _ => tir.name.as_str(),
     };
     TIR::stable_memo_field_slot(owner, field)
@@ -298,10 +302,8 @@ pub(crate) fn lower_option_lift2_adapter(
     sequence: &mut u64,
 ) -> Result<FuncId, String> {
     let original_sig = fn_value_signature(module, fn_ty, meta)?;
-    let name = jet_foundation::Syntax::generated_name(&format!(
-        "jit_option_lift2_adapter_{}",
-        *sequence
-    ));
+    let name =
+        jet_foundation::Syntax::generated_name(&format!("jit_option_lift2_adapter_{}", *sequence));
     *sequence = sequence.saturating_add(1);
     let mut sig = Signature::new(module.target_config().default_call_conv);
     sig.params.extend([
@@ -328,23 +330,22 @@ pub(crate) fn lower_option_lift2_adapter(
             return Err("jit OptionLift2 callable arity unsupported".to_string());
         }
         let callable = values[0];
-        let raw_arg = |b: &mut FunctionBuilder<'_>, bits: Value, ty: &Type| {
-            match meta
-                .clif_ty(ty)
-                .ok_or_else(|| format!("jit OptionLift2 callable parameter unsupported: {ty:?}"))?
-            {
-                clif if clif == types::F64 => Ok(b.ins().bitcast(
-                    types::F64,
-                    MemFlags::new().with_endianness(Endianness::Little),
-                    bits,
-                )),
-                clif if clif == types::I8 => Ok(b.ins().ireduce(types::I8, bits)),
-                clif if clif == types::I32 => Ok(b.ins().ireduce(types::I32, bits)),
-                clif if clif == types::I64 => Ok(bits),
-                clif => Err(format!(
-                    "jit OptionLift2 callable parameter unsupported: {ty:?} ({clif:?})"
-                )),
-            }
+        let raw_arg = |b: &mut FunctionBuilder<'_>, bits: Value, ty: &Type| match meta
+            .clif_ty(ty)
+            .ok_or_else(
+            || format!("jit OptionLift2 callable parameter unsupported: {ty:?}"),
+        )? {
+            clif if clif == types::F64 => Ok(b.ins().bitcast(
+                types::F64,
+                MemFlags::new().with_endianness(Endianness::Little),
+                bits,
+            )),
+            clif if clif == types::I8 => Ok(b.ins().ireduce(types::I8, bits)),
+            clif if clif == types::I32 => Ok(b.ins().ireduce(types::I32, bits)),
+            clif if clif == types::I64 => Ok(bits),
+            clif => Err(format!(
+                "jit OptionLift2 callable parameter unsupported: {ty:?} ({clif:?})"
+            )),
         };
         let left = raw_arg(&mut b, values[1], &params[0])?;
         let right = raw_arg(&mut b, values[2], &params[1])?;
@@ -365,25 +366,23 @@ pub(crate) fn lower_option_lift2_adapter(
         b.append_block_param(merge, types::I64);
         b.ins().brif(is_captured, captured, &[], plain, &[]);
 
-        let pack_result = |b: &mut FunctionBuilder<'_>, value: Value| {
-            match fn_ty_return(fn_ty) {
-                Some(ret) => match meta.clif_ty(ret) {
-                    Some(clif) if clif == types::F64 => Ok(b.ins().bitcast(
-                        types::I64,
-                        MemFlags::new().with_endianness(Endianness::Little),
-                        value,
-                    )),
-                    Some(clif) if clif == types::I8 || clif == types::I32 => {
-                        Ok(b.ins().uextend(types::I64, value))
-                    }
-                    Some(clif) if clif == types::I64 => Ok(value),
-                    Some(clif) => Err(format!(
-                        "jit OptionLift2 callable result unsupported: {ret:?} ({clif:?})"
-                    )),
-                    None => Ok(b.ins().iconst(types::I64, 0)),
-                },
+        let pack_result = |b: &mut FunctionBuilder<'_>, value: Value| match fn_ty_return(fn_ty) {
+            Some(ret) => match meta.clif_ty(ret) {
+                Some(clif) if clif == types::F64 => Ok(b.ins().bitcast(
+                    types::I64,
+                    MemFlags::new().with_endianness(Endianness::Little),
+                    value,
+                )),
+                Some(clif) if clif == types::I8 || clif == types::I32 => {
+                    Ok(b.ins().uextend(types::I64, value))
+                }
+                Some(clif) if clif == types::I64 => Ok(value),
+                Some(clif) => Err(format!(
+                    "jit OptionLift2 callable result unsupported: {ret:?} ({clif:?})"
+                )),
                 None => Ok(b.ins().iconst(types::I64, 0)),
-            }
+            },
+            None => Ok(b.ins().iconst(types::I64, 0)),
         };
 
         b.switch_to_block(plain);
@@ -652,9 +651,7 @@ fn block_has_valued_return(stmts: &[TStmt]) -> bool {
                 work.extend(then_body.iter().rev());
             }
             TStmt::EnumMatch {
-                arms,
-                else_body,
-                ..
+                arms, else_body, ..
             } => {
                 if let Some(body) = else_body {
                     work.extend(body.iter().rev());
@@ -822,10 +819,8 @@ pub(crate) fn lower_shared_transaction_lambda(
     runtime: &mut JitRuntime,
     sequence: u64,
 ) -> Result<FuncId, String> {
-    let name = jet_foundation::Syntax::generated_name(&format!(
-        "jit_shared_txn_lambda_{}",
-        sequence
-    ));
+    let name =
+        jet_foundation::Syntax::generated_name(&format!("jit_shared_txn_lambda_{}", sequence));
     let mut sig = Signature::new(module.target_config().default_call_conv);
     sig.params.push(AbiParam::new(types::I64));
     sig.params.push(AbiParam::new(types::I64));
@@ -1063,7 +1058,7 @@ fn lower_callable_lambda_with_env(
         ret: lam.ret.clone().map(Box::new),
         effect_bound: None,
         param_contract: None,
-                call_metadata: None,
+        call_metadata: None,
         return_view_provenance: None,
     };
     let block_returns_value = match &lam.executable {
@@ -1395,9 +1390,9 @@ pub(crate) fn lower_option_lift2_factory(
                     .declare_func_in_func(lctx.host.coll.list_get, lctx.b.func);
                 let call = lctx.b.ins().call(host, &[env, index, line]);
                 let raw = lctx.b.inst_results(call)[0];
-                let clif = meta
-                    .clif_ty(ty)
-                    .ok_or_else(|| format!("jit OptionLift2 factory capture unsupported: {ty:?}"))?;
+                let clif = meta.clif_ty(ty).ok_or_else(|| {
+                    format!("jit OptionLift2 factory capture unsupported: {ty:?}")
+                })?;
                 let value = match clif {
                     t if t == types::F64 => lctx.b.ins().bitcast(
                         types::F64,
@@ -1571,19 +1566,17 @@ fn lower_function(
                 param_idx += 3;
                 continue;
             }
-            let scalar_write = matches!(
-                convention,
-                jet_foundation::AST::AccessConvention::Write
-            ) && matches!(
-                ty,
-                Type::Int
-                    | Type::IntN { .. }
-                    | Type::InlineRange { .. }
-                    | Type::Float
-                    | Type::Float32
-                    | Type::Bool
-                    | Type::Char
-            );
+            let scalar_write = matches!(convention, jet_foundation::AST::AccessConvention::Write)
+                && matches!(
+                    ty,
+                    Type::Int
+                        | Type::IntN { .. }
+                        | Type::InlineRange { .. }
+                        | Type::Float
+                        | Type::Float32
+                        | Type::Bool
+                        | Type::Char
+                );
             let clif = if scalar_write {
                 types::I64
             } else {
@@ -1625,10 +1618,7 @@ fn lower_function(
                 return Err("jit memo getter has no receiver".to_string());
             }
             let record = param_vals[0];
-            let slot = lctx.b.ins().iconst(
-                types::I64,
-                memo_slot(tir, field),
-            );
+            let slot = lctx.b.ins().iconst(types::I64, memo_slot(tir, field));
             let probe_ref = lctx
                 .module
                 .declare_func_in_func(lctx.host.memo_probe, lctx.b.func);
@@ -1728,8 +1718,7 @@ fn generator_body_signature(module: &JITModule, tir: &TFunc) -> Result<Signature
     }
     let mut sig = Signature::new(module.target_config().default_call_conv);
     for (_, ty, _) in &tir.params {
-        let clif = clif_ty(ty)
-            .ok_or_else(|| format!("jit generator param unsupported: {ty:?}"))?;
+        let clif = clif_ty(ty).ok_or_else(|| format!("jit generator param unsupported: {ty:?}"))?;
         if clif != types::I64 {
             return Err(format!("jit generator param ABI unsupported: {ty:?}"));
         }
@@ -1913,7 +1902,14 @@ pub(crate) fn compile_program(
     runtime: &mut JitRuntime,
     existing_main: Option<FuncId>,
 ) -> Result<FuncId, String> {
-    compile_program_tiered(module, host, program, runtime, existing_main, &HashMap::new())
+    compile_program_tiered(
+        module,
+        host,
+        program,
+        runtime,
+        existing_main,
+        &HashMap::new(),
+    )
 }
 
 /// Compile with optional per-function interpreter deopt stubs (#778).
@@ -2010,7 +2006,9 @@ pub(crate) fn compile_program_tiered(
                 continue;
             }
             if !func_ids.contains_key(&target_name) {
-                return Err(format!("jit CLI target `{target_name}` missing from lowered TIR"));
+                return Err(format!(
+                    "jit CLI target `{target_name}` missing from lowered TIR"
+                ));
             }
             let cc = module.target_config().default_call_conv;
             let mut signature = Signature::new(cc);

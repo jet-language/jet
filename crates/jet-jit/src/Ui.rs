@@ -165,7 +165,9 @@ fn jet_jit_ui_node_dim(node: i64, which: i64) -> f64 {
 
 fn jet_jit_ui_null_backend() -> i64 {
     with_rt(|rt| {
-        rt.ui.backends.push(UiBackendSlot::Null(ui_rt::jet_ui_null()));
+        rt.ui
+            .backends
+            .push(UiBackendSlot::Null(ui_rt::jet_ui_null()));
         rt.ui.backends.len() as i64
     })
 }
@@ -228,7 +230,9 @@ fn jet_jit_ui_button_on_click(
         let label = rt.heap.clone_string(label).unwrap_or_default();
         rt.ui
             .nodes
-            .push(ui_rt::jet_ui_button_on_click(&label, move || cb.invoke_void()));
+            .push(ui_rt::jet_ui_button_on_click(&label, move || {
+                cb.invoke_void()
+            }));
         rt.ui.nodes.len() as i64
     })
 }
@@ -509,14 +513,16 @@ fn jet_jit_ui_frame_lines(backend: i64) -> i64 {
 }
 
 fn jet_jit_ui_render_count(backend: i64) -> i64 {
-    with_rt(|rt| match rt
-        .ui
-        .backends
-        .get(backend.saturating_sub(1) as usize)
-        .expect("jit ui render_count: bad backend")
-    {
-        UiBackendSlot::Tui(b) => b.render_count(),
-        _ => 0,
+    with_rt(|rt| {
+        match rt
+            .ui
+            .backends
+            .get(backend.saturating_sub(1) as usize)
+            .expect("jit ui render_count: bad backend")
+        {
+            UiBackendSlot::Tui(b) => b.render_count(),
+            _ => 0,
+        }
     })
 }
 
@@ -622,14 +628,7 @@ fn jet_jit_ui_gtk_present(backend: i64, title: i64) {
     });
 }
 
-fn jet_jit_ui_reactive_render(
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-) {
+fn jet_jit_ui_reactive_render(fn_ptr: i64, n_caps: i64, c0: i64, c1: i64, c2: i64, c3: i64) {
     let cb = crate::Reactive::JitCb {
         fn_ptr: fn_ptr as u64,
         caps: [c0, c1, c2, c3],
@@ -738,8 +737,3 @@ host_fns! {
     gtk_present: "jet_jit_ui_gtk_present" => jet_jit_ui_gtk_present: binary_void;
     reactive_render: "jet_jit_ui_reactive_render" => jet_jit_ui_reactive_render: cb6;
 }
-
-
-
-
-

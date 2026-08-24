@@ -182,7 +182,10 @@ pub(crate) fn compound_why(op: BinOp) -> String {
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::FloorDiv => {
             "`+ - * / /%` work on Int and Float".to_string()
         }
-        _ => format!("{} is a whole-number operation (Int only)", operator_label(op)),
+        _ => format!(
+            "{} is a whole-number operation (Int only)",
+            operator_label(op)
+        ),
     }
 }
 
@@ -231,6 +234,9 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
     }
     match (want, got) {
         (Type::Float, Type::Int) => "write the number with a decimal part, like `2.0`".to_string(),
+        (Type::Float, got) if nominal_leaf(got) == Syntax::TYPE_DECIMAL => {
+            "write the literal as Float{3.4}, or keep Decimal on both sides".to_string()
+        }
         (Type::Int, Type::Float) => "drop the decimal part, like `2`".to_string(),
         // D-SHAPE-CONVERT1: the destination type owns explicit conversion.
         (Type::Int, Type::IntN { signed, bits }) => format!(
@@ -257,6 +263,17 @@ mod polish_tests {
             "use Rng here"
         );
     }
+
+    #[test]
+    fn decimal_to_float_fix_names_explicit_float_spelling() {
+        assert_eq!(
+            type_fix_hint(
+                &Type::Float,
+                &Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())
+            ),
+            "write the literal as Float{3.4}, or keep Decimal on both sides"
+        );
+    }
 }
 
 /// D-TYPEDTEXT1/D-FFI-SH1: plain `String` reaching checked typed text. `None`
@@ -264,10 +281,13 @@ mod polish_tests {
 /// mismatch diagnostic.
 pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option<Diagnostic> {
     let (tn, typed_text_name) = match want {
-        Type::Named(tn) => (tn.clone(), Syntax::typed_head_kind(tn).filter(|kind| kind.is_typed_text()).map(|_| tn.clone())),
-        Type::Apply { name, args }
-            if name == Syntax::TYPE_CHECKED_TEXT && args.len() == 1 =>
-        {
+        Type::Named(tn) => (
+            tn.clone(),
+            Syntax::typed_head_kind(tn)
+                .filter(|kind| kind.is_typed_text())
+                .map(|_| tn.clone()),
+        ),
+        Type::Apply { name, args } if name == Syntax::TYPE_CHECKED_TEXT && args.len() == 1 => {
             let name = args[0].name();
             (name.clone(), Some(name))
         }
@@ -470,8 +490,7 @@ pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) 
     Diagnostic::error(
         "E0987",
         format!("no loop labeled `{name}` is in scope"),
-        "a named `break`/`next` must name an enclosing `name :: loop` (D-LOOPLABEL3)"
-            .to_string(),
+        "a named `break`/`next` must name an enclosing `name :: loop` (D-LOOPLABEL3)".to_string(),
         fix,
         Some(span),
     )
@@ -531,11 +550,7 @@ pub(crate) fn owned_type_for_read_view(ty: &Type) -> Option<Type> {
 /// indirection (I3: sema already proves this elsewhere), so a cycle back to a
 /// type still being visited is vacuously cloneable — the recursion doesn't need
 /// to unwind further to know that. Without this guard the walk never terminates.
-fn is_cloneable_rec(
-    ty: &Type,
-    registry: &TypeRegistry,
-    visiting: &mut HashSet<String>,
-) -> bool {
+fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<String>) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -543,12 +558,10 @@ fn is_cloneable_rec(
             is_cloneable_rec(inner, registry, visiting)
         }
         Type::Map { key, value, .. } => {
-            is_cloneable_rec(key, registry, visiting)
-                && is_cloneable_rec(value, registry, visiting)
+            is_cloneable_rec(key, registry, visiting) && is_cloneable_rec(value, registry, visiting)
         }
         Type::Result { ok, err } => {
-            is_cloneable_rec(ok, registry, visiting)
-                && is_cloneable_rec(err, registry, visiting)
+            is_cloneable_rec(ok, registry, visiting) && is_cloneable_rec(err, registry, visiting)
         }
         Type::Fn { .. } => false,
         Type::Named(name) if builtin_resource_type(name) => false,
@@ -566,9 +579,7 @@ fn is_cloneable_rec(
                     Some(TypeDef::Enum { variants, .. }) => {
                         variants.values().all(|(_, p)| match p {
                             VariantPayload::Unit => true,
-                            VariantPayload::Single(t, _) => {
-                                is_cloneable_rec(t, registry, visiting)
-                            }
+                            VariantPayload::Single(t, _) => is_cloneable_rec(t, registry, visiting),
                             VariantPayload::Named(fs) => fs
                                 .iter()
                                 .all(|f| is_cloneable_rec(&f.ty, registry, visiting)),
@@ -607,9 +618,7 @@ fn is_cloneable_rec(
         }
         Type::Apply { name, .. } if name == "View" => true,
         Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
-        Type::Apply { args, .. } => args
-            .iter()
-            .all(|a| is_cloneable_rec(a, registry, visiting)),
+        Type::Apply { args, .. } => args.iter().all(|a| is_cloneable_rec(a, registry, visiting)),
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| is_cloneable_rec(t, registry, visiting)),
@@ -1031,7 +1040,7 @@ fn alias_target(
     FOREIGN_METHOD_ALIASES
         .iter()
         .find(|(foreign, family, target)| {
-                *foreign == name
+            *foreign == name
                 && receiver_family.map_or(true, |receiver| receiver == *family)
                 && *target != name
                 && candidates.iter().any(|known| known.as_str() == *target)
@@ -1110,7 +1119,10 @@ fn suggest_method(name: &str, candidates: &[String]) -> Option<MethodSuggestion>
 }
 
 fn secret_bearing_crypto_leaf(name: &str) -> bool {
-    matches!(name, "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret")
+    matches!(
+        name,
+        "Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret"
+    )
 }
 
 pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
@@ -1121,7 +1133,11 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
         },
         Type::List(inner) => Type::List(Box::new(core_crypto_nominal(*inner))),
         Type::Shared(inner) => Type::Shared(Box::new(core_crypto_nominal(*inner))),
-        Type::Map { key, key_span, value } => Type::Map {
+        Type::Map {
+            key,
+            key_span,
+            value,
+        } => Type::Map {
             key: Box::new(core_crypto_nominal(*key)),
             key_span,
             value: Box::new(core_crypto_nominal(*value)),
@@ -1163,7 +1179,10 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
         // Already-provenanced leaves are idempotent. User flow tags remain
         // transparent wrappers while provenance is installed below them.
         Type::Tagged { marker, inner }
-            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+            ) =>
         {
             Type::Tagged { marker, inner }
         }
@@ -1171,9 +1190,9 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             marker,
             inner: Box::new(core_crypto_nominal(*inner)),
         },
-        Type::Union(members) => crate::AST::canonicalize_union(
-            members.into_iter().map(core_crypto_nominal).collect(),
-        ),
+        Type::Union(members) => {
+            crate::AST::canonicalize_union(members.into_iter().map(core_crypto_nominal).collect())
+        }
         Type::Int => Type::Int,
         Type::Float => Type::Float,
         Type::Bool => Type::Bool,
@@ -1245,7 +1264,10 @@ pub(crate) fn expiring_secret_loan_matches(want: &Type, got: &Type) -> bool {
 pub(crate) fn contains_expiring_secret_loan(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, .. }
-            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan)) =>
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan)
+            ) =>
         {
             true
         }
@@ -1254,9 +1276,12 @@ pub(crate) fn contains_expiring_secret_loan(ty: &Type) -> bool {
         | Type::List(inner)
         | Type::Shared(inner)
         | Type::FixedList { elem: inner, .. } => contains_expiring_secret_loan(inner),
-        Type::Result { ok, err } | Type::Map { key: ok, value: err, .. } => {
-            contains_expiring_secret_loan(ok) || contains_expiring_secret_loan(err)
-        }
+        Type::Result { ok, err }
+        | Type::Map {
+            key: ok,
+            value: err,
+            ..
+        } => contains_expiring_secret_loan(ok) || contains_expiring_secret_loan(err),
         Type::Fn { params, ret, .. } => {
             params.iter().any(contains_expiring_secret_loan)
                 || ret.as_deref().is_some_and(contains_expiring_secret_loan)
@@ -1298,7 +1323,10 @@ pub(crate) fn is_clock_type(ty: &Type) -> bool {
 pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, inner }
-            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
+            if matches!(
+                marker,
+                crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
+            ) =>
         {
             matches!(inner.as_ref(), Type::Named(name) if secret_bearing_crypto_leaf(name))
         }
@@ -1409,8 +1437,7 @@ pub(crate) fn is_printable(
         }
         Type::List(inner) => is_printable(inner, registry, trait_reg),
         Type::Map { key, value, .. } => {
-            is_printable(key, registry, trait_reg)
-                && is_printable(value, registry, trait_reg)
+            is_printable(key, registry, trait_reg) && is_printable(value, registry, trait_reg)
         }
         Type::Named(n) => {
             registry.is_unit_type(n)
@@ -1420,12 +1447,9 @@ pub(crate) fn is_printable(
         Type::Quantity { .. } => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
-            (name == "View"
-                && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
+            (name == "View" && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
                 || (trait_reg.implements_trait(name, Generics::PRINTABLE)
-                    && args
-                        .iter()
-                        .all(|a| is_printable(a, registry, trait_reg)))
+                    && args.iter().all(|a| is_printable(a, registry, trait_reg)))
         }
         Type::Tuple(fields) => fields
             .iter()
@@ -1434,9 +1458,7 @@ pub(crate) fn is_printable(
         Type::FixedList { elem, .. } => is_printable(elem, registry, trait_reg),
         Type::Tagged { inner, .. } => is_printable(inner, registry, trait_reg),
         Type::InlineRange { base, .. } => is_printable(base, registry, trait_reg),
-        Type::Union(members) => members
-            .iter()
-            .all(|m| is_printable(m, registry, trait_reg)),
+        Type::Union(members) => members.iter().all(|m| is_printable(m, registry, trait_reg)),
         // Same as the retired `\0compute.dimension.N` string encoding: it
         // never matched any of the `Type::Named` arms above, so this stayed
         // non-printable on its own (only ever seen as a `Type::Apply` arg).
@@ -1458,8 +1480,7 @@ pub(crate) fn is_displayable(
         Type::IntN { .. } | Type::Float32 => true,
         Type::Option(inner) => is_displayable(inner, type_reg, trait_reg),
         Type::Result { ok, err } => {
-            is_displayable(ok, type_reg, trait_reg)
-                && is_displayable(err, type_reg, trait_reg)
+            is_displayable(ok, type_reg, trait_reg) && is_displayable(err, type_reg, trait_reg)
         }
         Type::List(inner) => is_displayable(inner, type_reg, trait_reg),
         Type::Map { value, .. } => is_displayable(value, type_reg, trait_reg),
@@ -1479,8 +1500,7 @@ pub(crate) fn is_displayable(
         Type::Quantity { .. } => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
-            (name == "View"
-                && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
+            (name == "View" && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
                 || trait_reg.implements_trait(name, Generics::DISPLAY)
                 || args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
         }
@@ -1580,9 +1600,7 @@ pub(crate) fn is_debuggable(
         Type::Quantity { .. } => true,
         Type::Apply { name, args } => {
             trait_reg.implements_trait(name, Generics::DEBUG)
-                && args
-                    .iter()
-                    .all(|a| is_debuggable(a, type_reg, trait_reg))
+                && args.iter().all(|a| is_debuggable(a, type_reg, trait_reg))
         }
         Type::Tuple(fields) => fields
             .iter()
@@ -1708,16 +1726,12 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
-        Type::Option(inner) => {
-            native_structural_ordering(inner, registry, &mut HashSet::new())
-        }
+        Type::Option(inner) => native_structural_ordering(inner, registry, &mut HashSet::new()),
         Type::Result { ok, err } => {
             native_structural_ordering(ok, registry, &mut HashSet::new())
                 && native_structural_ordering(err, registry, &mut HashSet::new())
         }
-        Type::List(inner) => {
-            native_structural_ordering(inner, registry, &mut HashSet::new())
-        }
+        Type::List(inner) => native_structural_ordering(inner, registry, &mut HashSet::new()),
         Type::Named(name) if name == "U8" || name == Syntax::TYPE_ORDERING => true,
         // D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
         Type::Named(name)
@@ -1737,11 +1751,15 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         }
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
         Type::Apply { name, .. } if name == "KeyRef" => true,
-        Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") => false,
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") =>
+        {
+            false
+        }
         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
-        Type::Tuple(fields) => fields.iter().all(|(_, t)| {
-            native_structural_ordering(t, registry, &mut HashSet::new())
-        }),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| native_structural_ordering(t, registry, &mut HashSet::new())),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => {
             native_structural_ordering(elem, registry, &mut HashSet::new())
@@ -1917,10 +1935,9 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
             "`{}` owns thread-local state and must stay on the thread that created it",
             name
         ),
-        SendProblemKind::LocalReactive(name) => format!(
-            "`#Local` keeps `{}` in the fast one-thread form",
-            name
-        ),
+        SendProblemKind::LocalReactive(name) => {
+            format!("`#Local` keeps `{}` in the fast one-thread form", name)
+        }
         SendProblemKind::ViewBorrow => "a view is a borrow, not an owned value".to_string(),
     }
 }
@@ -2015,7 +2032,9 @@ pub(crate) fn soft_public_use(name: &str, span: Span) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
-    use super::{core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method};
+    use super::{
+        core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method,
+    };
     use crate::AST::{InternalTag, TagMarker, Type};
 
     fn count_core_crypto_markers(ty: &Type) -> usize {
@@ -2066,7 +2085,9 @@ mod tests {
         for leaf in ["Secret", "SigningKey", "X25519SecretKey", "SharedSecret"] {
             let local_generic = Type::Named(leaf.to_string());
             assert!(!is_secret_bearing_crypto_type(&local_generic));
-            assert!(is_secret_bearing_crypto_type(&core_crypto_nominal(local_generic)));
+            assert!(is_secret_bearing_crypto_type(&core_crypto_nominal(
+                local_generic
+            )));
         }
 
         let wrapped = Type::Fn {
@@ -2092,7 +2113,9 @@ mod tests {
                 ),
                 (
                     "maybe".to_string(),
-                    Box::new(Type::Option(Box::new(Type::Named("SigningKey".to_string())))),
+                    Box::new(Type::Option(Box::new(Type::Named(
+                        "SigningKey".to_string(),
+                    )))),
                 ),
                 (
                     "result".to_string(),
@@ -2112,7 +2135,7 @@ mod tests {
             ]))),
             effect_bound: None,
             param_contract: None,
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         };
 
@@ -2128,7 +2151,10 @@ mod tests {
             },
             _ => (false, false),
         };
-        assert!(flow_inner_is_secret, "flow tag must preserve inner provenance");
+        assert!(
+            flow_inner_is_secret,
+            "flow tag must preserve inner provenance"
+        );
         assert!(flow_tag_is_secret, "flow tag must remain secret-bearing");
     }
 
@@ -2136,7 +2162,11 @@ mod tests {
     fn suggest_field_never_echoes_the_rejected_identifier() {
         let only_itself = vec!["decode".to_string()];
         assert_eq!(suggest_field("decode", &only_itself).as_deref(), None);
-        let family = vec!["decode".to_string(), "encode".to_string(), "parse".to_string()];
+        let family = vec![
+            "decode".to_string(),
+            "encode".to_string(),
+            "parse".to_string(),
+        ];
         assert_ne!(suggest_field("decode", &family).as_deref(), Some("decode"));
         assert_eq!(suggest_field("decod", &family).as_deref(), Some("decode"));
         let tied = vec!["decode".to_string(), "decord".to_string()];
@@ -2174,11 +2204,15 @@ mod tests {
         let map = vec!["add".to_string(), "has_key".to_string(), "len".to_string()];
         let set = vec!["add".to_string(), "has".to_string(), "len".to_string()];
         assert_eq!(
-            suggest_method("contains_key", &map).map(|s| s.name).as_deref(),
+            suggest_method("contains_key", &map)
+                .map(|s| s.name)
+                .as_deref(),
             Some("has_key")
         );
         assert_eq!(
-            suggest_method("contains_key", &set).map(|s| s.name).as_deref(),
+            suggest_method("contains_key", &set)
+                .map(|s| s.name)
+                .as_deref(),
             Some("has")
         );
         // `add` is the real Map/Set name, so the row that maps it to `push`
@@ -2208,14 +2242,20 @@ mod tests {
         // normalizes to `contains_key`, which the table maps to `has_key`.
         let map = vec!["add".to_string(), "has_key".to_string()];
         assert_eq!(
-            suggest_method("containsKey", &map).map(|s| s.name).as_deref(),
+            suggest_method("containsKey", &map)
+                .map(|s| s.name)
+                .as_deref(),
             Some("has_key")
         );
     }
 
     #[test]
     fn true_typos_keep_the_edit_distance_fix_byte_for_byte() {
-        let list = vec!["len".to_string(), "push".to_string(), "try_push".to_string()];
+        let list = vec![
+            "len".to_string(),
+            "push".to_string(),
+            "try_push".to_string(),
+        ];
         let suggestion = suggest_method("psh", &list).expect("close typo should resolve");
         assert_eq!(suggestion.name, "push");
         assert_eq!(suggestion.fix, "did you mean `push`?");

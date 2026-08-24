@@ -18,13 +18,16 @@ use common::have_rustc;
 
 #[test]
 fn octave_sidecar_runs_real_matrix_round_trip() {
-    let tool = ["octave-cli", "octave"].iter().find(|candidate| {
-        Command::new(candidate)
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }).expect("jet-env full must provision Octave");
+    let tool = ["octave-cli", "octave"]
+        .iter()
+        .find(|candidate| {
+            Command::new(candidate)
+                .arg("--version")
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
+        .expect("jet-env full must provision Octave");
     eprintln!("using {tool} for Octave integration");
     let root = std::env::temp_dir().join(format!("jet_octave_e2e_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -60,8 +63,8 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
         String::from_utf8_lossy(&run.stdout),
         fs::read_to_string(root.join("expected.out")).unwrap()
     );
-    let provenance = fs::read_to_string(root.join(".jet/bindings/octave/scale.provenance"))
-        .unwrap();
+    let provenance =
+        fs::read_to_string(root.join(".jet/bindings/octave/scale.provenance")).unwrap();
     assert!(provenance.contains("transport=json"));
     assert!(provenance.contains("shape=rank-2"));
     let _ = fs::remove_dir_all(root);
@@ -69,8 +72,14 @@ fn octave_sidecar_runs_real_matrix_round_trip() {
 
 #[test]
 fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
-    let cobc = Command::new("cobc").arg("--version").output().expect("jet-env full must provision cobc");
-    assert!(cobc.status.success(), "provisioned cobc failed its version check");
+    let cobc = Command::new("cobc")
+        .arg("--version")
+        .output()
+        .expect("jet-env full must provision cobc");
+    assert!(
+        cobc.status.success(),
+        "provisioned cobc failed its version check"
+    );
     let root = std::env::temp_dir().join(format!("jet_cobol_e2e_{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
@@ -79,9 +88,24 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
         fs::copy(repo.join(file), root.join(file)).unwrap();
     }
     let bind = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["inspect", "bind", "cobol", "payroll.cob", "--copybook", "payroll.cpy", "--pkg", "payroll"])
-        .current_dir(&root).output().unwrap();
-    assert!(bind.status.success(), "{}", String::from_utf8_lossy(&bind.stderr));
+        .args([
+            "inspect",
+            "bind",
+            "cobol",
+            "payroll.cob",
+            "--copybook",
+            "payroll.cpy",
+            "--pkg",
+            "payroll",
+        ])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
     let generated = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.jet")).unwrap();
     assert!(generated.contains("jet-ffi-descriptor="));
     assert!(generated.contains("gross_pay: Decimal\n"));
@@ -89,30 +113,41 @@ fn cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3() {
     assert!(!generated.contains("gross_pay: Float"));
     assert!(generated.contains("Int CobolError! -[FFI.Cobol]>"));
     assert!(!generated.contains("=>"));
-    let provenance = fs::read_to_string(root.join(".jet/bindings/cobol/payroll.provenance")).unwrap();
+    let provenance =
+        fs::read_to_string(root.join(".jet/bindings/cobol/payroll.provenance")).unwrap();
     assert!(provenance.contains("schema=jet-cobol-bind-v1\n"));
     assert!(provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
     assert!(provenance.contains("program_symbol=JETPAY\n"));
     assert!(provenance.contains("record_width=29\n"));
-    let run = Command::new(env!("CARGO_BIN_EXE_jet")).args(["run", "main.jet"]).current_dir(&root).output().unwrap();
-    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), fs::read_to_string(root.join("expected.out")).unwrap());
+    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "main.jet"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        fs::read_to_string(root.join("expected.out")).unwrap()
+    );
     let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn forged_fortran_library_prefix_cannot_admit_list_abi() {
-    let root = std::env::temp_dir().join(format!(
-        "jet_fortran_prefix_{}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("jet_fortran_prefix_{}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     let main = root.join("main.jet");
     let source = "use c.jet_fortran_forged as raw\n#Extern module c.jet_fortran_forged { fn probe(a: [Float]) Float = \"probe\"; }\nfn run() { print(raw.probe([1.0])) }\n";
     fs::write(&main, source).unwrap();
     let diagnostics = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_err();
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3203"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3203"),
         "forged prefix admitted a list ABI: {diagnostics:?}"
     );
 }
@@ -135,7 +170,9 @@ fn run() {}
     fs::write(&path, source).unwrap();
     let diagnostics = jet::check_with_path(path.to_str().unwrap());
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3203"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3203"),
         "a non-#Layout(c) aggregate must fail at the typed layout gate: {diagnostics:?}"
     );
     let _ = fs::remove_dir_all(root);
@@ -158,11 +195,15 @@ fn run() {
     fs::write(&safe_path, safe).unwrap();
     let safe_diags = jet::check_with_path(safe_path.to_str().unwrap());
     assert!(
-        safe_diags.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        safe_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0702"),
         "safe raw capability call must be rejected with E0702: {safe_diags:?}"
     );
     assert!(
-        !safe_diags.iter().any(|diagnostic| diagnostic.code == "E3103"),
+        !safe_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3103"),
         "capability gate must use E0702, not E3103: {safe_diags:?}"
     );
 
@@ -181,14 +222,13 @@ fn run() {
     fs::write(&audited_path, audited).unwrap();
     let audited_diags = jet::check_with_path(audited_path.to_str().unwrap());
     assert!(
-        !audited_diags.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        !audited_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0702"),
         "an audited raw capability call must clear the E0702 boundary gate: {audited_diags:?}"
     );
-    let audited_output = jet::compile_with_path(
-        audited,
-        audited_path.to_str().unwrap(),
-    )
-    .expect("an audited capability call must lower through the checked wrapper");
+    let audited_output = jet::compile_with_path(audited, audited_path.to_str().unwrap())
+        .expect("an audited capability call must lower through the checked wrapper");
     assert!(
         audited_output.rust.contains("jet_ffi_borrow(&mut"),
         "`&` must remain an exclusive borrow at the generated call edge"
@@ -215,11 +255,15 @@ fn run() {
     fs::write(&path, source).unwrap();
     let diagnostics = jet::check_with_path(path.to_str().unwrap());
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0702"),
         "a qualified raw capability call must be rejected with E0702: {diagnostics:?}"
     );
     assert!(
-        !diagnostics.iter().any(|diagnostic| diagnostic.code == "E3103"),
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3103"),
         "a qualified capability gate must use E0702, not E3103: {diagnostics:?}"
     );
 
@@ -268,7 +312,10 @@ fn run() {
     fs::write(&path, source).unwrap();
     let output = jet::compile_with_path(source, path.to_str().unwrap())
         .unwrap_or_else(|diagnostics| panic!("C capability rejected:\n{diagnostics:?}"));
-    assert!(output.ffi.is_none(), "capability C calls must stay on the native path");
+    assert!(
+        output.ffi.is_none(),
+        "capability C calls must stay on the native path"
+    );
     assert!(
         output.rust.contains("*mut std::os::raw::c_longlong"),
         "C `&` must lower to a mutable pointer:\n{}",
@@ -280,7 +327,9 @@ fn run() {
         output.rust
     );
     assert!(
-        output.rust.contains("pub fn __jet_consume(a0: super::__jet_Pair)"),
+        output
+            .rust
+            .contains("pub fn __jet_consume(a0: super::__jet_Pair)"),
         "C `^` must consume the C-layout value without a borrowed clone"
     );
     let rs = root.join("main.rs");
@@ -373,7 +422,11 @@ fn run() {
         String::from_utf8_lossy(&built.stderr)
     );
     let run = Command::new(&bin).output().unwrap();
-    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "41\n");
     let _ = fs::remove_dir_all(root);
 }
@@ -414,7 +467,9 @@ fn run() {
     fs::write(&invalid_path, invalid).unwrap();
     let invalid_diags = jet::check_with_path(invalid_path.to_str().unwrap());
     assert!(
-        invalid_diags.iter().any(|diagnostic| diagnostic.code == "E0702"),
+        invalid_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0702"),
         "layout/ownership mismatch must fail as a typed FFI diagnostic: {invalid_diags:?}"
     );
 
@@ -612,8 +667,8 @@ fn unified_foreign_namespace_model_recognizes_every_registered_root() {
     assert_eq!(roots.map(|(_, language)| language), ForeignLanguage::ALL);
     for (root, language) in roots {
         let path = format!("{root}.lib");
-        let namespace = ForeignNamespace::from_module_path(&path)
-            .unwrap_or_else(|| panic!("{root} namespace"));
+        let namespace =
+            ForeignNamespace::from_module_path(&path).unwrap_or_else(|| panic!("{root} namespace"));
         assert_eq!(namespace.language, language);
         assert_eq!(namespace.lib, "lib");
         assert_eq!(namespace.display(), path);
@@ -635,7 +690,11 @@ fn foreign_namespace_selective_imports_reuse_ordinary_parser_path() {
             language.root()
         );
         let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
-        assert!(lex_diagnostics.is_empty(), "{}: {lex_diagnostics:?}", language.root());
+        assert!(
+            lex_diagnostics.is_empty(),
+            "{}: {lex_diagnostics:?}",
+            language.root()
+        );
         let program = jet::Parser::parse(&tokens)
             .unwrap_or_else(|diagnostics| panic!("{}: {diagnostics:?}", language.root()));
         let ImportKind::Unqualified {
@@ -759,7 +818,9 @@ fn run() { }
     fs::write(&main, source).unwrap();
     let diagnostics = jet::compile_with_path(source, main.to_str().unwrap())
         .expect_err("two inline aliases with one name must fail");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0105"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0105"));
     let rendered = jet::render_diagnostics(main.to_str().unwrap(), source, &diagnostics);
     assert!(rendered.contains("the import name `lib` is used twice"));
     let _ = fs::remove_dir_all(root);
@@ -811,10 +872,19 @@ fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
     assert_eq!(diags[0].code, "E1002");
 }
 
-#[cfg(not(target_os="windows"))]
+#[cfg(not(target_os = "windows"))]
 #[test]
 fn foreign_com_import_is_honestly_windows_gated() {
-    let dir=common::unique_tmp("jet_foreign_com_gate");fs::create_dir_all(&dir).unwrap();let main=dir.join("main.jet");let src="use com.excel as excel\nfn run() { }\n";fs::write(&main,src).unwrap();let diags=jet::compile_with_path(src,main.to_str().unwrap()).expect_err("COM import must reject a non-Windows host");assert_eq!(diags[0].code,"E3260");let rendered=jet::render_diagnostics(main.to_str().unwrap(),src,&diags);assert!(rendered.contains("`com.*` needs a Windows host"));
+    let dir = common::unique_tmp("jet_foreign_com_gate");
+    fs::create_dir_all(&dir).unwrap();
+    let main = dir.join("main.jet");
+    let src = "use com.excel as excel\nfn run() { }\n";
+    fs::write(&main, src).unwrap();
+    let diags = jet::compile_with_path(src, main.to_str().unwrap())
+        .expect_err("COM import must reject a non-Windows host");
+    assert_eq!(diags[0].code, "E3260");
+    let rendered = jet::render_diagnostics(main.to_str().unwrap(), src, &diags);
+    assert!(rendered.contains("`com.*` needs a Windows host"));
 }
 
 #[test]
@@ -962,76 +1032,127 @@ fn foreign_interop_routes_swift_as_planned_c_abi_bridge() {
 
 #[test]
 fn foreign_interop_routes_dart_as_active_api_dl_host() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let root=PathBuf::from("/tmp/jet_foreign_route");
-    let route=route_plan(&root,ForeignNamespace::from_module_path("dart.callbacks").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::Dart);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::DartApiDl);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::DartContract);
-    assert_eq!(route.host,ForeignHost::DartHostFfi);
-    assert_eq!(route.type_stub,Some(root.join(".jet/bindings/dart/callbacks_host.dart")));
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let root = PathBuf::from("/tmp/jet_foreign_route");
+    let route = route_plan(
+        &root,
+        ForeignNamespace::from_module_path("dart.callbacks").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Dart);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::DartApiDl);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::DartContract);
+    assert_eq!(route.host, ForeignHost::DartHostFfi);
+    assert_eq!(
+        route.type_stub,
+        Some(root.join(".jet/bindings/dart/callbacks_host.dart"))
+    );
 }
 
 #[test]
 fn foreign_interop_routes_powershell_as_active_supervised_worker() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("pwsh.inventory").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::PowerShell);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPowerShell);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::PowerShellScript);
-    assert_eq!(route.host,ForeignHost::SupervisedPowerShell);
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("pwsh.inventory").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::PowerShell);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(
+        route.descriptor.runtime,
+        BinderRuntime::SupervisedPowerShell
+    );
+    assert_eq!(
+        route.descriptor.stub_kind,
+        BindingStubKind::PowerShellScript
+    );
+    assert_eq!(route.host, ForeignHost::SupervisedPowerShell);
 }
 
 #[test]
 fn foreign_interop_routes_perl_as_active_supervised_worker() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("perl.text").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::Perl);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPerl);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::PerlScript);
-    assert_eq!(route.host,ForeignHost::SupervisedPerl);
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("perl.text").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Perl);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedPerl);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::PerlScript);
+    assert_eq!(route.host, ForeignHost::SupervisedPerl);
 }
 
 #[test]
 fn foreign_interop_routes_ruby_as_active_supervised_worker() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("ruby.text").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::Ruby);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedRuby);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::RubyScript);
-    assert_eq!(route.host,ForeignHost::SupervisedRuby);
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("ruby.text").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Ruby);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedRuby);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::RubyScript);
+    assert_eq!(route.host, ForeignHost::SupervisedRuby);
 }
 
 #[test]
 fn foreign_interop_routes_php_as_active_supervised_pool() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("php.pricing").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::Php);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedPhpPool);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::PhpScript);
-    assert_eq!(route.host,ForeignHost::SupervisedPhpPool);
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("php.pricing").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Php);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedPhpPool);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::PhpScript);
+    assert_eq!(route.host, ForeignHost::SupervisedPhpPool);
 }
 
 #[test]
 fn foreign_interop_routes_r_as_active_supervised_worker() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("r.stats").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::R);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::SupervisedR);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::RScript);
-    assert_eq!(route.host,ForeignHost::SupervisedR);
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("r.stats").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::R);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedR);
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::RScript);
+    assert_eq!(route.host, ForeignHost::SupervisedR);
 }
 
 #[test]
@@ -1048,8 +1169,14 @@ fn foreign_interop_routes_python_as_active_supervised_sidecar() {
     .unwrap();
     assert_eq!(route.descriptor.language, ForeignLanguage::Py);
     assert_eq!(route.descriptor.status, BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime, BinderRuntime::SupervisedPythonSidecar);
-    assert_eq!(route.descriptor.stub_kind, BindingStubKind::PythonIntrospection);
+    assert_eq!(
+        route.descriptor.runtime,
+        BinderRuntime::SupervisedPythonSidecar
+    );
+    assert_eq!(
+        route.descriptor.stub_kind,
+        BindingStubKind::PythonIntrospection
+    );
     assert_eq!(route.host, ForeignHost::SupervisedPythonSidecar);
     assert_eq!(route.abi_contract, ForeignAbiContract::MESSAGE);
     assert_eq!(route.descriptor.provider, jet::AST::ForeignProvider::PyPi);
@@ -1076,14 +1203,24 @@ fn foreign_interop_routes_octave_as_active_supervised_worker() {
 
 #[test]
 fn foreign_interop_routes_com_as_active_windows_automation() {
-    use jet::Foreign::{route_plan,BinderRuntime,BinderStatus,BindingStubKind,ForeignHost,ForeignTarget};
-    use jet::AST::{ForeignLanguage,ForeignNamespace};
-    let route=route_plan(&PathBuf::from("/tmp/jet_foreign_route"),ForeignNamespace::from_module_path("com.excel").unwrap(),ForeignTarget::Native).unwrap();
-    assert_eq!(route.descriptor.language,ForeignLanguage::Com);
-    assert_eq!(route.descriptor.status,BinderStatus::Active);
-    assert_eq!(route.descriptor.runtime,BinderRuntime::WindowsComAutomation);
-    assert_eq!(route.descriptor.stub_kind,BindingStubKind::ComTypeLibrary);
-    assert_eq!(route.host,ForeignHost::WindowsComAutomation);
+    use jet::Foreign::{
+        route_plan, BinderRuntime, BinderStatus, BindingStubKind, ForeignHost, ForeignTarget,
+    };
+    use jet::AST::{ForeignLanguage, ForeignNamespace};
+    let route = route_plan(
+        &PathBuf::from("/tmp/jet_foreign_route"),
+        ForeignNamespace::from_module_path("com.excel").unwrap(),
+        ForeignTarget::Native,
+    )
+    .unwrap();
+    assert_eq!(route.descriptor.language, ForeignLanguage::Com);
+    assert_eq!(route.descriptor.status, BinderStatus::Active);
+    assert_eq!(
+        route.descriptor.runtime,
+        BinderRuntime::WindowsComAutomation
+    );
+    assert_eq!(route.descriptor.stub_kind, BindingStubKind::ComTypeLibrary);
+    assert_eq!(route.host, ForeignHost::WindowsComAutomation);
 }
 
 /// Build a tiny C static library `libjetc.a` in `dir`, returning its directory
@@ -1157,25 +1294,21 @@ fn build_local_c_provider(root: &Path, lib: &str, source: &str) {
         .iter()
         .find(|compiler| Command::new(compiler).arg("--version").output().is_ok())
         .expect("C provider fixture needs a C compiler");
-    assert!(
-        Command::new(cc)
-            .args(["-c"])
-            .arg(&source_path)
-            .arg("-o")
-            .arg(&object_path)
-            .status()
-            .unwrap()
-            .success()
-    );
-    assert!(
-        Command::new("ar")
-            .arg("rcs")
-            .arg(root.join(format!("lib{lib}.a")))
-            .arg(object_path)
-            .status()
-            .unwrap()
-            .success()
-    );
+    assert!(Command::new(cc)
+        .args(["-c"])
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&object_path)
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new("ar")
+        .arg("rcs")
+        .arg(root.join(format!("lib{lib}.a")))
+        .arg(object_path)
+        .status()
+        .unwrap()
+        .success());
 }
 
 fn add_ffi_bridge_args(rustc: &mut Command, link: &jet::FFI::FfiLink) {
@@ -1422,7 +1555,10 @@ fn run() {
     );
     assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
     assert!(!jit_stderr.contains("unbound wrapper"), "{jit_stderr}");
-    assert!(!jit_stderr.contains("unsupported signature"), "{jit_stderr}");
+    assert!(
+        !jit_stderr.contains("unsupported signature"),
+        "{jit_stderr}"
+    );
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -1448,11 +1584,13 @@ fn run() {
 }
 "#;
     fs::write(&main, source).unwrap();
-    let out = jet::compile_with_path(source, main.to_str().unwrap())
-        .unwrap_or_else(|diagnostics| panic!("front end rejected exact Int C boundary:\n{diagnostics:?}"));
-    assert!(out.rust.contains(
-        "jet_int_to_i64(a0).unwrap_or_else(|| super::jet_runtime_stop(\"E1003\""
-    ));
+    let out =
+        jet::compile_with_path(source, main.to_str().unwrap()).unwrap_or_else(|diagnostics| {
+            panic!("front end rejected exact Int C boundary:\n{diagnostics:?}")
+        });
+    assert!(out
+        .rust
+        .contains("jet_int_to_i64(a0).unwrap_or_else(|| super::jet_runtime_stop(\"E1003\""));
 
     let rust = root.join("main.rs");
     let binary = root.join("main_bin");
@@ -1484,9 +1622,7 @@ fn run() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(run.status.code(), Some(1), "{stderr}");
     assert!(
-        stderr.contains(
-            "Error [E1003]: a default Int value does not fit in the C i64 range"
-        ),
+        stderr.contains("Error [E1003]: a default Int value does not fit in the C i64 range"),
         "{stderr}"
     );
     assert!(!stderr.contains("panicked at"), "{stderr}");
@@ -1674,9 +1810,12 @@ fn run() {
 
 #[test]
 fn cffi_repr_c_enums_match_native_c_layout() {
-    if !have_rustc() { return; }
+    if !have_rustc() {
+        return;
+    }
     let root = std::env::temp_dir().join(format!("jet_cffi_reprc2_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
     fs::write(root.join("reprc2.c"), r#"#include <stdint.h>
 #include <stddef.h>
 typedef enum { STATUS_OK=0, STATUS_LOST=7 } Status;
@@ -1686,9 +1825,25 @@ typedef struct { PacketTag tag; PacketPayload payload; } Packet;
 int32_t repr_status(Status s){return (int32_t)s;} int32_t repr_packet(Packet p){return (int32_t)p.tag*100+p.payload.ping;}
 int32_t repr_packet_size(void){return sizeof(Packet);} int32_t repr_packet_align(void){return _Alignof(Packet);}
 int32_t repr_packet_payload_offset(void){return offsetof(Packet,payload);}"#).unwrap();
-    let cc = ["cc","gcc","clang"].iter().find(|x| Command::new(x).arg("--version").output().is_ok()).unwrap();
-    assert!(Command::new(cc).args(["-c"]).arg(root.join("reprc2.c")).arg("-o").arg(root.join("reprc2.o")).status().unwrap().success());
-    assert!(Command::new("ar").arg("rcs").arg(root.join("libreprc2.a")).arg(root.join("reprc2.o")).status().unwrap().success());
+    let cc = ["cc", "gcc", "clang"]
+        .iter()
+        .find(|x| Command::new(x).arg("--version").output().is_ok())
+        .unwrap();
+    assert!(Command::new(cc)
+        .args(["-c"])
+        .arg(root.join("reprc2.c"))
+        .arg("-o")
+        .arg(root.join("reprc2.o"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new("ar")
+        .arg("rcs")
+        .arg(root.join("libreprc2.a"))
+        .arg(root.join("reprc2.o"))
+        .status()
+        .unwrap()
+        .success());
     declare_local_c_dep(&root, "reprc2");
     let main = root.join("main.jet");
     fs::write(&main, r#"use c.reprc2 as c
@@ -1705,24 +1860,77 @@ enum Packet { Ping(Int) = 3; Data(x: Int, y: Int) = 7 }
 }
 fn run() { print(c.repr_status(Status.Lost)); print(c.repr_packet(Packet.Ping(41))); print(c.repr_packet_size()); print(c.repr_packet_align()); print(c.repr_packet_payload_offset()) }
 "#).unwrap();
-    let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
-    assert!(out.rust.contains("#[repr(C, u8)]") && out.rust.contains("__jet_Lost = 7") && out.rust.contains("__jet_Ping(i64) = 3"));
-    assert!(out.rust.contains("typedef uint8_t Packet_Tag;") && out.rust.contains("typedef union Packet_Payload") && out.rust.contains("typedef struct Packet"));
-    fs::write(root.join("main.rs"),&out.rust).unwrap();
-    let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lreprc2"); let built=rustc.output().unwrap();
-    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap();
-    assert!(run.status.success(),"{}",String::from_utf8_lossy(&run.stderr)); assert_eq!(String::from_utf8_lossy(&run.stdout),"7\n341\n24\n8\n8\n");
-    let _=fs::remove_dir_all(root);
+    let src = fs::read_to_string(&main).unwrap();
+    let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "{}",
+            jet::render_diagnostics(main.to_str().unwrap(), &src, &d)
+        )
+    });
+    assert!(
+        out.rust.contains("#[repr(C, u8)]")
+            && out.rust.contains("__jet_Lost = 7")
+            && out.rust.contains("__jet_Ping(i64) = 3")
+    );
+    assert!(
+        out.rust.contains("typedef uint8_t Packet_Tag;")
+            && out.rust.contains("typedef union Packet_Payload")
+            && out.rust.contains("typedef struct Packet")
+    );
+    fs::write(root.join("main.rs"), &out.rust).unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc
+        .args(["--edition", "2021"])
+        .arg(root.join("main.rs"))
+        .arg("-o")
+        .arg(root.join("main_bin"))
+        .arg("-L")
+        .arg(format!("native={}", root.display()))
+        .arg("-lreprc2");
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "I2: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(root.join("main_bin")).output().unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "7\n341\n24\n8\n8\n");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn cffi_named_pure_callback_has_stable_c_symbol() {
-    if !have_rustc() { return; }
-    let root=std::env::temp_dir().join(format!("jet_cffi_cb_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    if !have_rustc() {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cffi_cb_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
     fs::write(root.join("cb.c"),"#include <stdint.h>\n#include <pthread.h>\ntypedef int32_t (*cb_t)(int32_t);\nint32_t call_twice(cb_t cb,int32_t x){ return cb(cb(x)); }\ntypedef struct { cb_t cb; int32_t x; int32_t out; } Job;\nstatic void* run_job(void* p){ Job* j=(Job*)p; j->out=j->cb(j->x); return 0; }\nint32_t call_parallel(cb_t cb){ pthread_t t[4]; Job j[4]; for(int i=0;i<4;i++){j[i]=(Job){cb,i,0}; pthread_create(&t[i],0,run_job,&j[i]);} int32_t s=0; for(int i=0;i<4;i++){pthread_join(t[i],0);s+=j[i].out;} return s; }\n").unwrap();
-    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
-    assert!(Command::new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success());
-    assert!(Command::new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success());
+    let cc = ["cc", "gcc", "clang"]
+        .iter()
+        .find(|x| Command::new(x).arg("--version").output().is_ok())
+        .unwrap();
+    assert!(Command::new(cc)
+        .args(["-c"])
+        .arg(root.join("cb.c"))
+        .arg("-o")
+        .arg(root.join("cb.o"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new("ar")
+        .arg("rcs")
+        .arg(root.join("libcb.a"))
+        .arg(root.join("cb.o"))
+        .status()
+        .unwrap()
+        .success());
     fs::write(
         root.join("package.jet"),
         format!(
@@ -1731,10 +1939,19 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
         ),
     )
     .unwrap();
-    let main=root.join("main.jet"); fs::write(&main,"use c.cb as c\nfn increment(x: I32) I32 -[]> { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) I32 -[]>, x: I32) I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) I32 -[]>) I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) -> x + x, 10)) }\n").unwrap();
-    let src=fs::read_to_string(&main).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
-    assert!(out.rust.contains("extern \"C\" fn __jet_increment")); assert!(out.rust.contains("extern \"C\" fn(i32) -> i32")); assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
-    fs::write(root.join("main.rs"),out.rust).unwrap();
+    let main = root.join("main.jet");
+    fs::write(&main,"use c.cb as c\nfn increment(x: I32) I32 -[]> { return x + 1 }\n#Extern module c.cb { fn call_twice(cb: fn(I32) I32 -[]>, x: I32) I32 = \"call_twice\"; fn call_parallel(cb: fn(I32) I32 -[]>) I32 = \"call_parallel\"; }\nfn run() { print(c.call_twice(increment, 40)); print(c.call_parallel(increment)); print(c.call_twice((x) -> x + x, 10)) }\n").unwrap();
+    let src = fs::read_to_string(&main).unwrap();
+    let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "{}",
+            jet::render_diagnostics(main.to_str().unwrap(), &src, &d)
+        )
+    });
+    assert!(out.rust.contains("extern \"C\" fn __jet_increment"));
+    assert!(out.rust.contains("extern \"C\" fn(i32) -> i32"));
+    assert!(out.rust.contains("extern \"C\" fn __jet_c_callback_"));
+    fs::write(root.join("main.rs"), out.rust).unwrap();
     let mut rustc = Command::new("rustc");
     rustc
         .args(["--edition", "2021"])
@@ -1746,19 +1963,47 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
         .arg("-lcb")
         .arg("-lpthread");
     let built = rustc.output().unwrap();
-    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n10\n40\n"); let _=fs::remove_dir_all(root);
+    assert!(
+        built.status.success(),
+        "I2: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(root.join("main_bin")).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n10\n40\n");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn cffi_raw_status_out_pointer_reads_only_on_success() {
-    if !have_rustc() { return; }
-    let root=std::env::temp_dir().join(format!("jet_cffi_out_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    if !have_rustc() {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cffi_out_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
     fs::write(root.join("store.c"),"#include <stdint.h>\n#include <string.h>\ntypedef struct { uint64_t id; uint32_t flags; } Record;\nint32_t store_load(uint64_t id, Record* out){ if(id==7){out->id=70;out->flags=3;return 0;} memset(out,0xA5,sizeof(*out)); return 9; }\n").unwrap();
-    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap();
-    assert!(Command::new(cc).args(["-c"]).arg(root.join("store.c")).arg("-o").arg(root.join("store.o")).status().unwrap().success());
-    assert!(Command::new("ar").arg("rcs").arg(root.join("libstore.a")).arg(root.join("store.o")).status().unwrap().success());
+    let cc = ["cc", "gcc", "clang"]
+        .iter()
+        .find(|x| Command::new(x).arg("--version").output().is_ok())
+        .unwrap();
+    assert!(Command::new(cc)
+        .args(["-c"])
+        .arg(root.join("store.c"))
+        .arg("-o")
+        .arg(root.join("store.o"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new("ar")
+        .arg("rcs")
+        .arg(root.join("libstore.a"))
+        .arg(root.join("store.o"))
+        .status()
+        .unwrap()
+        .success());
     declare_local_c_dep(&root, "store");
-    let main=root.join("main.jet"); let src=r#"use core.mem
+    let main = root.join("main.jet");
+    let src = r#"use core.mem
 use c.store as store
 #Layout(c)
 struct Record { id: U64; flags: U32 }
@@ -1782,35 +2027,150 @@ fn run() {
         .Err(e) -> { print(e) }
     }
 }
-"#; fs::write(&main,src).unwrap();
-    let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d)));
-    assert!(out.rust.contains("*mut super::__jet_Record")); assert!(!out.rust.contains("Result<super::__jet_Record"));
-    fs::write(root.join("main.rs"),&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-lstore"); if let Some(link)=out.ffi.as_ref(){add_ffi_bridge_args(&mut rustc,link);} let built=rustc.output().unwrap();
-    assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"70\nstatus 9\n"); let _=fs::remove_dir_all(root);
+"#;
+    fs::write(&main, src).unwrap();
+    let out = jet::compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "{}",
+            jet::render_diagnostics(main.to_str().unwrap(), src, &d)
+        )
+    });
+    assert!(out.rust.contains("*mut super::__jet_Record"));
+    assert!(!out.rust.contains("Result<super::__jet_Record"));
+    fs::write(root.join("main.rs"), &out.rust).unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc
+        .args(["--edition", "2021"])
+        .arg(root.join("main.rs"))
+        .arg("-o")
+        .arg(root.join("main_bin"))
+        .arg("-L")
+        .arg(format!("native={}", root.display()))
+        .arg("-lstore");
+    if let Some(link) = out.ffi.as_ref() {
+        add_ffi_bridge_args(&mut rustc, link);
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "I2: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(root.join("main_bin")).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "70\nstatus 9\n");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 #[cfg(all(target_arch = "x86_64", not(target_os = "windows")))]
 fn cffi_sysv64_abi_executes_native_symbol() {
-    if !have_rustc() { return; }
-    let root=std::env::temp_dir().join(format!("jet_cffi_sysv_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("abi.c"),"#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){return a+b;}\n").unwrap();
-    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success());
+    if !have_rustc() {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cffi_sysv_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("abi.c"),
+        "#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){return a+b;}\n",
+    )
+    .unwrap();
+    let cc = ["cc", "gcc", "clang"]
+        .iter()
+        .find(|x| Command::new(x).arg("--version").output().is_ok())
+        .unwrap();
+    assert!(Command::new(cc)
+        .args(["-c"])
+        .arg(root.join("abi.c"))
+        .arg("-o")
+        .arg(root.join("abi.o"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new("ar")
+        .arg("rcs")
+        .arg(root.join("libabi.a"))
+        .arg(root.join("abi.o"))
+        .status()
+        .unwrap()
+        .success());
     declare_local_c_dep(&root, "abi");
-    let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
-    fs::write(root.join("main.rs"),&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi"); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
+    let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n";
+    let main = root.join("main.jet");
+    fs::write(&main, src).unwrap();
+    let out = jet::compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(|d| {
+        panic!(
+            "{}",
+            jet::render_diagnostics(main.to_str().unwrap(), src, &d)
+        )
+    });
+    assert!(out.rust.contains("extern \"sysv64\""));
+    fs::write(root.join("main.rs"), &out.rust).unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc
+        .args(["--edition", "2021"])
+        .arg(root.join("main.rs"))
+        .arg("-o")
+        .arg(root.join("main_bin"))
+        .arg("-L")
+        .arg(format!("native={}", root.display()))
+        .arg("-labi");
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "I2: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let run = Command::new(root.join("main_bin")).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "42\n");
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
-    if !have_rustc() { return; }
-    let root=std::env::temp_dir().join(format!("jet_cffi_cstr_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
+    if !have_rustc() {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("jet_cffi_cstr_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
     fs::write(root.join("strret.c"),"const char* good(void){return \"caf\\xC3\\xA9\";} const char* null_s(void){return 0;} const char* bad(void){static const char s[]={ (char)0xff,0 };return s;}\n").unwrap();
-    let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success());
+    let cc = ["cc", "gcc", "clang"]
+        .iter()
+        .find(|x| Command::new(x).arg("--version").output().is_ok())
+        .unwrap();
+    assert!(Command::new(cc)
+        .args(["-c"])
+        .arg(root.join("strret.c"))
+        .arg("-o")
+        .arg(root.join("strret.o"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(Command::new("ar")
+        .arg("rcs")
+        .arg(root.join("libstrret.a"))
+        .arg(root.join("strret.o"))
+        .status()
+        .unwrap()
+        .success());
     declare_local_c_dep(&root, "strret");
-    for (name, expected, success) in [("good","café\n",true),("null_s","returned a null pointer",false),("bad","not valid UTF-8",false)] {
-        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n"); let main=root.join(format!("{name}.jet")); fs::write(&main,&src).unwrap(); let out=jet::compile_with_path(&src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),&src,&d)));
-        let wrapper = out.rust
+    for (name, expected, success) in [
+        ("good", "café\n", true),
+        ("null_s", "returned a null pointer", false),
+        ("bad", "not valid UTF-8", false),
+    ] {
+        let src=format!("use c.strret as c\n#Extern module c.strret {{ fn get() String = \"{name}\"; }}\nfn run() {{ print(c.get()) }}\n");
+        let main = root.join(format!("{name}.jet"));
+        fs::write(&main, &src).unwrap();
+        let out = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(|d| {
+            panic!(
+                "{}",
+                jet::render_diagnostics(main.to_str().unwrap(), &src, &d)
+            )
+        });
+        let wrapper = out
+            .rust
             .split_once("pub fn __jet_get() -> String {\n")
             .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
             .1
@@ -1824,9 +2184,34 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
         assert!(wrapper.contains(".to_owned()"));
         assert!(!wrapper.contains("to_string_lossy"));
         assert!(!wrapper.contains("/* unsupported:"));
-        let rs=root.join(format!("{name}.rs")); let bin=root.join(format!("{name}_bin")); fs::write(&rs,&out.rust).unwrap(); let mut rustc=Command::new("rustc"); rustc.args(["--edition","2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg(format!("native={}",root.display())).arg("-lstrret"); let built=rustc.output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(bin).output().unwrap(); assert_eq!(run.status.success(),success); let text=format!("{}{}",String::from_utf8_lossy(&run.stdout),String::from_utf8_lossy(&run.stderr)); assert!(text.contains(expected),"{name}: {text}");
+        let rs = root.join(format!("{name}.rs"));
+        let bin = root.join(format!("{name}_bin"));
+        fs::write(&rs, &out.rust).unwrap();
+        let mut rustc = Command::new("rustc");
+        rustc
+            .args(["--edition", "2021"])
+            .arg(&rs)
+            .arg("-o")
+            .arg(&bin)
+            .arg("-L")
+            .arg(format!("native={}", root.display()))
+            .arg("-lstrret");
+        let built = rustc.output().unwrap();
+        assert!(
+            built.status.success(),
+            "I2: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let run = Command::new(bin).output().unwrap();
+        assert_eq!(run.status.success(), success);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert!(text.contains(expected), "{name}: {text}");
     }
-    let _=fs::remove_dir_all(root);
+    let _ = fs::remove_dir_all(root);
 }
 
 /// Card #436: a runtime-built `String` (not a literal — so sema's E3211
@@ -1907,12 +2292,7 @@ fn run() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"ab\0cd\n")
-        .unwrap();
+    child.stdin.take().unwrap().write_all(b"ab\0cd\n").unwrap();
     let run = child.wait_with_output().unwrap();
     assert!(
         !run.status.success(),
@@ -2143,7 +2523,9 @@ fn descriptor_mismatch_rejects_generated_cache_before_call() {
     let source = fs::read_to_string(&main).unwrap();
     let diagnostics = jet::compile_with_path(&source, main.to_str().unwrap()).unwrap_err();
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3208"),
         "stale descriptor must be rejected before the foreign call: {diagnostics:?}"
     );
     let _ = fs::remove_dir_all(&root);
@@ -2151,7 +2533,10 @@ fn descriptor_mismatch_rejects_generated_cache_before_call() {
 
 #[test]
 fn cobol_cache_without_descriptor_rejects_abi_unknown() {
-    let root = std::env::temp_dir().join(format!("jet_cobol_descriptor_missing_{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "jet_cobol_descriptor_missing_{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&root);
     let cache_dir = root.join(".jet/bindings/cobol");
     fs::create_dir_all(&cache_dir).unwrap();
@@ -2161,11 +2546,17 @@ fn cobol_cache_without_descriptor_rejects_abi_unknown() {
     )
     .unwrap();
     let main = root.join("main.jet");
-    fs::write(&main, "use cobol.payroll as payroll\nfn run() { print(payroll.apply_minor(1)) }\n").unwrap();
+    fs::write(
+        &main,
+        "use cobol.payroll as payroll\nfn run() { print(payroll.apply_minor(1)) }\n",
+    )
+    .unwrap();
     let source = fs::read_to_string(&main).unwrap();
     let diagnostics = jet::compile_with_path(&source, main.to_str().unwrap()).unwrap_err();
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3208"),
         "COBOL cache without a descriptor must fail closed: {diagnostics:?}"
     );
     let _ = fs::remove_dir_all(&root);
@@ -2272,7 +2663,9 @@ fn failed_rebind_rejects_stale_cffi_cache() {
     let diagnostics = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_err();
 
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3208"),
         "failed rebind must report E3208, got: {diagnostics:?}"
     );
     assert_eq!(
@@ -2306,7 +2699,9 @@ fn missing_declared_header_rejects_stale_cffi_cache() {
     let diagnostics = jet::compile_with_path(&src, main.to_str().unwrap()).unwrap_err();
 
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3208"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3208"),
         "missing declared header must report E3208, got: {diagnostics:?}"
     );
     let missing_header = diagnostics
@@ -2326,21 +2721,15 @@ fn missing_declared_header_rejects_stale_cffi_cache() {
 #[test]
 fn absent_or_malformed_hash_regenerates_declared_header_cache() {
     for (case, sidecar) in [("absent", None), ("malformed", Some("not-a-sha256"))] {
-        let root = std::env::temp_dir().join(format!(
-            "jet_cbind_hash_{case}_{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet_cbind_hash_{case}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let cache_dir = root.join(".jet/bindings/c");
         let header_dir = root.join("include");
         fs::create_dir_all(&cache_dir).unwrap();
         fs::create_dir_all(&header_dir).unwrap();
         declare_local_c_dep(&root, "rebind");
-        build_local_c_provider(
-            &root,
-            "rebind",
-            "int fresh_value(void) { return 7; }\n",
-        );
+        build_local_c_provider(&root, "rebind", "int fresh_value(void) { return 7; }\n");
         let header = "int fresh_value(void);\n";
         fs::write(header_dir.join("rebind.h"), header).unwrap();
 
@@ -2361,7 +2750,10 @@ fn absent_or_malformed_hash_regenerates_declared_header_cache() {
         let src = fs::read_to_string(&main).unwrap();
         let result = jet::compile_with_path(&src, main.to_str().unwrap());
 
-        assert!(result.is_ok(), "{case} hash did not trigger rebind: {result:?}");
+        assert!(
+            result.is_ok(),
+            "{case} hash did not trigger rebind: {result:?}"
+        );
         assert!(
             fs::read_to_string(&cache_file)
                 .unwrap()
@@ -2641,7 +3033,9 @@ fn ffi_example_compiles_and_runs() {
         .arg("--extern")
         .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
     for deps_dir in link.dependency_dirs() {
-        rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", deps_dir.display()));
     }
     let status = rustc.status().unwrap();
     assert!(status.success(), "rustc rejected FFI-linked output (I2)");
@@ -2777,7 +3171,9 @@ fn concurrent_processes_share_one_bridge_build_per_key() {
             // release artifact only; both files are one bridge build.
             if name.starts_with("libjet_ffi_")
                 && name.ends_with(".rlib")
-                && path.parent().is_some_and(|parent| parent.ends_with("release"))
+                && path
+                    .parent()
+                    .is_some_and(|parent| parent.ends_with("release"))
             {
                 rlibs.push(name);
             } else if name.starts_with("jet_ffi_") && name.ends_with(".sha256") {

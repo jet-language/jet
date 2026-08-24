@@ -72,6 +72,7 @@ Optional `.vscode/launch.json` configuration:
       "request": "launch",
       "name": "Jet: Launch",
       "program": "${file}",
+      "stopOnEntry": true,
       "showRawFrames": false
     }
   ]

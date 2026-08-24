@@ -30,8 +30,7 @@ pub(super) fn resolve_inline_module_imports(
                 if let Some(module) = imp.core_module_path() {
                     if !crate::Syntax::is_known_core_module(&module) {
                         diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
-                            &module,
-                            imp.span,
+                            &module, imp.span,
                         ));
                         continue;
                     }
@@ -84,7 +83,8 @@ pub(super) fn resolve_inline_module_imports(
                             diags.push(Diagnostic::error(
                                 "E0105",
                                 format!("the import name `{alias}` is used twice"),
-                                "each import needs a unique namespace name in this file".to_string(),
+                                "each import needs a unique namespace name in this file"
+                                    .to_string(),
                                 format!("rename one with `{} alias`", Syntax::KW_AS),
                                 Some(imp.alias_span),
                             ));
@@ -172,20 +172,29 @@ pub(super) fn resolve_inline_module_imports(
                     }
                     group_names.push(local.clone());
                     enum Target {
-                        Inline { alias: String, mangled: String },
-                        File { name: String, module_idx: usize },
-                        Core { module: String, item: Option<String> },
+                        Inline {
+                            alias: String,
+                            mangled: String,
+                        },
+                        File {
+                            name: String,
+                            module_idx: usize,
+                        },
+                        Core {
+                            module: String,
+                            item: Option<String>,
+                        },
                     }
                     let resolved = {
                         let st = &states[idx];
                         if let Some(canonical) = st.code_modules.get(module_alias) {
-                            let mangled =
-                                jet_foundation::Names::member_name(canonical, &orig);
+                            let mangled = jet_foundation::Names::member_name(canonical, &orig);
                             if !st.funcs.contains_key(&mangled) {
                                 diags.push(Diagnostic::error(
                                     "E0611",
                                     format!("{orig} is not defined in module {module_alias}"),
-                                    "check the module body for the item you are importing".to_string(),
+                                    "check the module body for the item you are importing"
+                                        .to_string(),
                                     "make sure the name is spelled correctly".to_string(),
                                     Some(module_alias_span),
                                 ));
@@ -195,8 +204,11 @@ pub(super) fn resolve_inline_module_imports(
                                     diags.push(Diagnostic::error(
                                         "E0609",
                                         format!("{orig} is private in module {module_alias}"),
-                                        "only public items can be brought into scope with use".to_string(),
-                                        format!("add pub before fn {orig} in module {module_alias}"),
+                                        "only public items can be brought into scope with use"
+                                            .to_string(),
+                                        format!(
+                                            "add pub before fn {orig} in module {module_alias}"
+                                        ),
                                         Some(module_alias_span),
                                     ));
                                     None
@@ -234,10 +246,12 @@ pub(super) fn resolve_inline_module_imports(
                                             binding.item_span.unwrap_or(module_alias_span),
                                         ));
                                     } else {
-                                        diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
-                                            &full,
-                                            module_alias_span,
-                                        ));
+                                        diags.push(
+                                            crate::Sema::CheckerCoreLib::unknown_core_module(
+                                                &full,
+                                                module_alias_span,
+                                            ),
+                                        );
                                     }
                                     None
                                 }
@@ -258,7 +272,8 @@ pub(super) fn resolve_inline_module_imports(
                                 diags.push(Diagnostic::error(
                                     "E0609",
                                     format!("{orig} is private in module {module_alias}"),
-                                    "only public items can be brought into scope with use".to_string(),
+                                    "only public items can be brought into scope with use"
+                                        .to_string(),
                                     format!("add pub before fn {orig} in the imported file"),
                                     Some(module_alias_span),
                                 ));
@@ -273,7 +288,8 @@ pub(super) fn resolve_inline_module_imports(
                             diags.push(Diagnostic::error(
                                 "E0610",
                                 format!("no module named {module_alias} in scope"),
-                                "the alias must refer to a module in the enclosing file".to_string(),
+                                "the alias must refer to a module in the enclosing file"
+                                    .to_string(),
                                 format!("import a module as {module_alias} before this use"),
                                 Some(module_alias_span),
                             ));
@@ -288,10 +304,8 @@ pub(super) fn resolve_inline_module_imports(
                                 .insert((inline_name.clone(), local.clone()), mangled.clone());
                             inserted_inline.push((inline_name.clone(), local.clone()));
                             if imp.is_pub {
-                                st.inline_reexport_inline.insert(
-                                    (inline_name.clone(), local.clone()),
-                                    (alias, mangled),
-                                );
+                                st.inline_reexport_inline
+                                    .insert((inline_name.clone(), local.clone()), (alias, mangled));
                                 inserted_reexport_inline.push((inline_name.clone(), local));
                             }
                         }
@@ -302,23 +316,22 @@ pub(super) fn resolve_inline_module_imports(
                             );
                             inserted_file.push((inline_name.clone(), local.clone()));
                             if imp.is_pub {
-                                st.inline_reexport_file
-                                    .insert((inline_name.clone(), local.clone()), (name, module_idx));
+                                st.inline_reexport_file.insert(
+                                    (inline_name.clone(), local.clone()),
+                                    (name, module_idx),
+                                );
                                 inserted_reexport_file.push((inline_name.clone(), local));
                             }
                         }
                         Target::Core { module, item } => {
                             let key = (inline_name.clone(), local.clone());
-                            st.inline_core_imports
-                                .insert(key.clone(), module.clone());
+                            st.inline_core_imports.insert(key.clone(), module.clone());
                             inserted_core.push(key.clone());
                             if let Some(item) = item {
-                                st.inline_core_items
-                                    .insert(key.clone(), item.clone());
+                                st.inline_core_items.insert(key.clone(), item.clone());
                                 inserted_core_items.push(key.clone());
                                 if imp.is_pub {
-                                    st.inline_reexport_core
-                                        .insert(key.clone(), (module, item));
+                                    st.inline_reexport_core.insert(key.clone(), (module, item));
                                     inserted_reexport_core.push(key);
                                 }
                             }

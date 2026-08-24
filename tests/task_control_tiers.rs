@@ -6,8 +6,8 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc, run_default_multi};
 use std::{fs, thread};
+use tir_support::{build_and_run, have_rustc, run_default_multi};
 
 const SOURCE: &str = r#"
 use core.time as time
@@ -135,7 +135,11 @@ fn run() {{
 #[test]
 fn parser_accepts_one_keyword_task_family() {
     let lexed = jet::Compiler::lex_source(SOURCE);
-    assert!(lexed.diagnostics.is_empty(), "lexer diagnostics: {:?}", lexed.diagnostics);
+    assert!(
+        lexed.diagnostics.is_empty(),
+        "lexer diagnostics: {:?}",
+        lexed.diagnostics
+    );
     for spelling in ["task", "all", "race", "any", "group"] {
         assert!(
             lexed.tokens.iter().any(|token| token.text == spelling),
@@ -143,14 +147,21 @@ fn parser_accepts_one_keyword_task_family() {
         );
     }
     let parsed = jet::Compiler::parse_source(SOURCE);
-    assert!(parsed.diagnostics.is_empty(), "parser diagnostics: {:?}", parsed.diagnostics);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "parser diagnostics: {:?}",
+        parsed.diagnostics
+    );
 }
 
 fn checked_task_bundle_for(
     name: &str,
     source: &str,
 ) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("jet_task_control_frontend_{name}_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "jet_task_control_frontend_{name}_{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, source).unwrap();
@@ -182,7 +193,11 @@ fn stream_drop_uses_task_cancel_cleanup_path() {
     let (code, stdout, stderr) =
         run_default_multi("stream_cancel", "main.jet", &[("main.jet", STREAM_SOURCE)]);
     assert_eq!(code, 0, "default JIT: {stderr}");
-    assert_eq!(strip_tier_trace(&stdout), STREAM_EXPECTED, "JIT drifted: {stderr}");
+    assert_eq!(
+        strip_tier_trace(&stdout),
+        STREAM_EXPECTED,
+        "JIT drifted: {stderr}"
+    );
     assert!(
         stderr.lines().any(|line| line.contains("tier1 native")),
         "stream fixture did not execute in resident JIT: {stderr}"
@@ -253,12 +268,19 @@ fn a_shielded_yield_defers_the_consumer_cancel_on_every_tier() {
 }
 
 fn run_forced_interpreter(name: &str, source: &str) -> String {
-    let dir = std::env::temp_dir().join(format!("jet_task_control_interp_{name}_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "jet_task_control_interp_{name}_{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, source).unwrap();
     let result = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
-        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
             assert_eq!(exit_code, 0, "forced interpreter: {stderr}");
             assert_eq!(stderr, "", "forced interpreter diagnostics: {stderr}");
             stdout
@@ -353,7 +375,12 @@ fn tir_lowers_each_canonical_task_combinator_and_group() {
     let mut all = 0;
     let mut race = 0;
     let mut any = 0;
-    fn count_expr(expr: &jet::Codegen::TIR::TExpr, all: &mut usize, race: &mut usize, any: &mut usize) {
+    fn count_expr(
+        expr: &jet::Codegen::TIR::TExpr,
+        all: &mut usize,
+        race: &mut usize,
+        any: &mut usize,
+    ) {
         match &expr.kind {
             jet::Codegen::TIR::TExprKind::TaskGroupAll { .. } => *all += 1,
             jet::Codegen::TIR::TExprKind::TaskGroupRace { .. } => *race += 1,
@@ -370,7 +397,9 @@ fn tir_lowers_each_canonical_task_combinator_and_group() {
         match statement {
             jet::Codegen::TIR::TStmt::TaskGroup { .. } => groups += 1,
             jet::Codegen::TIR::TStmt::Let { init, .. }
-            | jet::Codegen::TIR::TStmt::ExprStmt(init) => count_expr(init, &mut all, &mut race, &mut any),
+            | jet::Codegen::TIR::TStmt::ExprStmt(init) => {
+                count_expr(init, &mut all, &mut race, &mut any)
+            }
             _ => {}
         }
     }
@@ -380,8 +409,12 @@ fn tir_lowers_each_canonical_task_combinator_and_group() {
 
 #[test]
 fn task_control_plane_matches_on_default_run() {
-    let (code, stdout, stderr) = run_default_multi("task_control", "main.jet", &[("main.jet", SOURCE)]);
-    assert_eq!(code, 0, "default `jet run` must succeed\n{stdout}\n{stderr}");
+    let (code, stdout, stderr) =
+        run_default_multi("task_control", "main.jet", &[("main.jet", SOURCE)]);
+    assert_eq!(
+        code, 0,
+        "default `jet run` must succeed\n{stdout}\n{stderr}"
+    );
     // The canonical keyword and nested combinators must stay on one path.
     assert!(
         !stderr.contains("E0956"),
@@ -419,10 +452,16 @@ fn explicit_group_limit_matches_aot_jit_and_interpreter() {
             &[("main.jet", source.as_str())],
         );
         assert_eq!(jit_code, 0, "{jit_stderr}");
-        assert_eq!(jit_stdout, expected, "resident JIT drifted for limit {limit}: {jit_stderr}");
+        assert_eq!(
+            jit_stdout, expected,
+            "resident JIT drifted for limit {limit}: {jit_stderr}"
+        );
 
         let interpreted = run_forced_interpreter(&format!("limit_{limit}"), &source);
-        assert_eq!(interpreted, expected, "forced interpreter drifted for limit {limit}");
+        assert_eq!(
+            interpreted, expected,
+            "forced interpreter drifted for limit {limit}"
+        );
     }
 }
 
@@ -432,8 +471,11 @@ fn task_combinators_cancel_losers_on_every_tier() {
     let interpreted = run_forced_interpreter("loser_cleanup", LOSER_CLEANUP_SOURCE);
     assert_eq!(interpreted, expected);
 
-    let (code, stdout, stderr) =
-        run_default_multi("task_loser_cleanup", "main.jet", &[("main.jet", LOSER_CLEANUP_SOURCE)]);
+    let (code, stdout, stderr) = run_default_multi(
+        "task_loser_cleanup",
+        "main.jet",
+        &[("main.jet", LOSER_CLEANUP_SOURCE)],
+    );
     assert_eq!(code, 0, "resident JIT: {stderr}");
     assert_eq!(stdout, expected, "resident JIT output drifted: {stderr}");
     assert!(

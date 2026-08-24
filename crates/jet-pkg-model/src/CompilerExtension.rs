@@ -328,7 +328,11 @@ impl TypedSnapshot {
                 "v1 trust policy admits only `untrusted` components",
             ));
         }
-        let caps: Vec<String> = self.abilities.iter().map(|c| c.as_str().to_string()).collect();
+        let caps: Vec<String> = self
+            .abilities
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect();
         let mut obj = BTreeMap::new();
         obj.insert(
             "abilities".into(),
@@ -345,7 +349,10 @@ impl TypedSnapshot {
             "symbols".into(),
             JSONValue::Array(self.symbols.iter().map(symbol_to_json).collect()),
         );
-        obj.insert("trust".into(), JSONValue::String(self.trust.as_str().to_string()));
+        obj.insert(
+            "trust".into(),
+            JSONValue::String(self.trust.as_str().to_string()),
+        );
         obj.insert(
             "types".into(),
             JSONValue::Array(self.types.iter().map(type_to_json).collect()),
@@ -379,16 +386,23 @@ impl TypedSnapshot {
                 "compiler-extension protocol mismatch: host={PROTOCOL_VERSION}, snapshot={protocol}"
             )));
         }
-        let stage = obj.get("stage").unwrap().as_str().map_err(ProtocolError::new)?;
+        let stage = obj
+            .get("stage")
+            .unwrap()
+            .as_str()
+            .map_err(ProtocolError::new)?;
         if stage != STAGE {
             return Err(ProtocolError::new(format!(
                 "snapshot stage must be `{STAGE}`, got `{stage}`"
             )));
         }
-        let trust_s = obj.get("trust").unwrap().as_str().map_err(ProtocolError::new)?;
-        let trust = TrustPolicy::parse(trust_s).ok_or_else(|| {
-            ProtocolError::new(format!("unknown trust policy `{trust_s}`"))
-        })?;
+        let trust_s = obj
+            .get("trust")
+            .unwrap()
+            .as_str()
+            .map_err(ProtocolError::new)?;
+        let trust = TrustPolicy::parse(trust_s)
+            .ok_or_else(|| ProtocolError::new(format!("unknown trust policy `{trust_s}`")))?;
         let caps = parse_abilities(obj.get("abilities").unwrap())?;
         let limits = limits_from_json(obj.get("limits").unwrap())?;
         let types = parse_types(obj.get("types").unwrap())?;
@@ -447,7 +461,13 @@ impl AnalyzeResponse {
         let mut obj = BTreeMap::new();
         obj.insert(
             "artifacts".into(),
-            JSONValue::Array(self.artifacts.iter().cloned().map(JSONValue::String).collect()),
+            JSONValue::Array(
+                self.artifacts
+                    .iter()
+                    .cloned()
+                    .map(JSONValue::String)
+                    .collect(),
+            ),
         );
         obj.insert(
             "findings".into(),
@@ -745,7 +765,9 @@ pub fn parse_analyze_result(wire: &str) -> Result<Vec<u8>, ProtocolError> {
             ProtocolError::new(format!("malformed compiler-extension analyze wire: {wire}"))
         })?;
         let len: usize = len_s.parse().map_err(|_| {
-            ProtocolError::new(format!("malformed compiler-extension analyze length: {len_s}"))
+            ProtocolError::new(format!(
+                "malformed compiler-extension analyze length: {len_s}"
+            ))
         })?;
         if hex.len() != len * 2 {
             return Err(ProtocolError::new(format!(
@@ -922,7 +944,10 @@ fn stringify(v: &JSONValue) -> String {
 fn limits_to_json(l: &ResourceLimits) -> JSONValue {
     let mut m = BTreeMap::new();
     m.insert("max_edits".into(), JSONValue::Number(l.max_edits as i64));
-    m.insert("max_findings".into(), JSONValue::Number(l.max_findings as i64));
+    m.insert(
+        "max_findings".into(),
+        JSONValue::Number(l.max_findings as i64),
+    );
     m.insert("max_fuel".into(), JSONValue::Number(l.max_fuel as i64));
     m.insert(
         "max_memory_bytes".into(),
@@ -1016,7 +1041,10 @@ fn finding_to_json(f: &Finding) -> JSONValue {
 fn edit_to_json(e: &ProposedEdit) -> JSONValue {
     let mut m = BTreeMap::new();
     m.insert("rationale".into(), JSONValue::String(e.rationale.clone()));
-    m.insert("replacement".into(), JSONValue::String(e.replacement.clone()));
+    m.insert(
+        "replacement".into(),
+        JSONValue::String(e.replacement.clone()),
+    );
     m.insert("span_id".into(), JSONValue::String(e.span_id.clone()));
     JSONValue::Object(m)
 }
@@ -1039,7 +1067,9 @@ fn require_keys(obj: &BTreeMap<String, JSONValue>, keys: &[&str]) -> Result<(), 
 fn json_u32(v: &JSONValue, name: &str) -> Result<u32, ProtocolError> {
     match v {
         JSONValue::Number(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
-        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => Ok(*n as u32),
+        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => {
+            Ok(*n as u32)
+        }
         _ => Err(ProtocolError::new(format!("`{name}` must be a u32"))),
     }
 }
@@ -1047,7 +1077,9 @@ fn json_u32(v: &JSONValue, name: &str) -> Result<u32, ProtocolError> {
 fn json_u64(v: &JSONValue, name: &str) -> Result<u64, ProtocolError> {
     match v {
         JSONValue::Number(n) if *n >= 0 => Ok(*n as u64),
-        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => Ok(*n as u64),
+        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => {
+            Ok(*n as u64)
+        }
         _ => Err(ProtocolError::new(format!("`{name}` must be a u64"))),
     }
 }
@@ -1097,7 +1129,12 @@ fn parse_types(v: &JSONValue) -> Result<Vec<TypeFact>, ProtocolError> {
             .map_err(|e| ProtocolError::new(format!("type: {e}")))?;
         require_keys(obj, &["id", "repr"])?;
         out.push(TypeFact {
-            id: obj.get("id").unwrap().as_str().map_err(ProtocolError::new)?.to_string(),
+            id: obj
+                .get("id")
+                .unwrap()
+                .as_str()
+                .map_err(ProtocolError::new)?
+                .to_string(),
             repr: obj
                 .get("repr")
                 .unwrap()
@@ -1120,7 +1157,12 @@ fn parse_spans(v: &JSONValue) -> Result<Vec<SpanFact>, ProtocolError> {
             .map_err(|e| ProtocolError::new(format!("span: {e}")))?;
         require_keys(obj, &["id", "file", "start", "end"])?;
         out.push(SpanFact {
-            id: obj.get("id").unwrap().as_str().map_err(ProtocolError::new)?.to_string(),
+            id: obj
+                .get("id")
+                .unwrap()
+                .as_str()
+                .map_err(ProtocolError::new)?
+                .to_string(),
             file: obj
                 .get("file")
                 .unwrap()
@@ -1156,7 +1198,12 @@ fn parse_symbols(v: &JSONValue) -> Result<Vec<SymbolFact>, ProtocolError> {
             ],
         )?;
         out.push(SymbolFact {
-            id: obj.get("id").unwrap().as_str().map_err(ProtocolError::new)?.to_string(),
+            id: obj
+                .get("id")
+                .unwrap()
+                .as_str()
+                .map_err(ProtocolError::new)?
+                .to_string(),
             name: obj
                 .get("name")
                 .unwrap()
@@ -1387,12 +1434,8 @@ mod tests {
     #[test]
     fn ability_negotiation_rejects_unknown_and_version_mismatch() {
         assert!(negotiate_abilities(2, &[Ability::ReadTypes]).is_err());
-        let granted =
-            negotiate_abilities(1, &[Ability::ReadTypes, Ability::EmitFinding]).unwrap();
-        assert_eq!(
-            granted,
-            vec![Ability::ReadTypes, Ability::EmitFinding]
-        );
+        let granted = negotiate_abilities(1, &[Ability::ReadTypes, Ability::EmitFinding]).unwrap();
+        assert_eq!(granted, vec![Ability::ReadTypes, Ability::EmitFinding]);
     }
 
     #[test]

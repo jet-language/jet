@@ -7,9 +7,7 @@ use std::sync::Mutex;
 
 /// Sema's `FuncSig` publishes view provenance through a shared cell; a parsed
 /// `Func` still carries the plain map.
-fn provenance_cell(
-    map: &Option<jet::AST::ViewProvenanceMap>,
-) -> jet::AST::ViewProvenanceCell {
+fn provenance_cell(map: &Option<jet::AST::ViewProvenanceMap>) -> jet::AST::ViewProvenanceCell {
     let cell = jet::AST::ViewProvenanceCell::new();
     if let Some(map) = map {
         cell.set(map.clone());
@@ -126,7 +124,10 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "print() inside `@ {{ }}` is still build-time invalid");
+    assert!(
+        res.is_err(),
+        "print() inside `@ {{ }}` is still build-time invalid"
+    );
     let diags = res.unwrap_err();
     let e3401s: Vec<_> = diags.iter().filter(|d| d.code == "E3401").collect();
     assert_eq!(
@@ -158,8 +159,14 @@ fn run() {
 }
 "#;
     let output = jet::compile(src).expect("comptime should accept named #Abilities");
-    assert!(output.rust.contains("42"), "comptime binding was not emitted");
-    assert!(!output.rust.contains("Abilities"), "comptime handle leaked into codegen");
+    assert!(
+        output.rust.contains("42"),
+        "comptime binding was not emitted"
+    );
+    assert!(
+        !output.rust.contains("Abilities"),
+        "comptime handle leaked into codegen"
+    );
 }
 
 /// A `pure fn` calling another `pure fn` is fine.
@@ -196,7 +203,11 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "public pure fn should compile: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "public pure fn should compile: {:?}",
+        res.err()
+    );
 }
 
 /// `pure fn` calling an impure user-defined function fires E3401.
@@ -311,7 +322,11 @@ fn run() {
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
-                    param_view_from_names: f.params.iter().map(|p| p.declared_view_from_names.clone()).collect(),
+                    param_view_from_names: f
+                        .params
+                        .iter()
+                        .map(|p| p.declared_view_from_names.clone())
+                        .collect(),
                     callable_policies: Default::default(),
                     is_must_use: f.is_must_use,
                     is_foreign_thread_safe: false,
@@ -406,7 +421,11 @@ fn run() {
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
-                    param_view_from_names: f.params.iter().map(|p| p.declared_view_from_names.clone()).collect(),
+                    param_view_from_names: f
+                        .params
+                        .iter()
+                        .map(|p| p.declared_view_from_names.clone())
+                        .collect(),
                     callable_policies: Default::default(),
                     is_must_use: f.is_must_use,
                     is_foreign_thread_safe: false,
@@ -489,7 +508,11 @@ fn run() {
                         .collect(),
                     param_variadic: f.params.iter().map(|p| p.variadic).collect(),
                     variadic_bounds: f.params.last().and_then(|p| p.variadic_bound_list.clone()),
-                    param_view_from_names: f.params.iter().map(|p| p.declared_view_from_names.clone()).collect(),
+                    param_view_from_names: f
+                        .params
+                        .iter()
+                        .map(|p| p.declared_view_from_names.clone())
+                        .collect(),
                     callable_policies: Default::default(),
                     is_must_use: f.is_must_use,
                     is_foreign_thread_safe: false,

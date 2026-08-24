@@ -187,7 +187,10 @@ fn content_files() -> Vec<PathBuf> {
 }
 
 fn file_name(path: &Path) -> String {
-    path.file_name().unwrap_or_default().to_string_lossy().to_string()
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
 }
 
 fn read(path: &Path) -> Option<String> {
@@ -208,8 +211,12 @@ fn contains_word(text: &str, word: &str) -> bool {
 #[test]
 fn retirement_walk_skips_outputs_and_nested_worktrees_but_keeps_live_source_visible() {
     assert!(is_skipped_dir(Path::new("build")));
-    assert!(is_skipped_dir(Path::new(".claude/worktrees/worker/examples")));
-    assert!(is_skipped_dir(Path::new(".agent-worktrees/worker/examples")));
+    assert!(is_skipped_dir(Path::new(
+        ".claude/worktrees/worker/examples"
+    )));
+    assert!(is_skipped_dir(Path::new(
+        ".agent-worktrees/worker/examples"
+    )));
     assert!(!is_skipped_dir(Path::new("examples")));
     let live_type = concat!("De", "que");
     let live_source = format!("let queue: {live_type}<Int> = {live_type}.new()");
@@ -300,7 +307,9 @@ fn lint_policy_value_is_code(line: &str) -> Option<bool> {
     let mut chars = token.chars();
     let code_shape = matches!(chars.next(), Some('E' | 'L' | 'W'))
         && chars.count() == 4
-        && token[1..].chars().all(|character| character.is_ascii_digit());
+        && token[1..]
+            .chars()
+            .all(|character| character.is_ascii_digit());
     Some(code_shape)
 }
 
@@ -376,7 +385,11 @@ fn has_retired_comptime_mark(tokens: &[jet::Lexer::Token]) -> bool {
     false
 }
 
-fn tally_collection_example(path_suffix: &str, retired_form: &str, canonical_form: &str) -> (usize, usize) {
+fn tally_collection_example(
+    path_suffix: &str,
+    retired_form: &str,
+    canonical_form: &str,
+) -> (usize, usize) {
     content_files()
         .into_iter()
         .filter(|path| path.to_string_lossy().ends_with(path_suffix))
@@ -399,7 +412,7 @@ fn tally_print_family(retired_form: &str, canonical_form: &str) -> (usize, usize
                 retired + usize::from(text.contains(retired_form)),
                 canonical + usize::from(text.contains(canonical_form)),
             )
-    })
+        })
 }
 
 /// Detect an effect spelling in a source surface, rather than counting a
@@ -445,7 +458,10 @@ fn tally(row: &Retirement) -> (usize, usize) {
         }
         "jetpack-file" => {
             let files = all_files();
-            let retired = files.iter().filter(|path| file_name(path) == JETPACK_TOML).count();
+            let retired = files
+                .iter()
+                .filter(|path| file_name(path) == JETPACK_TOML)
+                .count();
             let canonical = files
                 .iter()
                 .filter(|path| matches!(file_name(path).as_str(), "package.jet" | "env.jet"))
@@ -600,11 +616,9 @@ fn tally(row: &Retirement) -> (usize, usize) {
             }
             (retired, canonical)
         }
-        "set-take" => tally_collection_example(
-            "examples/features/collections/set.jet",
-            ".take(",
-            ".pop(",
-        ),
+        "set-take" => {
+            tally_collection_example("examples/features/collections/set.jet", ".take(", ".pop(")
+        }
         "map-replace" => tally_collection_example(
             "examples/features/collections/map_surface.jet",
             ".replace(",
@@ -767,7 +781,11 @@ fn adoption_ratchets_toward_zero() {
         let ceiling = ceilings[row.id];
         let (retired, canonical) = tally(row);
         let total = retired + canonical;
-        let adoption = if total == 0 { 100.0 } else { canonical as f64 * 100.0 / total as f64 };
+        let adoption = if total == 0 {
+            100.0
+        } else {
+            canonical as f64 * 100.0 / total as f64
+        };
         let answer = match row.kind {
             RetirementKind::Rename => "fmt/fix rewrites",
             RetirementKind::Semantic => "refused",
@@ -833,7 +851,8 @@ fn ref_provider_set_has_one_definition_site() {
         .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
         .expect("RefSpec::Source::is_builtin body");
     assert!(
-        !is_builtin_body.contains("REF_SOURCE_") || is_builtin_body.contains("REF_SOURCE_PROVIDERS"),
+        !is_builtin_body.contains("REF_SOURCE_")
+            || is_builtin_body.contains("REF_SOURCE_PROVIDERS"),
         "RefSpec::Source::is_builtin must read Syntax::REF_SOURCE_PROVIDERS, not hand-copy \
          individual REF_SOURCE_* constants into a second list:\n{is_builtin_body}"
     );

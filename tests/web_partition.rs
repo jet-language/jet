@@ -190,7 +190,9 @@ fn run() {
     assert!(result.wasm_rust.contains("JetComplex"));
     assert!(result.wasm_rust.contains("jet_complex_mul"));
     assert!(result.wasm_rust.contains("jet_complex_abs"));
-    assert!(result.wasm_rust.contains("impl std::fmt::Display for JetComplex"));
+    assert!(result
+        .wasm_rust
+        .contains("impl std::fmt::Display for JetComplex"));
     assert!(!result.wasm_rust.contains("4i"));
 }
 
@@ -266,7 +268,9 @@ fn manifest_partitions(manifest: &str) -> Vec<(String, String)> {
         .find("\"partitions\": {")
         .expect("manifest missing partitions");
     let body = &manifest[start..];
-    let end = body.find("\n  }").expect("manifest partitions block unterminated");
+    let end = body
+        .find("\n  }")
+        .expect("manifest partitions block unterminated");
     body[..end]
         .lines()
         .skip(1)
@@ -348,7 +352,10 @@ fn run() { print(exported()) }
         .expect("repeat compile")
         .web_partition_report
         .expect("repeat report");
-    assert_eq!(report, repeat, "partition report must be stable across compiles");
+    assert_eq!(
+        report, repeat,
+        "partition report must be stable across compiles"
+    );
 }
 
 #[test]
@@ -366,7 +373,9 @@ fn run() { handlers.init() }
     let web = out.web.expect("web artifacts");
     let parts = manifest_partitions(&web.manifest_json);
     assert!(
-        parts.iter().any(|(k, b)| k == "handlers__init" && b == "JS"),
+        parts
+            .iter()
+            .any(|(k, b)| k == "handlers__init" && b == "JS"),
         "callback module must stay JS-qualified: {parts:?}"
     );
     assert!(

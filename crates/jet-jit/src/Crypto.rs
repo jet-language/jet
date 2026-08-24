@@ -8,10 +8,10 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::Marshal::clone_string;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use jet_foundation::AST::Type;
-use crate::Marshal::clone_string;
 
 pub(crate) mod runtime {
     #[allow(unused_imports)]
@@ -22,8 +22,8 @@ pub(crate) mod runtime {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHAFamily.rs");
-    use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
     pub(crate) use jet_crypto_entropy::jet_crypto_entropy_fill as jet_crypto_entropy_fill_for_host;
+    use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
     include!("../../jet-pkg-model/src/Prelude/Crypto.rs");
     include!("../../jet-pkg-model/src/Prelude/VaultNfc.rs");
     include!("../../jet-pkg-model/src/Prelude/SecretsCrypto.rs");
@@ -89,7 +89,9 @@ pub(crate) mod runtime {
 }
 
 /// Interpreter ambient: rebuild X25519SecretKey without a Cranelift heap.
-pub(crate) fn x25519_secret_from_vec(bytes: Vec<u8>) -> Result<runtime::JetX25519SecretKey, String> {
+pub(crate) fn x25519_secret_from_vec(
+    bytes: Vec<u8>,
+) -> Result<runtime::JetX25519SecretKey, String> {
     runtime::x25519_secret_from_bytes(bytes)
 }
 
@@ -184,8 +186,7 @@ fn claims_record(claims: runtime::JetAuthClaims) -> i64 {
             Ok(value) => (true, value as u64),
             Err(_) => (false, 0),
         };
-        let not_before =
-            crate::runtime_host::alloc_jit_result(rt, not_before_ok, not_before_bits);
+        let not_before = crate::runtime_host::alloc_jit_result(rt, not_before_ok, not_before_bits);
         let (issued_at_ok, issued_at_bits) = match claims.issued_at {
             Ok(value) => (true, value as u64),
             Err(_) => (false, 0),
@@ -261,21 +262,17 @@ fn auth_error_bits(error: runtime::JetAuthError) -> u64 {
         runtime::JetAuthError::DecodeError(value) => {
             named(DECODE_ERROR, vec![AuthErrorField::Text(value)])
         }
-        runtime::JetAuthError::WrongAudience { expected, actual } => {
-            named(
-                WRONG_AUDIENCE,
-                vec![AuthErrorField::Text(expected), AuthErrorField::Text(actual)],
-            )
-        }
-        runtime::JetAuthError::WrongIssuer { expected, actual } => {
-            named(
-                WRONG_ISSUER,
-                vec![
-                    AuthErrorField::Text(expected),
-                    AuthErrorField::OptionalText(actual),
-                ],
-            )
-        }
+        runtime::JetAuthError::WrongAudience { expected, actual } => named(
+            WRONG_AUDIENCE,
+            vec![AuthErrorField::Text(expected), AuthErrorField::Text(actual)],
+        ),
+        runtime::JetAuthError::WrongIssuer { expected, actual } => named(
+            WRONG_ISSUER,
+            vec![
+                AuthErrorField::Text(expected),
+                AuthErrorField::OptionalText(actual),
+            ],
+        ),
         runtime::JetAuthError::TokenNotYetValid => named(TOKEN_NOT_YET_VALID, vec![]),
     }
 }
@@ -290,14 +287,20 @@ fn take_crypto(handle: i64) -> Option<CryptoValue> {
 fn with_crypto<R>(handle: i64, f: impl FnOnce(&CryptoValue) -> Option<R>) -> Option<R> {
     Concurrency::with_runtime_mut(|rt| {
         let index = handle.saturating_sub(1) as usize;
-        rt.crypto_values.get(index).and_then(|slot| slot.as_ref()).and_then(f)
+        rt.crypto_values
+            .get(index)
+            .and_then(|slot| slot.as_ref())
+            .and_then(f)
     })
 }
 
 fn with_crypto_mut<R>(handle: i64, f: impl FnOnce(&mut CryptoValue) -> Option<R>) -> Option<R> {
     Concurrency::with_runtime_mut(|rt| {
         let index = handle.saturating_sub(1) as usize;
-        rt.crypto_values.get_mut(index).and_then(|slot| slot.as_mut()).and_then(f)
+        rt.crypto_values
+            .get_mut(index)
+            .and_then(|slot| slot.as_mut())
+            .and_then(f)
     })
 }
 
@@ -305,7 +308,9 @@ fn with_crypto_mut<R>(handle: i64, f: impl FnOnce(&mut CryptoValue) -> Option<R>
 /// Keeps the crypto handle live so `with` can loan it until expiry drops it.
 pub(crate) fn claim_expiring_secret(handle: i64) -> Option<crate::Memory::SecretState> {
     let bytes = with_crypto(handle, |value| match value {
-        CryptoValue::SigningKey(key) => Some(runtime::jet_crypto_expert_signing_key_bytes_impl(key)),
+        CryptoValue::SigningKey(key) => {
+            Some(runtime::jet_crypto_expert_signing_key_bytes_impl(key))
+        }
         CryptoValue::X25519SecretKey(key) => {
             Some(runtime::jet_crypto_expert_x25519_secret_bytes_impl(key))
         }
@@ -364,7 +369,9 @@ fn jet_jit_crypto_x25519_generate() -> i64 {
 
 fn jet_jit_crypto_x25519_public(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
-        CryptoValue::X25519SecretKey(key) => Some(runtime::jet_crypto_x25519_public_typed_impl(key)),
+        CryptoValue::X25519SecretKey(key) => {
+            Some(runtime::jet_crypto_x25519_public_typed_impl(key))
+        }
         _ => None,
     }) {
         Some(public) => push(CryptoValue::X25519PublicKey(public)),
@@ -410,11 +417,7 @@ fn jet_jit_crypto_sign(key_handle: i64, message_handle: i64) -> i64 {
     }
 }
 
-fn jet_jit_crypto_verify(
-    key_handle: i64,
-    message_handle: i64,
-    signature_handle: i64,
-) -> i64 {
+fn jet_jit_crypto_verify(key_handle: i64, message_handle: i64, signature_handle: i64) -> i64 {
     let message = clone_bytes(message_handle);
     let key = take_crypto(key_handle);
     let signature = take_crypto(signature_handle);
@@ -552,7 +555,9 @@ fn jet_jit_crypto_digest256_bytes(handle: i64) -> i64 {
 
 fn jet_jit_crypto_signature_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
-        CryptoValue::Signature(signature) => Some(runtime::jet_crypto_signature_bytes_impl(signature)),
+        CryptoValue::Signature(signature) => {
+            Some(runtime::jet_crypto_signature_bytes_impl(signature))
+        }
         _ => None,
     }) {
         Some(bytes) => alloc_bytes(&bytes),
@@ -578,7 +583,9 @@ fn jet_jit_crypto_sealed_bytes(handle: i64) -> i64 {
 
 fn jet_jit_crypto_x25519_public_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
-        CryptoValue::X25519PublicKey(key) => Some(runtime::jet_crypto_x25519_public_bytes_impl(key)),
+        CryptoValue::X25519PublicKey(key) => {
+            Some(runtime::jet_crypto_x25519_public_bytes_impl(key))
+        }
         _ => None,
     }) {
         Some(bytes) => alloc_bytes(&bytes),
@@ -610,7 +617,9 @@ fn jet_jit_crypto_x25519_public_from_text(text: i64) -> i64 {
 }
 
 fn jet_jit_crypto_secret_from_text(text: i64) -> i64 {
-    push(CryptoValue::Secret(runtime::jet_crypto_secret_from_text_impl(clone_string(text))))
+    push(CryptoValue::Secret(
+        runtime::jet_crypto_secret_from_text_impl(clone_string(text)),
+    ))
 }
 
 fn jet_jit_crypto_random_bytes(count: i64) -> i64 {
@@ -621,7 +630,11 @@ fn jet_jit_crypto_seal(recipients: i64, plaintext: i64, aad: i64) -> i64 {
     let Some(recipients) = public_keys(recipients) else {
         return error("invalid seal recipient list".to_string());
     };
-    match runtime::jet_crypto_seal_typed_impl(recipients, &clone_bytes(plaintext), &clone_bytes(aad)) {
+    match runtime::jet_crypto_seal_typed_impl(
+        recipients,
+        &clone_bytes(plaintext),
+        &clone_bytes(aad),
+    ) {
         Ok(sealed) => result(true, push(CryptoValue::Sealed(sealed)) as u64),
         Err(err) => error(err.to_string()),
     }
@@ -707,9 +720,9 @@ fn jet_jit_crypto_file_open(recipient: i64, source: i64, dest: i64) -> i64 {
 }
 
 fn jet_jit_crypto_secret_from_bytes(bytes: i64) -> i64 {
-    push(CryptoValue::Secret(runtime::jet_crypto_secret_from_bytes_impl(
-        clone_bytes(bytes),
-    )))
+    push(CryptoValue::Secret(
+        runtime::jet_crypto_secret_from_bytes_impl(clone_bytes(bytes)),
+    ))
 }
 
 fn jet_jit_crypto_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
@@ -754,9 +767,7 @@ fn jet_jit_crypto_constant_time_equal(a: i64, b: i64) -> i64 {
         _ => None,
     });
     match (left, right) {
-        (Some(a), Some(b)) => {
-            i64::from(runtime::jet_crypto_constant_time_secret_impl(&a, &b))
-        }
+        (Some(a), Some(b)) => i64::from(runtime::jet_crypto_constant_time_secret_impl(&a, &b)),
         _ => 0,
     }
 }
@@ -838,12 +849,7 @@ fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_zero: i64) 
     }
 }
 
-fn jet_jit_crypto_expert_hkdf_sha256(
-    ikm: i64,
-    salt: i64,
-    info: i64,
-    length: i64,
-) -> i64 {
+fn jet_jit_crypto_expert_hkdf_sha256(ikm: i64, salt: i64, info: i64, length: i64) -> i64 {
     match runtime::jet_crypto_expert_hkdf_sha256_impl(
         &clone_bytes(ikm),
         &clone_bytes(salt),
@@ -1006,12 +1012,7 @@ fn jet_jit_auth_register_user(user_id: i64, password_hash: i64) -> i64 {
     }
 }
 
-fn jet_jit_auth_password_login(
-    user_id: i64,
-    password_hash: i64,
-    now_ms: i64,
-    ttl_ms: i64,
-) -> i64 {
+fn jet_jit_auth_password_login(user_id: i64, password_hash: i64, now_ms: i64, ttl_ms: i64) -> i64 {
     match runtime::auth_password_login(
         clone_string(user_id),
         clone_string(password_hash),
@@ -1031,22 +1032,14 @@ fn jet_jit_auth_session_validate(session_id: i64, now_ms: i64) -> i64 {
     }
 }
 
-fn jet_jit_auth_magic_link_issue(
-    user_id: i64,
-    now_ms: i64,
-    ttl_ms: i64,
-) -> i64 {
+fn jet_jit_auth_magic_link_issue(user_id: i64, now_ms: i64, ttl_ms: i64) -> i64 {
     match runtime::auth_magic_link_issue(clone_string(user_id), now_ms, ttl_ms) {
         Ok(token) => result_text(token),
         Err(message) => error(message),
     }
 }
 
-fn jet_jit_auth_magic_link_consume(
-    token: i64,
-    now_ms: i64,
-    ttl_ms: i64,
-) -> i64 {
+fn jet_jit_auth_magic_link_consume(token: i64, now_ms: i64, ttl_ms: i64) -> i64 {
     match runtime::auth_magic_link_consume(clone_string(token), now_ms, ttl_ms) {
         Ok(session) => result(true, session_record(session) as u64),
         Err(message) => error(message),
@@ -1060,18 +1053,8 @@ fn jet_jit_auth_oauth_begin(provider: i64) -> i64 {
     }
 }
 
-fn jet_jit_auth_oauth_finish(
-    state: i64,
-    subject: i64,
-    now_ms: i64,
-    ttl_ms: i64,
-) -> i64 {
-    match runtime::auth_oauth_finish(
-        clone_string(state),
-        clone_string(subject),
-        now_ms,
-        ttl_ms,
-    ) {
+fn jet_jit_auth_oauth_finish(state: i64, subject: i64, now_ms: i64, ttl_ms: i64) -> i64 {
+    match runtime::auth_oauth_finish(clone_string(state), clone_string(subject), now_ms, ttl_ms) {
         Ok(session) => result(true, session_record(session) as u64),
         Err(message) => error(message),
     }
@@ -1558,9 +1541,10 @@ fn jet_jit_vault_export_to_recipients(key_ref: i64, recipients: i64, tag: i64) -
     };
     match tag {
         1 => match with_crypto(key_ref, |value| match value {
-            CryptoValue::KeyRefSigning(key) => {
-                Some(runtime::jet_vault_export_to_recipients_impl(key, &recipients))
-            }
+            CryptoValue::KeyRefSigning(key) => Some(runtime::jet_vault_export_to_recipients_impl(
+                key,
+                &recipients,
+            )),
             _ => None,
         }) {
             Some(Ok(wrapped)) => result(true, push(CryptoValue::WrappedVaultKey(wrapped)) as u64),
@@ -1568,9 +1552,10 @@ fn jet_jit_vault_export_to_recipients(key_ref: i64, recipients: i64, tag: i64) -
             None => error("invalid key ref handle".to_string()),
         },
         2 => match with_crypto(key_ref, |value| match value {
-            CryptoValue::KeyRefX25519(key) => {
-                Some(runtime::jet_vault_export_to_recipients_impl(key, &recipients))
-            }
+            CryptoValue::KeyRefX25519(key) => Some(runtime::jet_vault_export_to_recipients_impl(
+                key,
+                &recipients,
+            )),
             _ => None,
         }) {
             Some(Ok(wrapped)) => result(true, push(CryptoValue::WrappedVaultKey(wrapped)) as u64),
@@ -1591,9 +1576,10 @@ fn jet_jit_vault_export_to_passphrase(key_ref: i64, passphrase: i64, tag: i64) -
     };
     match tag {
         1 => match with_crypto(key_ref, |value| match value {
-            CryptoValue::KeyRefSigning(key) => {
-                Some(runtime::jet_vault_export_to_passphrase_impl(key, &passphrase))
-            }
+            CryptoValue::KeyRefSigning(key) => Some(runtime::jet_vault_export_to_passphrase_impl(
+                key,
+                &passphrase,
+            )),
             _ => None,
         }) {
             Some(Ok(wrapped)) => result(true, push(CryptoValue::WrappedVaultKey(wrapped)) as u64),
@@ -1601,9 +1587,10 @@ fn jet_jit_vault_export_to_passphrase(key_ref: i64, passphrase: i64, tag: i64) -
             None => error("invalid key ref handle".to_string()),
         },
         2 => match with_crypto(key_ref, |value| match value {
-            CryptoValue::KeyRefX25519(key) => {
-                Some(runtime::jet_vault_export_to_passphrase_impl(key, &passphrase))
-            }
+            CryptoValue::KeyRefX25519(key) => Some(runtime::jet_vault_export_to_passphrase_impl(
+                key,
+                &passphrase,
+            )),
             _ => None,
         }) {
             Some(Ok(wrapped)) => result(true, push(CryptoValue::WrappedVaultKey(wrapped)) as u64),
@@ -1623,7 +1610,9 @@ fn jet_jit_vault_wrapped_from_bytes(bytes: i64) -> i64 {
 
 fn jet_jit_vault_wrapped_bytes(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
-        CryptoValue::WrappedVaultKey(wrapped) => Some(runtime::jet_vault_wrapped_bytes_impl(wrapped)),
+        CryptoValue::WrappedVaultKey(wrapped) => {
+            Some(runtime::jet_vault_wrapped_bytes_impl(wrapped))
+        }
         _ => None,
     }) {
         Some(bytes) => alloc_bytes(&bytes),
@@ -1710,9 +1699,9 @@ fn jet_jit_vault_authorize_wrapped_import(plan: i64, reason: i64, tag: i64) -> i
     let reason = clone_string(reason);
     match tag {
         1 => match with_crypto(plan, |value| match value {
-            CryptoValue::WrappedPlanSigning(plan) => {
-                Some(runtime::jet_vault_authorize_wrapped_import_impl(plan, &reason))
-            }
+            CryptoValue::WrappedPlanSigning(plan) => Some(
+                runtime::jet_vault_authorize_wrapped_import_impl(plan, &reason),
+            ),
             _ => None,
         }) {
             Some(Ok(write)) => result(true, push(CryptoValue::WriteSigning(write)) as u64),
@@ -1720,9 +1709,9 @@ fn jet_jit_vault_authorize_wrapped_import(plan: i64, reason: i64, tag: i64) -> i
             None => error("invalid wrapped import plan".to_string()),
         },
         2 => match with_crypto(plan, |value| match value {
-            CryptoValue::WrappedPlanX25519(plan) => {
-                Some(runtime::jet_vault_authorize_wrapped_import_impl(plan, &reason))
-            }
+            CryptoValue::WrappedPlanX25519(plan) => Some(
+                runtime::jet_vault_authorize_wrapped_import_impl(plan, &reason),
+            ),
             _ => None,
         }) {
             Some(Ok(write)) => result(true, push(CryptoValue::WriteX25519(write)) as u64),
@@ -1746,13 +1735,12 @@ fn jet_jit_vault_commit_import_wrapped(write: i64, plan: i64, tag: i64) -> i64 {
             _ => error("invalid commit_import_wrapped handles".to_string()),
         },
         2 => match (take_crypto(write), take_crypto(plan)) {
-            (
-                Some(CryptoValue::WriteX25519(write)),
-                Some(CryptoValue::WrappedPlanX25519(plan)),
-            ) => match runtime::jet_vault_commit_import_wrapped_impl(write, plan) {
-                Ok(key) => result(true, push(CryptoValue::KeyRefX25519(key)) as u64),
-                Err(err) => err_debug(err),
-            },
+            (Some(CryptoValue::WriteX25519(write)), Some(CryptoValue::WrappedPlanX25519(plan))) => {
+                match runtime::jet_vault_commit_import_wrapped_impl(write, plan) {
+                    Ok(key) => result(true, push(CryptoValue::KeyRefX25519(key)) as u64),
+                    Err(err) => err_debug(err),
+                }
+            }
             _ => error("invalid commit_import_wrapped handles".to_string()),
         },
         _ => error("invalid vault key tag".to_string()),
@@ -1760,8 +1748,10 @@ fn jet_jit_vault_commit_import_wrapped(write: i64, plan: i64, tag: i64) -> i64 {
 }
 
 fn jet_jit_vault_expert_prepare_import_signing(name: i64, bytes: i64) -> i64 {
-    match runtime::jet_vault_expert_prepare_import_signing_impl(&clone_string(name), clone_bytes(bytes))
-    {
+    match runtime::jet_vault_expert_prepare_import_signing_impl(
+        &clone_string(name),
+        clone_bytes(bytes),
+    ) {
         Ok(plan) => result(true, push(CryptoValue::PlanSigning(plan)) as u64),
         Err(err) => err_debug(err),
     }

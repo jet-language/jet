@@ -24,10 +24,13 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
         .iter()
         .filter_map(|item| {
             let Item::Distinct(d) = item else { return None };
-            let Type::Named(base) = &d.base else { return None };
-            items.iter().any(|item| {
-                matches!(item, Item::Distinct(other) if other.name == *base)
-            }).then(|| d.name.clone())
+            let Type::Named(base) = &d.base else {
+                return None;
+            };
+            items
+                .iter()
+                .any(|item| matches!(item, Item::Distinct(other) if other.name == *base))
+                .then(|| d.name.clone())
         })
         .collect();
 
@@ -81,23 +84,25 @@ fn has_derive(derives: &[(String, Span)], name: &str) -> bool {
     derives.iter().any(|(derive, _)| derive == name)
 }
 
-fn struct_derive_items(
-    s: &crate::AST::StructDef,
-    equatable: bool,
-    comparable: bool,
-) -> Vec<Item> {
-    let fields: Vec<_> = s.fields.iter().filter(|field| field.computed.is_none()).collect();
+fn struct_derive_items(s: &crate::AST::StructDef, equatable: bool, comparable: bool) -> Vec<Item> {
+    let fields: Vec<_> = s
+        .fields
+        .iter()
+        .filter(|field| field.computed.is_none())
+        .collect();
     let owner_type = applied_owner_type(&s.name, &s.type_params);
     let mut out = Vec::new();
     if equatable {
         let equality = fields
             .iter()
-            .map(|field| binary(
-                BinOp::Eq,
-                field_read("self", &field.name, s.name_span),
-                field_read("rhs", &field.name, s.name_span),
-                s.name_span,
-            ))
+            .map(|field| {
+                binary(
+                    BinOp::Eq,
+                    field_read("self", &field.name, s.name_span),
+                    field_read("rhs", &field.name, s.name_span),
+                    s.name_span,
+                )
+            })
             .reduce(|left, right| binary(BinOp::And, left, right, s.name_span))
             .unwrap_or_else(|| Expr::Bool(true, s.name_span));
         out.push(Item::Impl(derive_impl(
@@ -105,7 +110,10 @@ fn struct_derive_items(
             crate::Generics::EQUATABLE,
             generated_func(
                 "equal",
-                vec![self_param(s.name_span), named_param("rhs", owner_type.clone(), s.name_span)],
+                vec![
+                    self_param(s.name_span),
+                    named_param("rhs", owner_type.clone(), s.name_span),
+                ],
                 Some(Type::Bool),
                 vec![Stmt::Return(Some(equality), s.name_span)],
                 s.name_span,
@@ -129,13 +137,19 @@ fn struct_derive_items(
                 s.name_span,
             ));
         }
-        body.push(Stmt::Return(Some(ordering("Equal", s.name_span)), s.name_span));
+        body.push(Stmt::Return(
+            Some(ordering("Equal", s.name_span)),
+            s.name_span,
+        ));
         out.push(Item::Impl(derive_impl(
             &s.name,
             crate::Generics::COMPARABLE,
             generated_func(
                 "compare",
-                vec![self_param(s.name_span), named_param("rhs", owner_type, s.name_span)],
+                vec![
+                    self_param(s.name_span),
+                    named_param("rhs", owner_type, s.name_span),
+                ],
                 Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
                 body,
                 s.name_span,
@@ -146,11 +160,7 @@ fn struct_derive_items(
     out
 }
 
-fn enum_derive_items(
-    e: &crate::AST::EnumDef,
-    equatable: bool,
-    comparable: bool,
-) -> Vec<Item> {
+fn enum_derive_items(e: &crate::AST::EnumDef, equatable: bool, comparable: bool) -> Vec<Item> {
     let mut out = Vec::new();
     let owner_type = applied_owner_type(&e.name, &e.type_params);
     let recursive = e.variants.iter().any(|variant| match &variant.payload {
@@ -186,7 +196,10 @@ fn enum_derive_items(
                 crate::Generics::EQUATABLE,
                 generated_func(
                     "equal",
-                    vec![self_param(e.name_span), named_param("rhs", owner_type.clone(), e.name_span)],
+                    vec![
+                        self_param(e.name_span),
+                        named_param("rhs", owner_type.clone(), e.name_span),
+                    ],
                     Some(Type::Bool),
                     vec![Stmt::Return(Some(call), e.name_span)],
                     e.name_span,
@@ -199,7 +212,10 @@ fn enum_derive_items(
                 crate::Generics::EQUATABLE,
                 generated_func(
                     "equal",
-                    vec![self_param(e.name_span), named_param("rhs", owner_type.clone(), e.name_span)],
+                    vec![
+                        self_param(e.name_span),
+                        named_param("rhs", owner_type.clone(), e.name_span),
+                    ],
                     Some(Type::Bool),
                     enum_dispatch_body(e, "self", "rhs", DispatchKind::Equality),
                     e.name_span,
@@ -316,7 +332,10 @@ fn distinct_derive_items(d: &crate::AST::DistinctDef) -> Vec<Item> {
         crate::Generics::EQUATABLE,
         generated_func(
             "equal",
-            vec![self_param(derive_span), named_param("rhs", Type::Named(d.name.clone()), derive_span)],
+            vec![
+                self_param(derive_span),
+                named_param("rhs", Type::Named(d.name.clone()), derive_span),
+            ],
             Some(Type::Bool),
             vec![Stmt::Return(Some(equality), derive_span)],
             derive_span,
@@ -331,11 +350,22 @@ fn distinct_derive_items(d: &crate::AST::DistinctDef) -> Vec<Item> {
             crate::Generics::COMPARABLE,
             generated_func(
                 "compare",
-                vec![self_param(derive_span), named_param("rhs", Type::Named(d.name.clone()), derive_span)],
+                vec![
+                    self_param(derive_span),
+                    named_param("rhs", Type::Named(d.name.clone()), derive_span),
+                ],
                 Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
                 vec![
-                    if_stmt(binary(BinOp::Lt, self_raw.clone(), rhs_raw.clone(), derive_span), vec![return_ordering("Less", derive_span)], derive_span),
-                    if_stmt(binary(BinOp::Gt, self_raw, rhs_raw, derive_span), vec![return_ordering("Greater", derive_span)], derive_span),
+                    if_stmt(
+                        binary(BinOp::Lt, self_raw.clone(), rhs_raw.clone(), derive_span),
+                        vec![return_ordering("Less", derive_span)],
+                        derive_span,
+                    ),
+                    if_stmt(
+                        binary(BinOp::Gt, self_raw, rhs_raw, derive_span),
+                        vec![return_ordering("Greater", derive_span)],
+                        derive_span,
+                    ),
                     Stmt::Return(Some(ordering("Equal", derive_span)), derive_span),
                 ],
                 derive_span,
@@ -367,18 +397,35 @@ fn enum_dispatch_body(
             let right_bindings = payload_bindings(&right_variant.payload, "right");
             let body = if left_index != right_index {
                 match kind {
-                    DispatchKind::Equality => vec![Stmt::Return(Some(Expr::Bool(false, e.name_span)), e.name_span)],
-                    DispatchKind::Comparison => vec![Stmt::Return(Some(ordering(
-                        if left_index < right_index { "Less" } else { "Greater" },
+                    DispatchKind::Equality => vec![Stmt::Return(
+                        Some(Expr::Bool(false, e.name_span)),
                         e.name_span,
-                    )), e.name_span)],
+                    )],
+                    DispatchKind::Comparison => vec![Stmt::Return(
+                        Some(ordering(
+                            if left_index < right_index {
+                                "Less"
+                            } else {
+                                "Greater"
+                            },
+                            e.name_span,
+                        )),
+                        e.name_span,
+                    )],
                 }
             } else {
                 match kind {
-                    DispatchKind::Equality => vec![Stmt::Return(Some(
-                        equality_expression(&left_bindings, &right_bindings, e.name_span),
-                    ), e.name_span)],
-                    DispatchKind::Comparison => comparison_body(&left_bindings, &right_bindings, e.name_span),
+                    DispatchKind::Equality => vec![Stmt::Return(
+                        Some(equality_expression(
+                            &left_bindings,
+                            &right_bindings,
+                            e.name_span,
+                        )),
+                        e.name_span,
+                    )],
+                    DispatchKind::Comparison => {
+                        comparison_body(&left_bindings, &right_bindings, e.name_span)
+                    }
                 }
             };
             inner_arms.push(SwitchArm {
@@ -447,7 +494,9 @@ fn payload_bindings(payload: &VariantPayload, prefix: &str) -> Vec<String> {
         VariantPayload::Single(..) => 1,
         VariantPayload::Named(fields) => fields.len(),
     };
-    (0..count).map(|index| format!("{prefix}_{index}")).collect()
+    (0..count)
+        .map(|index| format!("{prefix}_{index}"))
+        .collect()
 }
 
 fn pattern_test(
@@ -474,15 +523,18 @@ fn pattern_test(
 fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
     let Item::Impl(implementation) = item else {
         if let Item::Func(function) = item {
-            if !items.iter().any(|existing| {
-                matches!(existing, Item::Func(old) if old.name == function.name)
-            }) {
+            if !items
+                .iter()
+                .any(|existing| matches!(existing, Item::Func(old) if old.name == function.name))
+            {
                 items.push(Item::Func(function));
             }
         }
         return;
     };
-    let Some(trait_name) = implementation.trait_name.clone() else { return };
+    let Some(trait_name) = implementation.trait_name.clone() else {
+        return;
+    };
     if has_trait_impl(items, &implementation.type_name, &trait_name) {
         return;
     }
@@ -493,7 +545,9 @@ fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
     }) {
         target.push(TraitImplBlock {
             trait_name,
-            trait_span: implementation.trait_span.unwrap_or(implementation.type_span),
+            trait_span: implementation
+                .trait_span
+                .unwrap_or(implementation.type_span),
             methods: implementation.methods,
             compiler_generated: true,
             assoc_type_impls: implementation.assoc_type_impls,
@@ -506,8 +560,12 @@ fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
 fn has_trait_impl(items: &[Item], type_name: &str, trait_name: &str) -> bool {
     items.iter().any(|item| match item {
         Item::Impl(i) => i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name),
-        Item::Struct(s) => s.name == type_name && s.trait_impls.iter().any(|i| i.trait_name == trait_name),
-        Item::Enum(e) => e.name == type_name && e.trait_impls.iter().any(|i| i.trait_name == trait_name),
+        Item::Struct(s) => {
+            s.name == type_name && s.trait_impls.iter().any(|i| i.trait_name == trait_name)
+        }
+        Item::Enum(e) => {
+            e.name == type_name && e.trait_impls.iter().any(|i| i.trait_name == trait_name)
+        }
         _ => false,
     })
 }
@@ -559,7 +617,12 @@ fn generated_func(
 }
 
 fn self_param(span: Span) -> Param {
-    named_param_with_ty("self", Type::Named(String::new()), span, AccessConvention::Read)
+    named_param_with_ty(
+        "self",
+        Type::Named(String::new()),
+        span,
+        AccessConvention::Read,
+    )
 }
 
 fn named_param(name: &str, ty: Type, span: Span) -> Param {

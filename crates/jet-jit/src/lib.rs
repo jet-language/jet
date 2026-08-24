@@ -13,7 +13,6 @@
 // each using a different subset, so dead-code reports here are about the
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
-
 #![allow(non_snake_case)]
 
 /// D-JOB-SUBCMD1=C: the JIT and interpreter import the same Prelude selector
@@ -22,9 +21,7 @@
 
 /// D-ALLOC-PROGRAM1=A / I9: engines only marshal the checked typed fact into
 /// the allocator kernel compiled from Prelude/ProgramAllocator.rs.
-fn program_allocator_cap_bytes(
-    bundle: &jet_foundation::AST::ProgramBundle,
-) -> Option<u64> {
+fn program_allocator_cap_bytes(bundle: &jet_foundation::AST::ProgramBundle) -> Option<u64> {
     match &bundle.program_allocator {
         jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } => {
             Some(cap.map_or(0, |size| size.bytes))
@@ -213,30 +210,30 @@ pub(crate) mod host_fns_audit {
 
 mod Archive;
 mod Args;
-mod ambient_interp;
-mod Cell;
 mod CLI;
+mod Cell;
 mod Collections;
 mod Compress;
 mod Compute;
 mod Concurrency;
 mod CoreHost;
 mod Crypto;
-mod Data;
 mod DB;
+mod Data;
 mod Encoding;
-mod enc_stream;
+mod Ffi;
 mod Fmt;
 mod Game;
-mod host_seam;
 mod IO;
 mod Layout;
 mod Marshal;
 mod Math;
 mod MathExtra;
-mod Ffi;
 mod Memory;
 mod Mod;
+mod ambient_interp;
+mod enc_stream;
+mod host_seam;
 mod net_http_rt;
 pub(crate) use jet_codegen::fault_injection;
 mod Net;
@@ -454,32 +451,32 @@ pub(crate) struct JitResultValue {
     bits: u64,
 }
 
-#[path = "jit/runtime_host.rs"]
-mod runtime_host;
-#[path = "jit/safety.rs"]
-mod safety;
-#[path = "jit/types_meta.rs"]
-pub(crate) mod types_meta;
-#[path = "jit/lower_ctx.rs"]
-mod lower_ctx;
-#[path = "jit/functions_compile.rs"]
-mod functions_compile;
-#[path = "jit/tiers.rs"]
-mod tiers;
-#[path = "jit/deopt.rs"]
-mod deopt;
-#[path = "jit/resident.rs"]
-mod resident;
 #[path = "jit/api_debug.rs"]
 mod api_debug;
 #[path = "jit/backend.rs"]
 mod backend;
+#[path = "jit/deopt.rs"]
+mod deopt;
+#[path = "jit/functions_compile.rs"]
+mod functions_compile;
 #[path = "jit/gap.rs"]
 mod gap;
-#[path = "jit/trace.rs"]
-mod trace;
+#[path = "jit/lower_ctx.rs"]
+mod lower_ctx;
+#[path = "jit/resident.rs"]
+mod resident;
+#[path = "jit/runtime_host.rs"]
+mod runtime_host;
+#[path = "jit/safety.rs"]
+mod safety;
 #[path = "jit/tier_cache.rs"]
 mod tier_cache;
+#[path = "jit/tiers.rs"]
+mod tiers;
+#[path = "jit/trace.rs"]
+mod trace;
+#[path = "jit/types_meta.rs"]
+pub(crate) mod types_meta;
 
 // `Concurrency.rs` (a real sibling module, not an include! fragment) reaches
 // `JitRuntime` via `super::JitRuntime` — keep that path alive at crate root.
@@ -502,20 +499,20 @@ pub fn set_program_owns_streams() {
 pub use api_debug::{
     cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,
     jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,
-    jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail, ResidentJitSafety,
+    jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail,
     resident_jit_safe_bundle, resident_jit_safe_bundle_detail, run_resident_strict_for_test,
-    tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle,
+    tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle, ResidentJitSafety,
 };
-pub use backend::CraneliftBackend;
 pub use backend::plan_bundle_tiers;
+pub use backend::CraneliftBackend;
 pub use gap::{entry_run_name, is_e2211, JitGap};
+pub use tier_cache::{run_cached_module, take_last_tier_artifact};
 pub use tiers::{
     publish_trace, record_trace, set_trace_tiers, take_last_trace, trace_tiers_enabled, Tier,
     TierPlan, TierRow,
 };
-pub use tier_cache::{run_cached_module, take_last_tier_artifact};
 pub use trace::{
-    fallback_invoked_for_test, jit_executed_for_test, note_fallback_invoked_for_test,
-    note_deopt_invoked_for_test, deopt_invoked_for_test, reset_jit_trace_for_test,
-    jit_trace_flags_for_test, merge_jit_trace_flags_for_test, JitTraceFlags,
+    deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,
+    jit_trace_flags_for_test, merge_jit_trace_flags_for_test, note_deopt_invoked_for_test,
+    note_fallback_invoked_for_test, reset_jit_trace_for_test, JitTraceFlags,
 };

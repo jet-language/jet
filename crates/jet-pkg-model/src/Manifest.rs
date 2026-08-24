@@ -8,8 +8,8 @@
 //! `package.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
 //! no back-compat alias.
 
-use crate::Diagnostics::Diagnostic;
 use crate::Authority::AuthorityResolver;
+use crate::Diagnostics::Diagnostic;
 use crate::Package::{self, PackageParseError};
 use crate::Syntax;
 use std::collections::BTreeMap;
@@ -117,9 +117,7 @@ pub fn version_banner() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        edition_is_supported, latest_edition, parse, version_banner, SUPPORTED_EDITIONS,
-    };
+    use super::{edition_is_supported, latest_edition, parse, version_banner, SUPPORTED_EDITIONS};
     use crate::Package::PackageParseError;
     use std::path::Path;
 
@@ -169,7 +167,9 @@ policy: {
             .expect_err("duplicate license policy entries must fail");
         assert_eq!(diagnostic.code, "E1206");
         assert!(diagnostic.what.contains("package.jet"));
-        assert!(diagnostic.why.contains("package metadata policy is malformed"));
+        assert!(diagnostic
+            .why
+            .contains("package metadata policy is malformed"));
         assert!(diagnostic.fix.contains("syntax-decisions.md"));
     }
 }

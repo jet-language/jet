@@ -156,7 +156,12 @@ impl<'a> InlineAlwaysScan<'a> {
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
+                    crate::AST::ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive: _,
+                    } => {
                         self.scan_expr(start);
                         self.scan_expr(end);
                         if let Some(step) = step {
@@ -165,7 +170,9 @@ impl<'a> InlineAlwaysScan<'a> {
                     }
                     crate::AST::ForKind::In { collection, step } => {
                         self.scan_expr(collection);
-                        if let Some(step) = step { self.scan_expr(step); }
+                        if let Some(step) = step {
+                            self.scan_expr(step);
+                        }
                     }
                 }
                 self.scan_stmts(body);
@@ -205,7 +212,9 @@ impl<'a> InlineAlwaysScan<'a> {
             } => {
                 self.scan_binding(init);
                 self.scan_expr(cond);
-                if let Some(step) = step { self.scan_stmt(step); }
+                if let Some(step) = step {
+                    self.scan_stmt(step);
+                }
                 self.scan_stmts(body);
             }
             Stmt::Unsafe { body, .. }
@@ -214,7 +223,7 @@ impl<'a> InlineAlwaysScan<'a> {
             | Stmt::Shield { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::ComptimeBlock { body, .. }
@@ -299,7 +308,10 @@ impl<'a> InlineAlwaysScan<'a> {
                 }
             }
             Expr::StrMatchLit(_, _) | Expr::BinMatchLit(_, _) => {}
-            Expr::Int(_, _, _, _) | Expr::Float(_, _, _, _) | Expr::Bool(_, _) | Expr::Char(_, _) => {}
+            Expr::Int(_, _, _, _)
+            | Expr::Float(_, _, _, _)
+            | Expr::Bool(_, _)
+            | Expr::Char(_, _) => {}
             Expr::ListLit(items, _) => {
                 for i in items {
                     self.scan_expr(i);
@@ -318,7 +330,11 @@ impl<'a> InlineAlwaysScan<'a> {
                 self.scan_expr(index);
             }
             Expr::Slice {
-                base, start, end, range, ..
+                base,
+                start,
+                end,
+                range,
+                ..
             } => {
                 self.scan_expr(base);
                 if let Some(range) = range {

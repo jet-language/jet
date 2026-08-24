@@ -205,11 +205,7 @@ fn devtools_ice_report_bundles_source_rust_and_versions() {
 fn devtools_new_example_scaffolds_a_passing_golden_pair() {
     let root = repo_root();
     let topic = "tooling";
-    let name = format!(
-        "devtools_test_scaffold_{}_{}",
-        std::process::id(),
-        line!()
-    );
+    let name = format!("devtools_test_scaffold_{}_{}", std::process::id(), line!());
     let example_path = root
         .join("examples/features")
         .join(topic)
@@ -246,8 +242,8 @@ fn devtools_new_example_scaffolds_a_passing_golden_pair() {
     // fixture byte for byte.
     let src = fs::read_to_string(&example_path).unwrap();
     let shown = format!("examples/features/{}/{}.jet", topic, name);
-    let compiled = jet::compile_with_path(&src, &example_path.to_string_lossy())
-        .unwrap_or_else(|diags| {
+    let compiled =
+        jet::compile_with_path(&src, &example_path.to_string_lossy()).unwrap_or_else(|diags| {
             panic!(
                 "scaffolded example failed the front end:\n{}",
                 jet::render_diagnostics(&shown, &src, &diags)
@@ -401,7 +397,13 @@ fn devtools_bless_dry_run_lists_every_known_target() {
 #[test]
 fn devtools_bless_rejects_unknown_target() {
     let out = Command::new(jet())
-        .args(["self", "devtools", "bless", "not_a_real_test_target", "--dry-run"])
+        .args([
+            "self",
+            "devtools",
+            "bless",
+            "not_a_real_test_target",
+            "--dry-run",
+        ])
         .output()
         .unwrap();
     assert!(

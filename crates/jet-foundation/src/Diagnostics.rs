@@ -83,8 +83,8 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub use crate::Report::{
-    FixApplicability, FixSafety, ReportEdit, ReportEnvelope, ReportExtension,
-    ReportPath, ReportSpan, REPORT_SCHEMA, render_status_json,
+    render_status_json, FixApplicability, FixSafety, ReportEdit, ReportEnvelope, ReportExtension,
+    ReportPath, ReportSpan, REPORT_SCHEMA,
 };
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.

@@ -233,8 +233,7 @@ fn run() {
 "#,
     );
     assert_eq!(
-        out,
-        "people\nports\npeople\nada,alan\n80\n0\nkept nothing\n",
+        out, "people\nports\npeople\nada,alan\n80\n0\nkept nothing\n",
         "two outcomes must not share a fact, and a second read must answer the first"
     );
 }

@@ -9,7 +9,10 @@ use crate::RefSpec::Source;
 /// — the type `loader.rs`/`fetch.rs`/`lock.rs` operate on. `raw` is the
 /// original `package.jet` text (kept for comment-preserving `jet add`/
 /// `remove` edits).
-pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::Manifest, Diagnostic> {
+pub fn to_manifest(
+    facts: &PackageFacts,
+    raw: &str,
+) -> Result<crate::Manifest::Manifest, Diagnostic> {
     use crate::Manifest::{DepSpec, GitSelector, Manifest, PackageMeta as MPackageMeta};
     use std::collections::BTreeMap;
 
@@ -36,10 +39,16 @@ pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::M
                     GitSelector::Rev(r) => GitSelector::Rev(r.clone()),
                 },
             },
-            DepSource::Provider { provider: Source::Path, target } => {
-                DepSpec::Path { path: target.clone() }
-            }
-            DepSource::Provider { provider: Source::Github, target } => {
+            DepSource::Provider {
+                provider: Source::Path,
+                target,
+            } => DepSpec::Path {
+                path: target.clone(),
+            },
+            DepSource::Provider {
+                provider: Source::Github,
+                target,
+            } => {
                 let Some((owner_repo, rev)) = target.rsplit_once('/') else {
                     return Err(bad_dep_shape(
                         name,

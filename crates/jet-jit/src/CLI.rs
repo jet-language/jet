@@ -8,13 +8,13 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type};
+use crate::Marshal::alloc_string;
 use jet_foundation::CLISchema::{
     self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
+use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use crate::Marshal::alloc_string;
 
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
@@ -246,11 +246,7 @@ pub(crate) fn cli_run_requires_adapter() -> bool {
 }
 
 pub(crate) fn cli_run_frame_is_value() -> bool {
-    CLI_PLAN.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .is_some_and(|plan| plan.run_record)
-    })
+    CLI_PLAN.with(|slot| slot.borrow().as_ref().is_some_and(|plan| plan.run_record))
 }
 
 pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
@@ -271,10 +267,12 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
     else {
         return;
     };
-    let entry_leaf = schema.entry_type.rsplit('.').next().unwrap_or(&schema.entry_type);
-    let type_identity = (!CLISchema::is_direct_run_entry(
-        &bundle.modules[bundle.entry].items,
-    ))
+    let entry_leaf = schema
+        .entry_type
+        .rsplit('.')
+        .next()
+        .unwrap_or(&schema.entry_type);
+    let type_identity = (!CLISchema::is_direct_run_entry(&bundle.modules[bundle.entry].items))
         .then(|| {
             if cli_module == bundle.entry {
                 Some(entry_leaf.to_string())
@@ -286,12 +284,9 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
             }
         })
         .flatten();
-    if let Some(plan) = cli_plan_from_schema(
-        schema,
-        &module.items,
-        cli_items,
-        type_identity.as_deref(),
-    ) {
+    if let Some(plan) =
+        cli_plan_from_schema(schema, &module.items, cli_items, type_identity.as_deref())
+    {
         install_cli_plan(plan);
     }
 }
@@ -406,15 +401,10 @@ fn cli_plan_from_struct_schema(
 }
 
 fn cli_run_returns_value(items: &[Item]) -> bool {
-    match items
-        .iter()
-        .find_map(|item| match item {
-            Item::Func(function) if function.name == "run" => {
-                function.return_type.as_ref()
-            }
-            _ => None,
-        })
-    {
+    match items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" => function.return_type.as_ref(),
+        _ => None,
+    }) {
         Some(Type::Named(name)) if name == "Unit" => false,
         Some(_) => true,
         None => false,
@@ -480,10 +470,7 @@ fn build_spec(
                 };
             }
             CLIInputShape::Value { .. } => {
-                let meta = input
-                    .metavar
-                    .clone()
-                    .unwrap_or_else(|| "VALUE".to_string());
+                let meta = input.metavar.clone().unwrap_or_else(|| "VALUE".to_string());
                 spec = option(
                     spec,
                     &flag_name,
@@ -502,10 +489,7 @@ fn build_spec(
     spec
 }
 
-fn build_command_spec(
-    schema: &CLICommandSchema,
-    prog: &str,
-) -> (Spec, Vec<(String, Spec)>) {
+fn build_command_spec(schema: &CLICommandSchema, prog: &str) -> (Spec, Vec<(String, Spec)>) {
     let mut root = build_spec(
         &schema.inputs,
         schema.description.as_deref(),
@@ -623,7 +607,9 @@ fn decode_frame(
                     .map(|bits| bits as i64)
                     .map_err(|_| format!("invalid float for --{flag_name}"))?,
                 None => match default {
-                    Some(CLIDefault::Value(CtValue::Float(value))) => value.as_f64().to_bits() as i64,
+                    Some(CLIDefault::Value(CtValue::Float(value))) => {
+                        value.as_f64().to_bits() as i64
+                    }
                     Some(CLIDefault::TypeDefault) => 0.0f64.to_bits() as i64,
                     Some(CLIDefault::Value(other)) => other
                         .jet_show()
@@ -727,7 +713,7 @@ fn decode_frame(
                 };
                 inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi)
                     .map_err(|reason| format!("invalid value for --{flag_name}: {reason}"))?
-            },
+            }
             (
                 CLIInputShape::Value {
                     kind: CLIValueKind::String | CLIValueKind::Path,
@@ -772,7 +758,8 @@ fn decode_frame(
                 Type::Option(_),
             ) => match option_val(parsed, flag_name) {
                 Some(v) => {
-                    let value = if matches!(fty, Type::Option(inner) if matches!(inner.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_PATH)) {
+                    let value = if matches!(fty, Type::Option(inner) if matches!(inner.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_PATH))
+                    {
                         alloc_path_record(v)
                     } else {
                         alloc_string(v)
@@ -782,9 +769,7 @@ fn decode_frame(
                 None => 0,
             },
             _ => {
-                return Err(format!(
-                    "jit CLI decode unsupported field `{fname}`"
-                ));
+                return Err(format!("jit CLI decode unsupported field `{fname}`"));
             }
         };
         Concurrency::with_runtime_mut(|rt| {
@@ -954,7 +939,9 @@ pub(crate) fn jet_jit_cli_main() -> i64 {
             }
         };
         let Some(ptr) = command.ptr else {
-            report_cli_error(&format!("jit CLI: command `{command_name}` pointer missing"));
+            report_cli_error(&format!(
+                "jit CLI: command `{command_name}` pointer missing"
+            ));
             return 0;
         };
         let call: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(ptr) };

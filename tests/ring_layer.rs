@@ -48,11 +48,7 @@ fn manifest_rejects_retired_std_runtime_name() {
 #[test]
 fn math_import_infers_core_layer() {
     let dir = tmp_project("math");
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"m\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
+    fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
     let main = r#"
 use core.math as math
 
@@ -78,11 +74,7 @@ fn run() {
 #[test]
 fn solve_import_infers_alloc_layer() {
     let dir = tmp_project("solve");
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"m\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
+    fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
     let main = r#"
 use core.compute.solve as solve
 
@@ -109,11 +101,7 @@ fn run() {
 #[test]
 fn fs_import_infers_std_layer() {
     let dir = tmp_project("fs");
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"m\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
+    fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
     let main = r#"
 use core.files as fs
 
@@ -192,11 +180,7 @@ fn run() {
 #[test]
 fn ambient_input_infers_std_layer() {
     let dir = tmp_project("input");
-    fs::write(
-        dir.join("package.jet"),
-        "name: \"m\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
+    fs::write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap();
     let main = r#"
 fn run() {
     _ :: input("name? ")

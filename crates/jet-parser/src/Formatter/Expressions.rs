@@ -1,7 +1,7 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, BinOp, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern, StrPart,
-    Type, UnOp,
+    AccessConvention, BinOp, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern,
+    StrPart, Type, UnOp,
 };
 
 impl<'a> Fmt<'a> {
@@ -21,7 +21,10 @@ impl<'a> Fmt<'a> {
             .unwrap_or_else(|| type_name.to_string());
         match expected {
             Type::Named(expected) => type_args.is_empty() && expected == &name,
-            Type::Apply { name: expected, args } => expected == &name && args == type_args,
+            Type::Apply {
+                name: expected,
+                args,
+            } => expected == &name && args == type_args,
             _ => false,
         }
     }
@@ -354,7 +357,10 @@ impl<'a> Fmt<'a> {
             .is_some_and(|index| {
                 let mut depth = 1;
                 for token in self.source_toks[..index].iter().rev() {
-                    if matches!(token.kind, TokKind::LineComment(_) | TokKind::BlockComment(_)) {
+                    if matches!(
+                        token.kind,
+                        TokKind::LineComment(_) | TokKind::BlockComment(_)
+                    ) {
                         continue;
                     }
                     match token.kind {
@@ -549,8 +555,7 @@ impl<'a> Fmt<'a> {
                     }
                     self.fmt_type(p);
                     written += 1;
-                    let last_positional_only = zone
-                        == Some(crate::AST::ParamZone::PositionalOnly)
+                    let last_positional_only = zone == Some(crate::AST::ParamZone::PositionalOnly)
                         && contract
                             .get(i + 1)
                             .is_none_or(|(_, next)| *next != crate::AST::ParamZone::PositionalOnly);
@@ -840,9 +845,7 @@ impl<'a> Fmt<'a> {
             }
             Expr::Float(v, _, _, _) => self.write(&fmt_float(*v)),
             // D-UNITLIT1: `500ms` — no space between the number and the suffix.
-            Expr::UnitLit {
-                raw, suffix, ..
-            } => {
+            Expr::UnitLit { raw, suffix, .. } => {
                 self.write(raw);
                 self.write(suffix);
             }
@@ -880,11 +883,7 @@ impl<'a> Fmt<'a> {
                 self.write("]");
             }
             // D-SPREAD1=A: re-emit member spread sugar.
-            Expr::MemberSpread {
-                base,
-                members,
-                ..
-            } => {
+            Expr::MemberSpread { base, members, .. } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write(".[");
                 for (i, (name, _)) in members.iter().enumerate() {
@@ -909,7 +908,8 @@ impl<'a> Fmt<'a> {
                             } else {
                                 fields[i - 1].1.span().end
                             };
-                            let colon = f.src
+                            let colon = f
+                                .src
                                 .get(field_start..e.span().start)
                                 .and_then(|source| source.rfind(':'))
                                 .map_or(e.span().start, |offset| field_start + offset);
@@ -1229,7 +1229,9 @@ impl<'a> Fmt<'a> {
                 if type_name == Syntax::TYPE_ERR {
                     self.write(Syntax::LIT_ERR);
                     self.write("(");
-                    if let Some((_, _, message)) = fields.iter().find(|(name, ..)| name == "message") {
+                    if let Some((_, _, message)) =
+                        fields.iter().find(|(name, ..)| name == "message")
+                    {
                         self.fmt_expr(message, Prec::OrFallback);
                     }
                     for label in ["code", "cause"] {
@@ -1530,17 +1532,19 @@ impl<'a> Fmt<'a> {
                 }
             }
             Expr::Lambda(lam) => self.fmt_lambda(lam),
-            Expr::CallValue { callee, args, .. }
-                if matches!(callee.as_ref(), Expr::Lambda(lam) if lam.meta.collecting_loop) =>
+            Expr::CallValue { callee, args, .. } if matches!(callee.as_ref(), Expr::Lambda(lam) if lam.meta.collecting_loop) =>
             {
-                let Expr::Lambda(lam) = callee.as_ref() else { unreachable!() };
+                let Expr::Lambda(lam) = callee.as_ref() else {
+                    unreachable!()
+                };
                 self.fmt_collecting_loop(lam);
                 debug_assert!(args.is_empty());
             }
-            Expr::CallValue { callee, args, .. }
-                if matches!(callee.as_ref(), Expr::Lambda(lam) if lam.meta.result_loop) =>
+            Expr::CallValue { callee, args, .. } if matches!(callee.as_ref(), Expr::Lambda(lam) if lam.meta.result_loop) =>
             {
-                let Expr::Lambda(lam) = callee.as_ref() else { unreachable!() };
+                let Expr::Lambda(lam) = callee.as_ref() else {
+                    unreachable!()
+                };
                 let crate::AST::LambdaBody::Block(stmts) = &lam.body else {
                     unreachable!("result loops use a block-backed compiler carrier")
                 };
@@ -1655,9 +1659,7 @@ impl<'a> Fmt<'a> {
             let route = body.last().expect("attached route is in the carrier");
             self.write(" ?? ");
             match route {
-                Stmt::BreakLabelValue(_, _, value, _) => {
-                    self.fmt_expr(value, Prec::OrFallback)
-                }
+                Stmt::BreakLabelValue(_, _, value, _) => self.fmt_expr(value, Prec::OrFallback),
                 Stmt::Return(value, _) => {
                     self.write("return");
                     if let Some(value) = value {
@@ -1666,9 +1668,7 @@ impl<'a> Fmt<'a> {
                     }
                 }
                 Stmt::Expr(value) => self.fmt_expr(value, Prec::OrFallback),
-                Stmt::BreakLabel(name, _) if super::is_generated_label(name) => {
-                    self.write("break")
-                }
+                Stmt::BreakLabel(name, _) if super::is_generated_label(name) => self.write("break"),
                 Stmt::BreakLabel(name, _) => self.write(&format!("break({name})")),
                 Stmt::ContinueLabel(name, _) if super::is_generated_label(name) => {
                     self.write(Syntax::KW_NEXT)
@@ -2285,7 +2285,9 @@ impl<'a> Fmt<'a> {
                     }] = spawn_args.as_slice()
                     {
                         match &lam.body {
-                            crate::AST::LambdaBody::Expr(expr) => self.fmt_expr(expr, Prec::OrFallback),
+                            crate::AST::LambdaBody::Expr(expr) => {
+                                self.fmt_expr(expr, Prec::OrFallback)
+                            }
                             crate::AST::LambdaBody::Block(stmts) => {
                                 self.write("{");
                                 self.newline();
@@ -2332,9 +2334,7 @@ impl<'a> Fmt<'a> {
         // as a hidden final argument. It is source syntax, not a runtime call
         // argument, so restore the block at this boundary before formatting
         // the ordinary arguments.
-        let template = args
-            .last()
-            .filter(|arg| arg.flags.template_items.is_some());
+        let template = args.last().filter(|arg| arg.flags.template_items.is_some());
         let call_args = if template.is_some() {
             &args[..args.len().saturating_sub(1)]
         } else {

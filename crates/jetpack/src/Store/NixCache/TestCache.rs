@@ -29,7 +29,51 @@ pub(super) fn signed_narinfo(
     key_id: &str,
     signing_key: &SigningKey,
 ) -> Vec<u8> {
-    let hash = format!("sha256:{}", crate::SHA256::sha256_hex(nar));
+    signed_narinfo_with_payload(
+        store_path,
+        nar_name,
+        nar,
+        nar,
+        NixCompression::None,
+        references,
+        key_id,
+        signing_key,
+    )
+}
+
+pub(super) fn signed_zstd_narinfo(
+    store_path: &str,
+    nar_name: &str,
+    nar: &[u8],
+    references: &[&str],
+    key_id: &str,
+    signing_key: &SigningKey,
+) -> Vec<u8> {
+    let compressed = crate::Store::encode_zstd_deterministic(nar).unwrap();
+    signed_narinfo_with_payload(
+        store_path,
+        nar_name,
+        &compressed,
+        nar,
+        NixCompression::Zstd,
+        references,
+        key_id,
+        signing_key,
+    )
+}
+
+fn signed_narinfo_with_payload(
+    store_path: &str,
+    nar_name: &str,
+    payload: &[u8],
+    nar: &[u8],
+    compression: NixCompression,
+    references: &[&str],
+    key_id: &str,
+    signing_key: &SigningKey,
+) -> Vec<u8> {
+    let file_hash = format!("sha256:{}", crate::SHA256::sha256_hex(payload));
+    let nar_hash = format!("sha256:{}", crate::SHA256::sha256_hex(nar));
     let references = references
         .iter()
         .map(|reference| reference.rsplit('/').next().unwrap())
@@ -38,10 +82,10 @@ pub(super) fn signed_narinfo(
     let mut info = NixNarInfo {
         store_path: store_path.to_string(),
         url: format!("nar/{nar_name}"),
-        compression: NixCompression::None,
-        file_hash: Some(hash.clone()),
-        file_size: Some(nar.len() as u64),
-        nar_hash: hash,
+        compression,
+        file_hash: Some(file_hash.clone()),
+        file_size: Some(payload.len() as u64),
+        nar_hash,
         nar_size: nar.len() as u64,
         references: references.split_whitespace().map(str::to_string).collect(),
         deriver: None,
@@ -54,10 +98,11 @@ pub(super) fn signed_narinfo(
         signature: signing_key.sign(&fingerprint).to_bytes(),
     });
     format!(
-        "StorePath: {}\nURL: {}\nCompression: none\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}:{}\n",
+        "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}:{}\n",
         info.store_path,
         info.url,
-        info.file_hash.as_deref().unwrap(),
+        info.compression.as_str(),
+        file_hash,
         info.file_size.unwrap(),
         info.nar_hash,
         info.nar_size,

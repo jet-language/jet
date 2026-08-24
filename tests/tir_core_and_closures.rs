@@ -7,9 +7,7 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{
-    build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
-};
+use tir_support::{build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc};
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
@@ -159,7 +157,10 @@ fn parallel_collection_adapters_use_stable_bounded_chunks() {
     if !have_rustc() {
         return;
     }
-    let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let values = (0..130)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     let src = format!(
         "fn double(n: Int) Int {{ return n * 2 }}\n\
          fn one() Int {{ return 1 }}\n\
@@ -233,7 +234,10 @@ fn parallel_collection_adapters_report_lowest_input_failure() {
     if !have_rustc() {
         return;
     }
-    let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let values = (0..130)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     for (method, callback, call) in [
         (
             "map",
@@ -283,7 +287,10 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
     if !have_rustc() {
         return;
     }
-    let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let values = (0..130)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     let src = format!(
         "use core.time as time\n\
          #Pre(n != 65, \"contract-high\") fn checked(n: Int) Int {{ return n }}\n\

@@ -130,7 +130,10 @@ fn web_app_expand_facts_web() {
         "examples/features/web/web_app.jet",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-    assert!(stdout.contains("web application graph") || stdout.contains("shared TIR"), "{stdout}");
+    assert!(
+        stdout.contains("web application graph") || stdout.contains("shared TIR"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -203,13 +206,13 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
         port,
     );
     let response = request(port, "GET", "/");
-    assert!(response.starts_with("HTTP/1.1 404"), "default typed App: {response}");
+    assert!(
+        response.starts_with("HTTP/1.1 404"),
+        "default typed App: {response}"
+    );
     drop(_server);
 
-    let (code, stdout, stderr) = run_jet(&[
-        "build",
-        "examples/features/web/app_typed_args.jet",
-    ]);
+    let (code, stdout, stderr) = run_jet(&["build", "examples/features/web/app_typed_args.jet"]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     let port = free_port();
     let _server = spawn_server_with_program(
@@ -218,7 +221,10 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
         port,
     );
     let response = request(port, "GET", "/");
-    assert!(response.starts_with("HTTP/1.1 404"), "AOT typed App: {response}");
+    assert!(
+        response.starts_with("HTTP/1.1 404"),
+        "AOT typed App: {response}"
+    );
 }
 
 #[test]
@@ -291,11 +297,7 @@ fn web_app_dev_auto_serves_with_reload_without_dev_function() {
     fs::write(&app, source).unwrap();
     let port = free_port();
     let _server = spawn_server(
-        &[
-            "dev",
-            app.to_str().unwrap(),
-            &format!("--port={port}"),
-        ],
+        &["dev", app.to_str().unwrap(), &format!("--port={port}")],
         port,
     );
     let page = request(port, "GET", "/");

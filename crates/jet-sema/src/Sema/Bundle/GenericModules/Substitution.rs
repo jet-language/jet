@@ -36,11 +36,8 @@ pub(super) fn substitute_meta(
                 substitute_expr(value, types, values)
             }
             crate::AST::MetaField::Unknown {
-                value: Some(value),
-                ..
-            } => {
-                substitute_expr(value, types, values)
-            }
+                value: Some(value), ..
+            } => substitute_expr(value, types, values),
             crate::AST::MetaField::Tunable { .. }
             | crate::AST::MetaField::Unknown { value: None, .. } => {}
         }
@@ -313,7 +310,11 @@ pub(super) fn substitute_expr(
             substitute_expr(index, types, values);
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             substitute_expr(base, types, values);
             if let Some(range) = range {
@@ -384,9 +385,9 @@ pub(super) fn substitute_stmts(
 
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(value)
-            | Stmt::Yield(value, _)
-            | Stmt::DeferClose { close: value, .. } => substitute_expr(value, types, &values),
+            Stmt::Expr(value) | Stmt::Yield(value, _) | Stmt::DeferClose { close: value, .. } => {
+                substitute_expr(value, types, &values)
+            }
             Stmt::Val(binding) => {
                 substitute_binding(binding, types, &values);
                 values.remove(&binding.name);
@@ -408,7 +409,12 @@ pub(super) fn substitute_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step, exclusive: _ } => {
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive: _,
+                    } => {
                         substitute_expr(start, types, &values);
                         substitute_expr(end, types, &values);
                         if let Some(step) = step {
@@ -417,7 +423,9 @@ pub(super) fn substitute_stmts(
                     }
                     ForKind::In { collection, step } => {
                         substitute_expr(collection, types, &values);
-                        if let Some(step) = step { substitute_expr(step, types, &values); }
+                        if let Some(step) = step {
+                            substitute_expr(step, types, &values);
+                        }
                     }
                 }
                 substitute_stmts(body, types, &values);

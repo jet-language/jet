@@ -89,7 +89,12 @@ fn run() {
         .env("JET_OVERLAY_PIPE_PRESSURE", "x".repeat(96 * 1024))
         .output()
         .unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
         "one\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\ntrue\n"
@@ -117,7 +122,9 @@ fn run() {
 "#,
     );
     assert!(out.rust.contains("std::env::vars_os()"));
-    assert!(out.rust.contains("type JetEnvEntries = Vec<(std::ffi::OsString, std::ffi::OsString)>"));
+    assert!(out
+        .rust
+        .contains("type JetEnvEntries = Vec<(std::ffi::OsString, std::ffi::OsString)>"));
     assert!(out.rust.contains("RwLock<JetEnvEntries>"));
     assert!(out.rust.contains("fn main() {\n    jet_std_env_init();"));
     assert!(out.rust.contains("command.env_clear()"));
@@ -183,7 +190,11 @@ fn main() {
         .arg(dir.join("raw_probe"))
         .output()
         .unwrap();
-    assert!(probe_build.status.success(), "{}", String::from_utf8_lossy(&probe_build.stderr));
+    assert!(
+        probe_build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&probe_build.stderr)
+    );
     let bin = build(&dir, "raw", &out);
     let run = Command::new(bin)
         .current_dir(&dir)
@@ -197,7 +208,12 @@ fn main() {
         )
         .output()
         .unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
         "true\ntrue\n\nenvironment contains a name or value that is not valid Unicode\n"
@@ -230,7 +246,12 @@ fn run() {
         .env("JET_HOST_ISOLATION", "host-before-snapshot")
         .output()
         .unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert_eq!(
         String::from_utf8_lossy(&run.stdout),
         "host-before-snapshot\njet-owned\n"
@@ -405,7 +426,12 @@ fn jet_test_snapshot_entry() {
     assert_ne!(rust, hooked_snapshot, "atomicity probe did not attach");
     let bin = build_rust(&dir, "atomic_spawn", &rust);
     let run = Command::new(bin).current_dir(&dir).output().unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
 }
 
 #[test]
@@ -430,7 +456,12 @@ fn fallible_set_runtime_hook_is_typed_for_next_edition() {
     assert_ne!(rust, out.rust, "fallible-set probe did not attach");
     let bin = build_rust(&dir, "fallible_set_hook", &rust);
     let run = Command::new(bin).current_dir(&dir).output().unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
 }
 
 #[cfg(windows)]
@@ -455,8 +486,16 @@ fn run() {
     let (dir, out) = compile("windows_native", src);
     let bin = build(&dir, "windows_native", &out);
     let run = Command::new(bin).current_dir(&dir).output().unwrap();
-    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "first\nlast-✓\ntrue\ntrue\n");
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "first\nlast-✓\ntrue\ntrue\n"
+    );
 }
 
 #[test]
@@ -474,7 +513,10 @@ fn run() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert_eq!(run.status.code(), Some(70));
     assert!(stderr.contains("panic: core.sys.set: invalid environment variable name"));
-    assert!(stderr.contains("invalid.jet:5 in run"), "missing call-site frame: {stderr}");
+    assert!(
+        stderr.contains("invalid.jet:5 in run"),
+        "missing call-site frame: {stderr}"
+    );
 }
 
 /// Card #2003 criterion 3 — one env owner, proved as a CROSS-TIER
@@ -549,7 +591,10 @@ fn run() {
         .into_iter()
         .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
         .collect();
-    assert!(errors.is_empty(), "tier fixture must type-check: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "tier fixture must type-check: {errors:?}"
+    );
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
         "env fixture must be resident-JIT safe: {:?}",
@@ -591,7 +636,10 @@ fn run() {
         "the interpreter tier silently executed native JIT code"
     );
 
-    assert_eq!(aot_stdout, EXPECTED, "AOT drifted from the pinned observable");
+    assert_eq!(
+        aot_stdout, EXPECTED,
+        "AOT drifted from the pinned observable"
+    );
     assert_eq!(jit_stdout, aot_stdout, "resident JIT diverged from AOT");
     assert_eq!(
         interpreted_stdout, aot_stdout,

@@ -911,12 +911,10 @@ pub fn apply_core_call_with_type(
                     Ok(CtValue::Float(core_math_float_min(*left, *right, span)?))
                 }
                 _ => Ok(CtValue::Float(core_math_float_min(
-                    as_ct_float(&left, span).map_err(|_| {
-                        unsupported("core.math.min: non-numeric arguments", span)
-                    })?,
-                    as_ct_float(&right, span).map_err(|_| {
-                        unsupported("core.math.min: non-numeric arguments", span)
-                    })?,
+                    as_ct_float(&left, span)
+                        .map_err(|_| unsupported("core.math.min: non-numeric arguments", span))?,
+                    as_ct_float(&right, span)
+                        .map_err(|_| unsupported("core.math.min: non-numeric arguments", span))?,
                     span,
                 )?)),
             }
@@ -932,12 +930,10 @@ pub fn apply_core_call_with_type(
                     Ok(CtValue::Float(core_math_float_max(*left, *right, span)?))
                 }
                 _ => Ok(CtValue::Float(core_math_float_max(
-                    as_ct_float(&left, span).map_err(|_| {
-                        unsupported("core.math.max: non-numeric arguments", span)
-                    })?,
-                    as_ct_float(&right, span).map_err(|_| {
-                        unsupported("core.math.max: non-numeric arguments", span)
-                    })?,
+                    as_ct_float(&left, span)
+                        .map_err(|_| unsupported("core.math.max: non-numeric arguments", span))?,
+                    as_ct_float(&right, span)
+                        .map_err(|_| unsupported("core.math.max: non-numeric arguments", span))?,
                     span,
                 )?)),
             }

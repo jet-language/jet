@@ -48,8 +48,7 @@ fn write_prompt_only_env(dir: &std::path::Path) {
 
 fn activation_hash(stdout: &[u8]) -> String {
     let text = String::from_utf8_lossy(stdout);
-    text
-        .lines()
+    text.lines()
         .find_map(|line| {
             line.strip_prefix("export JETPACK_ENV_HASH='")
                 .and_then(|value| value.strip_suffix('\''))
@@ -83,7 +82,10 @@ fn hook_prints_installable_snippet_per_shell() {
             stdout.contains("__jet_help_prefill"),
             "`hook {shell}` must install help-app prefill widgets:\n{stdout}"
         );
-        assert!(!stdout.contains("__jetpack_"), "hook {shell} leaked engine identifiers:\n{stdout}");
+        assert!(
+            !stdout.contains("__jetpack_"),
+            "hook {shell} leaked engine identifiers:\n{stdout}"
+        );
     }
 }
 
@@ -254,8 +256,14 @@ fn export_changed_definition_reactivates_at_next_prompt() {
         "a changed definition must emit replacement activation"
     );
     let replacement = String::from_utf8_lossy(&out.stdout);
-    assert!(replacement.contains("changed"), "replacement facts missing:\n{replacement}");
-    assert!(!replacement.contains("smoke"), "stale facts survived reload:\n{replacement}");
+    assert!(
+        replacement.contains("changed"),
+        "replacement facts missing:\n{replacement}"
+    );
+    assert!(
+        !replacement.contains("smoke"),
+        "stale facts survived reload:\n{replacement}"
+    );
     assert!(replacement.contains("export JETPACK_ENV_HASH='"));
 }
 
@@ -347,17 +355,14 @@ fn run() {}
     .unwrap();
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
-        .args([
-            "enter",
-            "--trust",
-            "--no-color",
-            "--",
-            "true",
-        ])
+        .args(["enter", "--trust", "--no-color", "--", "true"])
         // `enter` keeps the caller's toolchain visible. The nested `jet run`
         // task therefore needs the same Rust toolchain that runs this test;
         // the clean-shell proof below still uses the fixed minimal PATH.
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Rust on PATH"))
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -384,13 +389,22 @@ fn enter_rejects_an_undeclared_lifecycle_job_before_launch() {
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args(["enter", "--trust", "--no-color", "--", "true"])
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Rust on PATH"))
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+        )
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1294"), "missing lifecycle job diagnostic:\n{stderr}");
-    assert!(stderr.contains("missing_task"), "missing task name:\n{stderr}");
+    assert!(
+        stderr.contains("E1294"),
+        "missing lifecycle job diagnostic:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("missing_task"),
+        "missing task name:\n{stderr}"
+    );
     assert!(
         !stderr.contains("running job missing_task"),
         "undeclared lifecycle job must be rejected before child launch:\n{stderr}"
@@ -416,7 +430,10 @@ fn export_runs_typed_lifecycle_jobs_without_stdout_pollution() {
         .current_dir(&scratch.path)
         .args(["trust", "grant", &selector, "--scope", "user"])
         .env("HOME", &home.path)
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Rust on PATH"))
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -427,7 +444,10 @@ fn export_runs_typed_lifecycle_jobs_without_stdout_pollution() {
     let out = export_cmd(&scratch.path)
         .args(["enter", "--no-color", "export", "bash"])
         .env("HOME", &home.path)
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Rust on PATH"))
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Rust on PATH"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -472,7 +492,10 @@ fn enter_requires_trust_for_a_trusted_lifecycle_hook() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1255"), "missing trust diagnostic:\n{stderr}");
+    assert!(
+        stderr.contains("E1255"),
+        "missing trust diagnostic:\n{stderr}"
+    );
     assert!(!project.path.join(".hook-marker").exists());
 }
 
@@ -498,8 +521,14 @@ fn env_test_rejects_an_untrusted_lifecycle_hook() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1329"), "missing trust diagnostic:\n{stderr}");
-    assert!(stderr.contains("needs-review"), "missing hook name:\n{stderr}");
+    assert!(
+        stderr.contains("E1329"),
+        "missing trust diagnostic:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("needs-review"),
+        "missing hook name:\n{stderr}"
+    );
 }
 
 #[test]
@@ -598,7 +627,10 @@ fn enter_installs_and_runs_a_native_git_hook_from_the_typed_environment() {
             "--get",
             "core.hooksPath",
         ])
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Git on PATH"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -613,8 +645,20 @@ fn enter_installs_and_runs_a_native_git_hook_from_the_typed_environment() {
 
     let commit = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
-        .args(["enter", "--trust", "--no-color", "--", "git", "commit", "-m", "hook"])
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .args([
+            "enter",
+            "--trust",
+            "--no-color",
+            "--",
+            "git",
+            "commit",
+            "-m",
+            "hook",
+        ])
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Git on PATH"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -638,13 +682,14 @@ fn env_test_projects_git_hooks_into_the_clean_ci_command() {
         "module env.ci {\n  git_hooks_path: \"scripts/githooks\"\n}\n",
     )
     .unwrap();
-    let expected = fs::canonicalize(&hooks).unwrap().to_string_lossy().into_owned();
-    let git = std::env::split_paths(
-        &std::env::var_os("PATH").expect("tests run with Git on PATH"),
-    )
-    .map(|directory| directory.join("git"))
-    .find(|candidate| candidate.is_file())
-    .expect("Git executable must be discoverable for the CI projection test");
+    let expected = fs::canonicalize(&hooks)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let git = std::env::split_paths(&std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .map(|directory| directory.join("git"))
+        .find(|candidate| candidate.is_file())
+        .expect("Git executable must be discoverable for the CI projection test");
     let out = Command::new(jetpack_bin())
         .current_dir(&scratch.path)
         .args([
@@ -658,7 +703,10 @@ fn env_test_projects_git_hooks_into_the_clean_ci_command() {
         ])
         .arg(&git)
         .args(["config", "--get", "core.hooksPath"])
-        .env("PATH", std::env::var_os("PATH").expect("tests run with Git on PATH"))
+        .env(
+            "PATH",
+            std::env::var_os("PATH").expect("tests run with Git on PATH"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -698,7 +746,10 @@ fn enter_rejects_a_missing_git_hooks_directory_before_launch() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E1333"), "missing git hook path diagnostic: {stderr}");
+    assert!(
+        stderr.contains("E1333"),
+        "missing git hook path diagnostic: {stderr}"
+    );
     assert!(!scratch.path.join("child-ran").exists());
 }
 
@@ -731,6 +782,9 @@ fn enter_rejects_a_trusted_hook_cwd_that_escapes_through_a_symlink() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("unsafe cwd"), "missing boundary diagnostic:\n{stderr}");
+    assert!(
+        stderr.contains("unsafe cwd"),
+        "missing boundary diagnostic:\n{stderr}"
+    );
     assert!(!outside.path.join("escaped").exists());
 }

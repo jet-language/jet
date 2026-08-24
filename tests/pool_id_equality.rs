@@ -54,8 +54,11 @@ fn reused_pool_slot_does_not_equal_its_stale_generation() {
         assert_eq!(stdout, "false\n");
     }
 
-    let (code, stdout, stderr) =
-        run_default_multi("pool_id_stale_generation", "main.jet", &[("main.jet", STALE_SOURCE)]);
+    let (code, stdout, stderr) = run_default_multi(
+        "pool_id_stale_generation",
+        "main.jet",
+        &[("main.jet", STALE_SOURCE)],
+    );
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "false\n");
 }

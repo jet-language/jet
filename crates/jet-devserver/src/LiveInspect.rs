@@ -71,20 +71,17 @@ fn checked_object<'a>(
     let JSONValue::Object(fields) = value else {
         return Err(format!("{label} must be an object"));
     };
-    if fields.keys().any(|key| {
-        !required.contains(&key.as_str()) && !optional.contains(&key.as_str())
-    }) || required.iter().any(|key| !fields.contains_key(*key)) {
+    if fields
+        .keys()
+        .any(|key| !required.contains(&key.as_str()) && !optional.contains(&key.as_str()))
+        || required.iter().any(|key| !fields.contains_key(*key))
+    {
         return Err(format!("{label} has missing or unsafe fields"));
     }
     Ok(fields)
 }
 
-fn int_field(
-    object: &JSONValue,
-    key: &str,
-    label: &str,
-    nonnegative: bool,
-) -> Result<i64, String> {
+fn int_field(object: &JSONValue, key: &str, label: &str, nonnegative: bool) -> Result<i64, String> {
     let value = json_get(object, key)
         .and_then(json_int)
         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
@@ -111,11 +108,7 @@ fn bool_field(object: &JSONValue, key: &str, label: &str) -> Result<bool, String
     }
 }
 
-fn optional_int_field(
-    object: &JSONValue,
-    key: &str,
-    label: &str,
-) -> Result<Option<i64>, String> {
+fn optional_int_field(object: &JSONValue, key: &str, label: &str) -> Result<Option<i64>, String> {
     match json_get(object, key) {
         Some(JSONValue::Null) => Ok(None),
         Some(JSONValue::Number(value)) if *value >= 0 => Ok(Some(*value)),
@@ -124,8 +117,8 @@ fn optional_int_field(
 }
 
 fn parse_live_snapshot(snapshot: &str) -> Result<LiveSnapshot, String> {
-    let root = parse_json(snapshot)
-        .map_err(|()| "live runtime snapshot is not valid JSON".to_string())?;
+    let root =
+        parse_json(snapshot).map_err(|()| "live runtime snapshot is not valid JSON".to_string())?;
     let root_fields = checked_object(
         &root,
         &[
@@ -323,10 +316,13 @@ pub fn read(pid: u32) -> Result<String, String> {
     if snapshot.len() as u64 > MAX_SNAPSHOT_BYTES {
         return Err("live runtime snapshot exceeds the 1 MiB safety limit".to_string());
     }
-    let parsed = parse_live_snapshot(&snapshot)
-        .map_err(|error| format!("live runtime snapshot has an invalid or unsafe schema: {error}"))?;
+    let parsed = parse_live_snapshot(&snapshot).map_err(|error| {
+        format!("live runtime snapshot has an invalid or unsafe schema: {error}")
+    })?;
     if parsed.pid != i64::from(pid) {
-        return Err(format!("live runtime snapshot does not belong to process {pid}"));
+        return Err(format!(
+            "live runtime snapshot does not belong to process {pid}"
+        ));
     }
     jet_debug::render_event_observations(&snapshot)
         .map_err(|error| format!("live runtime event observations are invalid: {error}"))?;
@@ -335,7 +331,9 @@ pub fn read(pid: u32) -> Result<String, String> {
         .unwrap_or_default()
         .as_millis();
     if now_ms.saturating_sub(parsed.captured_ms) > MAX_SNAPSHOT_AGE_MS {
-        return Err(format!("process {pid} is not publishing a live runtime snapshot"));
+        return Err(format!(
+            "process {pid} is not publishing a live runtime snapshot"
+        ));
     }
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
@@ -352,7 +350,9 @@ pub fn read(pid: u32) -> Result<String, String> {
             })
             .ok_or_else(|| format!("cannot verify process {pid} identity"))?;
         if parsed.start_id != expected_start_id {
-            return Err(format!("live runtime snapshot does not belong to process {pid}"));
+            return Err(format!(
+                "live runtime snapshot does not belong to process {pid}"
+            ));
         }
     }
     Ok(snapshot)
@@ -385,7 +385,11 @@ pub fn render(snapshot: &str) -> String {
                 task.id,
                 task.parent,
                 task.state,
-                if task.wait.is_empty() { "-" } else { &task.wait },
+                if task.wait.is_empty() {
+                    "-"
+                } else {
+                    &task.wait
+                },
                 deadline,
                 task.cancelled
             ));

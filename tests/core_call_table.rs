@@ -128,9 +128,8 @@ fn core_projection_is_complete_both_directions() {
             assert!(row.module.is_empty());
             assert!(!row.has_direct_symbol());
             assert!(
-                row.receiver_types
-                    .iter()
-                    .all(|receiver| receiver_keys.insert(((*receiver).to_string(), row.member.to_string()))),
+                row.receiver_types.iter().all(|receiver| receiver_keys
+                    .insert(((*receiver).to_string(), row.member.to_string()))),
                 "duplicate receiver Core row: {:?}.{}",
                 row.receiver_types,
                 row.member
@@ -160,7 +159,11 @@ fn core_projection_is_complete_both_directions() {
         );
         assert_eq!(jet::Syntax::core_call(row.module, row.member), Some(row));
     }
-    assert!(keys.len() > 500, "Core call table lost rows: {}", keys.len());
+    assert!(
+        keys.len() > 500,
+        "Core call table lost rows: {}",
+        keys.len()
+    );
     assert!(
         receiver_keys.len() > 90,
         "receiver Core table lost rows: {}",
@@ -213,11 +216,14 @@ fn core_projection_is_complete_both_directions() {
                 .map(move |receiver| ((*receiver).to_string(), row.member.to_string()))
         })
         .collect();
-    let consumer_receivers: HashSet<(String, String)> = arm_pairs(receiver_source).into_iter().collect();
+    let consumer_receivers: HashSet<(String, String)> =
+        arm_pairs(receiver_source).into_iter().collect();
     assert!(
         consumer_receivers.is_subset(&table_receivers),
         "receiver evaluator owns calls outside the canonical table: {:?}",
-        consumer_receivers.difference(&table_receivers).collect::<Vec<_>>()
+        consumer_receivers
+            .difference(&table_receivers)
+            .collect::<Vec<_>>()
     );
     // Receiver calls also have typed projections outside `evaluate_method`:
     // sketch mutation, solver construction/requirement, and display. Those
@@ -340,8 +346,7 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
         "sema effect routing no longer reads the Core-call record"
     );
     assert!(
-        sema.contains("CoreCallCoverage::SEMA")
-            && sema.contains("Syntax::core_call_projection"),
+        sema.contains("CoreCallCoverage::SEMA") && sema.contains("Syntax::core_call_projection"),
         "sema no longer uses the row projection guard"
     );
     assert!(
@@ -360,8 +365,7 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
         "TIR coverage no longer reads the Core-call record"
     );
     assert!(
-        tir.contains("CoreCallCoverage::TIR_SUBSET")
-            && interpreter_source_has_projection(),
+        tir.contains("CoreCallCoverage::TIR_SUBSET") && interpreter_source_has_projection(),
         "TIR/interpreter projections do not use the row coverage guard"
     );
 
@@ -475,13 +479,11 @@ fn receiver_and_plain_consumer_sets_have_one_table_home() {
         "receiver evaluator has a hand-kept membership gate"
     );
     assert!(
-        jit.contains("fn lower_recorded_core_call")
-            && jit.contains("jit_symbol_candidates()"),
+        jit.contains("fn lower_recorded_core_call") && jit.contains("jit_symbol_candidates()"),
         "JIT has no row-driven receiver/plain projection seam"
     );
     assert!(
-        !jit.contains("if module == \"core.log\"")
-            && !jit.contains("if module == \"core.files\""),
+        !jit.contains("if module == \"core.log\"") && !jit.contains("if module == \"core.files\""),
         "JIT retained a per-module Core-call dispatch table"
     );
 
@@ -513,8 +515,7 @@ fn receiver_and_plain_consumer_sets_have_one_table_home() {
 
 #[test]
 fn core_call_truth_names_the_foundation_home() {
-    let row = jet_foundation::Registry::row("CoreCalls")
-        .expect("CoreCalls truth is registered");
+    let row = jet_foundation::Registry::row("CoreCalls").expect("CoreCalls truth is registered");
     assert_eq!(
         row.home,
         Some("crates/jet-foundation/src/Syntax/core_calls.rs")

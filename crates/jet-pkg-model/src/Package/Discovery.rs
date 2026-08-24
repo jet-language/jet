@@ -35,7 +35,7 @@ pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryE
         .discover_source_files()
         .map_err(|_| DiscoveryError::NotFound {
             name: name.to_string(),
-    })?;
+        })?;
     let mut matches: Vec<PathBuf> = Vec::new();
     for file in &files {
         if file

@@ -12,13 +12,12 @@
 //! left to right in the order they were written, and unbound defaults run
 //! afterwards in declaration order.
 
-use crate::AST::{CallArg, ParamZone};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Diagnostics::{
     binder_ambiguous_call, binder_ambiguous_positional, binder_label_forbidden,
-    binder_label_required, binder_missing_argument, binder_repeated_label,
-    binder_unknown_label,
+    binder_label_required, binder_missing_argument, binder_repeated_label, binder_unknown_label,
 };
+use crate::AST::{CallArg, ParamZone};
 
 /// One parameter's public call contract, as the binder needs to see it.
 pub(crate) struct BindParam<'a> {
@@ -111,7 +110,6 @@ impl Binding {
         }
         true
     }
-
 }
 
 /// Read the public call contract off a registered free-function signature.
@@ -271,7 +269,11 @@ pub(crate) fn bind_call_args(
     }
 
     for position in missing {
-        diags.push(binder_missing_argument(callee, params[position].label, call_span));
+        diags.push(binder_missing_argument(
+            callee,
+            params[position].label,
+            call_span,
+        ));
         ok = false;
     }
     if !ok {
@@ -321,13 +323,7 @@ where
         0 => {
             // Preserve today's binder diagnostics when no candidate binds.
             if let Some(candidate) = candidates.first() {
-                let _ = bind_call_args(
-                    callee,
-                    candidate.params,
-                    args,
-                    call_span,
-                    diags,
-                );
+                let _ = bind_call_args(callee, candidate.params, args, call_span, diags);
             }
             None
         }
@@ -426,8 +422,7 @@ fn rewrite(
                     p.name.to_string(),
                     jet_foundation::Names::mangle_generated(&format!(
                         "binder_ref_{}_{}",
-                        call_span.start,
-                        slot
+                        call_span.start, slot
                     )),
                 )
             })

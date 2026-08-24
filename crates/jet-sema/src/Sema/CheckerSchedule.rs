@@ -16,16 +16,18 @@
 //! I3: this module only decides; codegen never reads `Func::every` at all —
 //! a `#Job`/`#Every` function generates as an ordinary fn.
 
-use crate::AST::{EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule};
 
 fn resolve_every_arg(
     arg: &EveryArg,
     registry: &super::TypeRegistry,
 ) -> Result<EverySchedule, EveryScheduleError> {
     match arg {
-        EveryArg::Duration { int, float, suffix, .. } => {
+        EveryArg::Duration {
+            int, float, suffix, ..
+        } => {
             let Some(unit) = registry.unit_literal("Time", suffix) else {
                 return Err(EveryScheduleError::UnknownDurationUnit);
             };
@@ -157,7 +159,13 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
             "write a duration or wall-clock literal, e.g. `#Every(5min)` or `#Every(\"03:00\")`.",
         ),
     };
-    Diagnostic::error("E0926", what.to_string(), why.to_string(), fix.to_string(), Some(span))
+    Diagnostic::error(
+        "E0926",
+        what.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        Some(span),
+    )
 }
 
 /// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1/D-CMD-OVERRIDE1=C).
@@ -208,8 +216,10 @@ pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
         return vec![Diagnostic::error(
             "E0928",
             format!("`{}` is reserved by Jet's command line", f.name),
-            "job dispatch reserves built-in command and flag names before ordinary CLI parsing".to_string(),
-            "rename the job, or choose a name outside Jet's command and flag vocabulary".to_string(),
+            "job dispatch reserves built-in command and flag names before ordinary CLI parsing"
+                .to_string(),
+            "rename the job, or choose a name outside Jet's command and flag vocabulary"
+                .to_string(),
             Some(span),
         )];
     }
@@ -223,16 +233,25 @@ pub(crate) fn check_job_collisions(modules: &[LoadedModule]) -> Vec<Diagnostic> 
     for module in modules {
         for item in &module.items {
             let Item::Func(function) = item else { continue };
-            if !function.is_job { continue }
+            if !function.is_job {
+                continue;
+            }
             let scope = function
                 .job_metadata
                 .as_ref()
                 .map(|metadata| metadata.scope)
                 .unwrap_or_default();
-            if !seen.iter().any(|(name, previous)| name == &function.name && *previous == scope) {
+            if !seen
+                .iter()
+                .any(|(name, previous)| name == &function.name && *previous == scope)
+            {
                 seen.push((function.name.clone(), scope));
             } else {
-                diags.push(e0928_job_collision(&function.name, scope, function.name_span));
+                diags.push(e0928_job_collision(
+                    &function.name,
+                    scope,
+                    function.name_span,
+                ));
             }
         }
     }

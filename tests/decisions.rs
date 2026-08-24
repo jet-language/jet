@@ -167,7 +167,8 @@ fn every_syntax_const_has_adjacent_decision_comment() {
                 }
                 continue;
             }
-            let is_kw_or_sigil = t.starts_with("pub const KW_") || t.starts_with("pub const SIGIL_");
+            let is_kw_or_sigil =
+                t.starts_with("pub const KW_") || t.starts_with("pub const SIGIL_");
             if is_kw_or_sigil && !covered && !line_has_decision_id(t) {
                 if exempt {
                     exempt_count += 1;
@@ -429,7 +430,11 @@ fn expand_slash_compound(tok: &str) -> Vec<String> {
     let suffix = &last[last_digit_end..];
     let mut out = Vec::new();
     for seg in &segs {
-        let digits: String = seg.chars().skip_while(|c| !c.is_ascii_digit()).take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = seg
+            .chars()
+            .skip_while(|c| !c.is_ascii_digit())
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         out.push(format!("{prefix}{digits}{suffix}"));
     }
     out

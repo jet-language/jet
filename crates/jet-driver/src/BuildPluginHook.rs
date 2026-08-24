@@ -30,9 +30,7 @@ pub fn run_packaged_build_plugin(
         .arg(BUILD_PLUGIN_HOST_SUBCOMMAND)
         .arg(manifest_path)
         .arg(component_path);
-    command
-        .arg(manifest_digest)
-        .arg(&spec.component_digest);
+    command.arg(manifest_digest).arg(&spec.component_digest);
     let request = encode_build_plugin_request(spec);
     let response = run_host_process(command, request)?;
     decode_build_plugin_response(&response)
@@ -90,7 +88,8 @@ fn run_host_process(mut command: Command, request: Vec<u8>) -> Result<Vec<u8>, S
         drop(stdin);
         result
     });
-    let stdout_reader = thread::spawn(move || read_bounded(stdout, BUILD_PLUGIN_MAX_RESPONSE_BYTES));
+    let stdout_reader =
+        thread::spawn(move || read_bounded(stdout, BUILD_PLUGIN_MAX_RESPONSE_BYTES));
     let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_HOST_STDERR_BYTES));
     let deadline = Instant::now() + HOST_TIMEOUT;
     let status = loop {

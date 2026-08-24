@@ -2,13 +2,13 @@
 //! Canonical watch snapshot/diff + EventScope cancel semantics (D-WATCH-SCOPE1 / D-EVENT1).
 
 use super::Concurrency;
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 /// stdlib-api-laws D4 (#2055): `domain`/`kind` are the Prelude's `WatchDomain`/
 /// `WatchKind` enums. This host keeps the variant NAME and marshals it through
@@ -83,8 +83,12 @@ fn event_record(ev: &WatchEvent) -> i64 {
         // Prelude declaration-order discriminant. String fields must be
         // JetVal::String (`record_set_string`); `struct_get_str` rejects
         // Int-tagged string ids.
-        let _ = rt.heap.record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
-        let _ = rt.heap.record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
+        let _ = rt
+            .heap
+            .record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
+        let _ = rt
+            .heap
+            .record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
         let _ = rt.heap.record_set_string(rec, 2, p);
         let _ = rt.heap.record_set_string(rec, 3, det);
         let _ = rt.heap.record_set_int(rec, 4, ev.pid);
@@ -100,8 +104,12 @@ fn list_from_events(events: Vec<WatchEvent>) -> i64 {
             let p = rt.heap.alloc_string(ev.path.clone());
             let det = rt.heap.alloc_string(ev.detail.clone());
             let rec = rt.heap.alloc_record(6);
-            let _ = rt.heap.record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
-            let _ = rt.heap.record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
+            let _ = rt
+                .heap
+                .record_set_int(rec, 0, watch_disc("WatchDomain", ev.domain));
+            let _ = rt
+                .heap
+                .record_set_int(rec, 1, watch_disc("WatchKind", ev.kind));
             let _ = rt.heap.record_set_string(rec, 2, p);
             let _ = rt.heap.record_set_string(rec, 3, det);
             let _ = rt.heap.record_set_int(rec, 4, ev.pid);
@@ -369,7 +377,9 @@ fn jet_jit_event_scope_frame_push() {
 }
 
 fn jet_jit_event_scope_frame_pop() {
-    let handles = SCOPE_FRAMES.with(|f| f.borrow_mut().pop()).unwrap_or_default();
+    let handles = SCOPE_FRAMES
+        .with(|f| f.borrow_mut().pop())
+        .unwrap_or_default();
     for h in handles {
         jet_jit_event_scope_cancel(h);
     }

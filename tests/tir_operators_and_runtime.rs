@@ -125,7 +125,7 @@ fn run() {
     assert_tiers_agree(
         "tir_spaceship_ordering",
         src,
-        "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\n"
+        "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\n",
     );
     let rust = compile("tir_spaceship_compare_desugar", src);
     assert!(

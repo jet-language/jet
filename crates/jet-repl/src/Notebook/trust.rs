@@ -157,9 +157,15 @@ pub fn revoke_matching(store: &mut TrustStore, _notebook_source_hash: &str) {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderDecision {
     /// Sanitized passive MIME or zero-capability sandboxed widget — no prompt.
-    AllowPassive { text_plain: String, mime: Vec<(String, String)> },
+    AllowPassive {
+        text_plain: String,
+        mime: Vec<(String, String)>,
+    },
     /// Ability widget with a matching local grant.
-    AllowActive { text_plain: String, mime: Vec<(String, String)> },
+    AllowActive {
+        text_plain: String,
+        mime: Vec<(String, String)>,
+    },
     /// Quarantined / ungated active content — safe text fallback only.
     FallbackPlain { text_plain: String, reason: String },
 }
@@ -189,9 +195,8 @@ pub fn decide_render(
         };
     }
 
-    let payload_hash = SHA256::sha256_hex(
-        format!("{:?}\0{:?}", bundle.mime, bundle.widget_id).as_bytes(),
-    );
+    let payload_hash =
+        SHA256::sha256_hex(format!("{:?}\0{:?}", bundle.mime, bundle.widget_id).as_bytes());
 
     let active = ActiveRequest {
         notebook_source_hash: notebook_source_hash.to_string(),
@@ -337,9 +342,8 @@ mod tests {
             decide_render(&store, "src", "env", "rend", &bundle),
             RenderDecision::FallbackPlain { .. }
         ));
-        let payload_hash = SHA256::sha256_hex(
-            format!("{:?}\0{:?}", bundle.mime, bundle.widget_id).as_bytes(),
-        );
+        let payload_hash =
+            SHA256::sha256_hex(format!("{:?}\0{:?}", bundle.mime, bundle.widget_id).as_bytes());
         let req = ActiveRequest {
             notebook_source_hash: "src".into(),
             payload_hash,

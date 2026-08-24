@@ -8,7 +8,7 @@ mod protocol;
 mod trust;
 
 pub use document::{
-    export_jet, export_ipynb, import_ipynb, load_jetnb, merge_by_id, save_jetnb, CellKind,
+    export_ipynb, export_jet, import_ipynb, load_jetnb, merge_by_id, save_jetnb, CellKind,
     CellOutput, JetNotebook, LossReport, MergeConflict, NotebookCell, OutputCacheEntry,
     OUTPUT_CACHE_POLICY,
 };

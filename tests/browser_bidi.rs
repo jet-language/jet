@@ -5,9 +5,9 @@
 
 mod common;
 
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::fs;
 use std::thread;
 use std::time::Duration;
 
@@ -66,8 +66,7 @@ fn sha1(data: &[u8]) -> [u8; 20] {
 }
 
 fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
         let a = chunk[0];
@@ -157,7 +156,10 @@ fn write_text_frame(stream: &mut TcpStream, text: &str) {
 
 fn field(text: &str, name: &str) -> String {
     let marker = format!("\"{name}\":");
-    let rest = text.split_once(&marker).unwrap_or_else(|| panic!("missing {name}: {text}")).1;
+    let rest = text
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("missing {name}: {text}"))
+        .1;
     if let Some(rest) = rest.strip_prefix('"') {
         return rest.split_once('"').unwrap().0.to_string();
     }
@@ -175,10 +177,14 @@ fn run_mock(listener: TcpListener) -> Vec<String> {
         methods.push(method.clone());
         let result = match method.as_str() {
             "session.status" => r#"{"ready":true,"message":"ready"}"#,
-            "session.new" => r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1","goog:cdp":true}}"#,
+            "session.new" => {
+                r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1","goog:cdp":true}}"#
+            }
             "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
             "browsingContext.create" => r#"{"context":"page-1"}"#,
-            "browsingContext.navigate" => r#"{"url":"https://example.test/app","navigation":"nav-1"}"#,
+            "browsingContext.navigate" => {
+                r#"{"url":"https://example.test/app","navigation":"nav-1"}"#
+            }
             "browsingContext.locateNodes" => r#"{"nodes":[{"type":"node","sharedId":"node-1"}]}"#,
             "input.performActions"
             | "session.subscribe"
@@ -188,7 +194,10 @@ fn run_mock(listener: TcpListener) -> Vec<String> {
             | "session.end" => "{}",
             other => panic!("unexpected BiDi method {other}: {request}"),
         };
-        write_text_frame(&mut stream, &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#));
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
         if method == "session.subscribe" {
             write_text_frame(
                 &mut stream,
@@ -532,9 +541,7 @@ fn run_continuous_events(listener: TcpListener) -> Vec<String> {
     for index in 0..60 {
         write_text_frame(
             &mut stream,
-            &format!(
-                r#"{{"type":"event","method":"network.tick{index}","params":{{}}}}"#
-            ),
+            &format!(r#"{{"type":"event","method":"network.tick{index}","params":{{}}}}"#),
         );
         thread::sleep(Duration::from_millis(5));
     }
@@ -550,7 +557,10 @@ fn run_continuous_events(listener: TcpListener) -> Vec<String> {
 
 fn hostile_listener(reply: HostileReply) -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let endpoint = format!("ws://{}/session?token=HOSTILE_SECRET", listener.local_addr().unwrap());
+    let endpoint = format!(
+        "ws://{}/session?token=HOSTILE_SECRET",
+        listener.local_addr().unwrap()
+    );
     let server = thread::spawn(move || run_hostile(listener, reply));
     (endpoint, server)
 }
@@ -738,7 +748,10 @@ fn run() {}
 #[test]
 fn native_bidi_cleanup_retries_failures_and_drops_last_owners_once() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let endpoint = format!("ws://{}/session?token=LIFECYCLE_SECRET", listener.local_addr().unwrap());
+    let endpoint = format!(
+        "ws://{}/session?token=LIFECYCLE_SECRET",
+        listener.local_addr().unwrap()
+    );
     let server = thread::spawn(move || run_lifecycle(listener));
     let source = r#"
 use core.web.browser as browser
@@ -774,8 +787,11 @@ fn run() {
 "#
     .replace("__ENDPOINT__", &endpoint);
 
-    let (code, stdout, stderr) =
-        common::build_and_run("jet_browser_bidi_lifecycle", "browser_bidi_lifecycle", &source);
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_lifecycle",
+        "browser_bidi_lifecycle",
+        &source,
+    );
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(stdout, "");
     assert!(!stdout.contains("SECRET"), "{stdout}");
@@ -919,14 +935,19 @@ fn run() {
 #[test]
 fn native_bidi_profile_drives_isolated_session_and_redacts_trace() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let endpoint = format!("ws://{}/session?token=TOP_SECRET", listener.local_addr().unwrap());
+    let endpoint = format!(
+        "ws://{}/session?token=TOP_SECRET",
+        listener.local_addr().unwrap()
+    );
     let server = thread::spawn(move || run_mock(listener));
     let source = include_str!("fixtures/browser_bidi.jet").replace("__ENDPOINT__", &endpoint);
 
-    let (code, stdout, stderr) =
-        common::build_and_run("jet_browser_bidi", "browser_bidi", &source);
+    let (code, stdout, stderr) = common::build_and_run("jet_browser_bidi", "browser_bidi", &source);
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert!(stdout.contains("abilities:true:true:bidi-2025.5"), "{stdout}");
+    assert!(
+        stdout.contains("abilities:true:true:bidi-2025.5"),
+        "{stdout}"
+    );
     assert!(stdout.contains("event:log.entryAdded"), "{stdout}");
     assert!(
         stdout.contains(r#"raw:{"message":"ready","ready":true}"#),
@@ -1118,7 +1139,12 @@ fn run() {
     assert!(!stdout.contains(&"x".repeat(128)), "{stdout}");
     assert_eq!(
         server.join().unwrap(),
-        ["session.status", "session.new", "session.status", "session.end"]
+        [
+            "session.status",
+            "session.new",
+            "session.status",
+            "session.end"
+        ]
     );
 }
 
@@ -1150,7 +1176,12 @@ fn run() {
     assert!(!stderr.contains("network.tick"), "{stderr}");
     assert_eq!(
         server.join().unwrap(),
-        ["session.status", "session.new", "session.status", "session.end"]
+        [
+            "session.status",
+            "session.new",
+            "session.status",
+            "session.end"
+        ]
     );
 }
 
@@ -1229,10 +1260,7 @@ fn run() {
     }
 
     let (forced_stdout, forced_methods, _) = run_once(true);
-    assert_eq!(
-        forced_stdout,
-        "bidi-2024.11\nblocked\nblocked\nblocked\n"
-    );
+    assert_eq!(forced_stdout, "bidi-2024.11\nblocked\nblocked\nblocked\n");
     assert_eq!(
         forced_methods,
         ["session.status", "session.new", "session.end"]
@@ -1311,8 +1339,7 @@ fn run() {
         );
     }
 
-    let (invalid, invalid_server) =
-        handshake_listener(r#"{"ready":01,"message":"bad"}"#, false);
+    let (invalid, invalid_server) = handshake_listener(r#"{"ready":01,"message":"bad"}"#, false);
     let (surrogate, surrogate_server) =
         handshake_listener(r#"{"ready":true,"message":"\uD83D\uDE80"}"#, true);
     let source = r#"
@@ -1372,8 +1399,11 @@ fn run_locator_actions(listener: TcpListener) -> Vec<String> {
                     r#"{"nodes":[]}"#
                 }
             }
-            "input.performActions" | "script.callFunction" | "browsingContext.close"
-            | "browser.removeUserContext" | "session.end" => "{}",
+            "input.performActions"
+            | "script.callFunction"
+            | "browsingContext.close"
+            | "browser.removeUserContext"
+            | "session.end" => "{}",
             other => panic!("unexpected BiDi method {other}: {request}"),
         };
         write_text_frame(
@@ -1442,7 +1472,11 @@ fn run() {
     assert!(!stderr.contains("SECRET"), "{stderr}");
     let methods = server.join().unwrap();
     assert!(
-        methods.iter().filter(|m| *m == "browsingContext.locateNodes").count() >= 11,
+        methods
+            .iter()
+            .filter(|m| *m == "browsingContext.locateNodes")
+            .count()
+            >= 11,
         "expected repeated locateNodes for waits/actions: {methods:?}"
     );
     assert!(
@@ -1450,7 +1484,11 @@ fn run() {
         "fill must use script.callFunction: {methods:?}"
     );
     assert!(
-        methods.iter().filter(|m| *m == "input.performActions").count() >= 3,
+        methods
+            .iter()
+            .filter(|m| *m == "input.performActions")
+            .count()
+            >= 3,
         "hover/click/press need performActions: {methods:?}"
     );
     assert_eq!(methods.last().map(String::as_str), Some("session.end"));
@@ -1548,7 +1586,9 @@ fn run_network_events(listener: TcpListener) -> Vec<String> {
         match method.as_str() {
             "session.status" => write_text_frame(
                 &mut stream,
-                &format!(r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#),
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                ),
             ),
             "session.new" => write_text_frame(
                 &mut stream,
@@ -1576,8 +1616,11 @@ fn run_network_events(listener: TcpListener) -> Vec<String> {
                     );
                 }
             }
-            "network.continueRequest" | "network.failRequest" | "network.provideResponse"
-            | "network.removeIntercept" | "session.end" => write_text_frame(
+            "network.continueRequest"
+            | "network.failRequest"
+            | "network.provideResponse"
+            | "network.removeIntercept"
+            | "session.end" => write_text_frame(
                 &mut stream,
                 &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
             ),
@@ -1633,11 +1676,8 @@ fn run() {
 "#
     .replace("__ENDPOINT__", &endpoint);
 
-    let (code, stdout, stderr) = common::build_and_run(
-        "jet_browser_bidi_network",
-        "browser_bidi_network",
-        &source,
-    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_browser_bidi_network", "browser_bidi_network", &source);
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(stdout.contains("network.beforeRequestSent\n"), "{stdout}");
     assert!(stdout.contains("req-secret-1\n"), "{stdout}");
@@ -1654,7 +1694,10 @@ fn run() {
         "{methods:?}"
     );
     assert_eq!(
-        methods.iter().filter(|m| *m == "network.addIntercept").count(),
+        methods
+            .iter()
+            .filter(|m| *m == "network.addIntercept")
+            .count(),
         2,
         "{methods:?}"
     );
@@ -1671,7 +1714,10 @@ fn run() {
         "{methods:?}"
     );
     assert_eq!(
-        methods.iter().filter(|m| *m == "network.removeIntercept").count(),
+        methods
+            .iter()
+            .filter(|m| *m == "network.removeIntercept")
+            .count(),
         2,
         "second remove must be local-idempotent: {methods:?}"
     );
@@ -1881,8 +1927,12 @@ fn run_artifacts(listener: TcpListener) -> Vec<String> {
                     r#"{{"type":"success","id":{id},"result":{{"url":"https://example.test/app","navigation":"nav-1"}}}}"#
                 ),
             ),
-            "storage.setCookie" | "storage.deleteCookies" | "browser.setDownloadBehavior"
-            | "browsingContext.close" | "browser.removeUserContext" | "session.end"
+            "storage.setCookie"
+            | "storage.deleteCookies"
+            | "browser.setDownloadBehavior"
+            | "browsingContext.close"
+            | "browser.removeUserContext"
+            | "session.end"
             | "input.setFiles" => write_text_frame(
                 &mut stream,
                 &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
@@ -1907,15 +1957,11 @@ fn run_artifacts(listener: TcpListener) -> Vec<String> {
             }
             "browsingContext.captureScreenshot" => write_text_frame(
                 &mut stream,
-                &format!(
-                    r#"{{"type":"success","id":{id},"result":{{"data":"iVBORw0KGgo="}}}}"#
-                ),
+                &format!(r#"{{"type":"success","id":{id},"result":{{"data":"iVBORw0KGgo="}}}}"#),
             ),
             "browsingContext.print" => write_text_frame(
                 &mut stream,
-                &format!(
-                    r#"{{"type":"success","id":{id},"result":{{"data":"JVBERi0xLjQ="}}}}"#
-                ),
+                &format!(r#"{{"type":"success","id":{id},"result":{{"data":"JVBERi0xLjQ="}}}}"#),
             ),
             "browsingContext.locateNodes" => {
                 locate_calls += 1;
@@ -2014,7 +2060,10 @@ fn run() {
     );
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(stdout.contains("true\n"), "{stdout}");
-    assert!(stdout.contains("browsingContext.downloadWillBegin\n"), "{stdout}");
+    assert!(
+        stdout.contains("browsingContext.downloadWillBegin\n"),
+        "{stdout}"
+    );
     assert!(stdout.contains("dl-1\n"), "{stdout}");
     assert!(stdout.contains("artifacts:ok\n"), "{stdout}");
     assert!(!stdout.contains("ARTIFACT_SECRET"), "{stdout}");
@@ -2456,9 +2505,7 @@ fn native_bidi_checked_expert_cdp_integrates_with_page_lifecycle() {
             methods.push(method.clone());
             let result = match method.as_str() {
                 "session.status" => r#"{"ready":true,"message":"ready"}"#,
-                "session.new" => {
-                    r#"{"sessionId":"cdp-life","capabilities":{"goog:cdp":true}}"#
-                }
+                "session.new" => r#"{"sessionId":"cdp-life","capabilities":{"goog:cdp":true}}"#,
                 "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
                 "browsingContext.create" => r#"{"context":"page-1"}"#,
                 "goog:cdp.sendCommand" => {
@@ -3009,11 +3056,8 @@ fn run() {
 "#
     .replace("__ENDPOINT__", &endpoint);
 
-    let (code, stdout, stderr) = common::build_and_run(
-        "jet_browser_bidi_matrix",
-        "browser_bidi_matrix",
-        &source,
-    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_browser_bidi_matrix", "browser_bidi_matrix", &source);
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
@@ -3199,8 +3243,14 @@ fn run() {
         "MATRIX_CLOSED_SECRET",
         "SECRET STACK",
     ] {
-        assert!(!stdout.contains(secret), "{secret} leaked in stdout:\n{stdout}");
-        assert!(!stderr.contains(secret), "{secret} leaked in stderr:\n{stderr}");
+        assert!(
+            !stdout.contains(secret),
+            "{secret} leaked in stdout:\n{stdout}"
+        );
+        assert!(
+            !stderr.contains(secret),
+            "{secret} leaked in stderr:\n{stderr}"
+        );
     }
     no_cdp_server.join().unwrap();
     assert_eq!(

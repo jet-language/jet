@@ -22,9 +22,7 @@ fn write_single_file(root: &PathBuf, body: &str) -> PathBuf {
 fn write_project(root: &PathBuf, edition: &str, body: &str) -> PathBuf {
     fs::write(
         root.join("package.jet"),
-        format!(
-            "name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"
-        ),
+        format!("name: \"enc\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n"),
     )
     .unwrap();
     write_single_file(root, body)
@@ -135,7 +133,9 @@ fn edition_2027_cbor_decode_emits_l2001_and_2028_removes_it() {
     let before_path = write_project(&before, "2027", source);
     let before_diags = jet::check_with_path(before_path.to_str().unwrap());
     assert!(
-        before_diags.iter().any(|diagnostic| diagnostic.code == "L2001"),
+        before_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L2001"),
         "expected L2001 for cbor.decode, got: {}",
         jet::render_diagnostics(before_path.to_str().unwrap(), "", &before_diags)
     );
@@ -144,7 +144,9 @@ fn edition_2027_cbor_decode_emits_l2001_and_2028_removes_it() {
     let after_path = write_project(&after, "2028", source);
     let after_diags = jet::check_with_path(after_path.to_str().unwrap());
     assert!(
-        after_diags.iter().any(|diagnostic| diagnostic.code == "E2002"),
+        after_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E2002"),
         "expected E2002 after cbor.decode removal, got: {}",
         jet::render_diagnostics(after_path.to_str().unwrap(), "", &after_diags)
     );
@@ -203,7 +205,9 @@ fn lifecycle_marker_metadata_erases_before_web_codegen() {
     let source = "#Deprecated(since: \"2027\", use: \"replacement\", removed_in: \"2028\")\npub fn legacy() { print(\"legacy\") }\npub fn replacement() { print(\"replacement\") }\n\nfn run() {\n    replacement()\n}\n";
     let output = jet::compile_web_with_path(source, "tests/fixtures/lifecycle_marker_web.jet")
         .expect("user lifecycle marker must compile for web");
-    let web = output.web.expect("user lifecycle marker must produce web artifacts");
+    let web = output
+        .web
+        .expect("user lifecycle marker must produce web artifacts");
     assert!(!web.wasm_rust.contains("Deprecated"));
     assert!(!web.js_app.contains("Deprecated"));
 }

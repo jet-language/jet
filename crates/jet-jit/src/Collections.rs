@@ -16,9 +16,9 @@ mod set_semantics {
 }
 
 mod range_semantics {
-    use jet_foundation::StructuralDebug::jet_debug_range;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    use jet_foundation::StructuralDebug::jet_debug_range;
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 
@@ -33,10 +33,7 @@ mod disjoint_semantics {
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Disjoint.rs");
 
-    pub(super) fn split(
-        len: usize,
-        mid: i64,
-    ) -> Result<((usize, usize), (usize, usize)), String> {
+    pub(super) fn split(len: usize, mid: i64) -> Result<((usize, usize), (usize, usize)), String> {
         jet_disjoint_split_bounds(len, mid)
     }
 
@@ -59,8 +56,8 @@ mod authority_semantics {
 // adapters for JIT handles.
 #[allow(dead_code, non_camel_case_types, unused_imports)]
 mod collection_semantics {
-    pub use jet_foundation::Outcome::*;
     use crate::fault_injection::jet_fault_should_fail_allocation;
+    pub use jet_foundation::Outcome::*;
 
     use jet_foundation::StructuralDebug::jet_debug_map;
     use jet_foundation::StructuralDebug::jet_debug_optional;
@@ -278,14 +275,14 @@ mod collection_semantics {
     ) -> (Vec<(String, i64)>, JetOutcome<Option<i64>, AllocError>) {
         let mut map = JetMap::from_iter(pairs);
         let result = jet_map_try_insert(&mut map, key, value);
-        let pairs = map.iter().map(|(key, value)| (key.clone(), *value)).collect();
+        let pairs = map
+            .iter()
+            .map(|(key, value)| (key.clone(), *value))
+            .collect();
         (pairs, result)
     }
 
-    pub(super) fn try_string_push(
-        text: &mut String,
-        addition: &str,
-    ) -> JetOutcome<(), AllocError> {
+    pub(super) fn try_string_push(text: &mut String, addition: &str) -> JetOutcome<(), AllocError> {
         jet_string_try_push(text, addition)
     }
 
@@ -297,27 +294,67 @@ mod collection_semantics {
         value.jet_debug()
     }
 
-    pub(super) fn debug_i64(value: i64) -> String { debug(&value) }
-    pub(super) fn debug_f64(value: f64) -> String { debug(&value) }
-    pub(super) fn debug_f32(value: f32) -> String { debug(&value) }
-    pub(super) fn debug_bool(value: bool) -> String { debug(&value) }
-    pub(super) fn debug_char(value: char) -> String { debug(&value) }
-    pub(super) fn debug_string(value: String) -> String { debug(&value) }
+    pub(super) fn debug_i64(value: i64) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_f64(value: f64) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_f32(value: f32) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_bool(value: bool) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_char(value: char) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_string(value: String) -> String {
+        debug(&value)
+    }
 
-    pub(super) fn show_i64_list(value: Vec<i64>) -> String { show(&value) }
-    pub(super) fn debug_i64_list(value: Vec<i64>) -> String { debug(&value) }
-    pub(super) fn show_u64_list(value: Vec<u64>) -> String { show(&value) }
-    pub(super) fn debug_u64_list(value: Vec<u64>) -> String { debug(&value) }
-    pub(super) fn show_f64_list(value: Vec<f64>) -> String { show(&value) }
-    pub(super) fn debug_f64_list(value: Vec<f64>) -> String { debug(&value) }
-    pub(super) fn show_f32_list(value: Vec<f32>) -> String { show(&value) }
-    pub(super) fn debug_f32_list(value: Vec<f32>) -> String { debug(&value) }
-    pub(super) fn show_bool_list(value: Vec<bool>) -> String { show(&value) }
-    pub(super) fn debug_bool_list(value: Vec<bool>) -> String { debug(&value) }
-    pub(super) fn show_char_list(value: Vec<char>) -> String { show(&value) }
-    pub(super) fn debug_char_list(value: Vec<char>) -> String { debug(&value) }
-    pub(super) fn show_string_list(value: Vec<String>) -> String { show(&value) }
-    pub(super) fn debug_string_list(value: Vec<String>) -> String { debug(&value) }
+    pub(super) fn show_i64_list(value: Vec<i64>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_i64_list(value: Vec<i64>) -> String {
+        debug(&value)
+    }
+    pub(super) fn show_u64_list(value: Vec<u64>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_u64_list(value: Vec<u64>) -> String {
+        debug(&value)
+    }
+    pub(super) fn show_f64_list(value: Vec<f64>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_f64_list(value: Vec<f64>) -> String {
+        debug(&value)
+    }
+    pub(super) fn show_f32_list(value: Vec<f32>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_f32_list(value: Vec<f32>) -> String {
+        debug(&value)
+    }
+    pub(super) fn show_bool_list(value: Vec<bool>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_bool_list(value: Vec<bool>) -> String {
+        debug(&value)
+    }
+    pub(super) fn show_char_list(value: Vec<char>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_char_list(value: Vec<char>) -> String {
+        debug(&value)
+    }
+    pub(super) fn show_string_list(value: Vec<String>) -> String {
+        show(&value)
+    }
+    pub(super) fn debug_string_list(value: Vec<String>) -> String {
+        debug(&value)
+    }
 
     pub(super) fn iter_take<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
         jet_iter_take(jet_iter_from_vec(xs), n).to_list()
@@ -430,25 +467,22 @@ mod collection_semantics {
         map_pairs(&jet_map_copy_kernel(&map_from_pairs(entries)))
     }
 
-    pub(super) fn map_equal_i64(
-        left: Vec<(String, i64)>,
-        right: Vec<(String, i64)>,
-    ) -> bool {
+    pub(super) fn map_equal_i64(left: Vec<(String, i64)>, right: Vec<(String, i64)>) -> bool {
         jet_map_equal_kernel(&map_from_pairs(left), &map_from_pairs(right))
     }
 
     pub(super) fn bit_set_copy(
         values: &std::collections::BTreeSet<i64>,
     ) -> std::collections::BTreeSet<i64> {
-        jet_bits_copy(&JetBitSet { bits: values.clone() }).bits
+        jet_bits_copy(&JetBitSet {
+            bits: values.clone(),
+        })
+        .bits
     }
 
     /// `Bits.has` — the same membership kernel `JetBitSet::contains` calls in
     /// AOT, read straight off the resident set (no copy on a lookup).
-    pub(super) fn bit_set_has(
-        values: &std::collections::BTreeSet<i64>,
-        bit: i64,
-    ) -> bool {
+    pub(super) fn bit_set_has(values: &std::collections::BTreeSet<i64>, bit: i64) -> bool {
         jet_bits_has_kernel(values, bit)
     }
 
@@ -493,10 +527,7 @@ mod collection_semantics {
         jet_map_contains_value_kernel(&map_from_pairs(entries), &needle)
     }
 
-    pub(super) fn map_remove_i64(
-        entries: Vec<(String, i64)>,
-        key: String,
-    ) -> Option<i64> {
+    pub(super) fn map_remove_i64(entries: Vec<(String, i64)>, key: String) -> Option<i64> {
         let mut map = map_from_pairs(entries);
         jet_map_pop_kernel(&mut map, &key).ok()
     }
@@ -512,10 +543,7 @@ mod collection_semantics {
         jet_list_remove_value_kernel(values, value)
     }
 
-    pub(super) fn list_remove_slot<T: Clone>(
-        values: &mut Vec<T>,
-        index: i64,
-    ) -> Result<T, String> {
+    pub(super) fn list_remove_slot<T: Clone>(values: &mut Vec<T>, index: i64) -> Result<T, String> {
         jet_list_remove_slot_kernel(values, index)
     }
 
@@ -538,7 +566,9 @@ mod collection_semantics {
         jet_deque_pop_back_kernel(values).ok()
     }
 
-    pub(super) fn priority_queue_pop<T: Ord>(values: &mut std::collections::BinaryHeap<T>) -> Option<T> {
+    pub(super) fn priority_queue_pop<T: Ord>(
+        values: &mut std::collections::BinaryHeap<T>,
+    ) -> Option<T> {
         jet_priority_queue_pop_kernel(values).ok()
     }
 
@@ -626,11 +656,7 @@ mod collection_semantics {
 /// that decodes it as `option_packed`, and a 1-based handle is never zero, so the
 /// miss reads as `Some(handle - 1)` — a wrong answer, never a refusal.
 fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
-    crate::runtime_host::alloc_jit_result(
-        rt,
-        value.is_some(),
-        value.unwrap_or_default() as u64,
-    )
+    crate::runtime_host::alloc_jit_result(rt, value.is_some(), value.unwrap_or_default() as u64)
 }
 
 fn alloc_error_result(
@@ -717,23 +743,18 @@ fn jet_jit_list_push_f64(list: i64, v: f64) {
 }
 
 fn jet_jit_list_try_new() -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        match collection_semantics::try_list_new::<i64>() {
-            Ok(values) => {
-                let list = rt.heap.alloc_int_list(values);
-                crate::runtime_host::alloc_jit_result(rt, true, list as u64)
-            }
-            Err(error) => alloc_error_result(rt, error),
+    Concurrency::with_runtime_mut(|rt| match collection_semantics::try_list_new::<i64>() {
+        Ok(values) => {
+            let list = rt.heap.alloc_int_list(values);
+            crate::runtime_host::alloc_jit_result(rt, true, list as u64)
         }
+        Err(error) => alloc_error_result(rt, error),
     })
 }
 
 fn jet_jit_list_try_with_capacity(capacity: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match collection_semantics::try_list_with_capacity::<i64>(
-            capacity,
-            &rt.program_allocator,
-        ) {
+        match collection_semantics::try_list_with_capacity::<i64>(capacity, &rt.program_allocator) {
             Ok(values) => {
                 let list = rt.heap.alloc_int_list(values);
                 crate::runtime_host::alloc_jit_result(rt, true, list as u64)
@@ -776,7 +797,10 @@ fn jet_jit_list_try_push_f64(list: i64, value: f64) -> i64 {
 
 fn jet_jit_list_try_reserve(list: i64, additional: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let mut values = rt.heap.clone_int_list(list).expect("jit list try_reserve: bad handle");
+        let mut values = rt
+            .heap
+            .clone_int_list(list)
+            .expect("jit list try_reserve: bad handle");
         match collection_semantics::try_list_reserve(&mut values, additional) {
             Ok(()) => {
                 let _ = rt.heap.replace_int_list(list, values);
@@ -789,7 +813,10 @@ fn jet_jit_list_try_reserve(list: i64, additional: i64) -> i64 {
 
 fn jet_jit_list_try_reserve_f64(list: i64, additional: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).expect("jit list try_reserve f64: bad handle");
+        let len = rt
+            .heap
+            .list_len(list)
+            .expect("jit list try_reserve f64: bad handle");
         let mut values = (0..len)
             .map(|index| rt.heap.list_get_float(list, index).unwrap_or_default())
             .collect::<Vec<_>>();
@@ -819,12 +846,7 @@ fn jet_jit_string_try_push(text: i64, addition: i64) -> i64 {
     })
 }
 
-fn jet_jit_list_push_range(
-    list: i64,
-    start: i64,
-    end: i64,
-    exclusive: i8,
-) {
+fn jet_jit_list_push_range(list: i64, start: i64, end: i64, exclusive: i8) {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
             .list_push_range(list, start, end, exclusive != 0)
@@ -858,8 +880,7 @@ unsafe fn invoke_closure_bool(slot: JitCallableSlot, value: i64) -> bool {
             std::mem::transmute(slot.fn_ptr as usize);
         callback(slot.env, value) != 0
     } else {
-        let callback: unsafe extern "C" fn(i64) -> i8 =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64) -> i8 = std::mem::transmute(slot.fn_ptr as usize);
         callback(value) != 0
     }
 }
@@ -870,8 +891,7 @@ unsafe fn invoke_closure_i64(slot: JitCallableSlot, value: i64) -> i64 {
             std::mem::transmute(slot.fn_ptr as usize);
         callback(slot.env, value)
     } else {
-        let callback: unsafe extern "C" fn(i64) -> i64 =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64) -> i64 = std::mem::transmute(slot.fn_ptr as usize);
         callback(value)
     }
 }
@@ -882,8 +902,7 @@ unsafe fn invoke_closure_i8(slot: JitCallableSlot, value: i64) -> i8 {
             std::mem::transmute(slot.fn_ptr as usize);
         callback(slot.env, value)
     } else {
-        let callback: unsafe extern "C" fn(i64) -> i8 =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64) -> i8 = std::mem::transmute(slot.fn_ptr as usize);
         callback(value)
     }
 }
@@ -894,8 +913,7 @@ unsafe fn invoke_closure_i32(slot: JitCallableSlot, value: i64) -> i32 {
             std::mem::transmute(slot.fn_ptr as usize);
         callback(slot.env, value)
     } else {
-        let callback: unsafe extern "C" fn(i64) -> i32 =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64) -> i32 = std::mem::transmute(slot.fn_ptr as usize);
         callback(value)
     }
 }
@@ -906,20 +924,17 @@ unsafe fn invoke_closure_f64(slot: JitCallableSlot, value: i64) -> f64 {
             std::mem::transmute(slot.fn_ptr as usize);
         callback(slot.env, value)
     } else {
-        let callback: unsafe extern "C" fn(i64) -> f64 =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64) -> f64 = std::mem::transmute(slot.fn_ptr as usize);
         callback(value)
     }
 }
 
 unsafe fn invoke_closure_unit(slot: JitCallableSlot, value: i64) {
     if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64, i64) = std::mem::transmute(slot.fn_ptr as usize);
         callback(slot.env, value);
     } else {
-        let callback: unsafe extern "C" fn(i64) =
-            std::mem::transmute(slot.fn_ptr as usize);
+        let callback: unsafe extern "C" fn(i64) = std::mem::transmute(slot.fn_ptr as usize);
         callback(value);
     }
 }
@@ -1246,9 +1261,7 @@ fn jet_jit_list_indexes(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for i in 0..n {
-            rt.heap
-                .list_push_int(list, i)
-                .expect("jit indexes push");
+            rt.heap.list_push_int(list, i).expect("jit indexes push");
         }
         list
     })
@@ -1508,12 +1521,7 @@ fn jet_jit_list_sort_str(list: i64) {
         };
         let mut pairs: Vec<(String, i64)> = ids
             .into_iter()
-            .map(|id| {
-                (
-                    rt.heap.clone_string(id).unwrap_or_default(),
-                    id,
-                )
-            })
+            .map(|id| (rt.heap.clone_string(id).unwrap_or_default(), id))
             .collect();
         collection_semantics::list_sort_by(&mut pairs, |pair| pair.0.clone());
         for (i, (_, id)) in pairs.into_iter().enumerate() {
@@ -1543,7 +1551,11 @@ fn jet_jit_list_sort_str_desc(list: i64) {
 }
 
 fn jet_jit_list_clone(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_list(list).expect("jit list clone: bad handle"))
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_list(list)
+            .expect("jit list clone: bad handle")
+    })
 }
 
 fn jet_jit_list_copy(list: i64) -> i64 {
@@ -1614,13 +1626,7 @@ fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
     })
 }
 
-fn jet_jit_list_range_end(
-    list: i64,
-    start: i64,
-    end: i64,
-    exclusive: i64,
-    line: u32,
-) -> i64 {
+fn jet_jit_list_range_end(list: i64, start: i64, end: i64, exclusive: i64, line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(len) = rt.heap.list_len(list) else {
             jet_foundation::ice!(None, "jit Range window: bad list handle");
@@ -1644,16 +1650,11 @@ fn alloc_view_mut(
     let view = rt.heap.alloc_record(3);
     let _ = rt.heap.record_set_int(view, 0, list);
     let _ = rt.heap.record_set_int(view, 1, start as i64);
-    let _ = rt
-        .heap
-        .record_set_int(view, 2, end_exclusive as i64 - 1);
+    let _ = rt.heap.record_set_int(view, 2, end_exclusive as i64 - 1);
     view
 }
 
-fn alloc_disjoint_result(
-    rt: &mut crate::JitRuntime,
-    result: Result<i64, String>,
-) -> i64 {
+fn alloc_disjoint_result(rt: &mut crate::JitRuntime, result: Result<i64, String>) -> i64 {
     match result {
         Ok(value) => crate::runtime_host::alloc_jit_result(rt, true, value as u64),
         Err(error) => {
@@ -1710,22 +1711,18 @@ fn jet_jit_get_disjoint_write(list: i64, targets: i64) -> i64 {
     })
 }
 
-fn jet_jit_range_contains(
-    start: i64,
-    end: i64,
-    exclusive: i64,
-    value: i64,
-) -> i8 {
+fn jet_jit_range_contains(start: i64, end: i64, exclusive: i64, value: i64) -> i8 {
     range_semantics::jet_range_contains(start, end, exclusive != 0, value) as i8
 }
 
 fn jet_jit_range_show(start: i64, end: i64, exclusive: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap.alloc_string(range_semantics::jet_range_structural_text(
-            start,
-            end,
-            exclusive != 0,
-        ))
+        rt.heap
+            .alloc_string(range_semantics::jet_range_structural_text(
+                start,
+                end,
+                exclusive != 0,
+            ))
     })
 }
 
@@ -1796,10 +1793,8 @@ fn jet_jit_map_max(map: i64) -> i64 {
 }
 
 fn jet_jit_map_intersection(left: i64, right: i64) -> i64 {
-    let pairs = collection_semantics::map_intersection_i64(
-        clone_map_pairs(left),
-        clone_map_pairs(right),
-    );
+    let pairs =
+        collection_semantics::map_intersection_i64(clone_map_pairs(left), clone_map_pairs(right));
     alloc_map_pairs(&pairs)
 }
 
@@ -1808,7 +1803,11 @@ fn jet_jit_map_slice(map: i64, keys: i64) -> i64 {
     let keys = Concurrency::with_runtime_mut(|rt| {
         key_ids
             .into_iter()
-            .map(|key| rt.heap.clone_string(key).expect("jit map slice: string key"))
+            .map(|key| {
+                rt.heap
+                    .clone_string(key)
+                    .expect("jit map slice: string key")
+            })
             .collect::<Vec<_>>()
     });
     let pairs = collection_semantics::map_slice_i64(clone_map_pairs(map), keys);
@@ -1820,7 +1819,11 @@ fn jet_jit_map_from_keys(keys: i64, default: i64) -> i64 {
     let keys = Concurrency::with_runtime_mut(|rt| {
         key_ids
             .into_iter()
-            .map(|key| rt.heap.clone_string(key).expect("jit map from_keys: string key"))
+            .map(|key| {
+                rt.heap
+                    .clone_string(key)
+                    .expect("jit map from_keys: string key")
+            })
             .collect::<Vec<_>>()
     });
     let pairs = collection_semantics::map_from_keys_i64(keys, default);
@@ -1856,7 +1859,10 @@ fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
                 .expect("jit map merge: bad left handle");
             let out = rt.heap.alloc_empty_map();
             for i in 0..len {
-                let key = rt.heap.map_key_at(left, i).expect("jit map merge: left key");
+                let key = rt
+                    .heap
+                    .map_key_at(left, i)
+                    .expect("jit map merge: left key");
                 let value = rt
                     .heap
                     .map_value_at(left, i)
@@ -2042,9 +2048,7 @@ fn jet_jit_map_keys(map: i64) -> i64 {
         let out = rt.heap.alloc_empty_list();
         for i in 0..len {
             let key = rt.heap.map_key_at(map, i).expect("jit map keys: key");
-            rt.heap
-                .list_push_int(out, key)
-                .expect("jit map keys: push");
+            rt.heap.list_push_int(out, key).expect("jit map keys: push");
         }
         out
     })
@@ -2055,10 +2059,7 @@ fn jet_jit_map_values(map: i64) -> i64 {
         let len = rt.heap.map_len(map).expect("jit map values: bad handle");
         let out = rt.heap.alloc_empty_list();
         for i in 0..len {
-            let value = rt
-                .heap
-                .map_value_at(map, i)
-                .expect("jit map values: value");
+            let value = rt.heap.map_value_at(map, i).expect("jit map values: value");
             rt.heap
                 .list_push_int(out, value)
                 .expect("jit map values: push");
@@ -2240,7 +2241,9 @@ fn jet_jit_iter_first(list: i64) -> i64 {
 
 fn jet_jit_iter_first_string(list: i64) -> i64 {
     match collection_semantics::iter_first(clone_list_strings(list)) {
-        Some(value) => Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value).wrapping_add(1)),
+        Some(value) => {
+            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value).wrapping_add(1))
+        }
         None => 0,
     }
 }
@@ -2391,7 +2394,9 @@ fn jit_zip_record_field(
             .map_or(JitZipValue::Absent, JitZipValue::Float),
         crate::runtime_host::JitZipValueKind::Bool => heap
             .record_get_bool(column_fills_handle, index)
-            .map_or(JitZipValue::Absent, |value| JitZipValue::Bits(i64::from(value))),
+            .map_or(JitZipValue::Absent, |value| {
+                JitZipValue::Bits(i64::from(value))
+            }),
         crate::runtime_host::JitZipValueKind::Char => heap
             .record_get_char(column_fills_handle, index)
             .map_or(JitZipValue::Absent, |value| {
@@ -2477,13 +2482,15 @@ fn jit_zip_set_value(
         (crate::runtime_host::JitZipValueKind::Bool, JitZipValue::Bits(value)) => {
             heap.record_set_bool(record, index, value != 0)
         }
-        (crate::runtime_host::JitZipValueKind::Char, JitZipValue::Bits(value)) => heap
-            .record_set_char(record, index, char::from_u32(value as u32).unwrap_or('\0')),
+        (crate::runtime_host::JitZipValueKind::Char, JitZipValue::Bits(value)) => {
+            heap.record_set_char(record, index, char::from_u32(value as u32).unwrap_or('\0'))
+        }
         (crate::runtime_host::JitZipValueKind::String, JitZipValue::Bits(value)) => {
             heap.record_set_string(record, index, value)
         }
-        (crate::runtime_host::JitZipValueKind::Float, JitZipValue::Bits(value)) => heap
-            .record_set_float(record, index, f64::from_bits(value as u64)),
+        (crate::runtime_host::JitZipValueKind::Float, JitZipValue::Bits(value)) => {
+            heap.record_set_float(record, index, f64::from_bits(value as u64))
+        }
         (_, JitZipValue::Absent) => None,
         (_, _) => None,
     }
@@ -2505,12 +2512,7 @@ fn jet_jit_iter_zip_family(
     out
 }
 
-fn zip_family_rows(
-    plan_id: i64,
-    column_handles: i64,
-    common_fill: i64,
-    column_fills: i64,
-) -> i64 {
+fn zip_family_rows(plan_id: i64, column_handles: i64, common_fill: i64, column_fills: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let out = rt.heap.alloc_empty_list();
         let Some(plan_id) = usize::try_from(plan_id).ok() else {
@@ -2919,10 +2921,14 @@ mod unzip_column_round_trip {
         for (text, number) in [("a", 1), ("bb", 2), ("c", 3)] {
             let text = heap.alloc_string(text);
             let record = heap.alloc_record(2);
-            assert!(
-                jit_zip_set_value(&mut heap, record, 0, string_column, JitZipValue::Bits(text))
-                    .is_some()
-            );
+            assert!(jit_zip_set_value(
+                &mut heap,
+                record,
+                0,
+                string_column,
+                JitZipValue::Bits(text)
+            )
+            .is_some());
             assert!(
                 jit_zip_set_value(&mut heap, record, 1, int_column, JitZipValue::Bits(number))
                     .is_some()
@@ -3020,7 +3026,10 @@ fn jet_jit_iter_cycle(list: i64, n: i64) -> i64 {
 }
 
 fn jet_jit_iter_drop_last(list: i64, n: i64) -> i64 {
-    alloc_from_ints(&collection_semantics::iter_drop_last(clone_list_ints(list), n))
+    alloc_from_ints(&collection_semantics::iter_drop_last(
+        clone_list_ints(list),
+        n,
+    ))
 }
 
 fn jet_jit_iter_shuffle(list: i64) -> i64 {
@@ -3370,7 +3379,8 @@ fn jet_jit_list_debug(list: i64, kind: i64) -> i64 {
 fn jet_jit_string_debug(value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.clone_string(value).unwrap_or_default();
-        rt.heap.alloc_string(collection_semantics::debug_string(text))
+        rt.heap
+            .alloc_string(collection_semantics::debug_string(text))
     })
 }
 
@@ -3391,14 +3401,9 @@ fn jet_jit_scalar_debug(value: i64, kind: i64) -> i64 {
 }
 
 /// Append `T?` Debug text through the shared StructuralDebug formatter.
-fn jet_jit_str_push_debug_optional(
-    buf_id: i64,
-    payload_id: i64,
-    present: i64,
-) {
+fn jet_jit_str_push_debug_optional(buf_id: i64, payload_id: i64, present: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let payload = (present != 0)
-            .then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+        let payload = (present != 0).then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
         let text = jet_foundation::StructuralDebug::jet_debug_optional(payload);
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&text);
@@ -3407,11 +3412,7 @@ fn jet_jit_str_push_debug_optional(
 }
 
 /// Append a record after the JIT has marshalled rendered values and metadata.
-fn jet_jit_str_push_debug_record(
-    buf_id: i64,
-    type_name_id: i64,
-    fields_id: i64,
-) {
+fn jet_jit_str_push_debug_record(buf_id: i64, type_name_id: i64, fields_id: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(type_name) = rt.heap.clone_string(type_name_id) else {
             return;
@@ -3438,10 +3439,7 @@ fn jet_jit_str_push_debug_record(
                 redacted: field[3] != 0,
             });
         }
-        let text = jet_foundation::StructuralDebug::jet_debug_record_fields(
-            &type_name,
-            marshalled,
-        );
+        let text = jet_foundation::StructuralDebug::jet_debug_record_fields(&type_name, marshalled);
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&text);
         }
@@ -3449,18 +3447,13 @@ fn jet_jit_str_push_debug_record(
 }
 
 /// Append a positional variant through the shared StructuralDebug formatter.
-fn jet_jit_str_push_debug_variant(
-    buf_id: i64,
-    variant_id: i64,
-    payload_id: i64,
-    has_payload: i64,
-) {
+fn jet_jit_str_push_debug_variant(buf_id: i64, variant_id: i64, payload_id: i64, has_payload: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(variant) = rt.heap.clone_string(variant_id) else {
             return;
         };
-        let payload = (has_payload != 0)
-            .then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
+        let payload =
+            (has_payload != 0).then(|| rt.heap.clone_string(payload_id).unwrap_or_default());
         let text = jet_foundation::StructuralDebug::jet_debug_variant(&variant, payload);
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&text);
@@ -3756,7 +3749,10 @@ fn jet_jit_set_insert(set: i64, v: i64) -> i8 {
         let string_kind = set_is_string(rt, set);
         if string_kind {
             let needle = rt.heap.clone_string(v).unwrap_or_default();
-            if existing.iter().any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str())) {
+            if existing
+                .iter()
+                .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
+            {
                 return 0;
             }
         }
@@ -3771,10 +3767,15 @@ fn jet_jit_set_insert(set: i64, v: i64) -> i8 {
 fn jet_jit_set_remove(set: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (set as usize).wrapping_sub(1);
-        let Some(existing) = rt.sets.get(idx).cloned() else { return; };
+        let Some(existing) = rt.sets.get(idx).cloned() else {
+            return;
+        };
         let id = if set_is_string(rt, set) {
             let needle = rt.heap.clone_string(v).unwrap_or_default();
-            existing.iter().find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str())).copied()
+            existing
+                .iter()
+                .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+                .copied()
         } else {
             Some(v)
         };
@@ -3800,20 +3801,25 @@ fn jet_jit_set_pop(set: i64, v: i64) -> i64 {
         } else {
             existing.contains(&v).then_some(v)
         };
-        option_packed(found.and_then(|id| collection_semantics::set_pop_i64(&mut rt.sets[idx], &id)))
+        option_packed(
+            found.and_then(|id| collection_semantics::set_pop_i64(&mut rt.sets[idx], &id)),
+        )
     })
 }
 
 fn jet_jit_set_has(set: i64, v: i64) -> i8 {
-    Concurrency::with_runtime_mut(|rt| {
-        match rt.sets.get((set as usize).wrapping_sub(1)) {
-            Some(s) if set_is_string(rt, set) && {
+    Concurrency::with_runtime_mut(|rt| match rt.sets.get((set as usize).wrapping_sub(1)) {
+        Some(s)
+            if set_is_string(rt, set) && {
                 let needle = rt.heap.clone_string(v).unwrap_or_default();
-                s.iter().any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
-            } => 1,
-            Some(s) if s.contains(&v) => 1,
-            _ => 0,
+                s.iter()
+                    .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
+            } =>
+        {
+            1
         }
+        Some(s) if s.contains(&v) => 1,
+        _ => 0,
     })
 }
 
@@ -3828,8 +3834,11 @@ fn jet_jit_set_len(set: i64) -> i64 {
 
 fn jet_jit_set_to_list(set: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let xs: Vec<i64> = rt.sets.get((set as usize).wrapping_sub(1))
-            .map(|s| s.iter().copied().collect()).unwrap_or_default();
+        let xs: Vec<i64> = rt
+            .sets
+            .get((set as usize).wrapping_sub(1))
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
         rt.heap.alloc_int_list(xs)
     })
 }
@@ -3848,11 +3857,21 @@ fn jet_jit_set_union(a: i64, b: i64) -> i64 {
             .unwrap_or_default();
         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
         if string_kind {
-            let ids = string_ids(rt, &left).into_iter().chain(string_ids(rt, &right)).collect::<HashMap<_, _>>();
+            let ids = string_ids(rt, &left)
+                .into_iter()
+                .chain(string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
             let left_values = set_string_values(rt, &left);
             let right_values = set_string_values(rt, &right);
             let out_values = set_semantics::jet_set_union(&left_values, &right_values);
-            return set_handle(rt, out_values.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            return set_handle(
+                rt,
+                out_values
+                    .into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
         set_handle(rt, set_semantics::jet_set_union(&left, &right), false)
     })
@@ -3872,11 +3891,27 @@ fn jet_jit_set_intersection(a: i64, b: i64) -> i64 {
             .unwrap_or_default();
         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
         if string_kind {
-            let ids = string_ids(rt, &left).into_iter().chain(string_ids(rt, &right)).collect::<HashMap<_, _>>();
-            let out = set_semantics::jet_set_intersection(&set_string_values(rt, &left), &set_string_values(rt, &right));
-            return set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let ids = string_ids(rt, &left)
+                .into_iter()
+                .chain(string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
+            let out = set_semantics::jet_set_intersection(
+                &set_string_values(rt, &left),
+                &set_string_values(rt, &right),
+            );
+            return set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
-        set_handle(rt, set_semantics::jet_set_intersection(&left, &right), false)
+        set_handle(
+            rt,
+            set_semantics::jet_set_intersection(&left, &right),
+            false,
+        )
     })
 }
 
@@ -3895,8 +3930,17 @@ fn jet_jit_set_difference(a: i64, b: i64) -> i64 {
         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
         if string_kind {
             let ids = string_ids(rt, &left);
-            let out = set_semantics::jet_set_difference(&set_string_values(rt, &left), &set_string_values(rt, &right));
-            return set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let out = set_semantics::jet_set_difference(
+                &set_string_values(rt, &left),
+                &set_string_values(rt, &right),
+            );
+            return set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
         set_handle(rt, set_semantics::jet_set_difference(&left, &right), false)
     })
@@ -3916,11 +3960,27 @@ fn jet_jit_set_symmetric_difference(a: i64, b: i64) -> i64 {
             .unwrap_or_default();
         let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
         if string_kind {
-            let ids = string_ids(rt, &left).into_iter().chain(string_ids(rt, &right)).collect::<HashMap<_, _>>();
-            let out = set_semantics::jet_set_symmetric_difference(&set_string_values(rt, &left), &set_string_values(rt, &right));
-            return set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let ids = string_ids(rt, &left)
+                .into_iter()
+                .chain(string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
+            let out = set_semantics::jet_set_symmetric_difference(
+                &set_string_values(rt, &left),
+                &set_string_values(rt, &right),
+            );
+            return set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
-        set_handle(rt, set_semantics::jet_set_symmetric_difference(&left, &right), false)
+        set_handle(
+            rt,
+            set_semantics::jet_set_symmetric_difference(&left, &right),
+            false,
+        )
     })
 }
 
@@ -3933,7 +3993,10 @@ fn jet_jit_set_is_subset(a: i64, b: i64) -> i8 {
             return i8::from(left.is_empty());
         };
         if set_is_string(rt, a) || set_is_string(rt, b) {
-            return i8::from(set_semantics::jet_set_is_subset(&set_string_values(rt, &left), &set_string_values(rt, &right)));
+            return i8::from(set_semantics::jet_set_is_subset(
+                &set_string_values(rt, &left),
+                &set_string_values(rt, &right),
+            ));
         }
         i8::from(set_semantics::jet_set_is_subset(&left, &right))
     })
@@ -3942,13 +4005,20 @@ fn jet_jit_set_is_subset(a: i64, b: i64) -> i8 {
 fn jet_jit_set_is_superset(a: i64, b: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(left) = rt.sets.get((a as usize).wrapping_sub(1)).cloned() else {
-            return i8::from(rt.sets.get((b as usize).wrapping_sub(1)).is_some_and(HashSet::is_empty));
+            return i8::from(
+                rt.sets
+                    .get((b as usize).wrapping_sub(1))
+                    .is_some_and(HashSet::is_empty),
+            );
         };
         let Some(right) = rt.sets.get((b as usize).wrapping_sub(1)).cloned() else {
             return 1;
         };
         if set_is_string(rt, a) || set_is_string(rt, b) {
-            return i8::from(set_semantics::jet_set_is_superset(&set_string_values(rt, &left), &set_string_values(rt, &right)));
+            return i8::from(set_semantics::jet_set_is_superset(
+                &set_string_values(rt, &left),
+                &set_string_values(rt, &right),
+            ));
         }
         i8::from(set_semantics::jet_set_is_superset(&left, &right))
     })
@@ -3963,7 +4033,10 @@ fn jet_jit_set_is_disjoint(a: i64, b: i64) -> i8 {
             return 1;
         };
         if set_is_string(rt, a) || set_is_string(rt, b) {
-            return i8::from(set_semantics::jet_set_is_disjoint(&set_string_values(rt, &left), &set_string_values(rt, &right)));
+            return i8::from(set_semantics::jet_set_is_disjoint(
+                &set_string_values(rt, &left),
+                &set_string_values(rt, &right),
+            ));
         }
         i8::from(set_semantics::jet_set_is_disjoint(&left, &right))
     })
@@ -3992,7 +4065,11 @@ fn jet_jit_deque_push_back(dq: i64, v: i64) {
 /// Packed Option: 0 = None, else value+1 (Int elems).
 fn jet_jit_deque_pop_front(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(collection_semantics::deque_pop_front) {
+        match rt
+            .deques
+            .get_mut((dq as usize).wrapping_sub(1))
+            .and_then(collection_semantics::deque_pop_front)
+        {
             Some(v) => v + 1,
             None => 0,
         }
@@ -4001,7 +4078,11 @@ fn jet_jit_deque_pop_front(dq: i64) -> i64 {
 
 fn jet_jit_deque_pop_back(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(collection_semantics::deque_pop_back) {
+        match rt
+            .deques
+            .get_mut((dq as usize).wrapping_sub(1))
+            .and_then(collection_semantics::deque_pop_back)
+        {
             Some(v) => v + 1,
             None => 0,
         }
@@ -4010,7 +4091,11 @@ fn jet_jit_deque_pop_back(dq: i64) -> i64 {
 
 fn jet_jit_deque_peek_front(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.deques.get((dq as usize).wrapping_sub(1)).and_then(|d| d.front().copied()) {
+        match rt
+            .deques
+            .get((dq as usize).wrapping_sub(1))
+            .and_then(|d| d.front().copied())
+        {
             Some(v) => v + 1,
             None => 0,
         }
@@ -4019,7 +4104,11 @@ fn jet_jit_deque_peek_front(dq: i64) -> i64 {
 
 fn jet_jit_deque_peek_back(dq: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.deques.get((dq as usize).wrapping_sub(1)).and_then(|d| d.back().copied()) {
+        match rt
+            .deques
+            .get((dq as usize).wrapping_sub(1))
+            .and_then(|d| d.back().copied())
+        {
             Some(v) => v + 1,
             None => 0,
         }
@@ -4276,7 +4365,10 @@ fn jet_jit_sorted_set_insert(handle: i64, value: i64) -> i8 {
         };
         if string_kind {
             let needle = rt.heap.clone_string(value).unwrap_or_default();
-            if existing.iter().any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str())) {
+            if existing
+                .iter()
+                .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str()))
+            {
                 return 0;
             }
         }
@@ -4287,10 +4379,15 @@ fn jet_jit_sorted_set_insert(handle: i64, value: i64) -> i8 {
 fn jet_jit_sorted_set_remove(handle: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (handle as usize).wrapping_sub(1);
-        let Some(existing) = rt.sorted_sets.get(idx).cloned() else { return; };
+        let Some(existing) = rt.sorted_sets.get(idx).cloned() else {
+            return;
+        };
         let id = if sorted_set_is_string(rt, handle) {
             let needle = rt.heap.clone_string(value).unwrap_or_default();
-            existing.iter().find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str())).copied()
+            existing
+                .iter()
+                .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+                .copied()
         } else {
             Some(value)
         };
@@ -4321,7 +4418,8 @@ fn jet_jit_sorted_set_to_list(handle: i64) -> i64 {
 
 fn jet_jit_sorted_set_first(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let value = rt.sorted_sets
+        let value = rt
+            .sorted_sets
             .get((handle as usize).wrapping_sub(1))
             .and_then(|set| {
                 if sorted_set_is_string(rt, handle) {
@@ -4339,7 +4437,8 @@ fn jet_jit_sorted_set_first(handle: i64) -> i64 {
 
 fn jet_jit_sorted_set_last(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let value = rt.sorted_sets
+        let value = rt
+            .sorted_sets
             .get((handle as usize).wrapping_sub(1))
             .and_then(|set| {
                 if sorted_set_is_string(rt, handle) {
@@ -4369,11 +4468,27 @@ fn jet_jit_sorted_set_union(a: i64, b: i64) -> i64 {
             .unwrap_or_default();
         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
         if string_kind {
-            let ids = sorted_string_ids(rt, &left).into_iter().chain(sorted_string_ids(rt, &right)).collect::<HashMap<_, _>>();
-            let out = set_semantics::jet_sorted_set_union(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right));
-            return sorted_set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let ids = sorted_string_ids(rt, &left)
+                .into_iter()
+                .chain(sorted_string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
+            let out = set_semantics::jet_sorted_set_union(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            );
+            return sorted_set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
-        sorted_set_handle(rt, set_semantics::jet_sorted_set_union(&left, &right), false)
+        sorted_set_handle(
+            rt,
+            set_semantics::jet_sorted_set_union(&left, &right),
+            false,
+        )
     })
 }
 
@@ -4391,11 +4506,27 @@ fn jet_jit_sorted_set_intersection(a: i64, b: i64) -> i64 {
             .unwrap_or_default();
         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
         if string_kind {
-            let ids = sorted_string_ids(rt, &left).into_iter().chain(sorted_string_ids(rt, &right)).collect::<HashMap<_, _>>();
-            let out = set_semantics::jet_sorted_set_intersection(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right));
-            return sorted_set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let ids = sorted_string_ids(rt, &left)
+                .into_iter()
+                .chain(sorted_string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
+            let out = set_semantics::jet_sorted_set_intersection(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            );
+            return sorted_set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
-        sorted_set_handle(rt, set_semantics::jet_sorted_set_intersection(&left, &right), false)
+        sorted_set_handle(
+            rt,
+            set_semantics::jet_sorted_set_intersection(&left, &right),
+            false,
+        )
     })
 }
 
@@ -4414,10 +4545,23 @@ fn jet_jit_sorted_set_difference(a: i64, b: i64) -> i64 {
         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
         if string_kind {
             let ids = sorted_string_ids(rt, &left);
-            let out = set_semantics::jet_sorted_set_difference(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right));
-            return sorted_set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let out = set_semantics::jet_sorted_set_difference(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            );
+            return sorted_set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
-        sorted_set_handle(rt, set_semantics::jet_sorted_set_difference(&left, &right), false)
+        sorted_set_handle(
+            rt,
+            set_semantics::jet_sorted_set_difference(&left, &right),
+            false,
+        )
     })
 }
 
@@ -4435,11 +4579,27 @@ fn jet_jit_sorted_set_symmetric_difference(a: i64, b: i64) -> i64 {
             .unwrap_or_default();
         let string_kind = sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b);
         if string_kind {
-            let ids = sorted_string_ids(rt, &left).into_iter().chain(sorted_string_ids(rt, &right)).collect::<HashMap<_, _>>();
-            let out = set_semantics::jet_sorted_set_symmetric_difference(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right));
-            return sorted_set_handle(rt, out.into_iter().filter_map(|value| ids.get(&value).copied()).collect(), true);
+            let ids = sorted_string_ids(rt, &left)
+                .into_iter()
+                .chain(sorted_string_ids(rt, &right))
+                .collect::<HashMap<_, _>>();
+            let out = set_semantics::jet_sorted_set_symmetric_difference(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            );
+            return sorted_set_handle(
+                rt,
+                out.into_iter()
+                    .filter_map(|value| ids.get(&value).copied())
+                    .collect(),
+                true,
+            );
         }
-        sorted_set_handle(rt, set_semantics::jet_sorted_set_symmetric_difference(&left, &right), false)
+        sorted_set_handle(
+            rt,
+            set_semantics::jet_sorted_set_symmetric_difference(&left, &right),
+            false,
+        )
     })
 }
 
@@ -4452,7 +4612,10 @@ fn jet_jit_sorted_set_is_subset(a: i64, b: i64) -> i8 {
             return i8::from(left.is_empty());
         };
         if sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b) {
-            return i8::from(set_semantics::jet_sorted_set_is_subset(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right)));
+            return i8::from(set_semantics::jet_sorted_set_is_subset(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            ));
         }
         i8::from(set_semantics::jet_sorted_set_is_subset(&left, &right))
     })
@@ -4471,7 +4634,10 @@ fn jet_jit_sorted_set_is_superset(a: i64, b: i64) -> i8 {
             return 1;
         };
         if sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b) {
-            return i8::from(set_semantics::jet_sorted_set_is_superset(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right)));
+            return i8::from(set_semantics::jet_sorted_set_is_superset(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            ));
         }
         i8::from(set_semantics::jet_sorted_set_is_superset(&left, &right))
     })
@@ -4486,7 +4652,10 @@ fn jet_jit_sorted_set_is_disjoint(a: i64, b: i64) -> i8 {
             return 1;
         };
         if sorted_set_is_string(rt, a) || sorted_set_is_string(rt, b) {
-            return i8::from(set_semantics::jet_sorted_set_is_disjoint(&sorted_string_values(rt, &left), &sorted_string_values(rt, &right)));
+            return i8::from(set_semantics::jet_sorted_set_is_disjoint(
+                &sorted_string_values(rt, &left),
+                &sorted_string_values(rt, &right),
+            ));
         }
         i8::from(set_semantics::jet_sorted_set_is_disjoint(&left, &right))
     })
@@ -4529,7 +4698,8 @@ fn jet_jit_priority_queue_push(handle: i64, value: i64) {
 
 fn jet_jit_priority_queue_peek(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let value = rt.priority_queues
+        let value = rt
+            .priority_queues
             .get((handle as usize).wrapping_sub(1))
             .and_then(|heap| heap.peek().copied());
         option_i64(rt, value)
@@ -4538,7 +4708,8 @@ fn jet_jit_priority_queue_peek(handle: i64) -> i64 {
 
 fn jet_jit_priority_queue_pop(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let value = rt.priority_queues
+        let value = rt
+            .priority_queues
             .get_mut((handle as usize).wrapping_sub(1))
             .and_then(collection_semantics::priority_queue_pop);
         option_i64(rt, value)
@@ -4550,7 +4721,13 @@ fn jet_jit_priority_queue_to_sorted_list(handle: i64) -> i64 {
         let values = rt
             .priority_queues
             .get((handle as usize).wrapping_sub(1))
-            .map(|heap| heap.clone().into_sorted_vec().into_iter().rev().collect::<Vec<_>>())
+            .map(|heap| {
+                heap.clone()
+                    .into_sorted_vec()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_default();
         copy_list(rt, values)
     })
@@ -4575,15 +4752,15 @@ fn jet_jit_priority_queue_remove_slot(handle: i64, index: i64, line: u32) -> i64
             .priority_queues
             .get_mut((handle as usize).wrapping_sub(1))
         {
-            Some(heap) => match collection_semantics::priority_queue_remove_slot(
-                heap, index, "<jit>", line,
-            ) {
-                Ok(value) => value.ok(),
-                Err(message) => {
-                    rt.set_runtime_stop("E3010", line, &message);
-                    None
+            Some(heap) => {
+                match collection_semantics::priority_queue_remove_slot(heap, index, "<jit>", line) {
+                    Ok(value) => value.ok(),
+                    Err(message) => {
+                        rt.set_runtime_stop("E3010", line, &message);
+                        None
+                    }
                 }
-            },
+            }
             None => None,
         };
         option_i64(rt, removed)
@@ -4608,7 +4785,11 @@ fn jet_jit_lru_put(handle: i64, key: i64, value: i64) -> i64 {
         let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
             return option_i64(rt, None);
         };
-        if let Some(index) = lru.entries.iter().position(|(existing, _)| existing == &key) {
+        if let Some(index) = lru
+            .entries
+            .iter()
+            .position(|(existing, _)| existing == &key)
+        {
             let (_, old) = lru.entries.remove(index).expect("lru position");
             lru.entries.push_front((key, value));
             return option_i64(rt, Some(old));
@@ -4630,7 +4811,11 @@ fn jet_jit_lru_get(handle: i64, key: i64) -> i64 {
         let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
             return option_i64(rt, None);
         };
-        let Some(index) = lru.entries.iter().position(|(existing, _)| existing == &key) else {
+        let Some(index) = lru
+            .entries
+            .iter()
+            .position(|(existing, _)| existing == &key)
+        else {
             return option_i64(rt, None);
         };
         let entry = lru.entries.remove(index).expect("lru position");
@@ -4665,7 +4850,10 @@ fn jet_jit_lru_keys(handle: i64) -> i64 {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let ids = keys.into_iter().map(|key| rt.heap.alloc_string(key)).collect::<Vec<_>>();
+        let ids = keys
+            .into_iter()
+            .map(|key| rt.heap.alloc_string(key))
+            .collect::<Vec<_>>();
         copy_list(rt, ids)
     })
 }
@@ -4723,7 +4911,8 @@ fn jet_jit_bit_set_copy(handle: i64) -> i64 {
             .get((handle as usize).wrapping_sub(1))
             .cloned()
             .unwrap_or_default();
-        rt.bit_sets.push(collection_semantics::bit_set_copy(&values));
+        rt.bit_sets
+            .push(collection_semantics::bit_set_copy(&values));
         rt.bit_sets.len() as i64
     })
 }
@@ -4792,10 +4981,7 @@ fn jet_jit_byte_buffer_write(handle: i64, value: i64, method: i64) {
         } else {
             None
         };
-        let Some(buffer) = rt
-            .byte_buffers
-            .get_mut((handle as usize).wrapping_sub(1))
-        else {
+        let Some(buffer) = rt.byte_buffers.get_mut((handle as usize).wrapping_sub(1)) else {
             return;
         };
         match method {
@@ -4841,12 +5027,7 @@ fn jet_jit_byte_buffer_to_bytes(handle: i64) -> i64 {
 /// i64 when ret_kind=1; option i64 (0=None else v+1) when ret_kind=2;
 /// string handle when ret_kind=3; new Bytes handle when ret_kind=4;
 /// list-of-string handle when ret_kind=5; unit 0 when ret_kind=6.
-fn jet_jit_byte_buffer_method(
-    handle: i64,
-    method: i64,
-    arg0: i64,
-    arg1: i64,
-) -> i64 {
+fn jet_jit_byte_buffer_method(handle: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (handle as usize).wrapping_sub(1);
         match method {
@@ -4992,15 +5173,13 @@ fn jet_jit_byte_buffer_method(
                     .unwrap_or_default();
                 match rt.heap.int_from_str(text.trim()) {
                     Ok(n) => {
-                    // Result packed: positive = Ok(n+1) won't work for negatives.
-                    // Store ok as string/int via existing result helpers if any —
-                    // for the example, return n directly when ok and use trap on err.
-                    n
+                        // Result packed: positive = Ok(n+1) won't work for negatives.
+                        // Store ok as string/int via existing result helpers if any —
+                        // for the example, return n directly when ok and use trap on err.
+                        n
                     }
                     Err(_) => {
-                        rt.trapped = Some(format!(
-                            "cannot parse `{text}` as an integer"
-                        ));
+                        rt.trapped = Some(format!("cannot parse `{text}` as an integer"));
                         0
                     }
                 }
@@ -5019,7 +5198,11 @@ fn jet_jit_byte_buffer_method(
                 }
                 0
             }
-            42 => match rt.byte_buffers.get_mut(idx).and_then(|b| b.read_bytes(arg0).ok()) {
+            42 => match rt
+                .byte_buffers
+                .get_mut(idx)
+                .and_then(|b| b.read_bytes(arg0).ok())
+            {
                 Some(bytes) => {
                     let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
                     copy_list(rt, values) + 1
@@ -5079,10 +5262,7 @@ fn jet_jit_byte_buffer_method(
                     .into_iter()
                     .filter_map(|id| rt.heap.clone_string(id))
                     .collect::<Vec<_>>();
-                let out = rt
-                    .byte_buffers
-                    .get(idx)
-                    .map(|b| b.join(&parts));
+                let out = rt.byte_buffers.get(idx).map(|b| b.join(&parts));
                 match out {
                     Some(buf) => {
                         rt.byte_buffers.push(buf);
@@ -5112,9 +5292,7 @@ fn jet_jit_byte_buffer_method(
                 }
                 // split borrows: clone source first
                 let src = rt.byte_buffers.get(idx).cloned();
-                if let (Some(src), Some(dst)) =
-                    (src, rt.byte_buffers.get_mut(other_idx))
-                {
+                if let (Some(src), Some(dst)) = (src, rt.byte_buffers.get_mut(other_idx)) {
                     if method == 53 {
                         src.copy_to(dst);
                     } else {
@@ -5162,15 +5340,10 @@ pub(crate) fn clear_packed_enum_show() {
     PACKED_ENUM_SHOW.with(|t| t.borrow_mut().clear());
 }
 
-pub(crate) fn register_packed_enum_show(
-    enum_name: &str,
-    variants: Vec<(String, u8, String)>,
-) {
+pub(crate) fn register_packed_enum_show(enum_name: &str, variants: Vec<(String, u8, String)>) {
     PACKED_ENUM_SHOW.with(|t| {
-        t.borrow_mut().insert(
-            enum_name.to_string(),
-            PackedEnumShow { variants },
-        );
+        t.borrow_mut()
+            .insert(enum_name.to_string(), PackedEnumShow { variants });
     });
 }
 
@@ -5223,11 +5396,7 @@ fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> St
     jet_foundation::StructuralDebug::jet_debug_variant(&vname, payload)
 }
 
-pub(crate) fn render_packed_enum(
-    packed: i64,
-    enum_name: &str,
-    heap: &jet_rt::JetArena,
-) -> String {
+pub(crate) fn render_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
     show_packed_enum(packed, enum_name, heap)
 }
 
@@ -5235,9 +5404,7 @@ fn packed_enum_name(name_ptr: i64, name_len: i64) -> String {
     if name_ptr == 0 || name_len <= 0 {
         return String::new();
     }
-    let slice = unsafe {
-        std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize)
-    };
+    let slice = unsafe { std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize) };
     String::from_utf8_lossy(slice).into_owned()
 }
 

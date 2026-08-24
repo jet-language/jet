@@ -151,12 +151,8 @@ fn sibling_host_instantiates_component_and_applies_guest_graph() {
     let manifest_path = root.join("plugin.manifest");
     std::fs::write(&manifest_path, &manifest).unwrap();
     let manifest_digest = ContentDigest::from_bytes(manifest.as_bytes());
-    let spec = WasmComponentPluginSpec::new(
-        "e2e",
-        "1.0.0",
-        component_digest.clone(),
-    )
-    .with_capability(BuildCapability::FS);
+    let spec = WasmComponentPluginSpec::new("e2e", "1.0.0", component_digest.clone())
+        .with_capability(BuildCapability::FS);
     let contribution = production_runner(
         &manifest_path,
         &component_path,

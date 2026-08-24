@@ -40,7 +40,11 @@ fn no_hand_typed_80x24_terminal_default_outside_the_one_home() {
 
     let mut violations = Vec::new();
     for file in files {
-        let rel = file.strip_prefix(&root).unwrap_or(&file).display().to_string();
+        let rel = file
+            .strip_prefix(&root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
         if rel == TERMINAL_DEFAULT_HOME {
             continue;
         }
@@ -81,8 +85,7 @@ fn common_types_and_process_pty_read_the_one_home() {
             && process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_ROWS"),
         "PtyConfig::default must read Prelude/TerminalDefault.rs, not a literal"
     );
-    let jit_process =
-        fs::read_to_string(root.join("crates/jet-jit/src/Process.rs")).unwrap();
+    let jit_process = fs::read_to_string(root.join("crates/jet-jit/src/Process.rs")).unwrap();
     assert!(
         jit_process.contains("PtyConfig::default()"),
         "jet_jit_process_spec_terminal must build PtyConfig::default(), not a hand-typed literal"

@@ -101,7 +101,10 @@ fn run() {
 }
 "#;
     let errors = error_codes(src);
-    assert!(errors.is_empty(), "alloc-and-use should compile clean, got {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "alloc-and-use should compile clean, got {errors:?}"
+    );
     if let Some(out) = build_and_run("ok", src) {
         assert_eq!(out, "43\n100\n7\n");
     }

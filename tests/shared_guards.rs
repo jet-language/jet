@@ -2,9 +2,9 @@
 
 mod common;
 
+use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
-use jet::JitBackend::JitBackend;
 
 const QUEUE: &str = include_str!("../examples/features/memory/shared_guard_queue.jet");
 
@@ -222,21 +222,18 @@ fn fixture(tag: &str, source: &str) -> (std::path::PathBuf, std::path::PathBuf) 
     (root, path)
 }
 
-fn assert_native_and_default(
-    source: &str,
-    expected: &str,
-    tag: &str,
-) {
+fn assert_native_and_default(source: &str, expected: &str, tag: &str) {
     assert!(common::have_rustc(), "SharedGuard parity proof needs rustc");
 
     let (native_root, native_path) = fixture(&format!("{tag}_native"), source);
-    let compiled = jet::compile_with_path(source, native_path.to_str().unwrap())
-        .unwrap_or_else(|diagnostics| {
+    let compiled = jet::compile_with_path(source, native_path.to_str().unwrap()).unwrap_or_else(
+        |diagnostics| {
             panic!(
                 "{}",
                 jet::render_diagnostics(native_path.to_str().unwrap(), source, &diagnostics)
             )
-        });
+        },
+    );
     let rust_path = native_root.join("main.rs");
     let native_bin = native_root.join("main");
     fs::write(&rust_path, compiled.rust).unwrap();
@@ -260,12 +257,7 @@ fn assert_native_and_default(
     let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
-        })
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
 
@@ -307,9 +299,7 @@ fn with_compiler_stack(test: impl FnOnce() + Send + 'static) {
 
 #[test]
 fn shared_guard_queue_matches_native_and_default_tiers() {
-    with_compiler_stack(|| {
-        assert_native_and_default(QUEUE, "7\n", "jet_shared_guard_queue")
-    });
+    with_compiler_stack(|| assert_native_and_default(QUEUE, "7\n", "jet_shared_guard_queue"));
 }
 
 #[test]
@@ -336,11 +326,7 @@ fn named_guard_spans_read_and_write_helpers_on_all_tiers() {
 #[test]
 fn returned_named_guard_reads_and_releases_on_all_tiers() {
     with_compiler_stack(|| {
-        assert_native_and_default(
-            RETURNED_GUARD,
-            "6\n7\n",
-            "jet_shared_guard_returned",
-        )
+        assert_native_and_default(RETURNED_GUARD, "6\n7\n", "jet_shared_guard_returned")
     });
 }
 
@@ -358,21 +344,13 @@ fn concurrent_transaction_deltas_apply_to_fresh_locked_state_on_all_tiers() {
 #[test]
 fn mapped_and_split_guards_write_disjoint_fields_on_all_tiers() {
     with_compiler_stack(|| {
-        assert_native_and_default(
-            MAP_AND_SPLIT,
-            "13\n10\n",
-            "jet_shared_guard_projection",
-        )
+        assert_native_and_default(MAP_AND_SPLIT, "13\n10\n", "jet_shared_guard_projection")
     });
 }
 
 #[test]
 fn stored_and_returned_guards_move_as_read_capabilities_on_all_tiers() {
     with_compiler_stack(|| {
-        assert_native_and_default(
-            STORED_GUARDS,
-            "8\n10\n9\n",
-            "jet_shared_guard_storage",
-        )
+        assert_native_and_default(STORED_GUARDS, "8\n10\n9\n", "jet_shared_guard_storage")
     });
 }

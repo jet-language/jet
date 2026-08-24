@@ -22,17 +22,25 @@ use std::path::Path;
 
 use super::Terminal::{Key, KeyReader, RawGuard};
 use super::{
-    dim, execute_line, set_turn_flag, unfold_turn, Docs, RerunPlan, Render,
-    EffectPrompt, PromptChoice, ReplFlags, ReplPolicy, Session,
+    dim, execute_line, set_turn_flag, unfold_turn, Docs, EffectPrompt, PromptChoice, Render,
+    ReplFlags, ReplPolicy, RerunPlan, Session,
 };
 
 /// Run the interactive raw-mode REPL loop. `_guard` is held for its
 /// lifetime (RAII). Ordinary exits restore on drop; an authorized
 /// `core.process.exit` restores explicitly before the interpreter terminates.
-pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard: RawGuard, flags: ReplFlags) -> i32 {
-    let base_dir: std::path::PathBuf = project_dir
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+pub(crate) fn run_interactive(
+    project_dir: Option<&str>,
+    color: bool,
+    mut guard: RawGuard,
+    flags: ReplFlags,
+) -> i32 {
+    let base_dir: std::path::PathBuf =
+        project_dir
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
 
     let mut session = Session::new();
     session.enable_persistent_history();
@@ -67,10 +75,21 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
                     continue;
                 }
                 let turns_before = session.turns.len();
-                let mut prompt = InteractiveEffectPrompt { reader: &mut reader, guard: &mut guard };
+                let mut prompt = InteractiveEffectPrompt {
+                    reader: &mut reader,
+                    guard: &mut guard,
+                };
                 let mut authorizer = policy.authorizer(Some(&mut prompt));
                 let interrupt = super::Terminal::EvaluationInterruptGuard::enable();
-                let quit = execute_line(&trimmed, &mut session, &base_dir, color, true, false, &mut authorizer);
+                let quit = execute_line(
+                    &trimmed,
+                    &mut session,
+                    &base_dir,
+                    color,
+                    true,
+                    false,
+                    &mut authorizer,
+                );
                 let double_interrupt = interrupt.as_ref().is_some_and(|guard| guard.count() >= 2);
                 drop(interrupt);
                 if quit || double_interrupt {
@@ -100,7 +119,14 @@ pub(crate) fn run_interactive(project_dir: Option<&str>, color: bool, mut guard:
             }
             LineOutcome::CtrlP => cmd_toggle_pin(&mut reader, &mut session, color),
             LineOutcome::CtrlF => cmd_toggle_fold(&mut reader, &mut session, color),
-            LineOutcome::CtrlR => cmd_rerun(&mut reader, &mut session, &base_dir, color, &mut policy, &mut guard),
+            LineOutcome::CtrlR => cmd_rerun(
+                &mut reader,
+                &mut session,
+                &base_dir,
+                color,
+                &mut policy,
+                &mut guard,
+            ),
         }
     }
 
@@ -113,21 +139,40 @@ struct InteractiveEffectPrompt<'a, R: Read> {
 }
 
 impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
-    fn choose(&mut self, request: &crate::Comptime::ReplEffectRequest, reused: bool) -> PromptChoice {
+    fn choose(
+        &mut self,
+        request: &crate::Comptime::ReplEffectRequest,
+        reused: bool,
+    ) -> PromptChoice {
         if reused {
-            println!("Using session {}.{} authority for `{}`. [c] continue  [r] revoke", request.root, request.operation, request.resource);
+            println!(
+                "Using session {}.{} authority for `{}`. [c] continue  [r] revoke",
+                request.root, request.operation, request.resource
+            );
             io::stdout().flush().ok();
             loop {
                 match self.reader.read_key() {
-                    Key::Char('c') | Key::Char('C') => { println!(); return PromptChoice::Continue; }
-                    Key::Char('r') | Key::Char('R') => { println!(); return PromptChoice::Revoke; }
+                    Key::Char('c') | Key::Char('C') => {
+                        println!();
+                        return PromptChoice::Continue;
+                    }
+                    Key::Char('r') | Key::Char('R') => {
+                        println!();
+                        return PromptChoice::Revoke;
+                    }
                     Key::Idle => continue,
-                    _ => { println!(); return PromptChoice::Revoke; }
+                    _ => {
+                        println!();
+                        return PromptChoice::Revoke;
+                    }
                 }
             }
         }
         if request.operation == "Exit" {
-            println!("Core effect Exec requests orderly REPL exit with status {}. [y/N]", request.resource);
+            println!(
+                "Core effect Exec requests orderly REPL exit with status {}. [y/N]",
+                request.resource
+            );
             io::stdout().flush().ok();
             loop {
                 match self.reader.read_key() {
@@ -137,22 +182,40 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
                         return PromptChoice::Once;
                     }
                     Key::Idle => continue,
-                    _ => { println!(); return PromptChoice::Deny; }
+                    _ => {
+                        println!();
+                        return PromptChoice::Deny;
+                    }
                 }
             }
         }
-        println!("Core effect {} requests runtime authority before this operation.", request.root);
+        println!(
+            "Core effect {} requests runtime authority before this operation.",
+            request.root
+        );
         println!("  operation: {}", request.operation.to_ascii_lowercase());
         println!("  target:    {}", request.resource);
         println!("  [o] once  [s] exact tuple for this session  [d] deny");
         io::stdout().flush().ok();
         loop {
             match self.reader.read_key() {
-                Key::Char('o') | Key::Char('O') => { println!(); return PromptChoice::Once; }
-                Key::Char('s') | Key::Char('S') => { println!(); return PromptChoice::Session; }
-                Key::Char('d') | Key::Char('D') => { println!(); return PromptChoice::Deny; }
+                Key::Char('o') | Key::Char('O') => {
+                    println!();
+                    return PromptChoice::Once;
+                }
+                Key::Char('s') | Key::Char('S') => {
+                    println!();
+                    return PromptChoice::Session;
+                }
+                Key::Char('d') | Key::Char('D') => {
+                    println!();
+                    return PromptChoice::Deny;
+                }
                 Key::Idle => continue,
-                _ => { println!(); return PromptChoice::Deny; }
+                _ => {
+                    println!();
+                    return PromptChoice::Deny;
+                }
             }
         }
     }
@@ -180,7 +243,10 @@ impl<R: Read> EffectPrompt for InteractiveEffectPrompt<'_, R> {
                 }
                 Key::CtrlC => {
                     println!();
-                    return Err(io::Error::new(io::ErrorKind::Interrupted, "input interrupted"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
+                        "input interrupted",
+                    ));
                 }
                 Key::Eof => {
                     println!();
@@ -207,18 +273,32 @@ fn print_bindings_pane(session: &Session, changed: &HashSet<String>, color: bool
     let lines = Render::render_bindings_pane(session, changed);
     let width = super::Terminal::terminal_width();
     let split = (width / 2).clamp(20, 48);
-    println!("{}", Render::render_workspace_row("┌─ session", "bindings ─┐", split, color));
+    println!(
+        "{}",
+        Render::render_workspace_row("┌─ session", "bindings ─┐", split, color)
+    );
     if lines.is_empty() {
-        println!("{}", Render::render_workspace_row("│", "(no bindings yet)", split, color));
+        println!(
+            "{}",
+            Render::render_workspace_row("│", "(no bindings yet)", split, color)
+        );
     } else {
         for l in &lines {
             println!("{}", Render::render_workspace_row("│", l, split, color));
         }
     }
-    println!("{}", Render::render_workspace_row("└─ session", "bindings ─┘", split, color));
+    println!(
+        "{}",
+        Render::render_workspace_row("└─ session", "bindings ─┘", split, color)
+    );
 }
 
-fn select_turn<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, action: &str, color: bool) -> Option<usize> {
+fn select_turn<R: Read>(
+    reader: &mut KeyReader<R>,
+    session: &mut Session,
+    action: &str,
+    color: bool,
+) -> Option<usize> {
     if session.turns.is_empty() {
         println!("{}", dim(&format!("no turns yet to {action}"), color));
         return None;
@@ -250,7 +330,11 @@ fn cmd_toggle_pin<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, col
     println!(
         "{}",
         dim(
-            &format!("turn {} {}", id, if now_pinned { "pinned" } else { "unpinned" }),
+            &format!(
+                "turn {} {}",
+                id,
+                if now_pinned { "pinned" } else { "unpinned" }
+            ),
             color
         )
     );
@@ -260,7 +344,11 @@ fn cmd_toggle_fold<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, co
     let Some(id) = select_turn(reader, session, "fold", color) else {
         return;
     };
-    let folded = session.turns.iter().find(|turn| turn.id == id).is_some_and(|turn| turn.folded);
+    let folded = session
+        .turns
+        .iter()
+        .find(|turn| turn.id == id)
+        .is_some_and(|turn| turn.folded);
     if folded {
         if let Ok(Some(full)) = unfold_turn(session, id) {
             page_collection(reader, &full, color);
@@ -274,7 +362,14 @@ fn cmd_toggle_fold<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, co
 
 // ── rerun (^R, D-FE-REPL-RERUN1=A) ─────────────────────────────────────────
 
-fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir: &Path, color: bool, policy: &mut ReplPolicy, guard: &mut RawGuard) {
+fn cmd_rerun<R: Read>(
+    reader: &mut KeyReader<R>,
+    session: &mut Session,
+    base_dir: &Path,
+    color: bool,
+    policy: &mut ReplPolicy,
+    guard: &mut RawGuard,
+) {
     if session.turns.is_empty() {
         println!("{}", dim("no turns yet to rerun", color));
         return;
@@ -291,11 +386,20 @@ fn cmd_rerun<R: Read>(reader: &mut KeyReader<R>, session: &mut Session, base_dir
             return;
         }
     };
-    let original = session.turns.iter().find(|turn| turn.id == id).unwrap().input.clone();
+    let original = session
+        .turns
+        .iter()
+        .find(|turn| turn.id == id)
+        .unwrap()
+        .input
+        .clone();
     println!(
         "{}",
         dim(
-            &format!("edit turn {} (Enter to keep as-is, or change it then Enter):", id),
+            &format!(
+                "edit turn {} (Enter to keep as-is, or change it then Enter):",
+                id
+            ),
             color
         )
     );
@@ -524,8 +628,7 @@ fn read_line<R: Read>(
                     cursor = buf.len();
                 }
             }
-            Key::Escape | Key::Unknown | Key::CtrlB | Key::CtrlP | Key::CtrlF
-            | Key::CtrlR => {
+            Key::Escape | Key::Unknown | Key::CtrlB | Key::CtrlP | Key::CtrlF | Key::CtrlR => {
                 // Mid-edit control keys are reserved (see module docs); a
                 // bare Escape/unrecognized byte is swallowed rather than
                 // inserted as a literal character.
@@ -606,20 +709,38 @@ fn highlight_input(line: &str, color: bool) -> String {
             while i < chars.len() {
                 let escaped = i > start && chars[i - 1] == '\\';
                 i += 1;
-                if chars[i - 1] == '"' && !escaped { break; }
+                if chars[i - 1] == '"' && !escaped {
+                    break;
+                }
             }
             out.push_str(&theme.success(&chars[start..i].iter().collect::<String>()));
         } else if chars[i].is_ascii_digit() {
             let start = i;
             i += 1;
-            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') { i += 1; }
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                i += 1;
+            }
             out.push_str(&theme.accent(&chars[start..i].iter().collect::<String>()));
         } else if chars[i].is_alphabetic() || chars[i] == '_' {
             let start = i;
             i += 1;
-            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') { i += 1; }
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
             let word: String = chars[start..i].iter().collect();
-            if matches!(word.as_str(), "fn" | "if" | "else" | "loop" | "return" | "use" | "struct" | "enum" | "match" | "true" | "false") {
+            if matches!(
+                word.as_str(),
+                "fn" | "if"
+                    | "else"
+                    | "loop"
+                    | "return"
+                    | "use"
+                    | "struct"
+                    | "enum"
+                    | "match"
+                    | "true"
+                    | "false"
+            ) {
                 out.push_str(&theme.warn(&word));
             } else {
                 out.push_str(&word);
@@ -633,8 +754,12 @@ fn highlight_input(line: &str, color: bool) -> String {
 }
 
 fn collection_rows(full: &str) -> Vec<String> {
-    let Some(start) = full.find('[') else { return vec![full.to_string()]; };
-    let Some(relative_end) = full[start..].find("] : List") else { return vec![full.to_string()]; };
+    let Some(start) = full.find('[') else {
+        return vec![full.to_string()];
+    };
+    let Some(relative_end) = full[start..].find("] : List") else {
+        return vec![full.to_string()];
+    };
     let body = &full[start + 1..start + relative_end];
     let mut rows = Vec::new();
     let mut current = String::new();
@@ -644,20 +769,38 @@ fn collection_rows(full: &str) -> Vec<String> {
     for ch in body.chars() {
         if quoted {
             current.push(ch);
-            if ch == '"' && !escaped { quoted = false; }
+            if ch == '"' && !escaped {
+                quoted = false;
+            }
             escaped = ch == '\\' && !escaped;
-            if ch != '\\' { escaped = false; }
+            if ch != '\\' {
+                escaped = false;
+            }
             continue;
         }
         match ch {
-            '"' => { quoted = true; current.push(ch); }
-            '[' | '{' | '(' => { depth += 1; current.push(ch); }
-            ']' | '}' | ')' => { depth = depth.saturating_sub(1); current.push(ch); }
-            ',' if depth == 0 => { rows.push(current.trim().to_string()); current.clear(); }
+            '"' => {
+                quoted = true;
+                current.push(ch);
+            }
+            '[' | '{' | '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ']' | '}' | ')' => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                rows.push(current.trim().to_string());
+                current.clear();
+            }
             _ => current.push(ch),
         }
     }
-    if !current.trim().is_empty() { rows.push(current.trim().to_string()); }
+    if !current.trim().is_empty() {
+        rows.push(current.trim().to_string());
+    }
     rows
 }
 
@@ -674,7 +817,18 @@ fn page_collection<R: Read>(reader: &mut KeyReader<R>, full: &str, color: bool) 
         for (offset, value) in rows.iter().skip(start).take(PAGE).enumerate() {
             println!("{:>3} │ {}", start + offset, value);
         }
-        println!("{}", dim(&format!("-- rows {}-{}/{} · j/k page · q close --", start + 1, (start + PAGE).min(rows.len()), rows.len()), color));
+        println!(
+            "{}",
+            dim(
+                &format!(
+                    "-- rows {}-{}/{} · j/k page · q close --",
+                    start + 1,
+                    (start + PAGE).min(rows.len()),
+                    rows.len()
+                ),
+                color
+            )
+        );
         io::stdout().flush().ok();
         match reader.read_key() {
             Key::Char('j') | Key::Down if start + PAGE < rows.len() => start += PAGE,
@@ -1008,8 +1162,8 @@ fn apply_completion<R: Read>(
     let (replace_start, candidates) = if let Some(dot) = text.rfind('.') {
         let receiver = &text[..dot];
         let partial = &text[dot + 1..];
-        let is_ident = !receiver.is_empty()
-            && receiver.chars().all(|c| c.is_alphanumeric() || c == '_');
+        let is_ident =
+            !receiver.is_empty() && receiver.chars().all(|c| c.is_alphanumeric() || c == '_');
         let candidates = if is_ident {
             Docs::dotted_completion_candidates(session, receiver, partial)
         } else {
@@ -1036,7 +1190,10 @@ fn apply_completion<R: Read>(
         insert_completion(buf, cursor, replace_start, &candidates[0].name);
         return false;
     }
-    let names = candidates.iter().map(|symbol| symbol.name.clone()).collect::<Vec<_>>();
+    let names = candidates
+        .iter()
+        .map(|symbol| symbol.name.clone())
+        .collect::<Vec<_>>();
     let common = longest_common_prefix(&names);
     let already: String = buf[replace_start..*cursor].iter().collect();
     if common.len() > already.len() {
@@ -1049,7 +1206,11 @@ fn apply_completion<R: Read>(
     true
 }
 
-fn completion_menu(candidates: &[jet_semindex::SemanticSymbol], selected: usize, color: bool) -> String {
+fn completion_menu(
+    candidates: &[jet_semindex::SemanticSymbol],
+    selected: usize,
+    color: bool,
+) -> String {
     let theme = Theme::new(color);
     let mut out = format!(
         "{}\r\n",
@@ -1057,7 +1218,10 @@ fn completion_menu(candidates: &[jet_semindex::SemanticSymbol], selected: usize,
     );
     for (index, symbol) in candidates.iter().enumerate() {
         let marker = if index == selected { ">" } else { " " };
-        let line = format!("{marker} {:<20} {}", symbol.qualified_name, symbol.signature);
+        let line = format!(
+            "{marker} {:<20} {}",
+            symbol.qualified_name, symbol.signature
+        );
         if index == selected && color {
             out.push_str(&format!("{}\r\n", theme.invert(&line)));
         } else {
@@ -1090,7 +1254,12 @@ fn select_completion<R: Read>(
     }
 }
 
-fn insert_completion(buf: &mut Vec<char>, cursor: &mut usize, replace_start: usize, completion: &str) {
+fn insert_completion(
+    buf: &mut Vec<char>,
+    cursor: &mut usize,
+    replace_start: usize,
+    completion: &str,
+) {
     buf.truncate(replace_start);
     buf.extend(completion.chars());
     *cursor = buf.len();

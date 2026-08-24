@@ -32,8 +32,7 @@ fn example_dir() -> PathBuf {
 fn expected_output() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples/features/expected/packages/outputs_build.out");
-    fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("missing {}", path.display()))
+    fs::read_to_string(&path).unwrap_or_else(|_| panic!("missing {}", path.display()))
 }
 
 fn jet_bin() -> PathBuf {
@@ -107,7 +106,9 @@ fn outputs_block_drives_jet_build_aot() {
             .unwrap_or_default()
     );
 
-    let run = Command::new(&binary).output().expect("built binary should run");
+    let run = Command::new(&binary)
+        .output()
+        .expect("built binary should run");
     assert!(
         run.status.success(),
         "built binary failed:\n{}",
@@ -135,7 +136,11 @@ fn entry_resolution_requires_the_outputs_block() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("service")).unwrap();
-    fs::write(dir.join("package.jet"), "name: \"outputs_build_demo\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"outputs_build_demo\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
     fs::copy(example_dir().join("entry.jet"), dir.join("entry.jet")).unwrap();
     fs::copy(
         example_dir().join("service/module.jet"),
@@ -162,13 +167,13 @@ fn entry_resolution_requires_the_outputs_block() {
 }
 
 fn typed_settings_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/typed_settings")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/typed_settings")
 }
 
 fn typed_settings_output(tls: &str) -> String {
     if tls == "on" {
-        return include_str!("../examples/features/expected/packages/typed_settings.out").to_string();
+        return include_str!("../examples/features/expected/packages/typed_settings.out")
+            .to_string();
     }
     format!("tls-{tls}\nhttps://api.example.com\n")
 }
@@ -312,10 +317,9 @@ fn computed_build_contribution_records_lock_and_matches_explain_golden() {
         "computed build contribution explain failed:\n{}",
         String::from_utf8_lossy(&explain.stderr)
     );
-    let expected = fs::read(
-        root.join("examples/features/expected/packages/build_contribution.explain.out"),
-    )
-    .expect("read computed contribution explain golden");
+    let expected =
+        fs::read(root.join("examples/features/expected/packages/build_contribution.explain.out"))
+            .expect("read computed contribution explain golden");
     assert_eq!(explain.stdout, expected);
 
     let changed = fs::read_to_string(scratch.join("run.jet"))

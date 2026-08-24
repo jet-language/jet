@@ -5,8 +5,7 @@
 #![allow(dead_code)]
 // Re-export foundation so `crate::AST`, `crate::Syntax` etc. work in Comptime source files.
 pub use jet_foundation::{
-    BuildEffect, Collections, Diagnostics, Generics, Numeric, Syntax, Traits, AST,
-    SHA256,
+    BuildEffect, Collections, Diagnostics, Generics, Numeric, Syntax, Traits, AST, SHA256,
 };
 
 // The included `jet_std` Prelude fragments resolve exact-number lexing through

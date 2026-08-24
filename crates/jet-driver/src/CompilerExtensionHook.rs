@@ -10,13 +10,13 @@
 //! Tower #549 C5 proofs live in `tests` below (host/SDK/diagnostic + AOT/dev
 //! fact parity). Repository-wide verification runs at multi-card milestones.
 
-use crate::AST::{Func, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Sema::SemIndexEffectFacts;
+use crate::AST::{Func, Item, ProgramBundle};
 use jet_pkg_model::CompilerExtension::{
-    self, decode_and_validate_response, message_exposes_rustc, AnalyzeResponse, Ability,
-    Finding, ProtocolError, SpanFact, SymbolFact, TypeFact, TypedSnapshot,
-    ENV_COMPILER_EXTENSION, HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
+    self, decode_and_validate_response, message_exposes_rustc, Ability, AnalyzeResponse, Finding,
+    ProtocolError, SpanFact, SymbolFact, TypeFact, TypedSnapshot, ENV_COMPILER_EXTENSION,
+    HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
 };
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -39,7 +39,10 @@ pub fn post_sema_diagnostics(
     effect_facts: Option<&SemIndexEffectFacts>,
     sema_diagnostics: &[Diagnostic],
 ) -> Vec<Diagnostic> {
-    if sema_diagnostics.iter().any(|diagnostic| diagnostic.severity == Severity::Error) {
+    if sema_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    {
         return Vec::new();
     }
     let Ok(path) = std::env::var(ENV_COMPILER_EXTENSION) else {
@@ -175,11 +178,15 @@ fn run_host_process(
     let (stdout, stdout_overflow) = stdout_reader
         .join()
         .map_err(|_| ProtocolError::new("compiler-extension host output thread panicked"))?
-        .map_err(|e| ProtocolError::new(format!("couldn't read compiler-extension host output: {e}")))?;
+        .map_err(|e| {
+            ProtocolError::new(format!("couldn't read compiler-extension host output: {e}"))
+        })?;
     let (stderr, stderr_overflow) = stderr_reader
         .join()
         .map_err(|_| ProtocolError::new("compiler-extension host error thread panicked"))?
-        .map_err(|e| ProtocolError::new(format!("couldn't read compiler-extension host error: {e}")))?;
+        .map_err(|e| {
+            ProtocolError::new(format!("couldn't read compiler-extension host error: {e}"))
+        })?;
 
     if stdout_overflow {
         return Err(ProtocolError::new(format!(
@@ -201,15 +208,14 @@ fn run_host_process(
         }));
     }
     write_result.map_err(|e| {
-        ProtocolError::new(format!("couldn't send snapshot to compiler-extension host: {e}"))
+        ProtocolError::new(format!(
+            "couldn't send snapshot to compiler-extension host: {e}"
+        ))
     })?;
     Ok(stdout)
 }
 
-fn read_bounded(
-    reader: impl Read,
-    limit: usize,
-) -> std::io::Result<(Vec<u8>, bool)> {
+fn read_bounded(reader: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
     let mut bytes = Vec::new();
     reader
         .take(limit.saturating_add(1) as u64)
@@ -222,9 +228,8 @@ fn read_bounded(
 }
 
 fn compiler_extension_host_path() -> Result<PathBuf, ProtocolError> {
-    let exe = std::env::current_exe().map_err(|e| {
-        ProtocolError::new(format!("couldn't resolve compiler executable: {e}"))
-    })?;
+    let exe = std::env::current_exe()
+        .map_err(|e| ProtocolError::new(format!("couldn't resolve compiler executable: {e}")))?;
     compiler_extension_host_path_for(&exe)
 }
 
@@ -309,7 +314,11 @@ pub fn snapshot_from_bundle(
             repr: fn_type_repr(func),
         });
         let effects = effect_facts
-            .and_then(|facts| facts.solved.get(&format!("{}::{}", module.alias, func.name)))
+            .and_then(|facts| {
+                facts
+                    .solved
+                    .get(&format!("{}::{}", module.alias, func.name))
+            })
             .map(|set| set.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
         symbols.push(SymbolFact {
@@ -332,9 +341,7 @@ pub fn snapshot_from_bundle(
         // Guests may still run; provide a file-level span so span_id refs can resolve.
         // No invented type/effect facts — drop read caps that would lie.
         abilities.retain(|c| {
-            *c != Ability::ReadTypes
-                && *c != Ability::ReadSymbols
-                && *c != Ability::ReadEffects
+            *c != Ability::ReadTypes && *c != Ability::ReadSymbols && *c != Ability::ReadEffects
         });
         types.clear();
         spans.push(SpanFact {
@@ -391,11 +398,7 @@ fn finding_to_diagnostic(snapshot: &TypedSnapshot, finding: &Finding) -> Diagnos
 }
 
 fn host_failure(message: &str, span: Option<Span>) -> Diagnostic {
-    Diagnostic::from_row(
-        "E1402",
-        &[("message", message)],
-        span,
-    )
+    Diagnostic::from_row("E1402", &[("message", message)], span)
 }
 
 #[cfg(test)]
@@ -406,8 +409,10 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
     static HOST_BUILD: Once = Once::new();
-    const SOURCE_X: &str = include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_x.jet");
-    const SOURCE_Y: &str = include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_y.jet");
+    const SOURCE_X: &str =
+        include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_x.jet");
+    const SOURCE_Y: &str =
+        include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_y.jet");
 
     fn fixture_wasm(name: &str) -> PathBuf {
         ensure_jetpack_host_built();
@@ -435,7 +440,10 @@ mod tests {
         assert_eq!(
             candidates,
             vec![
-                dir.join(format!("debug/deps/jetpack{}", std::env::consts::EXE_SUFFIX)),
+                dir.join(format!(
+                    "debug/deps/jetpack{}",
+                    std::env::consts::EXE_SUFFIX
+                )),
                 dir.join(format!("debug/jetpack{}", std::env::consts::EXE_SUFFIX)),
             ]
         );
@@ -463,13 +471,8 @@ mod tests {
     fn oversized_ipc_response_is_rejected() {
         let mut command = Command::new("sh");
         command.args(["-c", "head -c 300000 /dev/zero", "compiler-extension-host"]);
-        let err = run_host_process(
-            command,
-            b"snapshot".to_vec(),
-            128,
-            Duration::from_secs(1),
-        )
-        .expect_err("oversized response must fail");
+        let err = run_host_process(command, b"snapshot".to_vec(), 128, Duration::from_secs(1))
+            .expect_err("oversized response must fail");
         assert_eq!(
             err.message,
             "compiler-extension host response exceeds IPC limit (128 bytes)"
@@ -515,16 +518,14 @@ mod tests {
             "printf 'rustc error[E0123] leaked\\nsecond line\\n' >&2; exit 9",
             "compiler-extension-host",
         ]);
-        let err = run_host_process(
-            command,
-            b"snapshot".to_vec(),
-            128,
-            Duration::from_secs(1),
-        )
-        .expect_err("nonzero host must fail");
+        let err = run_host_process(command, b"snapshot".to_vec(), 128, Duration::from_secs(1))
+            .expect_err("nonzero host must fail");
         assert!(err.message.contains("rustc error[E0123]"));
         let sanitized = sanitize_host_message(&err.message);
-        assert_eq!(sanitized, "compiler-extension failed with an internal message");
+        assert_eq!(
+            sanitized,
+            "compiler-extension failed with an internal message"
+        );
         let diagnostic = host_failure(&sanitized, None);
         assert_eq!(diagnostic.code, "E1402");
         assert!(!message_exposes_rustc(&diagnostic.what));
@@ -542,10 +543,9 @@ mod tests {
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         assert!(bundle.is_some(), "sema must succeed; diags={diags:?}");
-        let lint = diags
-            .iter()
-            .find(|d| d.code == "L1401")
-            .unwrap_or_else(|| panic!("custom-lint finding must surface as L1401; diags={diags:?}"));
+        let lint = diags.iter().find(|d| d.code == "L1401").unwrap_or_else(|| {
+            panic!("custom-lint finding must surface as L1401; diags={diags:?}")
+        });
         assert!(lint.what.contains("no-x"), "got {}", lint.what);
         assert!(lint.what.contains("prefer y"), "got {}", lint.what);
         assert!(!message_exposes_rustc(&lint.what));
@@ -621,7 +621,9 @@ mod tests {
         let (diags, bundle, facts) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         assert!(
-            !diags.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            !diags
+                .iter()
+                .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "sema must succeed; diags={diags:?}"
         );
         let bundle = bundle.expect("bundle");
@@ -646,7 +648,9 @@ mod tests {
             run.effects
         );
         assert!(
-            snap.types.iter().any(|t| t.id == run.type_id && t.repr.starts_with("fn(")),
+            snap.types
+                .iter()
+                .any(|t| t.id == run.type_id && t.repr.starts_with("fn(")),
             "type_id must point at a real fn signature repr; types={:?}",
             snap.types
         );
@@ -664,7 +668,9 @@ mod tests {
         let (diags, bundle, _) =
             crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
         assert!(
-            !diags.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            !diags
+                .iter()
+                .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "sema must succeed; diags={diags:?}"
         );
         let bundle = bundle.expect("bundle");
@@ -810,7 +816,10 @@ mod tests {
 
         let (check_diags, bundle, _) =
             crate::Driver::check_file_with_effect_facts(path, None, false);
-        assert!(bundle.is_some(), "check sema must succeed; diags={check_diags:?}");
+        assert!(
+            bundle.is_some(),
+            "check sema must succeed; diags={check_diags:?}"
+        );
         let check_lint = check_diags
             .iter()
             .find(|d| d.code == "L1401")
@@ -869,8 +878,10 @@ mod tests {
             .find(|d| d.code == "L1401")
             .unwrap_or_else(|| panic!("opts_full must surface L1401; lints={:?}", aot.lints));
 
-        let dev = crate::Driver::compile_bundle_path_with_entry(path, "dev")
-            .unwrap_or_else(|errs| panic!("entry-swap must succeed with lint guest; errs={errs:?}"));
+        let dev =
+            crate::Driver::compile_bundle_path_with_entry(path, "dev").unwrap_or_else(|errs| {
+                panic!("entry-swap must succeed with lint guest; errs={errs:?}")
+            });
         let dev_lint = dev
             .lints
             .iter()

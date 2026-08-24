@@ -17,20 +17,21 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn verify_manifest(root: &Path) -> usize {
-    let manifest = fs::read_to_string(root.join("MANIFEST.tsv")).unwrap_or_else(|_| {
-        panic!("missing MANIFEST.tsv under {}", root.display())
-    });
+    let manifest = fs::read_to_string(root.join("MANIFEST.tsv"))
+        .unwrap_or_else(|_| panic!("missing MANIFEST.tsv under {}", root.display()));
     let mut count = 0;
-    for line in manifest.lines().filter(|line| !line.starts_with('#') && !line.is_empty()) {
+    for line in manifest
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+    {
         let fields = line.split('\t').collect::<Vec<_>>();
         assert!(
             fields.len() >= 4,
             "bad manifest row in {}: {line}",
             root.display()
         );
-        let bytes = fs::read(root.join(fields[0])).unwrap_or_else(|_| {
-            panic!("manifest file missing: {}/{}", root.display(), fields[0])
-        });
+        let bytes = fs::read(root.join(fields[0]))
+            .unwrap_or_else(|_| panic!("manifest file missing: {}/{}", root.display(), fields[0]));
         assert_eq!(
             sha256_hex(&bytes),
             fields[1],
@@ -44,7 +45,11 @@ fn verify_manifest(root: &Path) -> usize {
             root.display(),
             fields[2]
         );
-        assert!(!fields[3].is_empty(), "missing license in {}", root.display());
+        assert!(
+            !fields[3].is_empty(),
+            "missing license in {}",
+            root.display()
+        );
         count += 1;
     }
     count
@@ -153,11 +158,13 @@ fn every_encoding_corpus_manifest_verifies_before_use() {
 fn rfc4648_vectors_decode_with_strict_2027_surface() {
     verify_manifest(&fixtures_encoding().join("rfc4648"));
     let corpus = fs::read_to_string(fixtures_encoding().join("rfc4648/vectors.tsv")).unwrap();
-    for line in corpus.lines().filter(|line| !line.starts_with('#') && !line.is_empty()) {
+    for line in corpus
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+    {
         let fields = line.split('\t').collect::<Vec<_>>();
         assert_eq!(fields.len(), 4, "bad RFC 4648 row: {line}");
-        let (plain_text, base64, base64url, base32) =
-            (fields[0], fields[1], fields[2], fields[3]);
+        let (plain_text, base64, base64url, base32) = (fields[0], fields[1], fields[2], fields[3]);
         let plain = if let Some(hex) = plain_text.strip_prefix("HEX:") {
             (0..hex.len())
                 .step_by(2)
@@ -171,10 +178,7 @@ fn rfc4648_vectors_decode_with_strict_2027_surface() {
             base_encoding_2026::decode_base64url(base64url).unwrap(),
             plain
         );
-        assert_eq!(
-            base_encoding_2026::decode_base32(base32).unwrap(),
-            plain
-        );
+        assert_eq!(base_encoding_2026::decode_base32(base32).unwrap(), plain);
     }
 }
 
@@ -197,9 +201,7 @@ fn rfc4180_cases_parse_through_csv_whole_value_api() {
             "    rows{idx} := csv.parse({escaped}) ?? panic(\"parse\")\n    print(rows{idx}.len() > 0)\n"
         ));
     }
-    let source = format!(
-        "use core.encoding.csv as csv\n\nfn run() {{\n{checks}}}\n"
-    );
+    let source = format!("use core.encoding.csv as csv\n\nfn run() {{\n{checks}}}\n");
     let (code, stdout, stderr) = build_and_run(&dir, "rfc4180", &source);
     assert_eq!(code, 0, "RFC 4180 corpus failed: {stderr}");
     for line in stdout.lines() {

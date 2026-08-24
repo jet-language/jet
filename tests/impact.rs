@@ -10,7 +10,13 @@ fn impact_report_upstream_run() {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
-        .args(["inspect", "impact", path.to_str().unwrap(), "report", "--depth=3"])
+        .args([
+            "inspect",
+            "impact",
+            path.to_str().unwrap(),
+            "report",
+            "--depth=3",
+        ])
         .output()
         .expect("jet inspect impact");
     assert!(
@@ -30,7 +36,8 @@ fn impact_json_output() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
         .args([
-            "inspect", "impact",
+            "inspect",
+            "impact",
             path.to_str().unwrap(),
             "square",
             "--json",
@@ -56,7 +63,12 @@ fn impact_unknown_symbol_exits_error() {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/effects/effects.jet");
     let out = std::process::Command::new(bin)
-        .args(["inspect", "impact", path.to_str().unwrap(), "not_a_real_symbol_xyz"])
+        .args([
+            "inspect",
+            "impact",
+            path.to_str().unwrap(),
+            "not_a_real_symbol_xyz",
+        ])
         .output()
         .expect("jet inspect impact missing symbol");
     assert!(!out.status.success());

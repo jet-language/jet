@@ -120,7 +120,9 @@ fn rust_source_segments(text: &str) -> Vec<(RustSegment, usize, usize)> {
         let skipped;
         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
             i += 2;
-            while i < bytes.len() && bytes[i] != b'\n' { i += 1; }
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
             skipped = true;
         } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
             i += 2;
@@ -143,14 +145,23 @@ fn rust_source_segments(text: &str) -> Vec<(RustSegment, usize, usize)> {
         } else if bytes[i] == b'"' {
             i += 1;
             while i < bytes.len() {
-                if bytes[i] == b'\\' { i = (i + 2).min(bytes.len()); }
-                else if bytes[i] == b'"' { i += 1; break; }
-                else { i += 1; }
+                if bytes[i] == b'\\' {
+                    i = (i + 2).min(bytes.len());
+                } else if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                } else {
+                    i += 1;
+                }
             }
             string = true;
             skipped = true;
         } else if bytes[i] == b'\'' {
-            let end = if bytes.get(i + 1) == Some(&b'\\') { i + 3 } else { i + 2 };
+            let end = if bytes.get(i + 1) == Some(&b'\\') {
+                i + 3
+            } else {
+                i + 2
+            };
             if bytes.get(end) == Some(&b'\'') {
                 i = end + 1;
                 skipped = true;
@@ -199,7 +210,11 @@ fn rust_header_before_block(text: &str) -> Option<String> {
     let segments = rust_source_segments(text);
     let brace = segments.iter().find_map(|(kind, start, end)| {
         (*kind == RustSegment::Code)
-            .then(|| text.as_bytes()[*start..*end].iter().position(|byte| *byte == b'{'))
+            .then(|| {
+                text.as_bytes()[*start..*end]
+                    .iter()
+                    .position(|byte| *byte == b'{')
+            })
             .flatten()
             .map(|at| *start + at)
     })?;
@@ -223,7 +238,9 @@ fn tuple_ranges(text: &str) -> Vec<(usize, usize)> {
             match byte {
                 b'(' => starts.push(i),
                 b')' => {
-                    if let Some(start) = starts.pop() { ranges.push((start, i + 1)); }
+                    if let Some(start) = starts.pop() {
+                        ranges.push((start, i + 1));
+                    }
                 }
                 _ => {}
             }
@@ -331,10 +348,16 @@ fn read_rust_tree(rel: &str) -> String {
 }
 
 fn source_between<'a>(text: &'a str, start: &str, end: Option<&str>) -> &'a str {
-    let start = text.find(start).unwrap_or_else(|| panic!("missing source marker {start}"));
+    let start = text
+        .find(start)
+        .unwrap_or_else(|| panic!("missing source marker {start}"));
     let rest = &text[start..];
     match end {
-        Some(end) => &rest[..rest.find(end).unwrap_or_else(|| panic!("missing source marker {end}"))],
+        Some(end) => {
+            &rest[..rest
+                .find(end)
+                .unwrap_or_else(|| panic!("missing source marker {end}"))]
+        }
         None => rest,
     }
 }
@@ -444,7 +467,9 @@ fn equality_constant_refs(text: &str, subject: &str) -> BTreeSet<String> {
         if let Some(after) = after.strip_prefix("Syntax::") {
             let len = after
                 .bytes()
-                .take_while(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
+                .take_while(|byte| {
+                    byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_'
+                })
                 .count();
             refs.insert(after[..len].to_string());
         }
@@ -480,8 +505,21 @@ fn builtin_receivers(collections: &str, syntax: &str) -> Vec<(String, jet::AST::
     use jet::AST::Type;
     let mut out = vec![
         ("List".into(), Type::List(Box::new(Type::Int))),
-        ("FixedList".into(), Type::FixedList { elem: Box::new(Type::Int), len: jet::AST::Measure::literal("length", 4) }),
-        ("Map".into(), Type::Map { key: Box::new(Type::String), key_span: None, value: Box::new(Type::Int) }),
+        (
+            "FixedList".into(),
+            Type::FixedList {
+                elem: Box::new(Type::Int),
+                len: jet::AST::Measure::literal("length", 4),
+            },
+        ),
+        (
+            "Map".into(),
+            Type::Map {
+                key: Box::new(Type::String),
+                key_span: None,
+                value: Box::new(Type::Int),
+            },
+        ),
         ("String".into(), Type::String),
         ("Int".into(), Type::Int),
         ("Float".into(), Type::Float),
@@ -492,7 +530,9 @@ fn builtin_receivers(collections: &str, syntax: &str) -> Vec<(String, jet::AST::
         ("Shared".into(), Type::Shared(Box::new(Type::Int))),
     ];
     let values = string_constant_values(syntax, "");
-    let mut named_receivers = extract_quoted(collections).into_iter().collect::<BTreeSet<_>>();
+    let mut named_receivers = extract_quoted(collections)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     named_receivers.extend(
         constant_refs(collections, "")
             .into_iter()
@@ -517,7 +557,11 @@ fn builtin_receivers(collections: &str, syntax: &str) -> Vec<(String, jet::AST::
 
 fn aot_collection_methods() -> BTreeSet<Entry> {
     let source = read("crates/jet-foundation/src/Collections.rs");
-    let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let syntax = format!(
+        "{}\n{}",
+        read("crates/jet-foundation/src/Syntax.rs"),
+        read_rust_tree("crates/jet-foundation/src/Syntax")
+    );
     let mut candidates = method_candidates(&source);
     let values = string_constant_values(&syntax, "");
     candidates.extend(
@@ -535,10 +579,18 @@ fn aot_collection_methods() -> BTreeSet<Entry> {
         for method in &candidates {
             for arity in 0..=8 {
                 if jet::Collections::builtin_method_return(&ty, method, arity, false).is_some() {
-                    entries.insert(Entry { surface: Surface::Value, owner: owner.clone(), method: method.clone() });
+                    entries.insert(Entry {
+                        surface: Surface::Value,
+                        owner: owner.clone(),
+                        method: method.clone(),
+                    });
                 }
                 if jet::Collections::builtin_method_return(&ty, method, arity, true).is_some() {
-                    entries.insert(Entry { surface: Surface::DirectStatic, owner: owner.clone(), method: method.clone() });
+                    entries.insert(Entry {
+                        surface: Surface::DirectStatic,
+                        owner: owner.clone(),
+                        method: method.clone(),
+                    });
                 }
             }
         }
@@ -581,11 +633,17 @@ fn aot_specialized_value_methods() -> BTreeSet<Entry> {
         "Mime",
         "Type::Named(n) if n == \"Mime\" => match method {",
     );
-    let date_marker =
-        "Type::Named(n) if n == \"Date\" || n == \"LocalDate\" => match method {";
+    let date_marker = "Type::Named(n) if n == \"Date\" || n == \"LocalDate\" => match method {";
     add_arm(&mut entries, &time, "Date", date_marker);
     add_arm(&mut entries, &time, "LocalDate", date_marker);
-    for owner in ["LocalTime", "DateTime", "Instant", "Period", "Zone", "ZonedDateTime"] {
+    for owner in [
+        "LocalTime",
+        "DateTime",
+        "Instant",
+        "Period",
+        "Zone",
+        "ZonedDateTime",
+    ] {
         add_arm(
             &mut entries,
             &time,
@@ -624,7 +682,11 @@ fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
         ("Present", "Option"),
         ("Failed", "Option"),
     ];
-    let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let syntax = format!(
+        "{}\n{}",
+        read("crates/jet-foundation/src/Syntax.rs"),
+        read_rust_tree("crates/jet-foundation/src/Syntax")
+    );
     let values = string_constant_values(&syntax, "");
     let mut out = BTreeSet::new();
     for (start, end) in tuple_ranges(text) {
@@ -655,19 +717,20 @@ fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
                         .filter_map(|constant| values.get(&constant).cloned()),
                 );
                 if guard.contains("type_name.as_str()") {
-                    owners.extend(
-                        extract_quoted(guard)
-                            .into_iter()
-                            .filter(|owner| owner.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())),
-                    );
+                    owners.extend(extract_quoted(guard).into_iter().filter(|owner| {
+                        owner
+                            .chars()
+                            .next()
+                            .is_some_and(|ch| ch.is_ascii_uppercase())
+                    }));
                 }
                 let mut methods = extract_quoted(fields[1]);
                 if fields[1].trim() == "method" {
-                    methods.extend(
-                        extract_quoted(guard)
-                            .into_iter()
-                            .filter(|method| method.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_')),
-                    );
+                    methods.extend(extract_quoted(guard).into_iter().filter(|method| {
+                        method
+                            .chars()
+                            .all(|ch| ch.is_ascii_lowercase() || ch == '_')
+                    }));
                 }
                 for owner in owners {
                     for method in &methods {
@@ -723,12 +786,20 @@ fn guarded_static_methods(text: &str) -> BTreeSet<(String, String)> {
 fn ct_static_methods(text: &str) -> BTreeSet<(String, String)> {
     let mut out = BTreeSet::new();
     for (owner, method) in extract_any_string_pairs(text) {
-        if owner.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()) {
+        if owner
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_uppercase())
+        {
             out.insert((owner, method));
         }
     }
     let collections = read("crates/jet-foundation/src/Collections.rs");
-    let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let syntax = format!(
+        "{}\n{}",
+        read("crates/jet-foundation/src/Syntax.rs"),
+        read_rust_tree("crates/jet-foundation/src/Syntax")
+    );
     let receivers = builtin_receivers(&collections, &syntax);
     for (method, _) in jet::Syntax::NUMERIC_CONVERSION_SOURCES {
         for (owner, ty) in &receivers {
@@ -847,11 +918,17 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
         return Some("named ambient/native boundary");
     }
     if module == "core.testing"
-        && matches!(method, "corpus" | "fixture" | "golden" | "snap" | "temp_dir")
+        && matches!(
+            method,
+            "corpus" | "fixture" | "golden" | "snap" | "temp_dir"
+        )
     {
         return Some("named testing filesystem boundary");
     }
-    if matches!((module, method), ("core.args", "spec") | ("core.game", "run")) {
+    if matches!(
+        (module, method),
+        ("core.args", "spec") | ("core.game", "run")
+    ) {
         return Some("named ambient runtime boundary");
     }
     if matches!(
@@ -872,7 +949,12 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     {
         return Some("named I/O handle boundary");
     }
-    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "time" | "instant" | "sleep" | "start") {
+    if module == "core.time"
+        && matches!(
+            method,
+            "now" | "now_utc" | "today" | "time" | "instant" | "sleep" | "start"
+        )
+    {
         return Some("named clock boundary");
     }
     if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
@@ -887,9 +969,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if module == "core.crypto.vault" {
         return Some("named native/security boundary");
     }
-    if (module == "core.time" && method == "today")
-        || (module == "core.time" && method == "now")
-    {
+    if (module == "core.time" && method == "today") || (module == "core.time" && method == "now") {
         return Some("named clock boundary");
     }
     if module == "core.time.expiring" && method == "new" {
@@ -920,8 +1000,32 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     ) {
         return Some("named reactive runtime boundary");
     }
-    matches!(owner, "Task" | "Receiver" | "Sender" | "Event" | "AsyncEvent" | "DispatchReport" | "Hook" | "Subscription" | "EventScope" | "EventTrace" | "WatchHandle" | "WatchSet" | "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash")
-        .then_some("named runtime/native handle boundary")
+    matches!(
+        owner,
+        "Task"
+            | "Receiver"
+            | "Sender"
+            | "Event"
+            | "AsyncEvent"
+            | "DispatchReport"
+            | "Hook"
+            | "Subscription"
+            | "EventScope"
+            | "EventTrace"
+            | "WatchHandle"
+            | "WatchSet"
+            | "SigningKey"
+            | "X25519SecretKey"
+            | "VerifyKey"
+            | "X25519PublicKey"
+            | "Signature"
+            | "Sealed"
+            | "WrappedKey"
+            | "Digest256"
+            | "Digest512"
+            | "PasswordHash"
+    )
+    .then_some("named runtime/native handle boundary")
 }
 
 fn value_method_boundary(owner: &str, method: &str) -> Option<&'static str> {
@@ -953,13 +1057,25 @@ fn discover_inventory() -> BTreeSet<Entry> {
         if EXTRACTOR_ARTIFACTS.contains(&(module.as_str(), method.as_str())) {
             continue;
         }
-        entries.insert(Entry { surface: Surface::Fixed, owner: module.clone(), method: method.clone() });
+        entries.insert(Entry {
+            surface: Surface::Fixed,
+            owner: module.clone(),
+            method: method.clone(),
+        });
     }
     for (module, method) in core_all.difference(&fixed) {
-        entries.insert(Entry { surface: Surface::Bespoke, owner: module.clone(), method: method.clone() });
+        entries.insert(Entry {
+            surface: Surface::Bespoke,
+            owner: module.clone(),
+            method: method.clone(),
+        });
     }
 
-    let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let syntax_src = format!(
+        "{}\n{}",
+        read("crates/jet-foundation/src/Syntax.rs"),
+        read_rust_tree("crates/jet-foundation/src/Syntax")
+    );
     let values = string_constant_values(&syntax_src, "");
     let direct_src = read("crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs");
     let mut direct_aot = builtin_constant_refs(&direct_src);
@@ -969,8 +1085,15 @@ fn discover_inventory() -> BTreeSet<Entry> {
             .filter(|constant| constant.starts_with("TYPE_") || constant == "RESOURCE_CLOSE"),
     );
     for constant in direct_aot {
-        let spelling = values.get(&constant).cloned().unwrap_or_else(|| constant.clone());
-        entries.insert(Entry { surface: Surface::DirectStatic, owner: "direct".into(), method: spelling });
+        let spelling = values
+            .get(&constant)
+            .cloned()
+            .unwrap_or_else(|| constant.clone());
+        entries.insert(Entry {
+            surface: Surface::DirectStatic,
+            owner: "direct".into(),
+            method: spelling,
+        });
     }
     let math_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs");
     let math_types = math_src
@@ -978,11 +1101,16 @@ fn discover_inventory() -> BTreeSet<Entry> {
         .next()
         .map(extract_quoted)
         .unwrap_or_default();
-    for name in math_types
-        .into_iter()
-        .filter(|name| name.chars().next().is_some_and(|ch| ch.is_ascii_uppercase()))
-    {
-        entries.insert(Entry { surface: Surface::DirectStatic, owner: "direct".into(), method: name });
+    for name in math_types.into_iter().filter(|name| {
+        name.chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_uppercase())
+    }) {
+        entries.insert(Entry {
+            surface: Surface::DirectStatic,
+            owner: "direct".into(),
+            method: name,
+        });
     }
     entries.extend(aot_collection_methods());
     entries.extend(aot_special_collection_constructors());
@@ -1002,7 +1130,11 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
     let ct_core = extract_pairs(&core_dispatch_src);
     let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
     let partials = KNOWN_PARTIAL_GAPS.iter().copied().collect::<BTreeSet<_>>();
-    let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
+    let syntax_src = format!(
+        "{}\n{}",
+        read("crates/jet-foundation/src/Syntax.rs"),
+        read_rust_tree("crates/jet-foundation/src/Syntax")
+    );
     let values = string_constant_values(&syntax_src, "");
     let mut direct_ct = builtin_constant_refs(&dispatch_src);
     direct_ct.extend(equality_constant_refs(&dispatch_src, "name"));
@@ -1054,9 +1186,13 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                 && entry.method == method
         });
         if !pair_is_discovered {
-            errors.push(format!("stale pure_pending gap: {module}.{method} is no longer discovered"));
+            errors.push(format!(
+                "stale pure_pending gap: {module}.{method} is no longer discovered"
+            ));
         } else if ct_core.contains(&(module.to_string(), method.to_string())) {
-            errors.push(format!("stale pure_pending gap: {module}.{method} is now comptime-covered"));
+            errors.push(format!(
+                "stale pure_pending gap: {module}.{method} is now comptime-covered"
+            ));
         }
     }
     for &(module, method) in KNOWN_PARTIAL_GAPS {
@@ -1066,7 +1202,9 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                 && entry.owner == module
                 && entry.method == method
         }) {
-            errors.push(format!("stale partial gap: {module}.{method} is no longer discovered"));
+            errors.push(format!(
+                "stale partial gap: {module}.{method} is no longer discovered"
+            ));
         } else if ct_core.contains(&pair) {
             errors.push(format!(
                 "partial gap leaked into comptime dispatch: {module}.{method}"
@@ -1113,7 +1251,11 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                 }
             }
             Surface::Value => {
-                let owner = if entry.owner == "FixedList" { "List" } else { &entry.owner };
+                let owner = if entry.owner == "FixedList" {
+                    "List"
+                } else {
+                    &entry.owner
+                };
                 let erased_scalar_dispatch = match entry.owner.as_str() {
                     "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" => {
                         matches!(
@@ -1123,8 +1265,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                                 | "count_zeros"
                                 | "leading_zeros"
                                 | "trailing_zeros"
-                        )
-                            && ct_values.contains(&("Int".to_string(), entry.method.clone()))
+                        ) && ct_values.contains(&("Int".to_string(), entry.method.clone()))
                     }
                     // D-FLOATW1: CtFloat preserves F32 width, so Float method
                     // dispatch is honest coverage for the F32 surface.
@@ -1175,17 +1316,39 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
             }
         };
         match classified {
-            Some((class, reason)) => out.push(Classified { entry, class, reason }),
-            None => errors.push(format!("unclassified {} {}.{}", entry.surface.name(), entry.owner, entry.method)),
+            Some((class, reason)) => out.push(Classified {
+                entry,
+                class,
+                reason,
+            }),
+            None => errors.push(format!(
+                "unclassified {} {}.{}",
+                entry.surface.name(),
+                entry.owner,
+                entry.method
+            )),
         }
     }
-    if errors.is_empty() { Ok(out) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(out)
+    } else {
+        Err(errors)
+    }
 }
 
 fn render_inventory(records: &[Classified]) -> String {
     let mut lines = records
         .iter()
-        .map(|record| format!("{} | {} | {}.{} | {}", record.class.name(), record.entry.surface.name(), record.entry.owner, record.entry.method, record.reason))
+        .map(|record| {
+            format!(
+                "{} | {} | {}.{} | {}",
+                record.class.name(),
+                record.entry.surface.name(),
+                record.entry.owner,
+                record.entry.method,
+                record.reason
+            )
+        })
         .collect::<Vec<_>>();
     lines.sort();
     lines.join("\n") + "\n"
@@ -1197,33 +1360,52 @@ fn stable_hash(text: &str) -> u64 {
     })
 }
 
-fn validate_records(discovered: &BTreeSet<Entry>, records: &[Classified]) -> Result<(), Vec<String>> {
+fn validate_records(
+    discovered: &BTreeSet<Entry>,
+    records: &[Classified],
+) -> Result<(), Vec<String>> {
     let mut seen = BTreeSet::new();
     let mut errors = Vec::new();
     for record in records {
         if !seen.insert(record.entry.clone()) {
             errors.push(format!(
                 "duplicate classification: {} {}.{}",
-                record.entry.surface.name(), record.entry.owner, record.entry.method
+                record.entry.surface.name(),
+                record.entry.owner,
+                record.entry.method
             ));
         }
         if !discovered.contains(&record.entry) {
             errors.push(format!(
                 "stale {} classification: {} {}.{}",
-                record.class.name(), record.entry.surface.name(), record.entry.owner, record.entry.method
+                record.class.name(),
+                record.entry.surface.name(),
+                record.entry.owner,
+                record.entry.method
             ));
         }
     }
     for entry in discovered.difference(&seen) {
         errors.push(format!(
             "unclassified: {} {}.{}",
-            entry.surface.name(), entry.owner, entry.method
+            entry.surface.name(),
+            entry.owner,
+            entry.method
         ));
     }
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
-fn record<'a>(records: &'a [Classified], surface: Surface, owner: &str, method: &str) -> &'a Classified {
+fn record<'a>(
+    records: &'a [Classified],
+    surface: Surface,
+    owner: &str,
+    method: &str,
+) -> &'a Classified {
     records
         .iter()
         .find(|record| {
@@ -1237,27 +1419,94 @@ fn record<'a>(records: &'a [Classified], surface: Surface, owner: &str, method: 
 #[test]
 fn canonical_builtin_inventory_is_complete_and_stable() {
     let discovered = discover_inventory();
-    let records = classify_inventory(&discovered).unwrap_or_else(|errors| panic!("{}", errors.join("\n")));
+    let records =
+        classify_inventory(&discovered).unwrap_or_else(|errors| panic!("{}", errors.join("\n")));
     validate_records(&discovered, &records).unwrap();
 
-    let fixed = records.iter().filter(|record| record.entry.surface == Surface::Fixed).count();
-    let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
-    let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
-    let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
+    let fixed = records
+        .iter()
+        .filter(|record| record.entry.surface == Surface::Fixed)
+        .count();
+    let direct_static = records
+        .iter()
+        .filter(|record| record.entry.surface == Surface::DirectStatic)
+        .count();
+    let value = records
+        .iter()
+        .filter(|record| record.entry.surface == Surface::Value)
+        .count();
+    let bespoke = records
+        .iter()
+        .filter(|record| record.entry.surface == Surface::Bespoke)
+        .count();
     // #747 / D-RANGE-EXCL1=C replaced enumerate with indexed + indexes on
     // List, FixedList, and Iter: six additions, three removals, net +3 values.
     assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 531, 57));
 
-    assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "idle").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loading").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loaded").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "failed").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Int", "parse").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Clock", "new").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Set", "from").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "ExpiringValue", "new").class, Class::Boundary);
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.math", "round").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::Fixed,
+            "core.encoding.json",
+            "to_string_pretty"
+        )
+        .class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Bespoke, "core.reactive.loadable", "idle").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::Bespoke,
+            "core.reactive.loadable",
+            "loading"
+        )
+        .class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::Bespoke,
+            "core.reactive.loadable",
+            "loaded"
+        )
+        .class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::Bespoke,
+            "core.reactive.loadable",
+            "failed"
+        )
+        .class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Int", "parse").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Clock", "new").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Set", "from").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "ExpiringValue", "new").class,
+        Class::Boundary
+    );
     for (owner, method) in [
         ("Rank", "from"),
         ("Rank", "new"),
@@ -1274,31 +1523,91 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
-    assert_eq!(record(&records, Surface::DirectStatic, "Tally", "new").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Value, "WrappedVaultKey", "bytes").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "wrapping").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "consume").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "String", "trim").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Tally", "new").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Secret", "from_text").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Secret", "from_bytes").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::DirectStatic,
+            "WrappedVaultKey",
+            "from_bytes"
+        )
+        .class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "WrappedVaultKey", "bytes").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "String", "from_bytes").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "direct", "Decimal").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "direct", "Vec3").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "direct", "wrapping").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "direct", "consume").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "String", "trim").class,
+        Class::Covered
+    );
     for method in ["after", "before", "bytes", "slice"] {
-        assert_eq!(record(&records, Surface::Value, "String", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "String", method).class,
+            Class::Covered
+        );
     }
     for method in ["is_nan", "is_infinite", "is_finite"] {
-        assert_eq!(record(&records, Surface::Value, "Float", method).class, Class::Covered);
-        assert_eq!(record(&records, Surface::Value, "F32", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Float", method).class,
+            Class::Covered
+        );
+        assert_eq!(
+            record(&records, Surface::Value, "F32", method).class,
+            Class::Covered
+        );
     }
     // D-FLOATW1: F32 width is preserved in CtFloat, so F32.to_string shares Float display.
-    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "F32", "to_string").class,
+        Class::Covered
+    );
     for owner in ["I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
-        assert_eq!(record(&records, Surface::Value, owner, "to_string").class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, owner, "to_string").class,
+            Class::Covered
+        );
     }
-    assert_eq!(record(&records, Surface::Value, "Float", "origin").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Value, "Stopwatch", "elapsed_millis").class, Class::Boundary);
+    assert_eq!(
+        record(&records, Surface::Value, "Float", "origin").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Stopwatch", "elapsed_millis").class,
+        Class::Boundary
+    );
     for owner in ["Int", "I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
         for method in [
             "count_ones",
@@ -1306,19 +1615,44 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "leading_zeros",
             "trailing_zeros",
         ] {
-            assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
+            assert_eq!(
+                record(&records, Surface::Value, owner, method).class,
+                Class::Covered
+            );
         }
     }
-    assert_eq!(record(&records, Surface::Value, "Decimal", "to_string").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "Decimal", "add").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.math", "decimal").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "Decimal", "to_string").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Decimal", "add").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.math", "decimal").class,
+        Class::Covered
+    );
     for method in ["add", "add_new", "clear", "each", "has_key"] {
-        assert_eq!(record(&records, Surface::Value, "Map", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Map", method).class,
+            Class::Covered
+        );
     }
-    assert_eq!(record(&records, Surface::Value, "List", "filter").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "List", "clear").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "List", "filter").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "List", "clear").class,
+        Class::Covered
+    );
     let sequence_methods = comptime_sequence_methods();
-    assert_eq!(sequence_methods.len(), 40, "SequenceParity method-set drift");
+    assert_eq!(
+        sequence_methods.len(),
+        40,
+        "SequenceParity method-set drift"
+    );
     for owner in ["List", "FixedList"] {
         for method in &sequence_methods {
             let expected = if owner == "FixedList" && method == "insert" {
@@ -1326,20 +1660,35 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             } else {
                 Class::Covered
             };
-            assert_eq!(record(&records, Surface::Value, owner, method).class, expected);
+            assert_eq!(
+                record(&records, Surface::Value, owner, method).class,
+                expected
+            );
         }
-        assert_eq!(record(&records, Surface::Value, owner, "view").class, Class::Boundary);
+        assert_eq!(
+            record(&records, Surface::Value, owner, "view").class,
+            Class::Boundary
+        );
     }
     for owner in ["View", "ViewMut"] {
         for method in [
             "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len",
             "map",
         ] {
-            assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
+            assert_eq!(
+                record(&records, Surface::Value, owner, method).class,
+                Class::Covered
+            );
         }
     }
-    assert_eq!(record(&records, Surface::Value, "BuildContext", "generate").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "Duration", "in").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "BuildContext", "generate").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Duration", "in").class,
+        Class::Covered
+    );
     for method in [
         "int",
         "float",
@@ -1354,7 +1703,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "sample",
         "shuffle",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Rng", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Rng", method).class,
+            Class::Covered
+        );
     }
     for method in [
         "len",
@@ -1370,21 +1722,19 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "write_u64_be",
         "write_bytes",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Bytes", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Bytes", method).class,
+            Class::Covered
+        );
     }
     for method in [
-        "add",
-        "add_new",
-        "get",
-        "remove",
-        "has_key",
-        "keys",
-        "capacity",
-        "len",
-        "is_empty",
+        "add", "add_new", "get", "remove", "has_key", "keys", "capacity", "len", "is_empty",
         "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Cache", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Cache", method).class,
+            Class::Covered
+        );
     }
     for method in [
         "push_front",
@@ -1397,26 +1747,26 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "is_empty",
         "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Queue", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Queue", method).class,
+            Class::Covered
+        );
     }
     for method in [
-        "add",
-        "remove",
-        "has",
-        "first",
-        "last",
-        "union",
-        "to_list",
-        "len",
-        "is_empty",
-        "clear",
+        "add", "remove", "has", "first", "last", "union", "to_list", "len", "is_empty", "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Rank", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Rank", method).class,
+            Class::Covered
+        );
     }
     for method in [
         "add", "remove", "has", "count", "len", "is_empty", "clear", "to_list",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Bits", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Bits", method).class,
+            Class::Covered
+        );
     }
     for method in [
         "push",
@@ -1435,13 +1785,29 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     for method in [
         "add", "remove", "has", "union", "to_list", "len", "is_empty", "clear",
     ] {
-        assert_eq!(record(&records, Surface::Value, "Set", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Set", method).class,
+            Class::Covered
+        );
     }
     for method in ["add", "remove", "has", "count", "len", "is_empty", "any"] {
-        assert_eq!(record(&records, Surface::Value, "Tally", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Tally", method).class,
+            Class::Covered
+        );
     }
-    for method in ["media_type", "subtype", "essence", "to_string", "param", "params"] {
-        assert_eq!(record(&records, Surface::Value, "Mime", method).class, Class::Covered);
+    for method in [
+        "media_type",
+        "subtype",
+        "essence",
+        "to_string",
+        "param",
+        "params",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Value, "Mime", method).class,
+            Class::Covered
+        );
     }
     for owner in ["Date", "LocalDate"] {
         for method in [
@@ -1460,17 +1826,32 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "truncate",
             "weekday",
         ] {
-            assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
+            assert_eq!(
+                record(&records, Surface::Value, owner, method).class,
+                Class::Covered
+            );
         }
     }
     for method in ["hour", "minute", "second", "to_string"] {
-        assert_eq!(record(&records, Surface::Value, "LocalTime", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "LocalTime", method).class,
+            Class::Covered
+        );
     }
     for method in ["to_timestamp", "to_unix_ms", "to_string"] {
-        assert_eq!(record(&records, Surface::Value, "DateTime", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "DateTime", method).class,
+            Class::Covered
+        );
     }
-    assert_eq!(record(&records, Surface::Value, "DateTime", "in_zone").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "Zone", "name").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "DateTime", "in_zone").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Zone", "name").class,
+        Class::Covered
+    );
     for method in [
         "add_duration",
         "add_period",
@@ -1482,10 +1863,16 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "to_string",
         "zone",
     ] {
-        assert_eq!(record(&records, Surface::Value, "ZonedDateTime", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "ZonedDateTime", method).class,
+            Class::Covered
+        );
     }
     for method in ["utc", "zone", "zoned", "zoned_local"] {
-        assert_eq!(record(&records, Surface::Fixed, "core.time", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.time", method).class,
+            Class::Covered
+        );
     }
     for method in [
         "date",
@@ -1499,22 +1886,55 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         "time",
         "truncate",
     ] {
-        assert_eq!(record(&records, Surface::Value, "DateTime", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "DateTime", method).class,
+            Class::Covered
+        );
     }
-    assert_eq!(record(&records, Surface::Value, "Period", "to_string").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "Period", "to_string").class,
+        Class::Covered
+    );
     for method in ["value", "uncertainty"] {
-        assert_eq!(record(&records, Surface::Value, "Measurement", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Measurement", method).class,
+            Class::Covered
+        );
     }
     for method in ["add", "sub", "mul", "div"] {
-        assert_eq!(record(&records, Surface::Value, "Measurement", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Measurement", method).class,
+            Class::Covered
+        );
     }
-    assert_eq!(record(&records, Surface::Value, "Instant", "elapsed_millis").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Value, "Task", "detach").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.data", "inner_join").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.data", "left_join").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.data", "pivot_sum").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.data", "schema").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.data", "json").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Value, "Instant", "elapsed_millis").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Task", "detach").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.data", "inner_join").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.data", "left_join").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.data", "pivot_sum").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.data", "schema").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.data", "json").class,
+        Class::Covered
+    );
     assert_eq!(
         record(&records, Surface::Fixed, "core.testing", "fake_rng").class,
         Class::Covered
@@ -1551,8 +1971,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
-    assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.game", "run").class, Class::Boundary);
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.args", "spec").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.game", "run").class,
+        Class::Boundary
+    );
     for (module, method) in [
         ("core.data.sketch.hll", "new"),
         ("core.data.sketch.tdigest", "new"),
@@ -1564,32 +1990,86 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
-    for owner in ["Signal", "Shared", "Effect", "Computed", "Derived", "DecisionHook"] {
+    for owner in [
+        "Signal",
+        "Shared",
+        "Effect",
+        "Computed",
+        "Derived",
+        "DecisionHook",
+    ] {
         assert_eq!(
-            record(&records, Surface::Value, owner, match owner {
-                "Signal" => "get",
-                "Shared" => "read",
-                "Effect" => "unsubscribe",
-                "Computed" | "Derived" => "get",
-                "DecisionHook" => "run",
-                _ => unreachable!(),
-            })
+            record(
+                &records,
+                Surface::Value,
+                owner,
+                match owner {
+                    "Signal" => "get",
+                    "Shared" => "read",
+                    "Effect" => "unsubscribe",
+                    "Computed" | "Derived" => "get",
+                    "DecisionHook" => "run",
+                    _ => unreachable!(),
+                }
+            )
             .class,
             Class::Boundary
         );
     }
     for method in ["add", "remove", "ids"] {
-        assert_eq!(record(&records, Surface::Value, "Pool", method).class, Class::Covered);
+        assert_eq!(
+            record(&records, Surface::Value, "Pool", method).class,
+            Class::Covered
+        );
     }
-    assert_eq!(record(&records, Surface::Value, "Solver", "status").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "Solver", "require").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Value, "Solver", "failure_count").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.crypto.vault", "prepare_import_signing").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Fixed, "core.crypto.vault", "commit_import_x25519").class, Class::Boundary);
+    assert_eq!(
+        record(&records, Surface::Value, "Solver", "status").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::DirectStatic, "Solver", "new").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Solver", "require").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "Solver", "failure_count").class,
+        Class::Covered
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.time", "now").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::Fixed,
+            "core.crypto.vault",
+            "prepare_import_signing"
+        )
+        .class,
+        Class::Boundary
+    );
+    assert_eq!(
+        record(
+            &records,
+            Surface::Fixed,
+            "core.crypto.vault",
+            "commit_import_x25519"
+        )
+        .class,
+        Class::Boundary
+    );
 
     // Exact per-call inventory: ported pure rows stay Covered; open pure gaps
     // stay PurePending; ambient backends stay Boundary (#721 / #392 C3).
@@ -1628,7 +2108,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         record(&records, Surface::Bespoke, "core.ui", "reactive_render").class,
         Class::Boundary
     );
-    assert_eq!(record(&records, Surface::Fixed, "core.game.raylib", "color").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.game.raylib", "color").class,
+        Class::Covered
+    );
     for method in [
         "ed25519_verify_strict",
         "ed25519_sign",
@@ -1689,13 +2172,29 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let rendered = render_inventory(&records);
     let mut reversed = records.clone();
     reversed.reverse();
-    assert_eq!(render_inventory(&reversed), rendered, "inventory rendering must be order-stable");
-    let covered = records.iter().filter(|record| record.class == Class::Covered).count();
-    let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
-    let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
+    assert_eq!(
+        render_inventory(&reversed),
+        rendered,
+        "inventory rendering must be order-stable"
+    );
+    let covered = records
+        .iter()
+        .filter(|record| record.class == Class::Covered)
+        .count();
+    let pending = records
+        .iter()
+        .filter(|record| record.class == Class::PurePending)
+        .count();
+    let boundaries = records
+        .iter()
+        .filter(|record| record.class == Class::Boundary)
+        .count();
     // #722 closed View/ViewMut.join. Iter.* covered via sequence dispatch (list-shaped TirBridge + AOT JetIter).
     // #722/#743: View.join + Iter.* covered. Zero PurePending effect-free backlog.
-    assert_eq!((records.len(), covered, pending, boundaries), (1_251, 904, 0, 347));
+    assert_eq!(
+        (records.len(), covered, pending, boundaries),
+        (1_251, 904, 0, 347)
+    );
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1710,36 +2209,92 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
 
 #[test]
 fn inventory_validator_rejects_duplicate_stale_and_unclassified_entries() {
-    let live = Entry { surface: Surface::Value, owner: "String".into(), method: "trim".into() };
-    let stale_covered = Entry { surface: Surface::Fixed, owner: "core.fake".into(), method: "covered".into() };
-    let stale_pending = Entry { surface: Surface::Fixed, owner: "core.fake".into(), method: "pending".into() };
-    let stale_boundary = Entry { surface: Surface::Fixed, owner: "core.fake".into(), method: "boundary".into() };
+    let live = Entry {
+        surface: Surface::Value,
+        owner: "String".into(),
+        method: "trim".into(),
+    };
+    let stale_covered = Entry {
+        surface: Surface::Fixed,
+        owner: "core.fake".into(),
+        method: "covered".into(),
+    };
+    let stale_pending = Entry {
+        surface: Surface::Fixed,
+        owner: "core.fake".into(),
+        method: "pending".into(),
+    };
+    let stale_boundary = Entry {
+        surface: Surface::Fixed,
+        owner: "core.fake".into(),
+        method: "boundary".into(),
+    };
     let discovered = [live.clone()].into_iter().collect::<BTreeSet<_>>();
-    let duplicate = Classified { entry: live.clone(), class: Class::Covered, reason: "proof" };
+    let duplicate = Classified {
+        entry: live.clone(),
+        class: Class::Covered,
+        reason: "proof",
+    };
     let records = vec![
         duplicate.clone(),
         duplicate,
-        Classified { entry: stale_covered, class: Class::Covered, reason: "old" },
-        Classified { entry: stale_pending, class: Class::PurePending, reason: "old" },
-        Classified { entry: stale_boundary, class: Class::Boundary, reason: "old" },
+        Classified {
+            entry: stale_covered,
+            class: Class::Covered,
+            reason: "old",
+        },
+        Classified {
+            entry: stale_pending,
+            class: Class::PurePending,
+            reason: "old",
+        },
+        Classified {
+            entry: stale_boundary,
+            class: Class::Boundary,
+            reason: "old",
+        },
     ];
-    let errors = validate_records(&discovered, &records).unwrap_err().join("\n");
-    assert!(errors.contains("duplicate classification: value String.trim"), "{errors}");
-    assert!(errors.contains("stale covered classification: fixed core.fake.covered"), "{errors}");
-    assert!(errors.contains("stale pure_pending classification: fixed core.fake.pending"), "{errors}");
-    assert!(errors.contains("stale boundary classification: fixed core.fake.boundary"), "{errors}");
+    let errors = validate_records(&discovered, &records)
+        .unwrap_err()
+        .join("\n");
+    assert!(
+        errors.contains("duplicate classification: value String.trim"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("stale covered classification: fixed core.fake.covered"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("stale pure_pending classification: fixed core.fake.pending"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("stale boundary classification: fixed core.fake.boundary"),
+        "{errors}"
+    );
 
     let errors = validate_records(&discovered, &[]).unwrap_err().join("\n");
-    assert!(errors.contains("unclassified: value String.trim"), "{errors}");
+    assert!(
+        errors.contains("unclassified: value String.trim"),
+        "{errors}"
+    );
 
     let direct = direct_dispatch_names(
         "if name == \"require\" { dispatch(); } fn helper() { let name = \"require_eq\"; }",
     );
     assert!(direct.contains("require"));
-    assert!(!direct.contains("require_eq"), "helper-only string must not prove dispatch coverage");
+    assert!(
+        !direct.contains("require_eq"),
+        "helper-only string must not prove dispatch coverage"
+    );
 
-    let fake_core = "// (\"core.fake\", \"comment\")\nlet text = \"(\\\"core.fake\\\", \\\"string\\\")\";";
-    assert!(extract_pairs(fake_core).is_empty(), "comment/string tuples must not prove dispatch coverage");
+    let fake_core =
+        "// (\"core.fake\", \"comment\")\nlet text = \"(\\\"core.fake\\\", \\\"string\\\")\";";
+    assert!(
+        extract_pairs(fake_core).is_empty(),
+        "comment/string tuples must not prove dispatch coverage"
+    );
 
     let fake_statics = r###"
 // if type_name == crate::Syntax::TYPE_SET && method == "from" {

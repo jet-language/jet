@@ -7,8 +7,8 @@ use jet::Comptime::{
 };
 use jet::Diagnostics::Span;
 use jet::AST::{
-    AccessConvention, Dimension, DistinctDef, Expr, Field, Func, Marker, Param,
-    ParamZone, InternalTag, QuantityKind, StructDef, TagMarker, Type, TypeParam,
+    AccessConvention, Dimension, DistinctDef, Expr, Field, Func, InternalTag, Marker, Param,
+    ParamZone, QuantityKind, StructDef, TagMarker, Type, TypeParam,
 };
 
 fn span() -> Span {
@@ -27,7 +27,7 @@ fn field(name: &str, ty: &str, is_pub: bool) -> Field {
         redact: false,
         computed: None,
         default: None,
-            default_ct: None,
+        default_ct: None,
     }
 }
 
@@ -52,7 +52,8 @@ fn method(name: &str, is_pub: bool) -> Func {
             ty_span: span(),
             default: None,
             variadic: false,
-            variadic_bound_list: None, declared_view_from_names: None,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
         }],
         return_type: Some(Type::Named("String".to_string())),
         return_type_span: Some(span()),
@@ -67,7 +68,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         is_sanitizer: false,
         scrub_tag: None,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         declared_effects: None,
@@ -451,7 +452,10 @@ fn registered_type_planes_reflect_as_typed_values() {
                 )
             })
             .unwrap_or_else(|| panic!("missing typed `{expected}` fact in {facts:?}"));
-        assert!(matches!(struct_field(fact, "value"), CtValue::Struct { .. }));
+        assert!(matches!(
+            struct_field(fact, "value"),
+            CtValue::Struct { .. }
+        ));
     }
 
     let fact_of_kind = |kind: &str| {
@@ -506,7 +510,10 @@ fn registered_type_planes_reflect_as_typed_values() {
         CtValue::Present(value) if matches!(value.as_ref(), CtValue::Int(24))
     ));
 
-    let dimension = struct_field(struct_field(fact_of_kind("Dimension"), "value"), "dimension");
+    let dimension = struct_field(
+        struct_field(fact_of_kind("Dimension"), "value"),
+        "dimension",
+    );
     let CtValue::Present(dimension) = dimension else {
         panic!("dimension payload is not present");
     };
@@ -526,7 +533,9 @@ fn registered_type_planes_reflect_as_typed_values() {
     let CtValue::Present(classification) = classification else {
         panic!("classification payload is not present");
     };
-    assert!(matches!(struct_field(classification, "name"), CtValue::Str(name) if name == "Audited"));
+    assert!(
+        matches!(struct_field(classification, "name"), CtValue::Str(name) if name == "Audited")
+    );
 
     let nominal = struct_field(struct_field(fact_of_kind("Nominal"), "value"), "nominal");
     let CtValue::Present(nominal) = nominal else {
@@ -534,7 +543,10 @@ fn registered_type_planes_reflect_as_typed_values() {
     };
     assert!(matches!(struct_field(nominal, "name"), CtValue::Str(name) if name == "core.crypto"));
 
-    let obligation = struct_field(struct_field(fact_of_kind("Obligation"), "value"), "obligation");
+    let obligation = struct_field(
+        struct_field(fact_of_kind("Obligation"), "value"),
+        "obligation",
+    );
     let CtValue::Present(obligation) = obligation else {
         panic!("obligation payload is not present");
     };
@@ -593,10 +605,7 @@ fn range_and_dimension_facts_are_typed_records() {
         struct_field(range_value, "start"),
         CtValue::Int(0)
     ));
-    assert!(matches!(
-        struct_field(range_value, "end"),
-        CtValue::Int(10)
-    ));
+    assert!(matches!(struct_field(range_value, "end"), CtValue::Int(10)));
     assert!(matches!(
         struct_field(struct_field(range, "value"), "dimension"),
         CtValue::Failed(CtReport::Clean(_))
@@ -641,7 +650,10 @@ fn orphan_fact_rows_are_typed_and_readable() {
             struct_field(&info, "kind"),
             CtValue::Enum { variant, .. } if variant == kind
         ));
-        assert!(matches!(struct_field(&info, "value"), CtValue::Struct { .. }));
+        assert!(matches!(
+            struct_field(&info, "value"),
+            CtValue::Struct { .. }
+        ));
         if name == "Attribution" {
             assert!(matches!(
                 struct_field(&info, "path"),

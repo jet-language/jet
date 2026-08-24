@@ -6,12 +6,12 @@
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
 
-#[allow(unused_imports)]
-pub use jet_foundation::Outcome::*;
 use super::Concurrency;
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 
 pub(crate) mod runtime {
     use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
@@ -116,10 +116,7 @@ pub(crate) mod runtime {
     pub fn url_parse(s: &String) -> Result<JetURL, String> {
         JetURL::parse(s)
     }
-    pub fn url_typed_literal(
-        literals: &Vec<String>,
-        holes: &Vec<String>,
-    ) -> JetURL {
+    pub fn url_typed_literal(literals: &Vec<String>, holes: &Vec<String>) -> JetURL {
         let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
         jet_std::jet_typed_url_literal(&literal_refs, holes.clone())
     }
@@ -283,15 +280,9 @@ pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
         })
         .unwrap_or_default()
 }
-pub(crate) fn mime_parts(
-    handle: i64,
-) -> Option<(String, String, Vec<(String, String)>)> {
+pub(crate) fn mime_parts(handle: i64) -> Option<(String, String, Vec<(String, String)>)> {
     with_net(handle, |value| match value {
-        NetValue::Mime(mime) => Some((
-            mime.top.clone(),
-            mime.sub.clone(),
-            mime.params.clone(),
-        )),
+        NetValue::Mime(mime) => Some((mime.top.clone(), mime.sub.clone(), mime.params.clone())),
         _ => None,
     })
 }
@@ -464,10 +455,13 @@ fn jet_jit_url_scheme(recv: i64) -> i64 {
 }
 
 fn jet_jit_url_host(recv: i64) -> i64 {
-    option_string(with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.host()),
-        _ => None,
-    }).and_then(|r| r.ok()))
+    option_string(
+        with_net(recv, |v| match v {
+            NetValue::Url(u) => Some(u.host()),
+            _ => None,
+        })
+        .and_then(|r| r.ok()),
+    )
 }
 
 fn jet_jit_url_path(recv: i64) -> i64 {
@@ -507,10 +501,13 @@ fn jet_jit_url_path_segments(recv: i64) -> i64 {
 }
 
 fn jet_jit_url_fragment(recv: i64) -> i64 {
-    option_string(with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.fragment()),
-        _ => None,
-    }).and_then(|r| r.ok()))
+    option_string(
+        with_net(recv, |v| match v {
+            NetValue::Url(u) => Some(u.fragment()),
+            _ => None,
+        })
+        .and_then(|r| r.ok()),
+    )
 }
 
 fn jet_jit_url_username(recv: i64) -> i64 {
@@ -633,10 +630,13 @@ fn jet_jit_mime_essence(recv: i64) -> i64 {
 
 fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
     let name = clone_string(name);
-    option_string(with_net(recv, |v| match v {
-        NetValue::Mime(m) => Some(m.param(&name)),
-        _ => None,
-    }).and_then(|r| r.ok()))
+    option_string(
+        with_net(recv, |v| match v {
+            NetValue::Mime(m) => Some(m.param(&name)),
+            _ => None,
+        })
+        .and_then(|r| r.ok()),
+    )
 }
 
 fn jet_jit_browser_profile(name: i64) -> i64 {
@@ -847,9 +847,7 @@ fn email_address_from_handle(handle: i64) -> Option<runtime::jet_email::Address>
     })
 }
 
-fn email_address_list_from_handle(
-    list: i64,
-) -> Option<Vec<runtime::jet_email::Address>> {
+fn email_address_list_from_handle(list: i64) -> Option<Vec<runtime::jet_email::Address>> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list)?;
         let mut addresses = Vec::with_capacity(len as usize);
@@ -877,9 +875,7 @@ fn email_envelope_from_handle(handle: i64) -> Option<runtime::jet_email::Envelop
     Some(runtime::jet_email::Envelope { from, recipients })
 }
 
-fn email_attachment_list_from_handle(
-    list: i64,
-) -> Option<Vec<runtime::jet_email::Attachment>> {
+fn email_attachment_list_from_handle(list: i64) -> Option<Vec<runtime::jet_email::Attachment>> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list)?;
         let mut attachments = Vec::with_capacity(len as usize);
@@ -974,9 +970,7 @@ fn jet_jit_email_address(text: i64) -> i64 {
     };
     match runtime::jet_email::address(&text) {
         Ok(addr) => result_ok(push(NetValue::EmailAddress(addr)) as u64),
-        Err(err) => {
-            email_err(err)
-        }
+        Err(err) => email_err(err),
     }
 }
 
@@ -995,9 +989,7 @@ fn jet_jit_email_attachment(filename: i64, mime: i64, bytes: i64) -> i64 {
             let h = push(NetValue::EmailAttachment(att));
             result_ok(h as u64)
         }
-        Err(err) => {
-            email_err(err)
-        }
+        Err(err) => email_err(err),
     }
 }
 
@@ -1037,15 +1029,9 @@ fn jet_jit_email_message(
     let Some(attachments) = attachments else {
         return email_config_error("message", "invalid attachment list");
     };
-    match runtime::jet_email::message(
-        &from, &to, &bcc, &subject, &text, &html, &attachments,
-    ) {
-        Ok(msg) => {
-            result_ok(push(NetValue::EmailMessage(msg)) as u64)
-        }
-        Err(err) => {
-            email_err(err)
-        }
+    match runtime::jet_email::message(&from, &to, &bcc, &subject, &text, &html, &attachments) {
+        Ok(msg) => result_ok(push(NetValue::EmailMessage(msg)) as u64),
+        Err(err) => email_err(err),
     }
 }
 
@@ -1080,9 +1066,7 @@ fn jet_jit_email_serialize(message: i64) -> i64 {
             });
             result_ok(list as u64)
         }
-        Err(err) => {
-            email_err(err)
-        }
+        Err(err) => email_err(err),
     }
 }
 
@@ -1160,7 +1144,6 @@ fn jet_jit_email_smtp(config: i64) -> i64 {
         Err(err) => email_err(err),
     }
 }
-
 
 // Minimal TCP listen/local-addr/port for watcher demos (#1219) and http loopbacks.
 use std::cell::RefCell;

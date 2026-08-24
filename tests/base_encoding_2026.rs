@@ -2,11 +2,13 @@ mod common;
 
 use jet_foundation::XmlPull::base_encoding_2026;
 
-const BASE64: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn digit(byte: u8) -> Option<u8> {
-    BASE64.iter().position(|&item| item == byte).map(|n| n as u8)
+    BASE64
+        .iter()
+        .position(|&item| item == byte)
+        .map(|n| n as u8)
 }
 
 fn frozen_aot_base64(text: &str) -> Option<Vec<u8>> {
@@ -65,7 +67,10 @@ fn frozen_base32(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let mut buffer = 0u32;
     let mut bits = 0u8;
-    for byte in text.bytes().filter(|&b| !b.is_ascii_whitespace() && b != b'=') {
+    for byte in text
+        .bytes()
+        .filter(|&b| !b.is_ascii_whitespace() && b != b'=')
+    {
         let value = match byte {
             b'A'..=b'Z' => byte - b'A',
             b'a'..=b'z' => byte - b'a',
@@ -94,7 +99,12 @@ fn strings(alphabet: &[u8], max_len: usize, mut check: impl FnMut(&str)) {
             input.pop();
         }
     }
-    visit(alphabet, max_len, &mut Vec::with_capacity(max_len), &mut check);
+    visit(
+        alphabet,
+        max_len,
+        &mut Vec::with_capacity(max_len),
+        &mut check,
+    );
 }
 
 fn check_base64_case(text: &str) {
@@ -113,7 +123,10 @@ fn check_base64_case(text: &str) {
     let aot = frozen_aot_base64(&prepared);
     let comptime = frozen_comptime_base64(&prepared);
     if let (Some(aot), Some(comptime)) = (&aot, &comptime) {
-        assert_eq!(aot, comptime, "historical base64url disagreement for {text:?}");
+        assert_eq!(
+            aot, comptime,
+            "historical base64url disagreement for {text:?}"
+        );
     }
     assert_eq!(
         base_encoding_2026::decode_base64url(text).ok().as_ref(),
@@ -165,6 +178,12 @@ fn rfc4648_base64_base64url_and_base32_vectors_decode() {
         );
         assert_eq!(base_encoding_2026::decode_base32(base32).unwrap(), plain);
     }
-    assert_eq!(base_encoding_2026::decode_base64("+/8=").unwrap(), [251, 255]);
-    assert_eq!(base_encoding_2026::decode_base64url("-_8").unwrap(), [251, 255]);
+    assert_eq!(
+        base_encoding_2026::decode_base64("+/8=").unwrap(),
+        [251, 255]
+    );
+    assert_eq!(
+        base_encoding_2026::decode_base64url("-_8").unwrap(),
+        [251, 255]
+    );
 }

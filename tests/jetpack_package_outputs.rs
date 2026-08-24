@@ -79,10 +79,9 @@ outputs: .{
         "{script_text}"
     );
 
-    let root_proof = fs::read_to_string(
-        root.join("systems/generations/fleet-output/generation-root.json"),
-    )
-    .unwrap();
+    let root_proof =
+        fs::read_to_string(root.join("systems/generations/fleet-output/generation-root.json"))
+            .unwrap();
     assert!(
         root_proof.contains("\"kind\":\"jetos.generation-root.v1\"")
             && root_proof.contains("\"source_proof_sha256\":\"")

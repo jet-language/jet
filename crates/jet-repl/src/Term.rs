@@ -34,7 +34,8 @@ impl RawGuard {
     /// lets `KeyReader` tell a bare Escape keypress (timeout, no continuation
     /// byte) apart from the start of an arrow-key escape sequence, without
     /// ever hanging the loop waiting on a byte that will never come.
-    const RAW_ARGS: &'static [&'static str] = &["-icanon", "-echo", "-isig", "min", "0", "time", "1"];
+    const RAW_ARGS: &'static [&'static str] =
+        &["-icanon", "-echo", "-isig", "min", "0", "time", "1"];
 
     /// `None` when stdin/stdout aren't both a real terminal, or `stty` isn't
     /// available/failed — the caller should use the cooked fallback.
@@ -68,7 +69,9 @@ impl RawGuard {
         if !saved_out.status.success() {
             return None;
         }
-        let saved = String::from_utf8_lossy(&saved_out.stdout).trim().to_string();
+        let saved = String::from_utf8_lossy(&saved_out.stdout)
+            .trim()
+            .to_string();
         if saved.is_empty() {
             return None;
         }
@@ -81,7 +84,10 @@ impl RawGuard {
             let _ = Command::new("stty").arg(&saved).status();
             return None;
         }
-        Some(RawGuard { saved, restored: false })
+        Some(RawGuard {
+            saved,
+            restored: false,
+        })
     }
 
     /// Restore saved terminal state before an orderly process exit. `Drop`
@@ -156,7 +162,8 @@ impl EvaluationInterruptGuard {
                 return None;
             }
             crate::Comptime::begin_repl_interruptible_turn();
-            let previous_handler = unsafe { signal(2, note_evaluation_interrupt as *const () as usize) };
+            let previous_handler =
+                unsafe { signal(2, note_evaluation_interrupt as *const () as usize) };
             let enabled = Command::new("stty")
                 .arg("isig")
                 .stdin(Stdio::inherit())

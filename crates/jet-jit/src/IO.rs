@@ -10,13 +10,13 @@
 
 use super::Concurrency;
 use super::CoreHost::{jit_env_value, jit_env_value_raw};
+use crate::runtime_host;
+use crate::Marshal::{clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use std::io::BufRead;
 use std::collections::{HashMap, HashSet};
+use std::io::BufRead;
 use std::sync::{Mutex, OnceLock};
-use crate::Marshal::{clone_string, result_err_msg, result_ok};
-use crate::runtime_host;
 
 pub(crate) mod term_prelude {
     include!("../../jet-codegen/src/Prelude/Term.rs");
@@ -36,7 +36,9 @@ mod progress_semantics {
 mod io_line_stream {
     use crate::fault_injection::jet_fault_should_fail;
 
-    use super::term_prelude::{jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout};
+    use super::term_prelude::{
+        jet_term_read_stdin_line, jet_term_read_text, jet_term_write_stdout,
+    };
 
     #[allow(dead_code)]
     mod jet_std {
@@ -58,7 +60,11 @@ mod io_line_stream {
             Other(IOContext),
         }
         impl IOError {
-            pub fn other(operation: IOOperation, resource: Option<String>, cause: impl ToString) -> Self {
+            pub fn other(
+                operation: IOOperation,
+                resource: Option<String>,
+                cause: impl ToString,
+            ) -> Self {
                 Self::Other(IOContext {
                     operation,
                     resource,
@@ -414,10 +420,8 @@ fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
 
 fn jet_jit_io_progress(text: i64) -> i64 {
     let s = clone_string(text);
-    let frame = term_prelude::jet_term_progress_frame(
-        term_prelude::jet_term_stdout_is_terminal(),
-        &s,
-    );
+    let frame =
+        term_prelude::jet_term_progress_frame(term_prelude::jet_term_stdout_is_terminal(), &s);
     match runtime_host::write_jit_stdout(&frame, true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
@@ -461,9 +465,8 @@ fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64) -> i64 {
         .lock()
         .expect("JIT progress known-iter state poisoned")
         .remove(&list);
-    let total = known_total.then(|| {
-        Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0) as usize)
-    });
+    let total = known_total
+        .then(|| Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0) as usize));
     jet_jit_io_progress_iter_with_total(list, description, format, total)
 }
 
@@ -586,7 +589,7 @@ pub(crate) fn progress_exhaust_state(list: i64) {
         };
         for text in texts {
             let frame = term_prelude::jet_term_progress_frame(tty, &text);
-        let _ = runtime_host::write_jit_stdout(&frame, true);
+            let _ = runtime_host::write_jit_stdout(&frame, true);
         }
     }
     progress_finish_state(list);
@@ -604,8 +607,8 @@ pub(crate) fn progress_transfer_state(source: i64, target: i64) {
         .expect("JIT progress state poisoned");
     if let Some(state) = states.remove(&source) {
         states.remove(&target);
-        let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0))
-            as usize;
+        let target_len =
+            Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
         let (plan, tail) = match state.plan.as_ref() {
             Some(source_plan) => {
                 let mut plan = source_plan.clone();
@@ -637,8 +640,8 @@ fn source_plan(source: i64) -> Option<(Vec<usize>, usize)> {
     let plan = match &state.plan {
         Some(plan) => plan.clone(),
         None => {
-            let len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0))
-                as usize;
+            let len =
+                Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
             vec![1; len]
         }
     };
@@ -671,12 +674,7 @@ fn install_plan(source: i64, target: i64, plan: Vec<usize>, tail: usize) {
 /// Install an operation-specific source-pull plan on a materialized result.
 /// The operation owns the mapping because output values alone cannot recover
 /// how many source items a lazy adapter consumed.
-pub(crate) fn progress_transfer_plan(
-    source: i64,
-    target: i64,
-    plan: Vec<usize>,
-    tail: usize,
-) {
+pub(crate) fn progress_transfer_plan(source: i64, target: i64, plan: Vec<usize>, tail: usize) {
     install_plan(source, target, plan, tail);
 }
 
@@ -697,7 +695,11 @@ pub(crate) fn progress_transfer_take_state(source: i64, target: i64, n: i64) {
     };
     let n = n.max(0) as usize;
     let output_len = n.min(plan.len());
-    let tail = if n != 0 && n >= plan.len() { old_tail } else { 0 };
+    let tail = if n != 0 && n >= plan.len() {
+        old_tail
+    } else {
+        0
+    };
     install_plan(source, target, prefix_plan(&plan, output_len), tail);
 }
 
@@ -707,7 +709,12 @@ pub(crate) fn progress_transfer_skip_state(source: i64, target: i64, n: i64) {
     };
     let n = n.max(0) as usize;
     if n >= plan.len() {
-        install_plan(source, target, Vec::new(), plan.iter().sum::<usize>() + old_tail);
+        install_plan(
+            source,
+            target,
+            Vec::new(),
+            plan.iter().sum::<usize>() + old_tail,
+        );
         return;
     }
     let mut output = plan[n..].to_vec();
@@ -734,22 +741,31 @@ pub(crate) fn progress_transfer_step_state(source: i64, target: i64, n: i64) {
             index = end;
         }
     }
-    install_plan(source, target, output, plan[index..].iter().sum::<usize>() + old_tail);
+    install_plan(
+        source,
+        target,
+        output,
+        plan[index..].iter().sum::<usize>() + old_tail,
+    );
 }
 
 pub(crate) fn progress_transfer_filter_state(source: i64, target: i64) {
     let Some((plan, old_tail)) = source_plan(source) else {
         return;
     };
-    let source_values = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
-    let target_values = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(target).unwrap_or_default());
+    let source_values =
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+    let target_values =
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(target).unwrap_or_default());
     let target_len = target_values.len();
     let mut output = Vec::with_capacity(target_len);
     let mut source_index = 0;
     for &target_value in &target_values {
         let Some(found) = source_values[source_index..]
             .iter()
-            .position(|source_value| *source_value == target_value || string_handle_eq(*source_value, target_value))
+            .position(|source_value| {
+                *source_value == target_value || string_handle_eq(*source_value, target_value)
+            })
             .map(|offset| source_index + offset)
         else {
             install_plan(source, target, vec![1; target_values.len()], old_tail);
@@ -766,16 +782,17 @@ fn progress_value_equal(a: i64, b: i64) -> bool {
     if a == b {
         return true;
     }
-    Concurrency::with_runtime_mut(|rt| {
-        matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b)
-    })
+    Concurrency::with_runtime_mut(
+        |rt| matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b),
+    )
 }
 
 pub(crate) fn progress_transfer_dedup_state(source: i64, target: i64, string_elems: bool) {
     let Some((plan, old_tail)) = source_plan(source) else {
         return;
     };
-    let values = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+    let values =
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
     let mut output = Vec::new();
     let mut pending = 0usize;
     let mut previous = None;
@@ -803,7 +820,8 @@ pub(crate) fn progress_transfer_chunks_state(source: i64, target: i64, n: i64) {
     let Some((plan, old_tail)) = source_plan(source) else {
         return;
     };
-    let source_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+    let source_len =
+        Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
     let size = n.max(1) as usize;
     let mut output = Vec::new();
     let mut start = 0usize;
@@ -840,12 +858,15 @@ pub(crate) fn progress_transfer_flatten_state(source: i64, target: i64) {
     let Some((plan, old_tail)) = source_plan(source) else {
         return;
     };
-    let outer = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+    let outer =
+        Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
     let mut output = Vec::new();
     let mut pending = 0usize;
     for (index, inner_handle) in outer.into_iter().enumerate() {
         let pull = plan.get(index).copied().unwrap_or(1);
-        let inner = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(inner_handle).unwrap_or_default());
+        let inner = Concurrency::with_runtime_mut(|rt| {
+            rt.heap.clone_int_list(inner_handle).unwrap_or_default()
+        });
         if inner.is_empty() {
             pending += pull;
         } else {
@@ -877,12 +898,19 @@ pub(crate) fn progress_transfer_take_while_state(source: i64, target: i64, is_sk
     let Some((plan, old_tail)) = source_plan(source) else {
         return;
     };
-    let source_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
-    let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+    let source_len =
+        Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+    let target_len =
+        Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
     let target_len = target_len.min(source_len);
     if is_skip {
         if target_len == 0 {
-            install_plan(source, target, Vec::new(), plan.iter().sum::<usize>() + old_tail);
+            install_plan(
+                source,
+                target,
+                Vec::new(),
+                plan.iter().sum::<usize>() + old_tail,
+            );
             return;
         }
         let skipped = source_len.saturating_sub(target_len);
@@ -908,9 +936,9 @@ fn string_handle_eq(a: i64, b: i64) -> bool {
     if a == b {
         return true;
     }
-    Concurrency::with_runtime_mut(|rt| {
-        matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b)
-    })
+    Concurrency::with_runtime_mut(
+        |rt| matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b),
+    )
 }
 
 /// D-COREIO1=A: the zip family is N-column and the receiver is column 0. A
@@ -930,7 +958,8 @@ pub(crate) fn progress_transfer_zip_state(columns: &[i64], target: i64) {
     let Some(source) = active.first().copied() else {
         return;
     };
-    let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+    let target_len =
+        Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
     if let Some((plan, old_tail)) = source_plan(source) {
         let consumed = target_len.min(plan.len());
         // `Iterator::zip` asks the receiver for one item before it asks the
@@ -945,7 +974,12 @@ pub(crate) fn progress_transfer_zip_state(columns: &[i64], target: i64) {
         } else {
             0
         };
-        install_plan(source, target, plan.into_iter().take(consumed).collect(), tail);
+        install_plan(
+            source,
+            target,
+            plan.into_iter().take(consumed).collect(),
+            tail,
+        );
     }
     for retired in active.into_iter().skip(1) {
         progress_remove_state(retired);
@@ -961,9 +995,8 @@ pub(crate) fn progress_finish_state(list: i64) {
         return;
     };
     if state.displayed {
-        let frame = term_prelude::jet_term_progress_finish(
-            term_prelude::jet_term_stdout_is_terminal(),
-        );
+        let frame =
+            term_prelude::jet_term_progress_finish(term_prelude::jet_term_stdout_is_terminal());
         if !frame.is_empty() {
             let _ = runtime_host::write_jit_stdout(frame, true);
         }
@@ -1010,11 +1043,7 @@ fn jet_jit_io_progress_transfer_intersperse(source: i64, target: i64) {
     progress_transfer_intersperse_state(source, target);
 }
 
-fn jet_jit_io_progress_transfer_take_while(
-    source: i64,
-    target: i64,
-    is_skip: i64,
-) {
+fn jet_jit_io_progress_transfer_take_while(source: i64, target: i64, is_skip: i64) {
     progress_transfer_take_while_state(source, target, is_skip != 0);
 }
 
@@ -1024,12 +1053,7 @@ fn jet_jit_io_progress_source_pull(source: i64, index: i64) -> i64 {
         .unwrap_or(1) as i64
 }
 
-fn jet_jit_io_progress_transfer_plan(
-    source: i64,
-    target: i64,
-    plan: i64,
-    tail: i64,
-) {
+fn jet_jit_io_progress_transfer_plan(source: i64, target: i64, plan: i64, tail: i64) {
     let plan = Concurrency::with_runtime_mut(|rt| {
         rt.heap
             .clone_int_list(plan)
@@ -1221,10 +1245,9 @@ fn jet_jit_term_read_key() -> i64 {
         JetKey::Ctrl(value) => ("Ctrl", i64::from(u32::from(value))),
         JetKey::Unknown => ("Unknown", 0),
     };
-    let Some(disc) = crate::types_meta::prelude_enum_variant_index(
-        jet_foundation::Syntax::TYPE_KEY,
-        variant,
-    ) else {
+    let Some(disc) =
+        crate::types_meta::prelude_enum_variant_index(jet_foundation::Syntax::TYPE_KEY, variant)
+    else {
         jet_foundation::ice!(None, "jit read_key: Key variant metadata");
     };
     (payload << 8) | disc

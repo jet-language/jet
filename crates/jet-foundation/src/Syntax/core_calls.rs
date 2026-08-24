@@ -8,8 +8,8 @@
 //! authority explicitly instead of copying sema's `Type` construction.
 
 use crate::Effects::Effect;
-use crate::Syntax::KNOWN_CORE_MODULES;
 use crate::Syntax::sinks::SinkClass;
+use crate::Syntax::KNOWN_CORE_MODULES;
 use crate::Syntax::VAULT_KEY_REF_TYPE;
 
 const fn same_text(left: &str, right: &str) -> bool {
@@ -4279,7 +4279,14 @@ pub fn core_module_for_call(module: &str, member: &str) -> Option<&'static str> 
     if module == "core.encoding"
         && one_of(
             member,
-            &["parse", "decode", "to_string", "to_string_pretty", "canonical", "events"],
+            &[
+                "parse",
+                "decode",
+                "to_string",
+                "to_string_pretty",
+                "canonical",
+                "events",
+            ],
         )
     {
         return Some("core.encoding.json");
@@ -4288,15 +4295,12 @@ pub fn core_module_for_call(module: &str, member: &str) -> Option<&'static str> 
 }
 
 /// Find marker metadata on an ordinary Core declaration row.
-pub fn core_marker_application(
-    module: &str,
-    member: &str,
-) -> Option<CoreMarkerApplication> {
+pub fn core_marker_application(module: &str, member: &str) -> Option<CoreMarkerApplication> {
     CORE_CALLS.iter().find_map(|row| {
         (row.module == module
             && row.receiver_types.is_empty()
             && row.marker.is_some_and(|marker| marker.member == member))
-            .then(|| row.marker.expect("marker checked above"))
+        .then(|| row.marker.expect("marker checked above"))
     })
 }
 

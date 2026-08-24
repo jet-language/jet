@@ -4,9 +4,9 @@
 //! for the non-interactive floor. Kept pure so layout/highlighting/NO_COLOR
 //! behavior is unit-testable without a real pty (card #360 test plan).
 
+use super::{Entry, Hit};
 use crate::Explain::Explanation;
 use jet_foundation::Terminal::Theme;
-use super::{Entry, Hit};
 
 const MIN_WIDTH: usize = 24;
 
@@ -305,7 +305,12 @@ pub fn render_categorized(
 pub fn categorized_order(index: &[Entry]) -> Vec<&str> {
     super::CATEGORIES
         .iter()
-        .flat_map(|cat| index.iter().filter(move |e| &e.category == cat).map(|e| e.symbol.name.as_str()))
+        .flat_map(|cat| {
+            index
+                .iter()
+                .filter(move |e| &e.category == cat)
+                .map(|e| e.symbol.name.as_str())
+        })
         .collect()
 }
 
@@ -345,10 +350,8 @@ pub fn render_result_list(
     let show_footer = height.is_none_or(|height| height >= 6);
     let show_lower_rule = height.is_none_or(|height| height >= 7);
     let show_example = example.is_some() && height.is_none_or(|height| height >= 8);
-    let fixed_rows = 4
-        + usize::from(show_footer)
-        + usize::from(show_lower_rule)
-        + usize::from(show_example);
+    let fixed_rows =
+        4 + usize::from(show_footer) + usize::from(show_lower_rule) + usize::from(show_example);
     let visible_hits = height
         .map(|height| height.saturating_sub(fixed_rows).max(1))
         .unwrap_or(hits.len());
@@ -359,7 +362,12 @@ pub fn render_result_list(
     for (i, hit) in hits.iter().enumerate().skip(start).take(visible_hits) {
         let is_sel = selected == Some(i) || (selected.is_none() && i == 0);
         match hit {
-            Hit::Command { entry, haystack, positions, .. } => {
+            Hit::Command {
+                entry,
+                haystack,
+                positions,
+                ..
+            } => {
                 let display = format!("jet {}   {}", entry.symbol.name, entry.symbol.summary);
                 // Only emphasize when the matched haystack IS the displayed
                 // usage/command text (keyword-alias hits show plain — the
@@ -385,11 +393,7 @@ pub fn render_result_list(
     if show_example {
         let ex = example.unwrap();
         let ex_line = if color {
-            format!(
-                "{} {}",
-                theme.dim("example"),
-                theme.bold(ex)
-            )
+            format!("{} {}", theme.dim("example"), theme.bold(ex))
         } else {
             format!("example  {}", ex)
         };
@@ -436,7 +440,12 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     } else {
         for (i, (flag, help)) in entry.flags.iter().enumerate() {
             let label = if i == 0 { "Flags   " } else { "        " };
-            out.push_str(&selected_row(width, &format!("{}{}  {}", label, flag, help), false, color));
+            out.push_str(&selected_row(
+                width,
+                &format!("{}{}  {}", label, flag, help),
+                false,
+                color,
+            ));
             out.push('\n');
         }
     }
@@ -450,14 +459,21 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
         out.push('\n');
     }
     if !entry.see_also.is_empty() {
-        out.push_str(&selected_row(width, &format!("See also  {}", entry.see_also.join(" · ")), false, color));
+        out.push_str(&selected_row(
+            width,
+            &format!("See also  {}", entry.see_also.join(" · ")),
+            false,
+            color,
+        ));
         out.push('\n');
     }
     out.push_str(&mid(width, color));
     out.push('\n');
     let command = format!("jet {}", entry.symbol.name);
     let footer = if color {
-        theme.dim(&format!("⏎ {command} · Alt+⏎ example · F1 open in reference"))
+        theme.dim(&format!(
+            "⏎ {command} · Alt+⏎ example · F1 open in reference"
+        ))
     } else {
         format!("⏎ {command} · Alt+⏎ example · F1 open in reference")
     };
@@ -488,7 +504,11 @@ pub fn render_text_viewport(text: &str, width: usize, height: usize, scroll: usi
     let max_start = rows.len().saturating_sub(height);
     let start = scroll.min(max_start);
     (0..height)
-        .map(|offset| rows.get(start + offset).cloned().unwrap_or_else(|| " ".to_string()))
+        .map(|offset| {
+            rows.get(start + offset)
+                .cloned()
+                .unwrap_or_else(|| " ".to_string())
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -536,13 +556,19 @@ fn wrap_text_rows(text: &str, width: usize) -> Vec<WrappedRow> {
                 continue;
             }
             if visible == width {
-                rows.push(WrappedRow { text: std::mem::take(&mut row), hard_break: false });
+                rows.push(WrappedRow {
+                    text: std::mem::take(&mut row),
+                    hard_break: false,
+                });
                 visible = 0;
             }
             row.push(ch);
             visible += 1;
         }
-        rows.push(WrappedRow { text: row, hard_break });
+        rows.push(WrappedRow {
+            text: row,
+            hard_break,
+        });
     }
     rows
 }
@@ -578,7 +604,11 @@ pub fn render_reference(
     let mut left_rows: Vec<String> = Vec::new();
     let mut selected_row = None;
     for (ci, cat) in super::CATEGORIES.iter().enumerate() {
-        let marker = if ci == selected_category { "▾" } else { "▸" };
+        let marker = if ci == selected_category {
+            "▾"
+        } else {
+            "▸"
+        };
         let category = format!("{} {}", marker, cat);
         left_rows.push(if ci == selected_category {
             theme.accent(&category)
@@ -587,7 +617,8 @@ pub fn render_reference(
         });
         if ci == selected_category {
             for e in index.iter().filter(|e| &e.category == cat) {
-                let sel = selected_entry.map(|s| s.symbol.name.as_str()) == Some(e.symbol.name.as_str());
+                let sel =
+                    selected_entry.map(|s| s.symbol.name.as_str()) == Some(e.symbol.name.as_str());
                 let prefix = if sel { "> " } else { "  " };
                 if sel {
                     selected_row = Some(left_rows.len());
@@ -612,9 +643,21 @@ pub fn render_reference(
         .unwrap_or(0)
         .min(left_rows.len().saturating_sub(body_rows));
     for i in 0..body_rows {
-        let l = left_rows.get(left_start + i).map(|s| pad(s, left_width)).unwrap_or_else(|| " ".repeat(left_width));
-        let r = pad(right_rows.get(i).map(String::as_str).unwrap_or(""), right_width);
-        lines.push(format!("{}{}{}{}", theme.border("│"), l, theme.border("│"), r));
+        let l = left_rows
+            .get(left_start + i)
+            .map(|s| pad(s, left_width))
+            .unwrap_or_else(|| " ".repeat(left_width));
+        let r = pad(
+            right_rows.get(i).map(String::as_str).unwrap_or(""),
+            right_width,
+        );
+        lines.push(format!(
+            "{}{}{}{}",
+            theme.border("│"),
+            l,
+            theme.border("│"),
+            r
+        ));
     }
     lines.push(pad(
         &theme.dim("↑↓ · → into · ⏎ command · Alt+⏎ example · Esc back"),
@@ -687,7 +730,11 @@ mod tests {
         let index = build_index();
         let hits = super::super::search(&index, "run");
         let out = render_result_list(&hits, "run", 64, false, None, None);
-        assert!(out.contains("[run]"), "expected bracketed match, got:\n{}", out);
+        assert!(
+            out.contains("[run]"),
+            "expected bracketed match, got:\n{}",
+            out
+        );
     }
 
     #[test]
@@ -737,14 +784,20 @@ mod tests {
         assert_eq!(scrolled.lines().count(), 10);
         assert!(scrolled.lines().any(|line| {
             line.starts_with("│> ")
-                && line.replace('[', "").replace(']', "").contains(&format!("jet {}", command(selected)))
+                && line
+                    .replace('[', "")
+                    .replace(']', "")
+                    .contains(&format!("jet {}", command(selected)))
         }));
 
         let restored = render_result_list(&hits, "E", 80, false, Some(0), Some(10));
         assert_eq!(restored.lines().count(), 10);
         assert!(restored.lines().any(|line| {
             line.starts_with("│> ")
-                && line.replace('[', "").replace(']', "").contains(&format!("jet {}", command(0)))
+                && line
+                    .replace('[', "")
+                    .replace(']', "")
+                    .contains(&format!("jet {}", command(0)))
         }));
     }
 
@@ -760,15 +813,24 @@ mod tests {
         for height in 5..=7 {
             let out = render_result_list(&hits, "run", 32, false, Some(0), Some(height));
             assert_eq!(out.lines().count(), height, "{height}-row output:\n{out}");
-            assert!(out.lines().all(|line| cols(line) <= 32), "{height}-row output:\n{out}");
+            assert!(
+                out.lines().all(|line| cols(line) <= 32),
+                "{height}-row output:\n{out}"
+            );
         }
     }
 
     #[test]
     fn code_page_is_verbatim_from_explain() {
         let ex = crate::Explain::lookup("E0102").unwrap();
-        assert_eq!(render_code_page(&ex, false), crate::Explain::render(&ex, false));
-        assert_eq!(render_code_page(&ex, true), crate::Explain::render(&ex, true));
+        assert_eq!(
+            render_code_page(&ex, false),
+            crate::Explain::render(&ex, false)
+        );
+        assert_eq!(
+            render_code_page(&ex, true),
+            crate::Explain::render(&ex, true)
+        );
     }
 
     #[test]
@@ -802,8 +864,15 @@ mod tests {
     #[test]
     fn short_reference_view_scrolls_selected_left_row_into_view() {
         let index = build_index();
-        let category = super::super::CATEGORIES.iter().position(|c| *c == "Reference").unwrap();
-        let selected = index.iter().filter(|e| e.category == "Reference").last().unwrap();
+        let category = super::super::CATEGORIES
+            .iter()
+            .position(|c| *c == "Reference")
+            .unwrap();
+        let selected = index
+            .iter()
+            .filter(|e| e.category == "Reference")
+            .last()
+            .unwrap();
         let out = render_reference(&index, category, Some(selected), 60, 8, false, "");
         assert_eq!(out.lines().count(), 8);
         assert!(
@@ -829,14 +898,11 @@ mod tests {
         let rows = wrap_text_rows(&canonical, 8);
         assert!(rows.iter().all(|row| cols(&row.text) <= 8));
         assert!(rows.iter().all(|row| {
-            row.text
-                .split('\x1b')
-                .skip(1)
-                .all(|suffix| {
-                    suffix.starts_with("[1;96m")
-                        || suffix.starts_with("[1m")
-                        || suffix.starts_with("[0m")
-                })
+            row.text.split('\x1b').skip(1).all(|suffix| {
+                suffix.starts_with("[1;96m")
+                    || suffix.starts_with("[1m")
+                    || suffix.starts_with("[0m")
+            })
         }));
         let mut reconstructed = String::new();
         for row in rows {

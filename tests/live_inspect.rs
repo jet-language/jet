@@ -100,7 +100,11 @@ fn run() {
         ])
         .output()
         .unwrap();
-    assert!(cli.status.success(), "{}", String::from_utf8_lossy(&cli.stderr));
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
     let cli_snapshot = String::from_utf8(cli.stdout).unwrap();
     assert!(cli_snapshot.contains(&format!("\"pid\":{pid}")));
     assert!(cli_snapshot.contains("\"wait\":\"channel receive\""));
@@ -176,10 +180,7 @@ fn run() {
 
 #[test]
 fn live_inspector_reads_default_resident_jit_tasks_without_payloads() {
-    live_inspector_reads_tasks_without_payloads(
-        &["run", "--observe"],
-        "jet_live_inspect_jit",
-    );
+    live_inspector_reads_tasks_without_payloads(&["run", "--observe"], "jet_live_inspect_jit");
 }
 
 #[test]

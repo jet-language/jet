@@ -456,11 +456,10 @@ mod tests {
     #[test]
     fn promotes_nested_subject_shorthand_lint_by_registered_name() {
         assert_eq!(code_for_name("subject_shorthand_nesting"), Some("L0512"));
-        let deny = parse_package_source(
-            "policy: .{ lints: .{ deny: [subject_shorthand_nesting] } }",
-        )
-        .unwrap()
-        .unwrap();
+        let deny =
+            parse_package_source("policy: .{ lints: .{ deny: [subject_shorthand_nesting] } }")
+                .unwrap()
+                .unwrap();
         let lint = Diagnostic::lint(
             "L0512",
             "nested subject shorthand needs an explicit binding".to_string(),

@@ -15,9 +15,19 @@ fn scene_probe_reuses_compatible_report() {
     let (dir, report) = scene_probe_once("scene_probe_runtime", FRAME_BUDGET);
     assert_scene_probe_measurement(&report, "FrameTime");
     let reports = dir.join(".jet/perf/reports");
-    let paths = || fs::read_dir(&reports).unwrap().map(|entry| entry.unwrap().path()).collect::<Vec<_>>();
+    let paths = || {
+        fs::read_dir(&reports)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>()
+    };
     let initial = paths();
-    assert_eq!(initial.len(), 1, "expected exactly one report; got {:?}", initial);
+    assert_eq!(
+        initial.len(),
+        1,
+        "expected exactly one report; got {:?}",
+        initial
+    );
 
     // Second run should reuse cached report (compatible identity → no new report).
     let second = scene_probe_run(&dir);

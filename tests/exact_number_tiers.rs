@@ -9,6 +9,10 @@ mod common;
 mod tir_support;
 
 const SOURCE: &str = r#"
+fn takes(v: Float) {
+    print(v)
+}
+
 fn run() {
     third :: 1 / 3
     print(third)
@@ -16,10 +20,14 @@ fn run() {
     print(0.1 + 0.2 == 0.3)
     fast :: Float{19.99}
     print(fast)
+    takes(3.4)
+    decimal :: 3.4
+    print("dec={decimal}")
+    print(decimal)
 }
 "#;
 
-const EXPECTED: &str = "1/3\ntrue\ntrue\n19.99\n";
+const EXPECTED: &str = "1/3\ntrue\ntrue\n19.99\n3.4\ndec=3.4\n3.4\n";
 
 fn web_source() -> String {
     format!("#Target(Web)\n{SOURCE}")
@@ -111,6 +119,10 @@ fn exact_numbers_comptime_matches_the_known_result() {
         return;
     }
     let source = r#"
+fn takes(v: Float) {
+    print(v)
+}
+
 @third :: 1 / 3
 @roundtrip :: @third * 3
 @decimal :: 0.1 + 0.2
@@ -121,6 +133,10 @@ fn run() {
     print(@roundtrip == 1)
     print(@decimal == 0.3)
     print(@fast)
+    takes(3.4)
+    decimal :: 3.4
+    print("dec={decimal}")
+    print(decimal)
 }
 "#;
     let (code, stdout, stderr) = tir_support::build_and_run_full(

@@ -3,8 +3,8 @@
 #![allow(unreachable_patterns)]
 // Re-export foundation + lexer so `crate::AST`, `crate::Lexer` etc. work in Parser/Formatter.
 pub use jet_lexer::{
-    CanonicalAST, Collections, Diagnostics, Generics, Lexer, Numeric, Syntax, TargetMachine,
-    Traits, Policy, Registry, AST, SHA256,
+    CanonicalAST, Collections, Diagnostics, Generics, Lexer, Numeric, Policy, Registry, Syntax,
+    TargetMachine, Traits, AST, SHA256,
 };
 mod FencedNames;
 pub mod Formatter;
@@ -12,17 +12,29 @@ pub mod Parser;
 
 #[cfg(test)]
 mod generic_module_tests {
-    use super::{AST, AST::{GenericModuleParam, Item, ModuleArg, Type}, Formatter, Lexer, Parser, Syntax};
+    use super::{
+        Formatter, Lexer, Parser, Syntax, AST,
+        AST::{GenericModuleParam, Item, ModuleArg, Type},
+    };
 
     #[test]
     fn generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics() {
         let src="module Weird<lower>(UPPER: Int) { fn ready() Bool -> { return true } }\nmodule Use :: Weird<String>(32)";
-        let (tokens,lex)=Lexer::lex(src);assert!(lex.is_empty(),"{lex:?}");let program=Parser::parse(&tokens).unwrap();
-        let Item::GenericModule(def)=&program.items[0]else{panic!("template")};
-        assert!(matches!(&def.params[0],GenericModuleParam::Type{name,bound,..}if name=="lower"&&bound.is_none()));
+        let (tokens, lex) = Lexer::lex(src);
+        assert!(lex.is_empty(), "{lex:?}");
+        let program = Parser::parse(&tokens).unwrap();
+        let Item::GenericModule(def) = &program.items[0] else {
+            panic!("template")
+        };
+        assert!(
+            matches!(&def.params[0],GenericModuleParam::Type{name,bound,..}if name=="lower"&&bound.is_none())
+        );
         assert!(matches!(&def.params[1],GenericModuleParam::Value{name,..}if name=="UPPER"));
-        let Item::ModuleAlias(alias)=&program.items[1]else{panic!("alias")};
-        assert!(matches!(&alias.args[0],ModuleArg::Type(..)));assert!(matches!(&alias.args[1],ModuleArg::Value(..)));
+        let Item::ModuleAlias(alias) = &program.items[1] else {
+            panic!("alias")
+        };
+        assert!(matches!(&alias.args[0], ModuleArg::Type(..)));
+        assert!(matches!(&alias.args[1], ModuleArg::Value(..)));
     }
 
     #[test]
@@ -32,7 +44,9 @@ mod generic_module_tests {
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();
         for item in &program.items[1..] {
-            let Item::ModuleAlias(alias) = item else { panic!("alias") };
+            let Item::ModuleAlias(alias) = item else {
+                panic!("alias")
+            };
             assert!(matches!(&alias.args[0], ModuleArg::Value(..)));
         }
     }
@@ -43,11 +57,14 @@ mod generic_module_tests {
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("retired mixed parameter spelling");
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0003"
-                && diagnostic.what.contains("parentheses")
-                && diagnostic.fix.contains("capacity: Int")
-        }), "{diagnostics:?}");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic.what.contains("parentheses")
+                    && diagnostic.fix.contains("capacity: Int")
+            }),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]
@@ -56,11 +73,14 @@ mod generic_module_tests {
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("retired equals alias spelling");
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0003"
-                && diagnostic.what.contains("::")
-                && diagnostic.fix.contains("module old :: Target")
-        }), "{diagnostics:?}");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic.what.contains("::")
+                    && diagnostic.fix.contains("module old :: Target")
+            }),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]
@@ -69,9 +89,15 @@ mod generic_module_tests {
         let (tokens, lex) = Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let program = Parser::parse(&tokens).unwrap();
-        let Item::GenericModule(def) = &program.items[0] else { panic!("template") };
-        let Item::Struct(data) = &def.body[0] else { panic!("struct") };
-        assert!(matches!(&data.fields[0].ty, Type::FixedList { len, .. } if len.symbol_name() == Some("capacity")));
+        let Item::GenericModule(def) = &program.items[0] else {
+            panic!("template")
+        };
+        let Item::Struct(data) = &def.body[0] else {
+            panic!("struct")
+        };
+        assert!(
+            matches!(&data.fields[0].ty, Type::FixedList { len, .. } if len.symbol_name() == Some("capacity"))
+        );
         assert!(matches!(&def.body[1], Item::CodeModule(module) if module.name == "stats"));
     }
 
@@ -101,7 +127,10 @@ mod generic_module_tests {
         let formatted = Formatter::format_source(source).expect("script should format");
         assert!(formatted.contains("print(\"first\")"), "{formatted}");
         assert!(formatted.contains("print(\"last\")"), "{formatted}");
-        assert!(!formatted.contains("fn run"), "formatter must keep script syntax: {formatted}");
+        assert!(
+            !formatted.contains("fn run"),
+            "formatter must keep script syntax: {formatted}"
+        );
     }
 
     #[test]
@@ -110,7 +139,9 @@ mod generic_module_tests {
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let program = Parser::parse(&tokens).expect("callable policy marker should parse");
-        let Item::Func(function) = &program.items[0] else { panic!("function") };
+        let Item::Func(function) = &program.items[0] else {
+            panic!("function")
+        };
         let marker = function
             .markers
             .iter()
@@ -145,7 +176,9 @@ mod generic_module_tests {
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("duplicate policy marker");
-        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0355"));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0355"));
     }
 }
 
@@ -229,12 +262,15 @@ fn run() {
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("retired source-loop comma");
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0383"
-                && diagnostic.what.contains("retired comma")
-                && diagnostic.why.contains("`in`")
-                && diagnostic.fix.contains("loop item in items")
-        }), "{diagnostics:?}");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0383"
+                    && diagnostic.what.contains("retired comma")
+                    && diagnostic.why.contains("`in`")
+                    && diagnostic.fix.contains("loop item in items")
+            }),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]
@@ -243,11 +279,14 @@ fn run() {
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("membership is not an operator");
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0384"
-                && diagnostic.what.contains("membership")
-                && diagnostic.fix.contains(".contains(x)")
-        }), "{diagnostics:?}");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0384"
+                    && diagnostic.what.contains("membership")
+                    && diagnostic.fix.contains(".contains(x)")
+            }),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]
@@ -256,11 +295,14 @@ fn run() {
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let diagnostics = Parser::parse(&tokens).expect_err("`in` must not be an identifier");
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0003"
-                && diagnostic.what.contains("reserved")
-                && diagnostic.fix.contains("in")
-        }), "{diagnostics:?}");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0003"
+                    && diagnostic.what.contains("reserved")
+                    && diagnostic.fix.contains("in")
+            }),
+            "{diagnostics:?}"
+        );
     }
 }
 

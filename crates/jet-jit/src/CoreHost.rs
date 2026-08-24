@@ -12,8 +12,8 @@
 
 use super::runtime_host::{contract_kernel, jit_result_parts};
 use super::Concurrency;
+use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string, result_err_msg, result_ok};
 use std::cell::{Cell, RefCell};
-use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
@@ -141,25 +141,37 @@ mod os_rt {
         };
         super::Concurrency::with_runtime_mut(|rt| {
             let record = rt.heap.alloc_record(4);
-            let _ = rt.heap.record_set_int(record, 0, operation_index(&context.operation));
+            let _ = rt
+                .heap
+                .record_set_int(record, 0, operation_index(&context.operation));
             let resource = context
                 .resource
                 .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
                 .unwrap_or(0);
             let _ = rt.heap.record_set_int(record, 1, resource);
-            let _ = rt.heap.record_set_int(record, 2, context.os_code.map(|code| code + 1).unwrap_or(0));
+            let _ = rt.heap.record_set_int(
+                record,
+                2,
+                context.os_code.map(|code| code + 1).unwrap_or(0),
+            );
             let cause = context
                 .cause
                 .map(|value| rt.heap.alloc_string(value).wrapping_add(1))
                 .unwrap_or(0);
             let _ = rt.heap.record_set_int(record, 3, cause);
             let packed = ((record << 8) | error_index(name)) as u64;
-            rt.results.push(crate::JitResultValue { ok: false, bits: packed });
+            rt.results.push(crate::JitResultValue {
+                ok: false,
+                bits: packed,
+            });
             rt.results.len() as i64
         })
     }
 
-    pub(super) fn marshal_result<T>(result: Result<T, jet_std::IOError>, ok: impl FnOnce(T) -> u64) -> i64 {
+    pub(super) fn marshal_result<T>(
+        result: Result<T, jet_std::IOError>,
+        ok: impl FnOnce(T) -> u64,
+    ) -> i64 {
         match result {
             Ok(value) => super::result_ok(ok(value)),
             Err(error) => marshal_error(error),
@@ -167,18 +179,17 @@ mod os_rt {
     }
 
     pub(super) use prelude_impl::{
-            jet_std_os_arch, jet_std_os_cpu_count, jet_std_os_exitcode,
-            jet_std_os_executable, jet_std_os_expand, jet_std_os_family, jet_std_os_fork,
-            jet_std_os_geteuid, jet_std_os_getegid, jet_std_os_getgid, jet_std_os_getgroups,
-            jet_std_os_getpgid, jet_std_os_getpgrp, jet_std_os_getppid, jet_std_os_getpriority,
-            jet_std_os_getsid, jet_std_os_getuid, jet_std_os_hostname, jet_std_os_initgroups,
-            jet_std_os_kill, jet_std_os_loadavg, jet_std_os_mkfifo, jet_std_os_name,
-            jet_std_os_pipe, jet_std_os_release, jet_std_os_setgid, jet_std_os_setpgid,
-            jet_std_os_setpgrp, jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid,
-            jet_std_os_success, jet_std_os_sync, jet_std_os_temp_dir,
-            jet_std_os_times, jet_std_os_umask, jet_std_os_uptime, jet_std_os_username,
-            jet_std_os_utime, jet_std_os_version, jet_std_os_wait, jet_std_os_waitpid,
-            jet_std_os_close_fd, jet_std_os_pid,
+        jet_std_os_arch, jet_std_os_close_fd, jet_std_os_cpu_count, jet_std_os_executable,
+        jet_std_os_exitcode, jet_std_os_expand, jet_std_os_family, jet_std_os_fork,
+        jet_std_os_getegid, jet_std_os_geteuid, jet_std_os_getgid, jet_std_os_getgroups,
+        jet_std_os_getpgid, jet_std_os_getpgrp, jet_std_os_getppid, jet_std_os_getpriority,
+        jet_std_os_getsid, jet_std_os_getuid, jet_std_os_hostname, jet_std_os_initgroups,
+        jet_std_os_kill, jet_std_os_loadavg, jet_std_os_mkfifo, jet_std_os_name, jet_std_os_pid,
+        jet_std_os_pipe, jet_std_os_release, jet_std_os_setgid, jet_std_os_setpgid,
+        jet_std_os_setpgrp, jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid,
+        jet_std_os_success, jet_std_os_sync, jet_std_os_temp_dir, jet_std_os_times,
+        jet_std_os_umask, jet_std_os_uptime, jet_std_os_username, jet_std_os_utime,
+        jet_std_os_version, jet_std_os_wait, jet_std_os_waitpid,
     };
 }
 
@@ -225,17 +236,20 @@ mod jit_os_interrupt {
                             Err(mpsc::RecvTimeoutError::Disconnected) => return,
                             Err(mpsc::RecvTimeoutError::Timeout) => {}
                         }
-                        interrupt_runtime::jet_interrupt_dispatch(&handlers, |&(callback, environment)| {
-                            Concurrency::with_http_jet_runtime(|| {
-                                // Every callback, including named and
-                                // capture-free callbacks, uses this one ABI.
-                                unsafe {
-                                    let callback: extern "C" fn(i64) =
-                                        std::mem::transmute(callback);
-                                    callback(environment);
-                                }
-                            });
-                        });
+                        interrupt_runtime::jet_interrupt_dispatch(
+                            &handlers,
+                            |&(callback, environment)| {
+                                Concurrency::with_http_jet_runtime(|| {
+                                    // Every callback, including named and
+                                    // capture-free callbacks, uses this one ABI.
+                                    unsafe {
+                                        let callback: extern "C" fn(i64) =
+                                            std::mem::transmute(callback);
+                                        callback(environment);
+                                    }
+                                });
+                            },
+                        );
                     }
                 })
                 .map_err(interrupt_runtime::jet_interrupt_dispatcher_start_error)?;
@@ -266,14 +280,10 @@ mod jit_os_interrupt {
                 env: environment,
                 ready: ready_tx,
             }))
-            .map_err(|_| {
+            .map_err(|_| interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string())?;
+            ready_rx.recv().map_err(|_| {
                 interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
-            })?;
-            ready_rx
-                .recv()
-                .map_err(|_| {
-                    interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
-                })
+            })
         })();
         if let Err(message) = result {
             Concurrency::with_runtime_mut(|rt| {
@@ -447,7 +457,9 @@ fn jet_jit_os_kill(pid: i64, signal: i64) -> i64 {
     os_rt::marshal_result(os_rt::jet_std_os_kill(pid, signal), |_| 0)
 }
 fn jet_jit_os_pipe() -> i64 {
-    os_rt::marshal_result(os_rt::jet_std_os_pipe(), |values| alloc_i64_list(&values) as u64)
+    os_rt::marshal_result(os_rt::jet_std_os_pipe(), |values| {
+        alloc_i64_list(&values) as u64
+    })
 }
 fn jet_jit_os_close_fd(fd: i64) {
     os_rt::jet_std_os_close_fd(fd)
@@ -476,7 +488,9 @@ fn jet_jit_os_wait() -> i64 {
     os_rt::marshal_result(os_rt::jet_std_os_wait(), |value| value as u64)
 }
 fn jet_jit_os_waitpid(pid: i64, options: i64) -> i64 {
-    os_rt::marshal_result(os_rt::jet_std_os_waitpid(pid, options), |value| value as u64)
+    os_rt::marshal_result(os_rt::jet_std_os_waitpid(pid, options), |value| {
+        value as u64
+    })
 }
 fn jet_jit_os_utime(path: i64, atime: i64, mtime: i64) -> i64 {
     let path = clone_string(path);
@@ -495,7 +509,6 @@ fn jet_jit_os_stop(code: i64) {
     // before returning the run outcome.
     jet_jit_process_exit(code)
 }
-
 
 // ── core.log (mirrors jet_ring_log_* in RingCsvLogTimeCrypto.rs) ───────────────
 // Level: 0=debug, 1=info, 2=warn, 3=error. Format: 0=auto, 1=json, 2=text.
@@ -676,7 +689,8 @@ fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
             "fatal" => "FATAL",
             _ => level,
         };
-        let mut line = format!("[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}");
+        let mut line =
+            format!("[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}");
         for field in fields {
             line.push_str(&format!(" {}={}", field.key, field.value));
         }
@@ -1472,12 +1486,16 @@ fn jet_jit_fs_stat(path: i64) -> i64 {
     let rec = Concurrency::with_runtime_mut(|rt| {
         let rec = rt.heap.alloc_record(8);
         let _ = rt.heap.record_set_int(rec, 0, meta.len() as i64);
-        let _ = rt
-            .heap
-            .record_set_int(rec, 1, meta.modified().ok().and_then(system_time_ms).unwrap_or(0));
-        let _ = rt
-            .heap
-            .record_set_int(rec, 2, meta.created().ok().and_then(system_time_ms).unwrap_or(0));
+        let _ = rt.heap.record_set_int(
+            rec,
+            1,
+            meta.modified().ok().and_then(system_time_ms).unwrap_or(0),
+        );
+        let _ = rt.heap.record_set_int(
+            rec,
+            2,
+            meta.created().ok().and_then(system_time_ms).unwrap_or(0),
+        );
         let _ = rt
             .heap
             .record_set_bool(rec, 3, meta.permissions().readonly());
@@ -1703,8 +1721,7 @@ fn jet_jit_fs_read_link(path: i64) -> i64 {
     match std::fs::read_link(&p) {
         Ok(target) => {
             let sid = Concurrency::with_runtime_mut(|rt| {
-                rt.heap
-                    .alloc_string(target.to_string_lossy().to_string())
+                rt.heap.alloc_string(target.to_string_lossy().to_string())
             });
             result_ok(sid as u64)
         }
@@ -1751,9 +1768,8 @@ fn jet_jit_fs_absolute(path: i64) -> i64 {
             Err(e) => return result_err_msg(&format!("absolute {p}: {e}")),
         }
     };
-    let sid = Concurrency::with_runtime_mut(|rt| {
-        rt.heap.alloc_string(abs.to_string_lossy().to_string())
-    });
+    let sid =
+        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(abs.to_string_lossy().to_string()));
     result_ok(sid as u64)
 }
 
@@ -2091,7 +2107,8 @@ fn jet_jit_carrier_fact(result: i64, field: i64, notes: i8) -> i64 {
             })
         };
         if notes != 0 {
-            let values = jet_foundation::Outcome::jet_notes(&outcome, |report| report.notes.clone());
+            let values =
+                jet_foundation::Outcome::jet_notes(&outcome, |report| report.notes.clone());
             let list = rt.heap.alloc_empty_list();
             for value in values {
                 let _ = rt.heap.list_push_int(list, value);

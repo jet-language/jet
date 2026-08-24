@@ -2,7 +2,7 @@
 //!
 //! The cache wire format and Jet's local HMAC cache format are separate trust
 //! protocols. This module verifies standard narinfo metadata, streams the
-//! uncompressed NAR path, follows references, and publishes one Hangar batch.
+//! compressed NAR path, follows references, and publishes one Hangar batch.
 
 use super::{
     entry_id, CacheIdentity, Closure, NixCompression, NixNarInfo, NixPublicKey, ProducerRecord,
@@ -11,6 +11,8 @@ use super::{
 use crate::{Envelope, RuntimePolicy, SHA256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+#[cfg(test)]
+use std::io::Write;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -51,6 +53,7 @@ impl NixCacheError {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn kind(&self) -> NixCacheErrorKind {
         self.kind
     }
@@ -60,7 +63,11 @@ impl NixCacheError {
     }
 
     pub(crate) fn what(&self) -> String {
-        format!("native Nix cache admission failed during {}", self.stage())
+        format!(
+            "native Nix cache admission failed during {}: {}",
+            self.stage(),
+            self.detail
+        )
     }
 
     pub(crate) fn why(&self) -> String {
@@ -74,6 +81,7 @@ impl NixCacheError {
         "repair the cache metadata or network response, then retry the admission"
     }
 
+    #[cfg(test)]
     pub(crate) fn diagnostic(&self) -> crate::Diagnostics::Diagnostic {
         crate::Diagnostics::Diagnostic::from_row(self.code(), &[("kind", self.stage())], None)
     }
@@ -136,6 +144,27 @@ pub(crate) fn admit_nix_closure(
         transaction.rollback();
     }
     result
+}
+
+/// Encode the producer's canonical zstd payload with stable single-threaded
+/// settings. The zstd crate's default build has no `zstdmt` feature, so the
+/// encoder remains single-threaded.
+#[cfg(test)]
+pub(crate) fn encode_zstd_deterministic(input: &[u8]) -> Result<Vec<u8>, NixCacheError> {
+    let mut encoder = zstd::stream::Encoder::new(Vec::new(), 19)
+        .map_err(|error| NixCacheError::new(NixCacheErrorKind::Admission, error.to_string()))?;
+    encoder
+        .include_contentsize(true)
+        .and_then(|_| encoder.include_checksum(true))
+        .and_then(|_| encoder.include_dictid(false))
+        .and_then(|_| encoder.set_pledged_src_size(Some(input.len() as u64)))
+        .map_err(|error| NixCacheError::new(NixCacheErrorKind::Admission, error.to_string()))?;
+    encoder
+        .write_all(input)
+        .map_err(|error| NixCacheError::new(NixCacheErrorKind::Admission, error.to_string()))?;
+    encoder
+        .finish()
+        .map_err(|error| NixCacheError::new(NixCacheErrorKind::Admission, error.to_string()))
 }
 
 struct AdmissionTransaction<'a> {
@@ -306,10 +335,13 @@ impl<'a> AdmissionTransaction<'a> {
         info: &FetchedInfo,
         store_dir: &str,
     ) -> Result<FetchedObject, NixCacheError> {
-        if info.info.compression != NixCompression::None {
+        if matches!(
+            info.info.compression,
+            NixCompression::Xz | NixCompression::Bzip2
+        ) {
             return Err(NixCacheError::new(
                 NixCacheErrorKind::UnsupportedCompression,
-                "zstd, xz, and bzip2 streaming requires the owner-approved codec dependencies",
+                "Nix cache compression is not enabled for this admission path",
             ));
         }
         let url = endpoint.object_url(&info.info.url)?;
@@ -357,13 +389,41 @@ impl<'a> AdmissionTransaction<'a> {
             NixCacheErrorKind::Admission,
         )?;
         let mut body = HashingReader::new(response, compressed_limit);
-        let stats =
-            super::read_nar_stream(&mut body, &tree, info.info.nar_size).map_err(|error| {
-                NixCacheError::new(
-                    classify_nar_error(&error),
-                    "Nix cache object is not a valid canonical NAR",
-                )
-            })?;
+        let stats = match info.info.compression {
+            NixCompression::None => super::read_nar_stream(&mut body, &tree, info.info.nar_size),
+            NixCompression::Zstd => {
+                let mut decoder = zstd::stream::read::Decoder::new(&mut body).map_err(|error| {
+                    NixCacheError::new(
+                        NixCacheErrorKind::CompressedCorruption,
+                        format!("could not initialize zstd decoder: {error}"),
+                    )
+                })?;
+                let result = super::read_nar_stream(&mut decoder, &tree, info.info.nar_size);
+                if result.is_ok() {
+                    let mut trailing = [0u8; 64 * 1024];
+                    if decoder.read(&mut trailing).map_err(|error| {
+                        NixCacheError::new(
+                            NixCacheErrorKind::CompressedCorruption,
+                            format!("could not finish zstd decoder: {error}"),
+                        )
+                    })? != 0
+                    {
+                        return Err(NixCacheError::new(
+                            NixCacheErrorKind::CompressedCorruption,
+                            "zstd stream contains bytes after the canonical NAR",
+                        ));
+                    }
+                }
+                result
+            }
+            NixCompression::Xz | NixCompression::Bzip2 => unreachable!(),
+        }
+        .map_err(|error| {
+            NixCacheError::new(
+                classify_nar_error(&error),
+                "Nix cache object is not a valid canonical NAR",
+            )
+        })?;
         if body.count != compressed_limit {
             return Err(NixCacheError::new(
                 NixCacheErrorKind::CompressedCorruption,
@@ -407,12 +467,13 @@ impl<'a> AdmissionTransaction<'a> {
                     "Nix staged object could not be hashed",
                 )
             })?;
-        let references = info
+        let mut references = info
             .info
             .references
             .iter()
             .map(|reference| format!("{store_dir}/{reference}"))
             .collect::<Vec<_>>();
+        references.sort();
         let proof = proof_digest(
             endpoint.endpoint.as_str(),
             &info.info,
@@ -1304,11 +1365,19 @@ fn classify_narinfo_error(error: &io::Error) -> NixCacheErrorKind {
 }
 
 fn classify_nar_error(error: &io::Error) -> NixCacheErrorKind {
-    let detail = error.to_string();
+    let detail = error.to_string().to_ascii_lowercase();
     if detail.contains("duplicate") {
         NixCacheErrorKind::DuplicateEntry
-    } else if detail.contains("signed byte limit") || detail.contains("compressed") {
+    } else if detail.contains("signed byte limit")
+        || detail.contains("compressed")
+        || detail.contains("zstd")
+        || detail.contains("checksum")
+        || detail.contains("frame")
+        || detail.contains("data corruption")
+    {
         NixCacheErrorKind::CompressedCorruption
+    } else if detail.contains("path") || detail.contains("name") || detail.contains("symlink") {
+        NixCacheErrorKind::PathTraversal
     } else {
         NixCacheErrorKind::NarCorruption
     }

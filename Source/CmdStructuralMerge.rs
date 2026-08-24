@@ -913,9 +913,7 @@ fn positional(args: &[String], command: &str) -> Vec<String> {
             skip_value = true;
             continue;
         }
-        if !arg.starts_with('-')
-            && arg.as_str() != "install-driver"
-        {
+        if !arg.starts_with('-') && arg.as_str() != "install-driver" {
             out.push(arg.clone());
         }
     }

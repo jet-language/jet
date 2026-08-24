@@ -14,9 +14,9 @@ use jet::Diagnostics::{Severity, Span, TextEdit};
 use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
 use jet_semindex::{
-    open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs,
-    open_structural_with_overlays, DefinitionAnchor, SemIndex, SemIndexError, SemanticOp,
-    SemanticOpTarget, SymbolKind,
+    open, open_structural_with_overlays, open_with_overlays_and_diagnostics,
+    open_with_overlays_diagnostics_and_inputs, DefinitionAnchor, SemIndex, SemIndexError,
+    SemanticOp, SemanticOpTarget, SymbolKind,
 };
 use Transaction::Change;
 use JSON::Value;

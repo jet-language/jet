@@ -146,9 +146,7 @@ fn wait_for_file_text(path: &std::path::Path, needle: &str, timeout: Duration) -
             return text;
         }
         if start.elapsed() > timeout {
-            panic!(
-                "PTY transcript never contained {needle:?} within {timeout:?}:\n{text}"
-            );
+            panic!("PTY transcript never contained {needle:?} within {timeout:?}:\n{text}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -252,7 +250,10 @@ fn ui_showcase_uses_builtin_host_and_keeps_companion_page_live() {
         let (status, body) = http_get(port, "/").expect("GET showcase companion page");
         assert_eq!(status, 200, "request {request}");
         let html = String::from_utf8_lossy(&body);
-        assert!(html.contains("<h1>Flight deck</h1>"), "request {request}: {html}");
+        assert!(
+            html.contains("<h1>Flight deck</h1>"),
+            "request {request}: {html}"
+        );
         assert!(
             html.contains("data-motion-state=\"idle\"") && html.contains("init_app"),
             "request {request}: showcase host served a generic shell"
@@ -665,19 +666,14 @@ fn jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region()
 
 #[test]
 fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
-    if !have_tool("rustc")
-        || !have_tool("node")
-        || !have_tool("chromium")
-        || !have_tool("script")
-    {
+    if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") || !have_tool("script") {
         eprintln!(
             "note: skipping jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix (need rustc + node + chromium + script)"
         );
         return;
     }
 
-    let dir =
-        std::env::temp_dir().join(format!("jet_dev_hybrid_browser_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dev_hybrid_browser_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src_path = dir.join("app.jet");
@@ -729,8 +725,7 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("PASS hybrid dev-server browser matrix"),
+        String::from_utf8_lossy(&output.stdout).contains("PASS hybrid dev-server browser matrix"),
         "browser matrix did not report completion"
     );
     assert_eq!(fs::read_to_string(&src_path).unwrap(), FIXTURE_SRC_EDITED);
@@ -741,7 +736,11 @@ fn jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix() {
     let start = Instant::now();
     loop {
         if let Some(status) = guard.0.try_wait().unwrap() {
-            assert_eq!(status.code(), Some(130), "browser PTY wrapper exit: {status}");
+            assert_eq!(
+                status.code(),
+                Some(130),
+                "browser PTY wrapper exit: {status}"
+            );
             break;
         }
         if start.elapsed() > Duration::from_secs(5) {
@@ -875,7 +874,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("body:not(.is-dev-mode) #wire-status { display: none; }"));
     assert!(html.contains("body:not(.is-dev-mode) .dev-only"));
     assert!(html.contains("body.is-debug-active .debug-controls { display: flex; }"));
-    assert!(html.contains("body:not(.is-debug-active) #debug-menu[open] .debug-controls { display: grid; }"));
+    assert!(html.contains(
+        "body:not(.is-debug-active) #debug-menu[open] .debug-controls { display: grid; }"
+    ));
     assert!(html.contains("id=\"debug-start\""));
     assert!(html.contains("No live session"));
     assert!(html.contains("body:not(.is-dev-mode) #jump { display: none; }"));
@@ -1238,8 +1239,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("toolbarSearch.addEventListener"));
     assert!(js.contains("document.body.classList.toggle(\"is-debug-active\""));
     assert!(js.contains("Apply pins"));
-    assert!(html.contains("grid-template-rows: minmax(0, 1fr) auto"), "{html}");
-    assert!(html.contains("#details { min-height: 0; overflow: auto;"), "{html}");
+    assert!(
+        html.contains("grid-template-rows: minmax(0, 1fr) auto"),
+        "{html}"
+    );
+    assert!(
+        html.contains("#details { min-height: 0; overflow: auto;"),
+        "{html}"
+    );
     assert!(js.contains("Visible conversion function"));
     assert!(js.contains("Wire refused"));
     assert!(js.contains("promote_to_binding"));
@@ -1316,10 +1323,16 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     let (status, body) = http_get(port, "/canvas/proof").expect("GET Canvas proof");
     assert_eq!(status, 200);
     let proof = String::from_utf8_lossy(&body);
-    assert!(proof.contains("\"protocol\":\"jet.canvas.proof\""), "{proof}");
+    assert!(
+        proof.contains("\"protocol\":\"jet.canvas.proof\""),
+        "{proof}"
+    );
     assert!(proof.contains("\"schema_version\":1"), "{proof}");
     assert!(proof.contains("\"check\":{\"state\":\"ok\""), "{proof}");
-    assert!(proof.contains("\"command_receipts\":{\"state\":\"missing\""), "{proof}");
+    assert!(
+        proof.contains("\"command_receipts\":{\"state\":\"missing\""),
+        "{proof}"
+    );
 
     let command_req = format!(
         "{{\"schema_version\":1,\"action_id\":\"canvas.command:check\",\"revision\":\"{}\"}}",
@@ -1333,16 +1346,31 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         receipt.contains("\"protocol\":\"jet.canvas.command_receipt\""),
         "{receipt}"
     );
-    assert!(receipt.contains("\"action_id\":\"canvas.command:check\""), "{receipt}");
-    assert!(receipt.contains("\"command\":[\"jet\",\"check\",\"app.jet\"]"), "{receipt}");
+    assert!(
+        receipt.contains("\"action_id\":\"canvas.command:check\""),
+        "{receipt}"
+    );
+    assert!(
+        receipt.contains("\"command\":[\"jet\",\"check\",\"app.jet\"]"),
+        "{receipt}"
+    );
     assert!(receipt.contains("\"success\":true"), "{receipt}");
 
     let (status, body) = http_get(port, "/canvas/proof").expect("GET Canvas proof after command");
     assert_eq!(status, 200);
     let proof = String::from_utf8_lossy(&body);
-    assert!(proof.contains("\"command_receipts\":{\"state\":\"current\""), "{proof}");
-    assert!(proof.contains("\"protocol\":\"jet.canvas.command_receipt\""), "{proof}");
-    assert!(proof.contains("\"proof\":{\"state\":\"current\",\"stale\":false"), "{proof}");
+    assert!(
+        proof.contains("\"command_receipts\":{\"state\":\"current\""),
+        "{proof}"
+    );
+    assert!(
+        proof.contains("\"protocol\":\"jet.canvas.command_receipt\""),
+        "{proof}"
+    );
+    assert!(
+        proof.contains("\"proof\":{\"state\":\"current\",\"stale\":false"),
+        "{proof}"
+    );
 
     fs::write(
         dir.join("package.jet"),
@@ -1373,14 +1401,23 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     );
     let helper_graph = String::from_utf8_lossy(&helper_graph);
     assert!(helper_graph.contains("helper.jet"), "{helper_graph}");
-    assert!(helper_graph.contains("print(\\\"helper\\\")"), "{helper_graph}");
+    assert!(
+        helper_graph.contains("print(\\\"helper\\\")"),
+        "{helper_graph}"
+    );
 
     let (status, helper_proof) =
         http_get(port, "/canvas/proof?source_id=helper.jet").expect("GET helper proof");
     assert_eq!(status, 200);
     let helper_proof = String::from_utf8_lossy(&helper_proof);
-    assert!(helper_proof.contains("\"protocol\":\"jet.canvas.proof\""), "{helper_proof}");
-    assert!(helper_proof.contains("\"source_id\":\"helper.jet\""), "{helper_proof}");
+    assert!(
+        helper_proof.contains("\"protocol\":\"jet.canvas.proof\""),
+        "{helper_proof}"
+    );
+    assert!(
+        helper_proof.contains("\"source_id\":\"helper.jet\""),
+        "{helper_proof}"
+    );
 
     let helper_src = fs::read_to_string(dir.join("helper.jet")).unwrap();
     let helper_revision = jet::Canvas::source_revision(&helper_src);
@@ -1392,8 +1429,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/command", &helper_command).expect("POST helper command");
     assert_eq!(status, 200);
     let helper_receipt = String::from_utf8_lossy(&helper_receipt);
-    assert!(helper_receipt.contains("\"source_id\":\"helper.jet\""), "{helper_receipt}");
-    assert!(helper_receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"), "{helper_receipt}");
+    assert!(
+        helper_receipt.contains("\"source_id\":\"helper.jet\""),
+        "{helper_receipt}"
+    );
+    assert!(
+        helper_receipt.contains("\"command\":[\"jet\",\"check\",\"helper.jet\"]"),
+        "{helper_receipt}"
+    );
     let helper_debug = format!(
         "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"commands\":[\"s\"]}}",
         helper_revision
@@ -1402,11 +1445,26 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/debug", &helper_debug).expect("POST helper debug");
     assert_eq!(status, 200);
     let helper_debug_body = String::from_utf8_lossy(&helper_debug_body);
-    assert!(helper_debug_body.contains("\"protocol\":\"jet.canvas.debug\""), "{helper_debug_body}");
-    assert!(helper_debug_body.contains(&format!("\"revision\":\"{}\"", helper_revision)), "{helper_debug_body}");
-    assert!(helper_debug_body.contains("\"state\":\"running\""), "{helper_debug_body}");
-    assert!(helper_debug_body.contains("\"active_line\":"), "{helper_debug_body}");
-    assert!(!helper_debug_body.contains("\"active_line\":null"), "{helper_debug_body}");
+    assert!(
+        helper_debug_body.contains("\"protocol\":\"jet.canvas.debug\""),
+        "{helper_debug_body}"
+    );
+    assert!(
+        helper_debug_body.contains(&format!("\"revision\":\"{}\"", helper_revision)),
+        "{helper_debug_body}"
+    );
+    assert!(
+        helper_debug_body.contains("\"state\":\"running\""),
+        "{helper_debug_body}"
+    );
+    assert!(
+        helper_debug_body.contains("\"active_line\":"),
+        "{helper_debug_body}"
+    );
+    assert!(
+        !helper_debug_body.contains("\"active_line\":null"),
+        "{helper_debug_body}"
+    );
     let helper_session = json_field(&helper_debug_body, "id");
     let helper_debug_next = format!(
         "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
@@ -1416,8 +1474,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/debug", &helper_debug_next).expect("POST helper debug next");
     assert_eq!(status, 200);
     let helper_debug_next_body = String::from_utf8_lossy(&helper_debug_next_body);
-    assert!(helper_debug_next_body.contains("\"state\":\"running\""), "{helper_debug_next_body}");
-    assert!(!helper_debug_next_body.contains("\"active_line\":null"), "{helper_debug_next_body}");
+    assert!(
+        helper_debug_next_body.contains("\"state\":\"running\""),
+        "{helper_debug_next_body}"
+    );
+    assert!(
+        !helper_debug_next_body.contains("\"active_line\":null"),
+        "{helper_debug_next_body}"
+    );
     let helper_debug_finish = format!(
         "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"c\"]}}",
         helper_revision, helper_session
@@ -1426,8 +1490,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/debug", &helper_debug_finish).expect("POST helper debug finish");
     assert_eq!(status, 200);
     let helper_debug_finish_body = String::from_utf8_lossy(&helper_debug_finish_body);
-    assert!(helper_debug_finish_body.contains("\"state\":\"finished\""), "{helper_debug_finish_body}");
-    assert!(helper_debug_finish_body.contains("\"active_line\":null"), "{helper_debug_finish_body}");
+    assert!(
+        helper_debug_finish_body.contains("\"state\":\"finished\""),
+        "{helper_debug_finish_body}"
+    );
+    assert!(
+        helper_debug_finish_body.contains("\"active_line\":null"),
+        "{helper_debug_finish_body}"
+    );
     let stale_breakpoint = format!(
         "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"breakpoint_spans\":[\"999999:1000000\"],\"commands\":[\"c\"]}}",
         helper_revision
@@ -1436,14 +1506,20 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/debug", &stale_breakpoint).expect("POST stale breakpoint");
     assert_eq!(status, 200);
     let stale_breakpoint_body = String::from_utf8_lossy(&stale_breakpoint_body);
-    assert!(stale_breakpoint_body.contains("\"state\":\"stale\""), "{stale_breakpoint_body}");
+    assert!(
+        stale_breakpoint_body.contains("\"state\":\"stale\""),
+        "{stale_breakpoint_body}"
+    );
     let stale_debug =
         "{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"sha256-stale\",\"commands\":[\"s\"]}";
     let (status, stale_debug_body) =
         http_post(port, "/canvas/debug", stale_debug).expect("POST stale helper debug");
     assert_eq!(status, 409);
     let stale_debug_body = String::from_utf8_lossy(&stale_debug_body);
-    assert!(stale_debug_body.contains("\"kind\":\"conflict\""), "{stale_debug_body}");
+    assert!(
+        stale_debug_body.contains("\"kind\":\"conflict\""),
+        "{stale_debug_body}"
+    );
     let ended_debug = format!(
         "{{\"schema_version\":1,\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
         helper_revision, helper_session
@@ -1452,7 +1528,10 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/debug", &ended_debug).expect("POST ended helper debug");
     assert_eq!(status, 409);
     let ended_debug_body = String::from_utf8_lossy(&ended_debug_body);
-    assert!(ended_debug_body.contains("\"kind\":\"session\""), "{ended_debug_body}");
+    assert!(
+        ended_debug_body.contains("\"kind\":\"session\""),
+        "{ended_debug_body}"
+    );
     let helper_query = format!(
         "{{\"schema_version\":1,\"op\":\"find\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"query\":\"run\"}}",
         helper_revision
@@ -1460,7 +1539,9 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     let (status, helper_query_body) =
         http_post(port, "/canvas/query", &helper_query).expect("POST helper query");
     assert_eq!(status, 200);
-    assert!(String::from_utf8_lossy(&helper_query_body).contains("\"protocol\":\"jet.canvas.query\""));
+    assert!(
+        String::from_utf8_lossy(&helper_query_body).contains("\"protocol\":\"jet.canvas.query\"")
+    );
 
     let helper_edit = format!(
         "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_id\":\"helper.jet\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    print(\\\"edited helper\\\")\\n}}\\n\"}}",
@@ -1468,9 +1549,16 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     );
     let (status, helper_edit_body) =
         http_post(port, "/canvas/transaction", &helper_edit).expect("POST helper transaction");
-    assert_eq!(status, 200, "helper transaction: {}", String::from_utf8_lossy(&helper_edit_body));
+    assert_eq!(
+        status,
+        200,
+        "helper transaction: {}",
+        String::from_utf8_lossy(&helper_edit_body)
+    );
     assert!(String::from_utf8_lossy(&helper_edit_body).contains("\"changed\":true"));
-    assert!(fs::read_to_string(dir.join("helper.jet")).unwrap().contains("edited helper"));
+    assert!(fs::read_to_string(dir.join("helper.jet"))
+        .unwrap()
+        .contains("edited helper"));
     assert_eq!(fs::read_to_string(&src_path).unwrap(), FIXTURE_SRC);
 
     let (status, catalog) =
@@ -1478,10 +1566,19 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert_eq!(status, 200);
     let catalog = String::from_utf8_lossy(&catalog);
     assert!(catalog.contains("\"op\":\"core_catalog\""), "{catalog}");
-    assert!(catalog.contains("\"catalog_schema_version\":1"), "{catalog}");
-    assert!(catalog.contains("\"authority\":[\"canvas.catalog:core.read\"]"), "{catalog}");
+    assert!(
+        catalog.contains("\"catalog_schema_version\":1"),
+        "{catalog}"
+    );
+    assert!(
+        catalog.contains("\"authority\":[\"canvas.catalog:core.read\"]"),
+        "{catalog}"
+    );
     assert!(catalog.contains("\"path\":\"core.http\""), "{catalog}");
-    assert!(catalog.contains("\"source\":\"docs/reference/core-library.md\""), "{catalog}");
+    assert!(
+        catalog.contains("\"source\":\"docs/reference/core-library.md\""),
+        "{catalog}"
+    );
 
     let project_revision = json_field(&project, "project_revision");
     let manifest_src = fs::read_to_string(dir.join("package.jet")).unwrap();
@@ -1494,10 +1591,15 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
         http_post(port, "/canvas/project/transaction", &project_req).expect("POST project tx");
     assert_eq!(status, 200);
     let body = String::from_utf8_lossy(&body);
-    assert!(body.contains("\"protocol\":\"jet.canvas.project.edit\""), "{body}");
+    assert!(
+        body.contains("\"protocol\":\"jet.canvas.project.edit\""),
+        "{body}"
+    );
     assert!(body.contains("\"writes\":\"preview_only\""), "{body}");
     assert!(body.contains("+    logging: \\\"0.1.0\\\","), "{body}");
-    assert!(!fs::read_to_string(dir.join("package.jet")).unwrap().contains("logging"));
+    assert!(!fs::read_to_string(dir.join("package.jet"))
+        .unwrap()
+        .contains("logging"));
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
@@ -1514,7 +1616,8 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("app.jet");
-    let source = "fn run() {\n    a := 1\n    b := a + 1\n    c := b + 1\n    print(\"debug\")\n}\n";
+    let source =
+        "fn run() {\n    a := 1\n    b := a + 1\n    c := b + 1\n    print(\"debug\")\n}\n";
     fs::write(&entry, source).unwrap();
 
     let mut child = Command::new(jet_bin())
@@ -1541,7 +1644,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
         revision
     );
     let (status, body) = http_post(port, "/canvas/debug", &first).expect("start Canvas debug");
-    assert_eq!(status, 200, "start response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "start response: {}",
+        String::from_utf8_lossy(&body)
+    );
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"protocol\":\"jet.canvas.debug\""), "{body}");
     assert!(body.contains("\"state\":\"running\""), "{body}");
@@ -1554,7 +1662,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
         revision, session
     );
     let (status, body) = http_post(port, "/canvas/debug", &next).expect("resume Canvas debug");
-    assert_eq!(status, 200, "resume response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "resume response: {}",
+        String::from_utf8_lossy(&body)
+    );
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"state\":\"running\""), "{body}");
     assert!(!body.contains("\"active_line\":null"), "{body}");
@@ -1565,7 +1678,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     );
     let (status, body) =
         http_post(port, "/canvas/debug", &invalid).expect("reject invalid debug command");
-    assert_eq!(status, 409, "invalid response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        409,
+        "invalid response: {}",
+        String::from_utf8_lossy(&body)
+    );
     assert!(String::from_utf8_lossy(&body).contains("\"kind\":\"unsupported\""));
 
     let after_invalid = format!(
@@ -1574,7 +1692,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     );
     let (status, body) = http_post(port, "/canvas/debug", &after_invalid)
         .expect("resume after invalid debug command");
-    assert_eq!(status, 200, "resume response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "resume response: {}",
+        String::from_utf8_lossy(&body)
+    );
     assert!(String::from_utf8_lossy(&body).contains("\"state\":\"running\""));
 
     let finish = format!(
@@ -1582,7 +1705,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
         revision, session
     );
     let (status, body) = http_post(port, "/canvas/debug", &finish).expect("finish Canvas debug");
-    assert_eq!(status, 200, "finish response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "finish response: {}",
+        String::from_utf8_lossy(&body)
+    );
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"state\":\"finished\""), "{body}");
     assert!(body.contains("\"active_line\":null"), "{body}");
@@ -1593,7 +1721,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
     );
     let (status, body) =
         http_post(port, "/canvas/debug", &stale_breakpoint).expect("stale breakpoint");
-    assert_eq!(status, 200, "stale breakpoint response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "stale breakpoint response: {}",
+        String::from_utf8_lossy(&body)
+    );
     assert!(
         String::from_utf8_lossy(&body).contains("\"state\":\"stale\""),
         "{}",
@@ -1602,9 +1735,13 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
 
     let stale_revision =
         "{\"schema_version\":1,\"revision\":\"sha256-stale\",\"commands\":[\"s\"]}";
-    let (status, body) =
-        http_post(port, "/canvas/debug", stale_revision).expect("stale revision");
-    assert_eq!(status, 409, "stale revision response: {}", String::from_utf8_lossy(&body));
+    let (status, body) = http_post(port, "/canvas/debug", stale_revision).expect("stale revision");
+    assert_eq!(
+        status,
+        409,
+        "stale revision response: {}",
+        String::from_utf8_lossy(&body)
+    );
     assert!(String::from_utf8_lossy(&body).contains("\"kind\":\"conflict\""));
 
     let ended = format!(
@@ -1612,7 +1749,12 @@ fn jet_dev_web_live_canvas_debug_session_round_trip() {
         revision, session
     );
     let (status, body) = http_post(port, "/canvas/debug", &ended).expect("ended session");
-    assert_eq!(status, 409, "ended response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        409,
+        "ended response: {}",
+        String::from_utf8_lossy(&body)
+    );
     assert!(String::from_utf8_lossy(&body).contains("\"kind\":\"session\""));
     assert_eq!(fs::read_to_string(&entry).unwrap(), source);
 
@@ -1627,7 +1769,10 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
         return;
     }
 
-    let dir = std::env::temp_dir().join(format!("jet_dev_canvas_project_query_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_canvas_project_query_{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let entry = dir.join("app.jet");
@@ -1675,7 +1820,12 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
         revision, project_revision
     );
     let (status, body) = http_post(port, "/canvas/query", &search).expect("POST project search");
-    assert_eq!(status, 200, "project search response: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "project search response: {}",
+        String::from_utf8_lossy(&body)
+    );
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"op\":\"project_search\""), "{body}");
     assert!(body.contains("\"source_id\":\"helper.jet\""), "{body}");
@@ -1684,7 +1834,8 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
         "{{\"schema_version\":1,\"op\":\"references\",\"source_id\":\"app.jet\",\"revision\":\"{}\",\"project_revision\":\"{}\",\"symbol\":\"helper\"}}",
         revision, project_revision
     );
-    let (status, body) = http_post(port, "/canvas/query", &references).expect("POST project references");
+    let (status, body) =
+        http_post(port, "/canvas/query", &references).expect("POST project references");
     assert_eq!(status, 200);
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"op\":\"references\""), "{body}");
@@ -1699,7 +1850,9 @@ fn jet_dev_web_project_queries_round_trip_and_reject_stale_revision() {
     assert_eq!(status, 409);
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("\"kind\":\"conflict\""), "{body}");
-    assert!(fs::read_to_string(dir.join("helper.jet")).unwrap().contains("return 3"));
+    assert!(fs::read_to_string(dir.join("helper.jet"))
+        .unwrap()
+        .contains("return 3"));
 
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
@@ -1928,10 +2081,7 @@ fn ul6_browser_watch_matrix_budget_reconnect_cleanup() {
         return;
     }
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_ul6_web_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_ul6_web_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src_path = dir.join("app.jet");

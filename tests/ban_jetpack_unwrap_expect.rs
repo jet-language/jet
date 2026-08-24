@@ -82,9 +82,7 @@ fn lex(source: &str) -> Vec<Token> {
             i = end;
             continue;
         }
-        let normal_prefix = if bytes[i..].starts_with(b"b\"")
-            || bytes[i..].starts_with(b"c\"")
-        {
+        let normal_prefix = if bytes[i..].starts_with(b"b\"") || bytes[i..].starts_with(b"c\"") {
             Some(2)
         } else if bytes[i] == b'"' {
             Some(1)
@@ -159,9 +157,7 @@ fn raw_string_end(bytes: &[u8], start: usize) -> Option<(usize, usize)> {
         if bytes[i] == b'\n' {
             newlines += 1;
         }
-        if bytes[i] == b'"'
-            && bytes.get(i + 1..i + 1 + hashes) == Some(&vec![b'#'; hashes][..])
-        {
+        if bytes[i] == b'"' && bytes.get(i + 1..i + 1 + hashes) == Some(&vec![b'#'; hashes][..]) {
             return Some((i + 1 + hashes, newlines));
         }
         i += 1;
@@ -245,8 +241,7 @@ fn parse_cfg_expr(tokens: &[Token], cursor: &mut usize) -> Truth {
             Truth::Maybe
         };
     }
-    if !matches!(name, "all" | "any" | "not")
-        || !tokens.get(*cursor).is_some_and(|t| punct(t, '('))
+    if !matches!(name, "all" | "any" | "not") || !tokens.get(*cursor).is_some_and(|t| punct(t, '('))
     {
         return Truth::Maybe;
     }
@@ -296,7 +291,15 @@ fn attribute_is_test_only(tokens: &[Token]) -> bool {
 fn scan_source(path: &str, source: &str) -> Vec<Finding> {
     let tokens = lex(source);
     let mut findings = Vec::new();
-    scan_scope(&tokens, 0, tokens.len(), false, "<module>", path, &mut findings);
+    scan_scope(
+        &tokens,
+        0,
+        tokens.len(),
+        false,
+        "<module>",
+        path,
+        &mut findings,
+    );
     findings
 }
 
@@ -321,7 +324,10 @@ fn scan_scope(
             }
         }
         if let TokenKind::Ident(keyword) = &tokens[i].kind {
-            if matches!(keyword.as_str(), "fn" | "mod" | "const" | "static" | "struct" | "enum" | "trait") {
+            if matches!(
+                keyword.as_str(),
+                "fn" | "mod" | "const" | "static" | "struct" | "enum" | "trait"
+            ) {
                 if let Some(Token {
                     kind: TokenKind::Ident(name),
                     ..
@@ -443,7 +449,10 @@ fn jetpack_production_has_no_unwrap_or_expect() {
 
 #[test]
 fn scanner_detects_production_and_seeded_gate_failure() {
-    let findings = scan_source("fixture.rs", "fn live() { value.unwrap(); other.expect(\"x\"); }");
+    let findings = scan_source(
+        "fixture.rs",
+        "fn live() { value.unwrap(); other.expect(\"x\"); }",
+    );
     assert_eq!(findings.len(), 2);
     assert_eq!(findings[0].item, "fn live");
     assert!(enforce_zero(&findings).is_err());
@@ -504,10 +513,7 @@ fn nested_key_value_is_not_builtin_test_cfg() { value.unwrap(); }
     let findings = scan_source("fixture.rs", source);
     assert_eq!(findings.len(), 3);
     assert_eq!(findings[0].item, "fn maybe_production");
-    assert_eq!(
-        findings[1].item,
-        "fn key_value_is_not_builtin_test_cfg"
-    );
+    assert_eq!(findings[1].item, "fn key_value_is_not_builtin_test_cfg");
     assert_eq!(
         findings[2].item,
         "fn nested_key_value_is_not_builtin_test_cfg"
@@ -533,7 +539,11 @@ fn file_walk_does_not_follow_outside_or_cyclic_symlinks() {
     fs::create_dir_all(&scan_root).unwrap();
     fs::create_dir_all(&outside).unwrap();
     fs::write(scan_root.join("safe.rs"), "fn safe() {}\n").unwrap();
-    fs::write(outside.join("escape.rs"), "fn escaped() { value.unwrap(); }\n").unwrap();
+    fs::write(
+        outside.join("escape.rs"),
+        "fn escaped() { value.unwrap(); }\n",
+    )
+    .unwrap();
     symlink(&outside, scan_root.join("outside-link")).unwrap();
     symlink(&scan_root, scan_root.join("cycle")).unwrap();
 

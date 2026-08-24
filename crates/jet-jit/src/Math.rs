@@ -8,10 +8,10 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::Marshal::{alloc_string, clone_string};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use std::cell::RefCell;
-use crate::Marshal::{clone_string, alloc_string};
 
 mod typed_text_semantics {
     #[allow(unused_imports)]
@@ -129,9 +129,9 @@ fn from_lanes(type_name: &str, lanes: &[f64]) -> Option<MathVal> {
         "F64x2" if lanes.len() == 2 => Some(MathVal::F64x2(F64x2([lanes[0], lanes[1]]))),
         "Vec2" if lanes.len() == 2 => Some(MathVal::Vec2(Vec2([lanes[0], lanes[1]]))),
         "Vec3" if lanes.len() == 3 => Some(MathVal::Vec3(Vec3([lanes[0], lanes[1], lanes[2]]))),
-        "Vec4" if lanes.len() == 4 => {
-            Some(MathVal::Vec4(Vec4([lanes[0], lanes[1], lanes[2], lanes[3]])))
-        }
+        "Vec4" if lanes.len() == 4 => Some(MathVal::Vec4(Vec4([
+            lanes[0], lanes[1], lanes[2], lanes[3],
+        ]))),
         "Mat3" if lanes.len() == 9 => {
             let mut a = [0.0f64; 9];
             a.copy_from_slice(lanes);
@@ -493,20 +493,19 @@ fn jet_jit_math_call(type_name: i64, func: i64, args: i64) -> i64 {
                     }
                 };
                 // Same-type full permute on F32x4/F64x2 keeps type; else VecN.
-                let result_ty = if (ty == "F32x4" && out.len() == 4)
-                    || (ty == "F64x2" && out.len() == 2)
-                {
-                    ty.as_str()
-                } else if out.len() == 1 {
-                    unreachable!()
-                } else {
-                    match out.len() {
-                        2 => "Vec2",
-                        3 => "Vec3",
-                        4 => "Vec4",
-                        _ => result_ty,
-                    }
-                };
+                let result_ty =
+                    if (ty == "F32x4" && out.len() == 4) || (ty == "F64x2" && out.len() == 2) {
+                        ty.as_str()
+                    } else if out.len() == 1 {
+                        unreachable!()
+                    } else {
+                        match out.len() {
+                            2 => "Vec2",
+                            3 => "Vec3",
+                            4 => "Vec4",
+                            _ => result_ty,
+                        }
+                    };
                 from_lanes(result_ty, &out).map(|v| pack_handle(push_val(v)))
             }
         }
@@ -595,7 +594,9 @@ fn clone_string_list(list: i64) -> Option<Vec<String>> {
 fn require_string_list(list: i64) -> Option<Vec<String>> {
     let values = clone_string_list(list);
     if values.is_none() {
-        Concurrency::with_runtime_mut(|rt| rt.set_trap("typed-text list contains a non-string value"));
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("typed-text list contains a non-string value")
+        });
     }
     values
 }
@@ -607,7 +608,10 @@ fn typed_path_interpolate(literals: i64, holes: i64) -> Option<String> {
     let literals = require_string_list(literals)?;
     let holes = require_string_list(holes)?;
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
-    Some(typed_text_semantics::jet_typed_path_interpolate(&literal_refs, &holes))
+    Some(typed_text_semantics::jet_typed_path_interpolate(
+        &literal_refs,
+        &holes,
+    ))
 }
 
 fn typed_datetime_interpolate(literals: i64, holes: i64) -> Option<String> {
@@ -739,15 +743,21 @@ fn jet_jit_typed_html_interpolate(literals: i64, holes: i64) -> i64 {
 }
 
 fn jet_jit_typed_html_raw(value: i64) -> i64 {
-    alloc_string(typed_text_semantics::jet_typed_html_raw(clone_string(value)))
+    alloc_string(typed_text_semantics::jet_typed_html_raw(clone_string(
+        value,
+    )))
 }
 
 fn jet_jit_typed_html_text(value: i64) -> i64 {
-    alloc_string(typed_text_semantics::jet_typed_html_text(clone_string(value)))
+    alloc_string(typed_text_semantics::jet_typed_html_text(clone_string(
+        value,
+    )))
 }
 
 fn jet_jit_html_escape(s: i64) -> i64 {
-    alloc_string(typed_text_semantics::jet_typed_html_escape(&clone_string(s)))
+    alloc_string(typed_text_semantics::jet_typed_html_escape(&clone_string(
+        s,
+    )))
 }
 
 fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
@@ -804,4 +814,3 @@ host_fns! {
     typed_path_interp: "jet_jit_typed_path_interpolate" => jet_jit_typed_path_interpolate: sig_binary;
     typed_datetime_interp: "jet_jit_typed_datetime_interpolate" => jet_jit_typed_datetime_interpolate: sig_binary;
 }
-

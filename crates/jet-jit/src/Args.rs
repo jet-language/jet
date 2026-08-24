@@ -137,12 +137,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) fn jet_jit_args_flag_short(
-        h: i64,
-        name: i64,
-        short: i64,
-        help: i64,
-    ) -> i64 {
+    pub(super) fn jet_jit_args_flag_short(h: i64, name: i64, short: i64, help: i64) -> i64 {
         let spec = jet_args_flag_short(
             take_spec(h),
             &clone_string(name),
@@ -152,12 +147,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) fn jet_jit_args_option(
-        h: i64,
-        name: i64,
-        help: i64,
-        meta: i64,
-    ) -> i64 {
+    pub(super) fn jet_jit_args_option(h: i64, name: i64, help: i64, meta: i64) -> i64 {
         let spec = jet_args_option(
             take_spec(h),
             &clone_string(name),
@@ -184,12 +174,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) fn jet_jit_args_option_int(
-        h: i64,
-        name: i64,
-        help: i64,
-        meta: i64,
-    ) -> i64 {
+    pub(super) fn jet_jit_args_option_int(h: i64, name: i64, help: i64, meta: i64) -> i64 {
         let spec = jet_args_option_int(
             take_spec(h),
             &clone_string(name),
@@ -216,12 +201,7 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) fn jet_jit_args_repeat(
-        h: i64,
-        name: i64,
-        help: i64,
-        meta: i64,
-    ) -> i64 {
+    pub(super) fn jet_jit_args_repeat(h: i64, name: i64, help: i64, meta: i64) -> i64 {
         let spec = jet_args_repeat(
             take_spec(h),
             &clone_string(name),
@@ -231,23 +211,19 @@ mod runtime {
         replace_spec(h, spec)
     }
 
-    pub(super) fn jet_jit_args_positional(
-        h: i64,
-        name: i64,
-        help: i64,
-    ) -> i64 {
+    pub(super) fn jet_jit_args_positional(h: i64, name: i64, help: i64) -> i64 {
         let spec = jet_args_positional(take_spec(h), &clone_string(name), &clone_string(help));
         replace_spec(h, spec)
     }
 
-    pub(super) fn jet_jit_args_subcommand(
-        h: i64,
-        name: i64,
-        help: i64,
-        sub: i64,
-    ) -> i64 {
+    pub(super) fn jet_jit_args_subcommand(h: i64, name: i64, help: i64, sub: i64) -> i64 {
         let nested = take_spec(sub);
-        let spec = jet_args_subcommand(take_spec(h), &clone_string(name), &clone_string(help), nested);
+        let spec = jet_args_subcommand(
+            take_spec(h),
+            &clone_string(name),
+            &clone_string(help),
+            nested,
+        );
         replace_spec(h, spec)
     }
 
@@ -283,22 +259,30 @@ mod runtime {
     }
 
     pub(super) fn jet_jit_parsed_option(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| pack_option_str(jet_parsed_option(p, &clone_string(name))))
+        with_parsed(h, |p| {
+            pack_option_str(jet_parsed_option(p, &clone_string(name)))
+        })
     }
 
     pub(super) fn jet_jit_parsed_option_int(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| pack_option_i64(jet_parsed_option_int(p, &clone_string(name))))
+        with_parsed(h, |p| {
+            pack_option_i64(jet_parsed_option_int(p, &clone_string(name)))
+        })
     }
 
     pub(super) fn jet_jit_parsed_option_float_opt(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| match jet_parsed_option_float(p, &clone_string(name)) {
-            Ok(v) => (v.to_bits() as i64).wrapping_add(1),
-            Err(JetAbsent) => 0,
+        with_parsed(h, |p| {
+            match jet_parsed_option_float(p, &clone_string(name)) {
+                Ok(v) => (v.to_bits() as i64).wrapping_add(1),
+                Err(JetAbsent) => 0,
+            }
         })
     }
 
     pub(super) fn jet_jit_parsed_options(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| list_from_strings(jet_parsed_options(p, &clone_string(name))))
+        with_parsed(h, |p| {
+            list_from_strings(jet_parsed_options(p, &clone_string(name)))
+        })
     }
 
     pub(super) fn jet_jit_parsed_positional(h: i64, idx: i64) -> i64 {
@@ -373,6 +357,3 @@ host_fns! {
     parsed_positional: "jet_jit_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
     parsed_subcommand: "jet_jit_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
 }
-
-
-

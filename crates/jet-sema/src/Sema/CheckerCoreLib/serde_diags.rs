@@ -1,10 +1,10 @@
-use crate::AST::{Expr, Type};
+use super::core_types::is_json_type_name;
+use super::module_items::core_module_items;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::suggest_field;
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
-use super::core_types::is_json_type_name;
-use super::module_items::core_module_items;
+use crate::AST::{Expr, Type};
 
 /// E2-M15: modules that require an OS and are forbidden in `--freestanding` builds.
 pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
@@ -53,7 +53,8 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
         return Diagnostic::error(
             "E1004",
             "`time.clock` was retired".to_string(),
-            "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)".to_string(),
+            "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)"
+                .to_string(),
             "use `Clock.new(seed)`".to_string(),
             Some(span),
         );
@@ -271,11 +272,7 @@ fn validate_union_decode_shapes(
         let mut seen: Vec<(crate::AST::SerdeWireShape, &Type)> = Vec::new();
         for member in members {
             let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
-                out.push(e2411_unknown_union_shape(
-                    &ty.show(),
-                    &label(member),
-                    span,
-                ));
+                out.push(e2411_unknown_union_shape(&ty.show(), &label(member), span));
                 continue;
             };
             for shape in shapes {
@@ -301,7 +298,11 @@ fn validate_union_decode_shapes(
         | Type::FixedList { elem: inner, .. } => {
             validate_union_decode_shapes(items, inner, span, out)
         }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             validate_union_decode_shapes(items, key, span, out);
             validate_union_decode_shapes(items, value, span, out);
         }
@@ -401,11 +402,16 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::IntN { .. } => crate::Traits::sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
-        Type::Map { key, value, .. } => matches!(**key, Type::String) && is_encodable_ty(value, reg),
+        Type::Map { key, value, .. } => {
+            matches!(**key, Type::String) && is_encodable_ty(value, reg)
+        }
         // A non-local type (imported) is trusted; a local one must derive Encode.
         Type::Named(n) => {
             n == "Decimal"
-                || matches!(n.as_str(), "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration")
+                || matches!(
+                    n.as_str(),
+                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                )
                 || is_json_type_name(n)
                 || !reg.local_types.contains(n)
                 || reg.implements_trait(n, crate::Generics::ENCODE)
@@ -432,17 +438,25 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         Type::IntN { .. } => crate::Traits::sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
-        Type::Map { key, value, .. } => matches!(**key, Type::String) && is_decodable_ty(value, reg),
+        Type::Map { key, value, .. } => {
+            matches!(**key, Type::String) && is_decodable_ty(value, reg)
+        }
         Type::Tagged { marker, inner }
             if matches!(
                 marker,
                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
-            ) && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") => true,
+            ) && matches!(inner.as_ref(), Type::Named(name) if name == "Secret") =>
+        {
+            true
+        }
         Type::Named(n) => {
             n == "Decimal"
                 || n == "Secret"
                 || n.rsplit_once('.').is_some_and(|(_, leaf)| leaf == "Secret")
-                || matches!(n.as_str(), "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration")
+                || matches!(
+                    n.as_str(),
+                    "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                )
                 || !reg.local_types.contains(n)
                 || reg.implements_trait(n, crate::Generics::DECODE)
         }
@@ -572,7 +586,10 @@ pub(crate) fn validate_serde_items(
         }
         if let Item::Struct(s) = item {
             for f in &s.fields {
-                let skip = f.serde_markers.iter().any(|m| m.name == Syntax::MARKER_SKIP);
+                let skip = f
+                    .serde_markers
+                    .iter()
+                    .any(|m| m.name == Syntax::MARKER_SKIP);
                 let flatten = f
                     .serde_markers
                     .iter()
@@ -663,21 +680,13 @@ pub(super) fn literal_string_value(expr: &Expr) -> Option<String> {
 /// D-A11YGATE1=B (c134 Phase 6, E2930): an interactive-role `UiNode` with an
 /// empty accessible label.
 pub(crate) fn a11y_unlabeled_control(role: &str, span: Span) -> Diagnostic {
-    Diagnostic::from_row(
-        "E2930",
-        &[("role", role)],
-        Some(span),
-    )
+    Diagnostic::from_row("E2930", &[("role", role)], Some(span))
 }
 
 /// D-A11YGATE1=B (c134 Phase 6, E2931): two interactive nodes in the same
 /// inline focus group share an accessible label.
 pub(crate) fn a11y_duplicate_label(label: &str, span: Span) -> Diagnostic {
-    Diagnostic::from_row(
-        "E2931",
-        &[("label", label)],
-        Some(span),
-    )
+    Diagnostic::from_row("E2931", &[("label", label)], Some(span))
 }
 
 /// D-REACT1=B (E2910): a `reactive.derived`/`effect` argument that isn't a lambda.

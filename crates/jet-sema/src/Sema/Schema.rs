@@ -328,7 +328,7 @@ mod tests {
                     redact: false,
                     computed: None,
                     default: None,
-            default_ct: None,
+                    default_ct: None,
                 },
                 Field {
                     is_pub: false,
@@ -341,7 +341,7 @@ mod tests {
                     redact: false,
                     computed: None,
                     default: None,
-            default_ct: None,
+                    default_ct: None,
                 },
             ],
             methods: vec![],

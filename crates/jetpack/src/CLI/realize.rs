@@ -890,7 +890,7 @@ pub(super) fn channel_sources(table: &RefSpec::SourceTable) -> Vec<ChannelSource
         .filter_map(|(name, upstream, _)| {
             let (base, channel) = RefSpec::split_channel_ref(&upstream);
             let policy = table.channel_policy(&name);
-            let base = if channel.is_none() && policy.moves() {
+            let base = if policy.moves() {
                 base.split_once(Syntax::REF_CHANNEL_MARKER)
                     .map(|(base, _)| base)
                     .unwrap_or(base)

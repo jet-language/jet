@@ -167,8 +167,9 @@ cell :: 1337
     );
     // `mem.address_of(cell)` → the sentry-backed address identity (no `unsafe`).
     assert!(
-        out.rust
-            .contains("let __jet_addr: i64 = jet_mem::jet_sentry_address_of((&(__jet_cell) as *const _));"),
+        out.rust.contains(
+            "let __jet_addr: i64 = jet_mem::jet_sentry_address_of((&(__jet_cell) as *const _));"
+        ),
         "address_of sentry wrapper missing:\n{}",
         out.rust
     );
@@ -343,17 +344,20 @@ fn run() {
     for (name, src, code, detail) in cases {
         let mut tiers = vec![
             ("default JIT", tir_support::jit_run(name, src)),
-            ("forced interpreter", tir_support::interpreter_run(name, src)),
+            (
+                "forced interpreter",
+                tir_support::interpreter_run(name, src),
+            ),
         ];
         if aot_available {
-            tiers.push((
-                "AOT",
-                build_and_run_full("jet_tir_sentry", name, src),
-            ));
+            tiers.push(("AOT", build_and_run_full("jet_tir_sentry", name, src)));
         }
         for (tier, (exit_code, stdout, stderr)) in tiers {
             assert_eq!(exit_code, 70, "{tier} changed {code} exit status: {stderr}");
-            assert!(stdout.is_empty(), "{tier} leaked stdout for {code}: {stdout}");
+            assert!(
+                stdout.is_empty(),
+                "{tier} leaked stdout for {code}: {stdout}"
+            );
             for marker in [
                 format!("Runtime fault [{code}]"),
                 format!("{name}.jet:"),
@@ -678,8 +682,7 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
     assert_eq!(code, 0);
     assert_eq!(stdout, expected_stdout);
 
-    let dir =
-        std::env::temp_dir().join(format!("jet_{name}_parity_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_{name}_parity_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
@@ -688,14 +691,12 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
     let mut bundle = jet::Loader::load_entry(&shown).expect("task bundle should load");
     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
-        })
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
-    assert!(errors.is_empty(), "task program must type-check: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "task program must type-check: {errors:?}"
+    );
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
         "task program must stay resident-JIT safe: {}",
@@ -866,8 +867,7 @@ fn run() {
     print(\"unreachable\")
 }
 ";
-    let (code, stdout, stderr) =
-        build_and_run_full("jet_tir_test", "tir_task_join_deadline", src);
+    let (code, stdout, stderr) = build_and_run_full("jet_tir_test", "tir_task_join_deadline", src);
     assert_eq!(code, 70, "{stderr}");
     assert_eq!(stdout, "", "{stderr}");
     assert!(
@@ -886,21 +886,18 @@ fn run() {
     let mut bundle = jet::Loader::load_entry(&shown).expect("deadline bundle should load");
     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
-        })
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
-    assert!(errors.is_empty(), "deadline program must type-check: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "deadline program must type-check: {errors:?}"
+    );
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
         "deadline program must stay resident-JIT safe: {}",
         jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
-        .expect("deadline program must compile in resident JIT");
+    jet_jit::try_compile_bundle(&bundle).expect("deadline program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -916,7 +913,9 @@ fn run() {
             }
             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
                 assert!(
-                    diagnostics.iter().any(|diagnostic| diagnostic.code == "E3003"),
+                    diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == "E3003"),
                     "{tier} reported the wrong deadline error: {diagnostics:?}"
                 );
             }
@@ -989,8 +988,7 @@ fn run() {
     print(\"unreachable\")
 }
 ";
-    let (code, stdout, stderr) =
-        build_and_run_full("jet_tir_test", "tir_task_all_deadline", src);
+    let (code, stdout, stderr) = build_and_run_full("jet_tir_test", "tir_task_all_deadline", src);
     assert_eq!(code, 70, "{stderr}");
     assert_eq!(stdout, "", "{stderr}");
     assert!(
@@ -1009,21 +1007,18 @@ fn run() {
     let mut bundle = jet::Loader::load_entry(&shown).expect("combinator bundle should load");
     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
-        })
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
-    assert!(errors.is_empty(), "combinator program must type-check: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "combinator program must type-check: {errors:?}"
+    );
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
         "combinator program must stay resident-JIT safe: {}",
         jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
-        .expect("combinator program must compile in resident JIT");
+    jet_jit::try_compile_bundle(&bundle).expect("combinator program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -1039,7 +1034,9 @@ fn run() {
             }
             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
                 assert!(
-                    diagnostics.iter().any(|diagnostic| diagnostic.code == "E3003"),
+                    diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == "E3003"),
                     "{tier} reported the wrong deadline error: {diagnostics:?}"
                 );
             }

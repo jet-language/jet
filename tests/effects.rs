@@ -107,9 +107,15 @@ fn run() {}
         "{:#?}",
         facts.summaries["clean"].edges
     );
-    assert!(facts.solved["Shape::area"].contains("IO"), "{:#?}", facts.solved);
+    assert!(
+        facts.solved["Shape::area"].contains("IO"),
+        "{:#?}",
+        facts.solved
+    );
     assert!(facts.solved["clean"].contains("IO"), "{:#?}", facts.solved);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3401"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E3401"));
 }
 
 #[test]
@@ -149,7 +155,10 @@ fn run() -[!Mem.Alloc(above: {bound})]> {{
             .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
         "five items at stride two execute three 4-byte calls:\n{diagnostics:#?}"
     );
-    let run_12 = ("main::run".to_string(), jet::Sema::MemoryFact::MemAllocBounded(12));
+    let run_12 = (
+        "main::run".to_string(),
+        jet::Sema::MemoryFact::MemAllocBounded(12),
+    );
     assert_eq!(
         facts.memory_projections.get(&run_12),
         Some(&jet::Sema::MemoryProjection::Proven)
@@ -157,7 +166,9 @@ fn run() -[!Mem.Alloc(above: {bound})]> {{
     assert!(facts.solved["run"].contains("IO"));
 
     let (diagnostics, facts) = check("jet_stride_arena_tight", &source(11, "2"));
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0921"));
     assert!(matches!(
         facts.memory_projections.get(&(
             "main::run".to_string(),
@@ -171,7 +182,9 @@ fn run() -[!Mem.Alloc(above: {bound})]> {{
         "fn run() -[!Mem.Alloc(above: 12)]> {\n    stride := 2",
     );
     let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0921"));
     assert!(matches!(
         facts.memory_projections.get(&run_12),
         Some(jet::Sema::MemoryProjection::OpenWorld { reason, .. })
@@ -256,7 +269,10 @@ fn run() { print(parse_port("8080")) }
         .expect("expected E0749");
     assert!(diagnostic.what.contains("parse_port"), "{diagnostic:#?}");
     assert!(diagnostic.why.contains("parse_port"), "{diagnostic:#?}");
-    assert!(diagnostic.fix.contains("fallible result"), "{diagnostic:#?}");
+    assert!(
+        diagnostic.fix.contains("fallible result"),
+        "{diagnostic:#?}"
+    );
     assert!(diagnostic.fix.contains("facts"), "{diagnostic:#?}");
     assert!(diagnostic.fix.contains("#Pre"), "{diagnostic:#?}");
 }
@@ -277,7 +293,9 @@ fn run() { top() }
     fs::write(&entry, src).unwrap();
     let (diagnostics, _, facts) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0749"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0749"));
     assert!(facts.solved["leaf"].contains("Panic"));
     assert!(facts.solved["middle"].contains("Panic"));
     assert!(facts.solved["top"].contains("Panic"));
@@ -296,7 +314,11 @@ Die :: distinct Int(1..6)
 fn pick(faces: [String#6], roll: Die) String -[!Panic]> ~faces[roll.raw() - 1]
 fn run() {}
 "#;
-    assert!(codes(src).is_empty(), "refined fixed-list read should compile: {:?}", codes(src));
+    assert!(
+        codes(src).is_empty(),
+        "refined fixed-list read should compile: {:?}",
+        codes(src)
+    );
 }
 
 /// Panic is a closed root. A nearby spelling remains E0119, not a new row.
@@ -304,8 +326,14 @@ fn run() {}
 fn unknown_panic_effect_name_is_e0119_only() {
     let src = "fn work() -[!Panics]> {}\nfn run() {}\n";
     let c = codes(src);
-    assert!(c.iter().any(|code| code == "E0119"), "expected E0119, got {c:?}");
-    assert!(!c.iter().any(|code| code == "E0749"), "unknown root must not deny: {c:?}");
+    assert!(
+        c.iter().any(|code| code == "E0119"),
+        "expected E0119, got {c:?}"
+    );
+    assert!(
+        !c.iter().any(|code| code == "E0749"),
+        "unknown root must not deny: {c:?}"
+    );
 }
 
 /// A `#(FS)` bound that matches the body's only effect compiles clean.
@@ -590,7 +618,11 @@ fn work() -[Bogus]> { print("hi"); }
 fn run() { work(); }
 "#;
     let c = codes(src);
-    assert!(c.iter().any(|c| c == "E0119"), "expected E0119, got {:?}", c);
+    assert!(
+        c.iter().any(|c| c == "E0119"),
+        "expected E0119, got {:?}",
+        c
+    );
     assert!(
         !c.iter().any(|c| c == "E0740"),
         "unknown name should suppress E0740: {:?}",
@@ -646,12 +678,9 @@ fn effect_declaration_requires_a_leaf() {
     let diagnostics =
         jet::compile("effect Log\nfn run() {}\n").expect_err("a root alone declares no leaf");
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| {
-                diagnostic.code == "E0750"
-                    && diagnostic.fix.contains("effect Log.Name")
-            }),
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0750" && diagnostic.fix.contains("effect Log.Name")
+        }),
         "{diagnostics:#?}"
     );
 }
@@ -696,11 +725,7 @@ fn dependency_effect_declaration_joins_the_package_view() {
     )
     .unwrap();
     let entry = app.join("main.jet");
-    fs::write(
-        &entry,
-        "use audit\nfn run() { audit.record() }\n",
-    )
-    .unwrap();
+    fs::write(&entry, "use audit\nfn run() { audit.record() }\n").unwrap();
 
     let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["check", "main.jet"])
@@ -843,7 +868,11 @@ fn run() {
 }
 "#;
     let c = codes(src);
-    assert!(c.iter().any(|c| c == "E0119"), "expected E0119, got {:?}", c);
+    assert!(
+        c.iter().any(|c| c == "E0119"),
+        "expected E0119, got {:?}",
+        c
+    );
     assert!(
         !c.iter().any(|c| c == "E0712"),
         "unknown name should suppress E0712: {:?}",
@@ -1079,7 +1108,10 @@ fn run() {
     assert_eq!(stdout, "second\nmanual\nfirst\ndone\n");
     let (jit_code, jit_stdout, jit_stderr) =
         tir_support::jit_run_traced("jet_effects_ffi_jit", src);
-    assert_eq!(jit_code, 0, "inline FFI JIT rollback run failed: {jit_stderr}");
+    assert_eq!(
+        jit_code, 0,
+        "inline FFI JIT rollback run failed: {jit_stderr}"
+    );
     assert_eq!(jit_stdout, "second\nmanual\nfirst\ndone\n");
     assert!(
         jit_stderr
@@ -1165,7 +1197,11 @@ fn run() {
         String::from_utf8_lossy(&output.stdout),
         "left\nright\ndone\n"
     );
-    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -1209,8 +1245,7 @@ fn run() {}
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "E0105"
-                && diagnostic.what.contains("ambiguous")),
+            .any(|diagnostic| diagnostic.code == "E0105" && diagnostic.what.contains("ambiguous")),
         "shared foreign undo ambiguity was not rejected: {diagnostics:?}"
     );
     let _ = fs::remove_dir_all(&root);
@@ -1239,7 +1274,9 @@ fn run() {
     let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Problems(diagnostics) => assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E2201"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E2201"),
             "native FFI must be an explicit interpreter boundary: {diagnostics:?}"
         ),
         other => panic!("interpreter ran native FFI: {other:?}"),
@@ -1568,7 +1605,9 @@ fn value() Int -[]> { return 1; }
 fn pure_caller() Int -[]> { return invoke(0, value); }
 fn run() { print("{invoke(0, value)}"); }
 "#;
-    let rust = jet::compile(src).expect("generic open effect row compiles").rust;
+    let rust = jet::compile(src)
+        .expect("generic open effect row compiles")
+        .rust;
     assert!(!rust.contains("..E"), "effect rows erase before codegen");
 }
 

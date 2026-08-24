@@ -1,92 +1,440 @@
 //! Windows COM type-library binder (D-FFI-COM1=A).
 
 use std::io::Read;
-use std::path::{Path,PathBuf};
-use std::process::{Command,Stdio};
-use std::time::{Duration,Instant};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-#[derive(Debug,Clone,PartialEq,Eq)]
-pub enum TypeLibraryInput{File(PathBuf),Registered{guid:String,major:u16,minor:u16,lcid:u32}}
-#[derive(Debug,Clone,PartialEq,Eq)]
-pub struct BindResult{pub source:String,pub archive:PathBuf,pub provenance:String,pub methods:Vec<String>}
-#[derive(Debug,Clone,PartialEq,Eq)]
-pub enum BindError{UnsupportedHost,Source(String),ToolMissing(&'static str),ToolFailed(&'static str,String),IO(String)}
-impl std::fmt::Display for BindError{fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{match self{Self::UnsupportedHost=>f.write_str("COM type libraries and IDispatch require a Windows host"),Self::Source(v)|Self::IO(v)=>f.write_str(v),Self::ToolMissing(v)=>write!(f,"the provisioned `{v}` tool was not found"),Self::ToolFailed(t,v)=>write!(f,"`{t}` could not inspect the COM type library: {v}")}}}
-
-#[derive(Debug,Clone,PartialEq,Eq)]enum Kind{Unit,Int,Float,Bool,Text,Data,Object(String)}
-impl Kind{fn parse(v:&str)->Option<Self>{Some(match v{"unit"=>Self::Unit,"int"=>Self::Int,"float"=>Self::Float,"bool"=>Self::Bool,"text"=>Self::Text,"data"=>Self::Data,_=>Self::Object(project(v.strip_prefix("object=")?).ok()?)})}fn jet(&self)->&str{match self{Self::Unit=>"Void",Self::Int=>"Int",Self::Float=>"Float",Self::Bool=>"Bool",Self::Text=>"String",Self::Data=>"DataTree",Self::Object(v)=>v}}fn c(&self)->&'static str{match self{Self::Unit=>"void",Self::Int|Self::Bool|Self::Object(_)=>"int64_t",Self::Float=>"double",Self::Text|Self::Data=>"const char*"}}}
-#[derive(Debug,Clone,PartialEq,Eq)]struct Param{name:String,kind:Kind}
-#[derive(Debug,Clone,PartialEq,Eq)]struct Method{interface:String,jet:String,dispid:i32,flags:u16,result:Kind,params:Vec<Param>}
-#[derive(Debug,Clone,PartialEq,Eq)]struct Schema{name:String,guid:String,class_guid:String,root_interface:String,methods:Vec<Method>}
-
-pub fn bind(input:&TypeLibraryInput,lib:&str,cache:&Path)->Result<BindResult,BindError>{
-    if !cfg!(target_os="windows"){return Err(BindError::UnsupportedHost)}if !ident(lib){return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name")))}
-    std::fs::create_dir_all(cache).map_err(|e|BindError::IO(format!("could not create COM binding cache: {e}")))?;let build=cache.join(format!(".com-build-{lib}"));let _=std::fs::remove_dir_all(&build);std::fs::create_dir_all(&build).map_err(|e|BindError::IO(format!("could not create COM build directory: {e}")))?;
-    let inspect_c=build.join("inspect.c");let inspect_exe=build.join("inspect.exe");std::fs::write(&inspect_c,DISCOVERY_C).map_err(|e|BindError::IO(format!("could not write COM type-library inspector: {e}")))?;
-    run(Command::new("cc").args(["-std=c11","-municode"]).arg(&inspect_c).args(["-loleaut32","-lole32","-o"]).arg(&inspect_exe),"cc")?;
-    let mut command=Command::new(&inspect_exe);match input{TypeLibraryInput::File(path)=>{let path=std::fs::canonicalize(path).map_err(|e|BindError::IO(format!("could not resolve the COM type library: {e}")))?;command.arg("file").arg(path);},TypeLibraryInput::Registered{guid,major,minor,lcid}=>{validate_guid(guid)?;command.args(["reg",guid,&major.to_string(),&minor.to_string(),&lcid.to_string()]);}}
-    let metadata=run_capture(&mut command,"COM type-library inspector")?;let schema=parse_schema(&metadata)?;let bridge=build.join(format!("jet_com_{lib}.c"));let object=build.join(format!("jet_com_{lib}.o"));std::fs::write(&bridge,render_c(lib,&schema)).map_err(|e|BindError::IO(format!("could not write COM automation bridge: {e}")))?;run(Command::new("cc").args(["-std=c11","-c"]).arg(&bridge).arg("-o").arg(&object),"cc")?;
-    let archive=cache.join(format!("libjet_com_{lib}.a"));let _=std::fs::remove_file(&archive);run(Command::new("ar").arg("rcs").arg(&archive).arg(&object),"ar")?;let source=render_jet(lib,&schema);let mut identity=b"jet-com-bind-v1\0".to_vec();identity.extend_from_slice(&metadata);identity.extend_from_slice(source.as_bytes());let provenance=format!("schema=jet-com-bind-v1\nsha256={}\ntype_library_name={}\ntype_library={}\nclass={}\nroot_interface={}\n",crate::SHA256::sha256_hex(&identity),schema.name,schema.guid,schema.class_guid,schema.root_interface);let methods=schema.methods.iter().map(method_name).collect();let _=std::fs::remove_dir_all(&build);Ok(BindResult{source,archive,provenance,methods})
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeLibraryInput {
+    File(PathBuf),
+    Registered {
+        guid: String,
+        major: u16,
+        minor: u16,
+        lcid: u32,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindResult {
+    pub source: String,
+    pub archive: PathBuf,
+    pub provenance: String,
+    pub methods: Vec<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindError {
+    UnsupportedHost,
+    Source(String),
+    ToolMissing(&'static str),
+    ToolFailed(&'static str, String),
+    IO(String),
+}
+impl std::fmt::Display for BindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedHost => {
+                f.write_str("COM type libraries and IDispatch require a Windows host")
+            }
+            Self::Source(v) | Self::IO(v) => f.write_str(v),
+            Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
+            Self::ToolFailed(t, v) => {
+                write!(f, "`{t}` could not inspect the COM type library: {v}")
+            }
+        }
+    }
 }
 
-fn parse_schema(bytes:&[u8])->Result<Schema,BindError>{
-    let text=std::str::from_utf8(bytes).map_err(|_|BindError::Source("the COM inspector returned non-UTF-8 metadata".into()))?;let mut name=None;let mut guid=None;let mut class=None;let mut root=None;let mut methods=Vec::new();
-    for line in text.lines(){let fields=line.split('\t').collect::<Vec<_>>();match fields.first().copied(){
-        Some("LIB")if fields.len()==3=>{name=Some(fields[1].to_string());guid=Some(fields[2].to_string())},
-        Some("CLASS")if fields.len()==3=>{class=Some(fields[1].to_string());root=Some(project(fields[2])?)},
-        Some("METHOD")if fields.len()>=6=>{let interface=project(fields[1])?;let raw=fields[2];let dispid=fields[3].parse().map_err(|_|BindError::Source(format!("COM member `{raw}` has an invalid DISPID")))?;let flags:u16=fields[4].parse().map_err(|_|BindError::Source(format!("COM member `{raw}` has invalid invocation flags")))?;let mut jet=project(raw)?;if methods.iter().any(|m:&Method|m.interface.eq_ignore_ascii_case(&interface)&&m.jet.eq_ignore_ascii_case(&jet)){jet.push_str(if flags&2!=0{"_get"}else if flags&12!=0{"_set"}else{"_call"});}if methods.iter().any(|m:&Method|m.interface.eq_ignore_ascii_case(&interface)&&m.jet.eq_ignore_ascii_case(&jet)){return Err(BindError::Source(format!("COM member `{raw}` collides with generated Jet member `{interface}.{jet}`")))}let result=Kind::parse(fields[5]).ok_or_else(||BindError::Source(format!("COM member `{raw}` has unsupported result type `{}`",fields[5])))?;let mut params=Vec::new();for value in &fields[6..]{let Some((n,k))=value.split_once(':')else{return Err(BindError::Source(format!("COM member `{raw}` has malformed parameter metadata")))};params.push(Param{name:project(n)?,kind:Kind::parse(k).ok_or_else(||BindError::Source(format!("COM member `{raw}` has unsupported parameter type `{k}`")))?});}methods.push(Method{interface,jet,dispid,flags,result,params})},
-        Some("SKIP")=>{},Some(tag)=>return Err(BindError::Source(format!("the COM inspector returned unknown `{tag}` metadata"))),None=>{}
-    }}
-    if methods.is_empty(){return Err(BindError::Source("the type library has no safely bindable IDispatch members".into()))}Ok(Schema{name:name.ok_or_else(||BindError::Source("the COM inspector omitted the library identity".into()))?,guid:guid.ok_or_else(||BindError::Source("the COM inspector omitted the library GUID".into()))?,class_guid:class.ok_or_else(||BindError::Source("the type library has no creatable COM class".into()))?,root_interface:root.ok_or_else(||BindError::Source("the COM class has no default automation interface".into()))?,methods})
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Kind {
+    Unit,
+    Int,
+    Float,
+    Bool,
+    Text,
+    Data,
+    Object(String),
+}
+impl Kind {
+    fn parse(v: &str) -> Option<Self> {
+        Some(match v {
+            "unit" => Self::Unit,
+            "int" => Self::Int,
+            "float" => Self::Float,
+            "bool" => Self::Bool,
+            "text" => Self::Text,
+            "data" => Self::Data,
+            _ => Self::Object(project(v.strip_prefix("object=")?).ok()?),
+        })
+    }
+    fn jet(&self) -> &str {
+        match self {
+            Self::Unit => "Void",
+            Self::Int => "Int",
+            Self::Float => "Float",
+            Self::Bool => "Bool",
+            Self::Text => "String",
+            Self::Data => "DataTree",
+            Self::Object(v) => v,
+        }
+    }
+    fn c(&self) -> &'static str {
+        match self {
+            Self::Unit => "void",
+            Self::Int | Self::Bool | Self::Object(_) => "int64_t",
+            Self::Float => "double",
+            Self::Text | Self::Data => "const char*",
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Param {
+    name: String,
+    kind: Kind,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Method {
+    interface: String,
+    jet: String,
+    dispid: i32,
+    flags: u16,
+    result: Kind,
+    params: Vec<Param>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Schema {
+    name: String,
+    guid: String,
+    class_guid: String,
+    root_interface: String,
+    methods: Vec<Method>,
 }
 
-fn method_name(m:&Method)->String{format!("{}_{}",m.interface,m.jet)}
+pub fn bind(input: &TypeLibraryInput, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
+    if !cfg!(target_os = "windows") {
+        return Err(BindError::UnsupportedHost);
+    }
+    if !ident(lib) {
+        return Err(BindError::Source(format!(
+            "`{lib}` is not a valid Jet library name"
+        )));
+    }
+    std::fs::create_dir_all(cache)
+        .map_err(|e| BindError::IO(format!("could not create COM binding cache: {e}")))?;
+    let build = cache.join(format!(".com-build-{lib}"));
+    let _ = std::fs::remove_dir_all(&build);
+    std::fs::create_dir_all(&build)
+        .map_err(|e| BindError::IO(format!("could not create COM build directory: {e}")))?;
+    let inspect_c = build.join("inspect.c");
+    let inspect_exe = build.join("inspect.exe");
+    std::fs::write(&inspect_c, DISCOVERY_C)
+        .map_err(|e| BindError::IO(format!("could not write COM type-library inspector: {e}")))?;
+    run(
+        Command::new("cc")
+            .args(["-std=c11", "-municode"])
+            .arg(&inspect_c)
+            .args(["-loleaut32", "-lole32", "-o"])
+            .arg(&inspect_exe),
+        "cc",
+    )?;
+    let mut command = Command::new(&inspect_exe);
+    match input {
+        TypeLibraryInput::File(path) => {
+            let path = std::fs::canonicalize(path).map_err(|e| {
+                BindError::IO(format!("could not resolve the COM type library: {e}"))
+            })?;
+            command.arg("file").arg(path);
+        }
+        TypeLibraryInput::Registered {
+            guid,
+            major,
+            minor,
+            lcid,
+        } => {
+            validate_guid(guid)?;
+            command.args([
+                "reg",
+                guid,
+                &major.to_string(),
+                &minor.to_string(),
+                &lcid.to_string(),
+            ]);
+        }
+    }
+    let metadata = run_capture(&mut command, "COM type-library inspector")?;
+    let schema = parse_schema(&metadata)?;
+    let bridge = build.join(format!("jet_com_{lib}.c"));
+    let object = build.join(format!("jet_com_{lib}.o"));
+    std::fs::write(&bridge, render_c(lib, &schema))
+        .map_err(|e| BindError::IO(format!("could not write COM automation bridge: {e}")))?;
+    run(
+        Command::new("cc")
+            .args(["-std=c11", "-c"])
+            .arg(&bridge)
+            .arg("-o")
+            .arg(&object),
+        "cc",
+    )?;
+    let archive = cache.join(format!("libjet_com_{lib}.a"));
+    let _ = std::fs::remove_file(&archive);
+    run(
+        Command::new("ar").arg("rcs").arg(&archive).arg(&object),
+        "ar",
+    )?;
+    let source = render_jet(lib, &schema);
+    let mut identity = b"jet-com-bind-v1\0".to_vec();
+    identity.extend_from_slice(&metadata);
+    identity.extend_from_slice(source.as_bytes());
+    let provenance=format!("schema=jet-com-bind-v1\nsha256={}\ntype_library_name={}\ntype_library={}\nclass={}\nroot_interface={}\n",crate::SHA256::sha256_hex(&identity),schema.name,schema.guid,schema.class_guid,schema.root_interface);
+    let methods = schema.methods.iter().map(method_name).collect();
+    let _ = std::fs::remove_dir_all(&build);
+    Ok(BindResult {
+        source,
+        archive,
+        provenance,
+        methods,
+    })
+}
 
-fn interfaces(s:&Schema)->Vec<String>{
-    let mut out=vec![s.root_interface.clone()];
-    for m in &s.methods{
-        if !out.contains(&m.interface){out.push(m.interface.clone())}
-        for kind in std::iter::once(&m.result).chain(m.params.iter().map(|p|&p.kind)){
-            if let Kind::Object(name)=kind{if !out.contains(name){out.push(name.clone())}}
+fn parse_schema(bytes: &[u8]) -> Result<Schema, BindError> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| BindError::Source("the COM inspector returned non-UTF-8 metadata".into()))?;
+    let mut name = None;
+    let mut guid = None;
+    let mut class = None;
+    let mut root = None;
+    let mut methods = Vec::new();
+    for line in text.lines() {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        match fields.first().copied() {
+            Some("LIB") if fields.len() == 3 => {
+                name = Some(fields[1].to_string());
+                guid = Some(fields[2].to_string())
+            }
+            Some("CLASS") if fields.len() == 3 => {
+                class = Some(fields[1].to_string());
+                root = Some(project(fields[2])?)
+            }
+            Some("METHOD") if fields.len() >= 6 => {
+                let interface = project(fields[1])?;
+                let raw = fields[2];
+                let dispid = fields[3].parse().map_err(|_| {
+                    BindError::Source(format!("COM member `{raw}` has an invalid DISPID"))
+                })?;
+                let flags: u16 = fields[4].parse().map_err(|_| {
+                    BindError::Source(format!("COM member `{raw}` has invalid invocation flags"))
+                })?;
+                let mut jet = project(raw)?;
+                if methods.iter().any(|m: &Method| {
+                    m.interface.eq_ignore_ascii_case(&interface) && m.jet.eq_ignore_ascii_case(&jet)
+                }) {
+                    jet.push_str(if flags & 2 != 0 {
+                        "_get"
+                    } else if flags & 12 != 0 {
+                        "_set"
+                    } else {
+                        "_call"
+                    });
+                }
+                if methods.iter().any(|m: &Method| {
+                    m.interface.eq_ignore_ascii_case(&interface) && m.jet.eq_ignore_ascii_case(&jet)
+                }) {
+                    return Err(BindError::Source(format!(
+                        "COM member `{raw}` collides with generated Jet member `{interface}.{jet}`"
+                    )));
+                }
+                let result = Kind::parse(fields[5]).ok_or_else(|| {
+                    BindError::Source(format!(
+                        "COM member `{raw}` has unsupported result type `{}`",
+                        fields[5]
+                    ))
+                })?;
+                let mut params = Vec::new();
+                for value in &fields[6..] {
+                    let Some((n, k)) = value.split_once(':') else {
+                        return Err(BindError::Source(format!(
+                            "COM member `{raw}` has malformed parameter metadata"
+                        )));
+                    };
+                    params.push(Param {
+                        name: project(n)?,
+                        kind: Kind::parse(k).ok_or_else(|| {
+                            BindError::Source(format!(
+                                "COM member `{raw}` has unsupported parameter type `{k}`"
+                            ))
+                        })?,
+                    });
+                }
+                methods.push(Method {
+                    interface,
+                    jet,
+                    dispid,
+                    flags,
+                    result,
+                    params,
+                })
+            }
+            Some("SKIP") => {}
+            Some(tag) => {
+                return Err(BindError::Source(format!(
+                    "the COM inspector returned unknown `{tag}` metadata"
+                )))
+            }
+            None => {}
+        }
+    }
+    if methods.is_empty() {
+        return Err(BindError::Source(
+            "the type library has no safely bindable IDispatch members".into(),
+        ));
+    }
+    Ok(Schema {
+        name: name.ok_or_else(|| {
+            BindError::Source("the COM inspector omitted the library identity".into())
+        })?,
+        guid: guid.ok_or_else(|| {
+            BindError::Source("the COM inspector omitted the library GUID".into())
+        })?,
+        class_guid: class.ok_or_else(|| {
+            BindError::Source("the type library has no creatable COM class".into())
+        })?,
+        root_interface: root.ok_or_else(|| {
+            BindError::Source("the COM class has no default automation interface".into())
+        })?,
+        methods,
+    })
+}
+
+fn method_name(m: &Method) -> String {
+    format!("{}_{}", m.interface, m.jet)
+}
+
+fn interfaces(s: &Schema) -> Vec<String> {
+    let mut out = vec![s.root_interface.clone()];
+    for m in &s.methods {
+        if !out.contains(&m.interface) {
+            out.push(m.interface.clone())
+        }
+        for kind in std::iter::once(&m.result).chain(m.params.iter().map(|p| &p.kind)) {
+            if let Kind::Object(name) = kind {
+                if !out.contains(name) {
+                    out.push(name.clone())
+                }
+            }
         }
     }
     out
 }
 
-fn render_jet(lib:&str,s:&Schema)->String{
-    let abi=format!("jet_com_{lib}");
+fn render_jet(lib: &str, s: &Schema) -> String {
+    let abi = format!("jet_com_{lib}");
     let mut o=format!("#Extern module c.{abi} {{\n    fn open() => Int = \"{abi}_open\"\n    fn take_error() => Int = \"{abi}_take_error\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn dynamic(handle: Int, name: String, args: String, flags: Int) => String = \"{abi}_dynamic\"\n");
-    for m in &s.methods{
-        let name=method_name(m);o.push_str(&format!("    fn {name}(handle: Int"));
-        for p in &m.params{o.push_str(&format!(", {}: {}",p.name,p.kind.jet()))}
-        o.push(')');if m.result!=Kind::Unit{o.push_str(&format!(" => {}",m.result.jet()))}
+    for m in &s.methods {
+        let name = method_name(m);
+        o.push_str(&format!("    fn {name}(handle: Int"));
+        for p in &m.params {
+            o.push_str(&format!(", {}: {}", p.name, p.kind.jet()))
+        }
+        o.push(')');
+        if m.result != Kind::Unit {
+            o.push_str(&format!(" => {}", m.result.jet()))
+        }
         o.push_str(&format!(" = \"{abi}_{name}\"\n"));
     }
-    o.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"));
-    for interface in interfaces(s){o.push_str(&format!("pub struct {interface} {{ value: Int }}\n"))}
+    o.push_str(&format!(
+        "}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"
+    ));
+    for interface in interfaces(s) {
+        o.push_str(&format!("pub struct {interface} {{ value: Int }}\n"))
+    }
     o.push_str("pub enum ComError { WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }\n\n");
     o.push_str(&format!("pub fn open() => {} ComError! {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({}.{{ value: value }})\n}}\n\n",s.root_interface,s.root_interface));
-    for interface in interfaces(s){
+    for interface in interfaces(s) {
         o.push_str(&format!("impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"));
         o.push_str(&format!("#Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) => DataTree ComError! {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"));
     }
     o.push_str("fn error(code: Int) => ComError {\n    if code == 1 { return ComError.WrongApartment }\n    if code == 2 { return ComError.InvalidHandle }\n    if code == 3 { return ComError.InvalidArgument }\n    if code == 5 { return ComError.TypeMismatch }\n    if code == 6 { return ComError.Limit }\n    return ComError.MemberFailed\n}\n\n");
-    for m in &s.methods{
-        let name=method_name(m);o.push_str(&format!("pub fn {name}(object: {}",m.interface));
-        for p in &m.params{o.push_str(&format!(", {}: {}",p.name,p.kind.jet()))}
-        o.push_str(&format!(") => {} ComError! {{\n    ",m.result.jet()));
-        if m.result!=Kind::Unit{o.push_str("value :: ")}o.push_str(&format!("abi.{name}(object.value"));
-        for p in &m.params{o.push_str(&format!(", {}",p.name))}
-        o.push_str(")\n    code :: abi.take_error()\n    if code != 0 { return Err(error(code)) }\n");
-        if m.result==Kind::Unit{o.push_str("    return Ok(Void)\n")}else{o.push_str("    return Ok(value)\n")}
+    for m in &s.methods {
+        let name = method_name(m);
+        o.push_str(&format!("pub fn {name}(object: {}", m.interface));
+        for p in &m.params {
+            o.push_str(&format!(", {}: {}", p.name, p.kind.jet()))
+        }
+        o.push_str(&format!(") => {} ComError! {{\n    ", m.result.jet()));
+        if m.result != Kind::Unit {
+            o.push_str("value :: ")
+        }
+        o.push_str(&format!("abi.{name}(object.value"));
+        for p in &m.params {
+            o.push_str(&format!(", {}", p.name))
+        }
+        o.push_str(
+            ")\n    code :: abi.take_error()\n    if code != 0 { return Err(error(code)) }\n",
+        );
+        if m.result == Kind::Unit {
+            o.push_str("    return Ok(Void)\n")
+        } else {
+            o.push_str("    return Ok(value)\n")
+        }
         o.push_str("}\n\n");
     }
     o
 }
 
-fn render_c(lib:&str,s:&Schema)->String{let abi=format!("jet_com_{lib}");let mut wrappers=String::new();for m in &s.methods{let name=method_name(m);wrappers.push_str(m.result.c());wrappers.push(' ');wrappers.push_str(&format!("{abi}_{name}(int64_t handle"));for p in &m.params{wrappers.push_str(&format!(",{} {}",p.kind.c(),p.name))}wrappers.push_str("){failed=0;VARIANT args[");wrappers.push_str(&m.params.len().max(1).to_string());wrappers.push_str("];for(size_t i=0;i<sizeof(args)/sizeof(args[0]);i++)VariantInit(&args[i]);VARIANT result;VariantInit(&result);");for(i,p)in m.params.iter().enumerate(){let at=m.params.len()-1-i;let set=match &p.kind{Kind::Int=>format!("V_VT(&args[{at}])=VT_I8;V_I8(&args[{at}])={};",p.name),Kind::Float=>format!("V_VT(&args[{at}])=VT_R8;V_R8(&args[{at}])={};",p.name),Kind::Bool=>format!("V_VT(&args[{at}])=VT_BOOL;V_BOOL(&args[{at}])={}?VARIANT_TRUE:VARIANT_FALSE;",p.name),Kind::Text=>format!("if(!text_arg({},&args[{at}]))goto bad;",p.name),Kind::Data=>format!("if(!json_arg({},&args[{at}]))goto bad;",p.name),Kind::Object(_)=>format!("if(!object_arg({},&args[{at}]))goto bad;",p.name),Kind::Unit=>String::new()};wrappers.push_str(&set)}wrappers.push_str(&format!("if(!invoke_member(handle,{}, {},args,{},&result))goto bad;",m.dispid,m.flags,m.params.len()));let ret=match &m.result{Kind::Unit=>"VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return;",Kind::Int=>"int64_t value=variant_int(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Float=>"double value=variant_float(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Bool=>"int64_t value=variant_bool(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Text=>"const char*value=variant_text(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Data=>"const char*value=variant_json(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Object(_)=>"int64_t value=variant_object(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"};wrappers.push_str(ret);wrappers.push_str("bad:VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));");wrappers.push_str(match &m.result{Kind::Unit=>"return;}\n",Kind::Float=>"return 0.0;}\n",Kind::Text|Kind::Data=>"return \"\";}\n",_=>"return 0;}\n"});}RUNTIME_C.replace("@ABI@",&abi).replace("@CLASS@",&s.class_guid).replace("@WRAPPERS@",&wrappers)}
+fn render_c(lib: &str, s: &Schema) -> String {
+    let abi = format!("jet_com_{lib}");
+    let mut wrappers = String::new();
+    for m in &s.methods {
+        let name = method_name(m);
+        wrappers.push_str(m.result.c());
+        wrappers.push(' ');
+        wrappers.push_str(&format!("{abi}_{name}(int64_t handle"));
+        for p in &m.params {
+            wrappers.push_str(&format!(",{} {}", p.kind.c(), p.name))
+        }
+        wrappers.push_str("){failed=0;VARIANT args[");
+        wrappers.push_str(&m.params.len().max(1).to_string());
+        wrappers.push_str("];for(size_t i=0;i<sizeof(args)/sizeof(args[0]);i++)VariantInit(&args[i]);VARIANT result;VariantInit(&result);");
+        for (i, p) in m.params.iter().enumerate() {
+            let at = m.params.len() - 1 - i;
+            let set = match &p.kind {
+                Kind::Int => format!("V_VT(&args[{at}])=VT_I8;V_I8(&args[{at}])={};", p.name),
+                Kind::Float => format!("V_VT(&args[{at}])=VT_R8;V_R8(&args[{at}])={};", p.name),
+                Kind::Bool => format!(
+                    "V_VT(&args[{at}])=VT_BOOL;V_BOOL(&args[{at}])={}?VARIANT_TRUE:VARIANT_FALSE;",
+                    p.name
+                ),
+                Kind::Text => format!("if(!text_arg({},&args[{at}]))goto bad;", p.name),
+                Kind::Data => format!("if(!json_arg({},&args[{at}]))goto bad;", p.name),
+                Kind::Object(_) => format!("if(!object_arg({},&args[{at}]))goto bad;", p.name),
+                Kind::Unit => String::new(),
+            };
+            wrappers.push_str(&set)
+        }
+        wrappers.push_str(&format!(
+            "if(!invoke_member(handle,{}, {},args,{},&result))goto bad;",
+            m.dispid,
+            m.flags,
+            m.params.len()
+        ));
+        let ret=match &m.result{Kind::Unit=>"VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return;",Kind::Int=>"int64_t value=variant_int(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Float=>"double value=variant_float(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Bool=>"int64_t value=variant_bool(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Text=>"const char*value=variant_text(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Data=>"const char*value=variant_json(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;",Kind::Object(_)=>"int64_t value=variant_object(&result);VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));return value;"};
+        wrappers.push_str(ret);
+        wrappers
+            .push_str("bad:VariantClear(&result);clear_args(args,sizeof(args)/sizeof(args[0]));");
+        wrappers.push_str(match &m.result {
+            Kind::Unit => "return;}\n",
+            Kind::Float => "return 0.0;}\n",
+            Kind::Text | Kind::Data => "return \"\";}\n",
+            _ => "return 0;}\n",
+        });
+    }
+    RUNTIME_C
+        .replace("@ABI@", &abi)
+        .replace("@CLASS@", &s.class_guid)
+        .replace("@WRAPPERS@", &wrappers)
+}
 
-const RUNTIME_C:&str=r#"#define COBJMACROS
+const RUNTIME_C: &str = r#"#define COBJMACROS
 #include <windows.h>
 #include <oleauto.h>
 #include <stdint.h>
@@ -134,7 +482,7 @@ const char* @ABI@_dynamic(int64_t h,const char*name,const char*json,int64_t flag
 @WRAPPERS@
 "#;
 
-const DISCOVERY_C:&str=r#"#define COBJMACROS
+const DISCOVERY_C: &str = r#"#define COBJMACROS
 #include <windows.h>
 #include <oleauto.h>
 #include <stdio.h>
@@ -164,31 +512,202 @@ int wmain(int argc,wchar_t**argv){
 "#;
 
 #[cfg(test)]
-mod tests{
+mod tests {
     #[test]
-    fn contextual_result_names_project_as_foreign_identifiers(){assert_eq!(super::project("Ok").unwrap(),"Ok");assert_eq!(super::project("Err").unwrap(),"Err");}
-    #[test]
-    fn schema_generates_typed_stub_and_real_windows_automation(){let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n";let schema=super::parse_schema(metadata).unwrap();let jet=super::render_jet("office",&schema);assert!(jet.contains("pub fn open() => Application ComError!"));assert!(jet.contains("impl Application.Close"));assert!(jet.contains("fn close(^self)"));assert!(!jet.contains("pub fn close_Application"));assert!(jet.contains("pub fn Application_Workbooks(object: Application) => Workbooks ComError!"));assert!(jet.contains("pub fn Workbooks_Open_Book(object: Workbooks, path: String) => Workbook ComError!"));assert!(jet.contains("pub fn Range_Values(object: Range) => DataTree ComError!"));assert!(jet.contains("#Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_Application"));let c=super::render_c("office",&schema);assert!(c.contains("jet_com_office_Workbooks_Open_Book"));for needle in ["CoInitializeEx","CoCreateInstance","IDispatch_Invoke","SafeArrayGetElement","VariantChangeType","IDispatch_Release","GetCurrentThreadId"]{assert!(c.contains(needle),"missing {needle}")}}
-    #[cfg(not(target_os="windows"))]
-    #[test]
-    fn generated_windows_sources_cross_compile_with_winegcc(){
-        if std::process::Command::new("winegcc").arg("--version").output().is_err(){return}
-        let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n";
-        let schema=super::parse_schema(metadata).unwrap();let dir=std::env::temp_dir().join(format!("jet-com-cross-{}",std::process::id()));let _=std::fs::remove_dir_all(&dir);std::fs::create_dir_all(&dir).unwrap();
-        let inspector=dir.join("inspect.c");let runtime=dir.join("runtime.c");std::fs::write(&inspector,super::DISCOVERY_C).unwrap();std::fs::write(&runtime,super::render_c("office",&schema)).unwrap();
-        for (source,object) in [(&inspector,"inspect.o"),(&runtime,"runtime.o")]{let output=std::process::Command::new("winegcc").args(["-std=gnu11","-c"]).arg(source).arg("-o").arg(dir.join(object)).output().unwrap();assert!(output.status.success(),"winegcc failed for {}: {}",source.display(),String::from_utf8_lossy(&output.stderr));}
-        let _=std::fs::remove_dir_all(dir);
+    fn contextual_result_names_project_as_foreign_identifiers() {
+        assert_eq!(super::project("Ok").unwrap(), "Ok");
+        assert_eq!(super::project("Err").unwrap(), "Err");
     }
     #[test]
-    fn non_windows_host_is_rejected_before_tool_or_file_access(){if cfg!(target_os="windows"){return}let error=super::bind(&super::TypeLibraryInput::File("missing.tlb".into()),"office",std::path::Path::new("missing-cache")).unwrap_err();assert_eq!(error,super::BindError::UnsupportedHost)}
+    fn schema_generates_typed_stub_and_real_windows_automation() {
+        let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tWorkbooks\t41\t2\tobject=Workbooks\nMETHOD\tWorkbooks\tOpen-Book\t42\t1\tobject=Workbook\tpath:text\nMETHOD\tRange\tValues\t77\t2\tdata\n";
+        let schema = super::parse_schema(metadata).unwrap();
+        let jet = super::render_jet("office", &schema);
+        assert!(jet.contains("pub fn open() => Application ComError!"));
+        assert!(jet.contains("impl Application.Close"));
+        assert!(jet.contains("fn close(^self)"));
+        assert!(!jet.contains("pub fn close_Application"));
+        assert!(jet
+            .contains("pub fn Application_Workbooks(object: Application) => Workbooks ComError!"));
+        assert!(jet.contains(
+            "pub fn Workbooks_Open_Book(object: Workbooks, path: String) => Workbook ComError!"
+        ));
+        assert!(jet.contains("pub fn Range_Values(object: Range) => DataTree ComError!"));
+        assert!(jet.contains("#Unsafe(\"dynamic IDispatch has no type-library contract\") pub fn dynamic_Application"));
+        let c = super::render_c("office", &schema);
+        assert!(c.contains("jet_com_office_Workbooks_Open_Book"));
+        for needle in [
+            "CoInitializeEx",
+            "CoCreateInstance",
+            "IDispatch_Invoke",
+            "SafeArrayGetElement",
+            "VariantChangeType",
+            "IDispatch_Release",
+            "GetCurrentThreadId",
+        ] {
+            assert!(c.contains(needle), "missing {needle}")
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn generated_windows_sources_cross_compile_with_winegcc() {
+        if std::process::Command::new("winegcc")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let metadata=b"LIB\tOffice Fixture\t{00000000-0000-0000-0000-000000000001}\nCLASS\t{00000000-0000-0000-0000-000000000002}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n";
+        let schema = super::parse_schema(metadata).unwrap();
+        let dir = std::env::temp_dir().join(format!("jet-com-cross-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let inspector = dir.join("inspect.c");
+        let runtime = dir.join("runtime.c");
+        std::fs::write(&inspector, super::DISCOVERY_C).unwrap();
+        std::fs::write(&runtime, super::render_c("office", &schema)).unwrap();
+        for (source, object) in [(&inspector, "inspect.o"), (&runtime, "runtime.o")] {
+            let output = std::process::Command::new("winegcc")
+                .args(["-std=gnu11", "-c"])
+                .arg(source)
+                .arg("-o")
+                .arg(dir.join(object))
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "winegcc failed for {}: {}",
+                source.display(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn non_windows_host_is_rejected_before_tool_or_file_access() {
+        if cfg!(target_os = "windows") {
+            return;
+        }
+        let error = super::bind(
+            &super::TypeLibraryInput::File("missing.tlb".into()),
+            "office",
+            std::path::Path::new("missing-cache"),
+        )
+        .unwrap_err();
+        assert_eq!(error, super::BindError::UnsupportedHost)
+    }
 }
 
-fn project(v:&str)->Result<String,BindError>{let out=v.replace('-',"_");if !ident(&out)||crate::Syntax::JET_KEYWORD_LIST.contains(&out.as_str())||crate::Syntax::JET_TYPE_LIST.contains(&out.as_str()){return Err(BindError::Source(format!("COM name `{v}` cannot be projected as a Jet identifier")))}Ok(out)}
-fn ident(v:&str)->bool{let mut c=v.chars();matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')&&c.all(|x|x.is_ascii_alphanumeric()||x=='_')}
-fn validate_guid(v:&str)->Result<(),BindError>{let bytes=v.as_bytes();if bytes.len()!=38||bytes[0]!=b'{'||bytes[37]!=b'}'||[9,14,19,24].iter().any(|i|bytes[*i]!=b'-')||bytes[1..37].iter().enumerate().any(|(i,b)|![8,13,18,23].contains(&i)&&!b.is_ascii_hexdigit()){return Err(BindError::Source("the registered COM type-library GUID is invalid".into()))}Ok(())}
+fn project(v: &str) -> Result<String, BindError> {
+    let out = v.replace('-', "_");
+    if !ident(&out)
+        || crate::Syntax::JET_KEYWORD_LIST.contains(&out.as_str())
+        || crate::Syntax::JET_TYPE_LIST.contains(&out.as_str())
+    {
+        return Err(BindError::Source(format!(
+            "COM name `{v}` cannot be projected as a Jet identifier"
+        )));
+    }
+    Ok(out)
+}
+fn ident(v: &str) -> bool {
+    let mut c = v.chars();
+    matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')
+        && c.all(|x| x.is_ascii_alphanumeric() || x == '_')
+}
+fn validate_guid(v: &str) -> Result<(), BindError> {
+    let bytes = v.as_bytes();
+    if bytes.len() != 38
+        || bytes[0] != b'{'
+        || bytes[37] != b'}'
+        || [9, 14, 19, 24].iter().any(|i| bytes[*i] != b'-')
+        || bytes[1..37]
+            .iter()
+            .enumerate()
+            .any(|(i, b)| ![8, 13, 18, 23].contains(&i) && !b.is_ascii_hexdigit())
+    {
+        return Err(BindError::Source(
+            "the registered COM type-library GUID is invalid".into(),
+        ));
+    }
+    Ok(())
+}
 
-fn run_capture(command:&mut Command,tool:&'static str)->Result<Vec<u8>,BindError>{command.stdout(Stdio::piped()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;let stdout=child.stdout.take().unwrap();let stderr=child.stderr.take().unwrap();let out=std::thread::spawn(move||drain(stdout));let err=std::thread::spawn(move||drain(stderr));let status=wait(&mut child,tool)?;let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??;let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(stdout)}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}}
-fn run(command:&mut Command,tool:&'static str)->Result<(),BindError>{let _=run_capture(command,tool)?;Ok(())}
-fn wait(child:&mut std::process::Child,tool:&'static str)->Result<std::process::ExitStatus,BindError>{let end=Instant::now()+Duration::from_secs(60);loop{if let Some(v)=child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{return Ok(v)}if Instant::now()>=end{let _=child.kill();let _=child.wait();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))}std::thread::sleep(Duration::from_millis(10))}}
-fn drain(mut input:impl Read)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read COM tool output: {e}")))?;if n==0{break}if out.len()<65536{out.extend_from_slice(&buf[..n.min(65536-out.len())])}}Ok(out)}
-fn launder(v:&[u8])->String{String::from_utf8_lossy(v).lines().map(str::trim).find(|s|!s.is_empty()).map(|_|"the Windows COM operation failed".into()).unwrap_or_else(||"the Windows COM operation failed".into())}
+fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, BindError> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
+    })?;
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let out = std::thread::spawn(move || drain(stdout));
+    let err = std::thread::spawn(move || drain(stderr));
+    let status = wait(&mut child, tool)?;
+    let stdout = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    if status.success() {
+        Ok(stdout)
+    } else {
+        Err(BindError::ToolFailed(tool, launder(&stderr)))
+    }
+}
+fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
+    let _ = run_capture(command, tool)?;
+    Ok(())
+}
+fn wait(
+    child: &mut std::process::Child,
+    tool: &'static str,
+) -> Result<std::process::ExitStatus, BindError> {
+    let end = Instant::now() + Duration::from_secs(60);
+    loop {
+        if let Some(v) = child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
+            return Ok(v);
+        }
+        if Instant::now() >= end {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(BindError::ToolFailed(
+                tool,
+                "the tool exceeded the 60 second limit".into(),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10))
+    }
+}
+fn drain(mut input: impl Read) -> Result<Vec<u8>, BindError> {
+    let mut out = Vec::new();
+    let mut buf = [0; 8192];
+    loop {
+        let n = input
+            .read(&mut buf)
+            .map_err(|e| BindError::IO(format!("could not read COM tool output: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        if out.len() < 65536 {
+            out.extend_from_slice(&buf[..n.min(65536 - out.len())])
+        }
+    }
+    Ok(out)
+}
+fn launder(v: &[u8]) -> String {
+    String::from_utf8_lossy(v)
+        .lines()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(|_| "the Windows COM operation failed".into())
+        .unwrap_or_else(|| "the Windows COM operation failed".into())
+}

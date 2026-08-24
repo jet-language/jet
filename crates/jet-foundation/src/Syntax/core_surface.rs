@@ -29,7 +29,14 @@ pub const ARTIFACT_EXT_GAME_REPLAY: &str = ".jetreplay";
 pub const ARTIFACT_EXT_PROOF_REPLAY: &str = ".jetproof-replay";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ArtifactKind { SourceMap, Notebook, Proof, Trace, GameReplay, ProofReplay }
+pub enum ArtifactKind {
+    SourceMap,
+    Notebook,
+    Proof,
+    Trace,
+    GameReplay,
+    ProofReplay,
+}
 
 pub const ARTIFACT_KINDS: &[(ArtifactKind, &str)] = &[
     (ArtifactKind::SourceMap, ARTIFACT_EXT_SOURCE_MAP),
@@ -41,7 +48,9 @@ pub const ARTIFACT_KINDS: &[(ArtifactKind, &str)] = &[
 ];
 
 pub fn artifact_kind(path: &str) -> Option<ArtifactKind> {
-    ARTIFACT_KINDS.iter().find_map(|(kind, suffix)| path.ends_with(suffix).then_some(*kind))
+    ARTIFACT_KINDS
+        .iter()
+        .find_map(|(kind, suffix)| path.ends_with(suffix).then_some(*kind))
 }
 
 /// S1 (ratified): keyword that starts a function definition.
@@ -543,7 +552,6 @@ pub fn typed_head_kind(name: &str) -> Option<TypedHeadKind> {
     }
 }
 
-
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family
 /// (`Wasm`/`JS`/`Web` above are the first, web-bucket axis). Attaches at
@@ -953,9 +961,10 @@ pub const COMPILER_FACTS: &[(&str, &str)] = &[
     (COMPILER_FACT_FIELDS, "fields"),
 ];
 
-
 pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
-    COMPILER_FACTS.iter().find_map(|(name, member)| (*name == fact).then_some(*member))
+    COMPILER_FACTS
+        .iter()
+        .find_map(|(name, member)| (*name == fact).then_some(*member))
 }
 
 pub fn fact_read_kind(member: &str) -> Option<crate::Registry::FactRead> {

@@ -6,7 +6,7 @@
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
 
-use crate::Marshal::{clone_bytes, alloc_byte_list, result_ok, result_err_msg};
+use crate::Marshal::{alloc_byte_list, clone_bytes, result_err_msg, result_ok};
 
 mod runtime {
     include!("../../jet-pkg-model/src/Prelude/Compress.rs");
@@ -54,8 +54,3 @@ host_fns! {
     zstd_compress: "jet_jit_zstd_compress" => jet_jit_zstd_compress: sig_unary;
     zstd_decompress: "jet_jit_zstd_decompress" => jet_jit_zstd_decompress: sig_unary;
 }
-
-
-
-
-

@@ -41,25 +41,46 @@ impl History {
             Err(_) => (DEFAULT_LIMIT, Vec::new()),
         };
         let Some(root) = state_root() else {
-            return (Self::fallback(limit), Some(storage_fallback("no platform state directory")));
+            return (
+                Self::fallback(limit),
+                Some(storage_fallback("no platform state directory")),
+            );
         };
         let backend = match Backend::open(&root) {
             Ok(backend) => backend,
-            Err(error) => return (Self::fallback(limit), Some(storage_fallback(&error.to_string()))),
+            Err(error) => {
+                return (
+                    Self::fallback(limit),
+                    Some(storage_fallback(&error.to_string())),
+                )
+            }
         };
         let guard = match backend.lock() {
             Ok(guard) => guard,
-            Err(error) => return (Self::fallback(limit), Some(storage_fallback(&error.to_string()))),
+            Err(error) => {
+                return (
+                    Self::fallback(limit),
+                    Some(storage_fallback(&error.to_string())),
+                )
+            }
         };
         let (mut entries, corrupt) = match load_entries(&backend) {
             Ok(loaded) => loaded,
-            Err(error) => return (Self::fallback(limit), Some(storage_fallback(&error.to_string()))),
+            Err(error) => {
+                return (
+                    Self::fallback(limit),
+                    Some(storage_fallback(&error.to_string())),
+                )
+            }
         };
         let before_trim = entries.len();
         trim(&mut entries, limit);
         if corrupt || entries.len() != before_trim {
             if let Err(error) = backend.rewrite(&entries) {
-                return (Self::fallback(limit), Some(storage_fallback(&error.to_string())));
+                return (
+                    Self::fallback(limit),
+                    Some(storage_fallback(&error.to_string())),
+                );
             }
         }
         drop(guard);

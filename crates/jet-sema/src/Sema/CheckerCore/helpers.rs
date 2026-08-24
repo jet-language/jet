@@ -1,5 +1,5 @@
-use crate::AST::{Expr, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{Expr, Type};
 
 /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL2): a `Type.{ uninit }` binding
 /// is restricted to plain-data ("POD") types — no heap ownership, no Drop glue —

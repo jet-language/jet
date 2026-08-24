@@ -12,9 +12,7 @@
 #![allow(non_snake_case)]
 #![deny(warnings)]
 
-pub use jet_codegen::{
-    Codegen, Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256,
-};
+pub use jet_codegen::{Codegen, Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256};
 
 // Card #367 / D-PRODUCT-SPLIT1=C: the read-only package/config data model
 // (manifest/lock/store-listing/ref/FFI-binding/script-dep parsing), plus the
@@ -24,13 +22,13 @@ pub use jet_codegen::{
 // provider/network/shell engine. Re-exported under their historical paths so
 // every internal call site in this crate (`crate::Package`,
 // `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
-pub use jet_pkg_model::{
-    AdaBind, CBind, CFFI, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FFI, FortranBind,
-    JavaBind, JetLib, JSON, LintPolicy, Lock, Manifest, Package, PascalBind, Platform,
-    PowerShellBind, RefSpec, ScriptDeps, TclBind, Variant,
-};
 pub use jet_pkg_model::ProviderFacts::{
     ProviderConflict, ProviderFactValue, ProviderFacts, ProviderLoss, ProviderSelector,
+};
+pub use jet_pkg_model::{
+    AdaBind, CBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FortranBind,
+    JavaBind, JetLib, LintPolicy, Lock, Manifest, Package, PascalBind, Platform, PowerShellBind,
+    RefSpec, ScriptDeps, TclBind, Variant, CFFI, FFI, JSON,
 };
 // Card #367 slice 5: WorkspacePlan/WorkspaceMember + WorkspaceLock read path
 // now live in jet-pkg-model (L1). WorkspaceFile eval lives in jet-env-model
@@ -191,9 +189,9 @@ pub mod Services;
 pub mod Shell;
 pub mod Store;
 pub mod Toolchain;
+pub mod Transition;
 pub mod Trust;
 pub mod TrustRoot;
-pub mod Transition;
 pub mod WorkspaceFile;
 pub mod WorkspaceLock;
 

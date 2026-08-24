@@ -1,9 +1,9 @@
-use crate::AST::Type;
+use super::alloc_ptrs::result_ty;
+use super::serde_diags::wrong_core_arity;
 use crate::Diagnostics::Span;
 use crate::Sema::Checker;
 use crate::Sema::Effects::Effect;
-use super::alloc_ptrs::result_ty;
-use super::serde_diags::wrong_core_arity;
+use crate::AST::Type;
 
 impl<'a> Checker<'a> {
     /// D-LIB-CALLGRANT1=A: a loaded Mod exposes one deliberately small first
@@ -31,4 +31,3 @@ impl<'a> Checker<'a> {
         Some(Some(result_ty(Type::Int, Type::String)))
     }
 }
-

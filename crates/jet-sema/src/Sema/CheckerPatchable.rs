@@ -11,9 +11,7 @@ pub(crate) fn patch_type_name(base: &str) -> String {
 }
 
 fn has_patchable(s: &StructDef) -> bool {
-    s.derives
-        .iter()
-        .any(|(t, _)| t == Syntax::MARKER_PATCHABLE)
+    s.derives.iter().any(|(t, _)| t == Syntax::MARKER_PATCHABLE)
 }
 
 /// Append synthetic `T.Patch` struct items (Codable via Encode+Decode) before registration.
@@ -47,7 +45,7 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
                 redact: false,
                 computed: None,
                 default: None,
-            default_ct: None,
+                default_ct: None,
             })
             .collect();
         to_add.push(Item::Struct(StructDef {

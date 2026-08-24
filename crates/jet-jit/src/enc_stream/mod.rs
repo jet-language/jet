@@ -6,15 +6,15 @@
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
 
-#[allow(unused_imports)]
-pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use super::Encoding::{alloc_datatree, read_datatree};
 use crate::Marshal::{clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module as _;
-use jet_codegen::AST::{CtKey, CtReport, CtValue, Type};
 use jet_codegen::Diagnostics::{Diagnostic, Span};
+use jet_codegen::AST::{CtKey, CtReport, CtValue, Type};
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 use std::cell::RefCell;
 
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
@@ -39,9 +39,9 @@ pub(crate) mod runtime {
     }
 
     pub mod jet_std {
+        use super::{JetDisplay, JetShow};
         #[allow(unused_imports)]
         pub use jet_foundation::Outcome::*;
-        use super::{JetDisplay, JetShow};
 
         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
 
@@ -50,7 +50,10 @@ pub(crate) mod runtime {
                 self.cause.clone()
             }
             fn display_text(&self) -> String {
-                let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
+                let mut out = format!(
+                    "{:?} {:?} at byte {}",
+                    self.format, self.kind, self.byte_offset
+                );
                 if let Ok(line) = self.line {
                     out.push_str(&format!(", line {line}"));
                 }
@@ -348,7 +351,9 @@ pub(crate) mod runtime {
         }
     }
 
-    fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pull::Value, String> {
+    fn jet_xml_from_data_tree(
+        value: &jet_std::DataTree,
+    ) -> Result<crate::jet_xml_pull::Value, String> {
         match value {
             jet_std::DataTree::Null => Ok(crate::jet_xml_pull::Value::Null),
             jet_std::DataTree::Bool(value) => Ok(crate::jet_xml_pull::Value::Bool(*value)),
@@ -399,9 +404,9 @@ pub(crate) mod runtime {
         }
     }
 
+    use crate::fault_injection::jet_fault_should_fail;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    use crate::fault_injection::jet_fault_should_fail;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -857,7 +862,9 @@ fn ambient_tree(value: &CtValue) -> Result<runtime::jet_std::DataTree, String> {
         "Object" => {
             let value = arg()?;
             let fields: Vec<(String, CtValue)> = match value {
-                CtValue::Struct { type_name, fields } if type_name == "JSONObject" => fields.clone(),
+                CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+                    fields.clone()
+                }
                 CtValue::Map(fields) => fields
                     .iter()
                     .map(|(key, value)| match key {
@@ -921,7 +928,9 @@ fn ambient_tree_value(value: runtime::jet_std::DataTree) -> CtValue {
         runtime::jet_std::DataTree::Bytes(value) => ("Bytes", Some(CtValue::Bytes(value))),
         runtime::jet_std::DataTree::Array(values) => (
             "Array",
-            Some(CtValue::List(values.into_iter().map(ambient_tree_value).collect())),
+            Some(CtValue::List(
+                values.into_iter().map(ambient_tree_value).collect(),
+            )),
         ),
         runtime::jet_std::DataTree::Object(fields) => (
             "Object",
@@ -1029,10 +1038,7 @@ fn ambient_io_error(operation: &str, path: &str, error: impl Into<String>) -> Ct
                         ambient_ok(CtValue::Str(path.to_string())),
                     ),
                     ("os_code".to_string(), CtValue::absent(Type::Int)),
-                    (
-                        "cause".to_string(),
-                        ambient_ok(CtValue::Str(error.into())),
-                    ),
+                    ("cause".to_string(), ambient_ok(CtValue::Str(error.into()))),
                 ],
             },
         )],
@@ -1071,10 +1077,7 @@ pub(crate) fn ambient_core_call(
     match (module, method) {
         ("core.files", "create" | "append") => {
             let Some(path) = args.first().and_then(ambient_path) else {
-                return Some(Err(ambient_unsupported(
-                    "core.files.create path",
-                    span,
-                )));
+                return Some(Err(ambient_unsupported("core.files.create path", span)));
             };
             if crate::fault_injection::jet_fault_should_fail("FS.Write") {
                 return Some(Ok(ambient_failed(ambient_io_error(
@@ -1103,10 +1106,7 @@ pub(crate) fn ambient_core_call(
         }
         ("core.files", "open") => {
             let Some(path) = args.first().and_then(ambient_path) else {
-                return Some(Err(ambient_unsupported(
-                    "core.files.open path",
-                    span,
-                )));
+                return Some(Err(ambient_unsupported("core.files.open path", span)));
             };
             if crate::fault_injection::jet_fault_should_fail("FS.Read") {
                 return Some(Ok(ambient_failed(ambient_io_error(
@@ -1141,12 +1141,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_json_reader(reader, ambient_limits(args.get(1))) {
-                Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::JSONReader(reader),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_json_reader(reader, ambient_limits(args.get(1))) {
+                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::JSONReader(reader),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.json", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1164,20 +1166,21 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            let canonical = args.get(2).and_then(|value| match value {
-                CtValue::Bool(value) => Some(*value),
-                _ => None,
-            }).unwrap_or(false);
-            Some(Ok(match runtime::enc_json_writer(
-                writer,
-                ambient_limits(args.get(1)),
-                canonical,
-            ) {
-                Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::JSONWriter(writer),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            let canonical = args
+                .get(2)
+                .and_then(|value| match value {
+                    CtValue::Bool(value) => Some(*value),
+                    _ => None,
+                })
+                .unwrap_or(false);
+            Some(Ok(
+                match runtime::enc_json_writer(writer, ambient_limits(args.get(1)), canonical) {
+                    Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::JSONWriter(writer),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.jsonl", "reader") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1195,12 +1198,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_jsonl_reader(reader, ambient_limits(args.get(1))) {
-                Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::JSONLReader(reader),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_jsonl_reader(reader, ambient_limits(args.get(1))) {
+                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::JSONLReader(reader),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.jsonl", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1218,12 +1223,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_jsonl_writer(writer, ambient_limits(args.get(1))) {
-                Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::JSONLWriter(writer),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_jsonl_writer(writer, ambient_limits(args.get(1))) {
+                    Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::JSONLWriter(writer),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.csv", "reader") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1241,12 +1248,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_csv_reader(reader, ambient_limits(args.get(1))) {
-                Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::CSVReader(reader),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_csv_reader(reader, ambient_limits(args.get(1))) {
+                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::CSVReader(reader),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.csv", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1264,12 +1273,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_csv_writer(writer, ambient_limits(args.get(1))) {
-                Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::CSVWriter(writer),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_csv_writer(writer, ambient_limits(args.get(1))) {
+                    Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::CSVWriter(writer),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.xml", "reader") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1287,16 +1298,18 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_xml_reader(
-                reader,
-                ambient_limits(args.get(1)),
-                runtime::jet_std::XMLParseOptions::safe(),
-            ) {
-                Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::XMLReader(reader),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_xml_reader(
+                    reader,
+                    ambient_limits(args.get(1)),
+                    runtime::jet_std::XMLParseOptions::safe(),
+                ) {
+                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::XMLReader(reader),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.xml", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1314,16 +1327,18 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_xml_writer(
-                writer,
-                ambient_limits(args.get(1)),
-                runtime::jet_std::XMLRenderOptions::safe(),
-            ) {
-                Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::XMLWriter(writer),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_xml_writer(
+                    writer,
+                    ambient_limits(args.get(1)),
+                    runtime::jet_std::XMLRenderOptions::safe(),
+                ) {
+                    Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::XMLWriter(writer),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.cbor", "reader") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1341,12 +1356,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_cbor_reader(reader, ambient_limits(args.get(1))) {
-                Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::CBORReader(reader),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_cbor_reader(reader, ambient_limits(args.get(1))) {
+                    Ok(reader) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::CBORReader(reader),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         ("core.encoding.cbor", "writer") => {
             let Some(CtValue::Int(file)) = args.first() else {
@@ -1364,12 +1381,14 @@ pub(crate) fn ambient_core_call(
                     )))
                 }
             };
-            Some(Ok(match runtime::enc_cbor_writer(writer, ambient_limits(args.get(1))) {
-                Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
-                    AmbientStream::CBORWriter(writer),
-                ))),
-                Err(error) => ambient_failed(ambient_encoding_error(&error)),
-            }))
+            Some(Ok(
+                match runtime::enc_cbor_writer(writer, ambient_limits(args.get(1))) {
+                    Ok(writer) => ambient_ok(CtValue::Int(ambient_stream_insert(
+                        AmbientStream::CBORWriter(writer),
+                    ))),
+                    Err(error) => ambient_failed(ambient_encoding_error(&error)),
+                },
+            ))
         }
         _ => None,
     }
@@ -1504,10 +1523,7 @@ pub(crate) fn ambient_handle(
         }),
         "JSONWriterWrite" => {
             let Some(value) = args.first() else {
-                return Some(Err(ambient_unsupported(
-                    "JSONWriter.write argument",
-                    span,
-                )));
+                return Some(Err(ambient_unsupported("JSONWriter.write argument", span)));
             };
             let event = match ambient_event(value) {
                 Ok(event) => event,
@@ -1547,10 +1563,7 @@ pub(crate) fn ambient_handle(
         }),
         "JSONLWriterWrite" => {
             let Some(value) = args.first() else {
-                return Some(Err(ambient_unsupported(
-                    "JSONLWriter.write argument",
-                    span,
-                )));
+                return Some(Err(ambient_unsupported("JSONLWriter.write argument", span)));
             };
             let tree = match ambient_tree(value) {
                 Ok(tree) => tree,
@@ -1634,10 +1647,7 @@ pub(crate) fn ambient_handle(
         }),
         "XMLWriterWrite" => {
             let Some(value) = args.first() else {
-                return Some(Err(ambient_unsupported(
-                    "XMLWriter.write argument",
-                    span,
-                )));
+                return Some(Err(ambient_unsupported("XMLWriter.write argument", span)));
             };
             let tree = match ambient_tree(value) {
                 Ok(tree) => tree,
@@ -1677,10 +1687,7 @@ pub(crate) fn ambient_handle(
         }),
         "CBORWriterWrite" => {
             let Some(value) = args.first() else {
-                return Some(Err(ambient_unsupported(
-                    "CBORWriter.write argument",
-                    span,
-                )));
+                return Some(Err(ambient_unsupported("CBORWriter.write argument", span)));
             };
             let event = match ambient_event(value) {
                 Ok(event) => event,
@@ -1712,9 +1719,7 @@ pub(crate) fn ambient_handle(
         }),
         _ => unreachable!("stream op filtered above"),
     };
-    Some(result.map_err(|error| {
-        ambient_unsupported(&format!("stream handle {op}: {error}"), span)
-    }))
+    Some(result.map_err(|error| ambient_unsupported(&format!("stream handle {op}: {error}"), span)))
 }
 
 // ── Handle tables (1-based) ──────────────────────────────────────────────────
@@ -1826,14 +1831,17 @@ fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
             buffer_bytes: get(0),
             max_depth: get(1),
             max_item_bytes: get(2),
-            max_total_bytes: if total == 0 { Err(JetAbsent) } else { Ok(total - 1) },
+            max_total_bytes: if total == 0 {
+                Err(JetAbsent)
+            } else {
+                Ok(total - 1)
+            },
             max_expansion_depth: get(4),
             max_expansion_bytes: get(5),
         };
     });
     lim
 }
-
 
 fn to_stream_tree(tree: &super::Encoding::json_rt::DataTree) -> runtime::jet_std::DataTree {
     match tree {
@@ -1848,7 +1856,9 @@ fn to_stream_tree(tree: &super::Encoding::json_rt::DataTree) -> runtime::jet_std
             runtime::jet_std::DataTree::TypedText(text.clone())
         }
         super::Encoding::json_rt::DataTree::Text(s) => runtime::jet_std::DataTree::Text(s.clone()),
-        super::Encoding::json_rt::DataTree::Bytes(b) => runtime::jet_std::DataTree::Bytes(b.clone()),
+        super::Encoding::json_rt::DataTree::Bytes(b) => {
+            runtime::jet_std::DataTree::Bytes(b.clone())
+        }
         super::Encoding::json_rt::DataTree::Array(items) => {
             runtime::jet_std::DataTree::Array(items.iter().map(to_stream_tree).collect())
         }
@@ -1887,14 +1897,9 @@ fn result_err_encoding(error: &runtime::jet_std::EncodingError) -> i64 {
                 let _ = rt.heap.record_set_int(
                     cause_record,
                     1,
-                    cause
-                        .os_code
-                        .map(|code| code.wrapping_add(1))
-                        .unwrap_or(0),
+                    cause.os_code.map(|code| code.wrapping_add(1)).unwrap_or(0),
                 );
-                let _ = rt
-                    .heap
-                    .record_set_string(cause_record, 2, cause_message);
+                let _ = rt.heap.record_set_string(cause_record, 2, cause_message);
                 cause_record.wrapping_add(1)
             }
             Err(JetAbsent) => 0,
@@ -1954,7 +1959,9 @@ fn from_stream_tree(tree: &runtime::jet_std::DataTree) -> super::Encoding::json_
             super::Encoding::json_rt::DataTree::TypedText(text.clone())
         }
         runtime::jet_std::DataTree::Text(s) => super::Encoding::json_rt::DataTree::Text(s.clone()),
-        runtime::jet_std::DataTree::Bytes(b) => super::Encoding::json_rt::DataTree::Bytes(b.clone()),
+        runtime::jet_std::DataTree::Bytes(b) => {
+            super::Encoding::json_rt::DataTree::Bytes(b.clone())
+        }
         runtime::jet_std::DataTree::Array(items) => {
             super::Encoding::json_rt::DataTree::Array(items.iter().map(from_stream_tree).collect())
         }

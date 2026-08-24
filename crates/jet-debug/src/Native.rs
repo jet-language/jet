@@ -209,6 +209,9 @@ fn run_with_io(
             &mut io,
             "error: native debugger could not find a source-mapped entry statement",
         );
+        // `Inferior` owns a live LLDB child.  Do not let an early setup
+        // failure strand that child behind the terminal/DAP session.
+        inf.quit();
         return (ExitCodes::ICE, io_into_output(io), false);
     };
     let entry_breakpoint_id = match inf.set_breakpoint(rust_file, entry_line) {
@@ -218,6 +221,7 @@ fn run_with_io(
                 &mut io,
                 "error: native debugger could not set the source breakpoint",
             );
+            inf.quit();
             return (ExitCodes::ICE, io_into_output(io), false);
         }
         Err(_) => {
@@ -225,6 +229,7 @@ fn run_with_io(
                 &mut io,
                 "error: native debugger could not set the source breakpoint",
             );
+            inf.quit();
             return (ExitCodes::ICE, io_into_output(io), false);
         }
     };
@@ -235,6 +240,7 @@ fn run_with_io(
                 &mut io,
                 "error: native debugger could not start the compiled session",
             );
+            inf.quit();
             return (ExitCodes::ICE, io_into_output(io), false);
         }
     };

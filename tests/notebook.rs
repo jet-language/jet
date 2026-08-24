@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
-    let mut kernel = Kernel::open(None, "entry-order-test")
-        .expect("open entry-order notebook kernel");
+    let mut kernel =
+        Kernel::open(None, "entry-order-test").expect("open entry-order notebook kernel");
     let comptime_reader = kernel
         .notebook
         .add_cell(
@@ -33,10 +33,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .clone();
     let caller = kernel
         .notebook
-        .add_cell(
-            CellKind::Jet,
-            "fn caller() Int { return helper().value }",
-        )
+        .add_cell(CellKind::Jet, "fn caller() Int { return helper().value }")
         .id
         .clone();
     let helper = kernel
@@ -101,9 +98,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
         .execute_cell(ClientKind::FirstParty, &binding)
         .unwrap()
         .ok());
-    let output = kernel
-        .execute_cell(ClientKind::FirstParty, &read)
-        .unwrap();
+    let output = kernel.execute_cell(ClientKind::FirstParty, &read).unwrap();
     assert!(output.ok());
     assert!(output.bundle.text_plain.contains('7'));
 }
@@ -111,11 +106,7 @@ fn notebook_declarations_are_file_wide_but_state_cells_stay_ordered() {
 #[test]
 fn shared_session_identical_stale_rules_across_clients() {
     let mut kernel = Kernel::open(None, "env-test").expect("open shared-session notebook kernel");
-    let a = kernel
-        .notebook
-        .add_cell(CellKind::Jet, "x :: 1")
-        .id
-        .clone();
+    let a = kernel.notebook.add_cell(CellKind::Jet, "x :: 1").id.clone();
     let b = kernel
         .notebook
         .add_cell(CellKind::Jet, "print(\"fx\")")
@@ -147,12 +138,20 @@ fn shared_session_identical_stale_rules_across_clients() {
     assert!(observable_success(&fx));
 
     let plan = kernel.replay_plan(1, Some("x :: 2")).expect("plan");
-    assert!(plan.steps.iter().any(|s| s.kind == jet::REPL::RerunPlan::StepKind::ConfirmEffect)
-        || plan.steps.len() >= 1);
+    assert!(
+        plan.steps
+            .iter()
+            .any(|s| s.kind == jet::REPL::RerunPlan::StepKind::ConfirmEffect)
+            || plan.steps.len() >= 1
+    );
 
     // Skip effect → identical stale marking for every client surface.
     let stale_jp = kernel
-        .apply_rerun(ClientKind::JupyterAdapter, &plan, &[RerunDecision::SkipStale])
+        .apply_rerun(
+            ClientKind::JupyterAdapter,
+            &plan,
+            &[RerunDecision::SkipStale],
+        )
         .unwrap();
     let view_first = kernel.view(ClientKind::FirstParty);
     let view_canvas = kernel.view(ClientKind::CanvasLens);
@@ -242,7 +241,10 @@ fn jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss() {
     // Round-trip ipynb with quarantined import.
     let ipynb_doc = CanonicalJson::object([
         ("nbformat".into(), CanonicalJson::integer("4").unwrap()),
-        ("nbformat_minor".into(), CanonicalJson::integer("5").unwrap()),
+        (
+            "nbformat_minor".into(),
+            CanonicalJson::integer("5").unwrap(),
+        ),
         ("metadata".into(), CanonicalJson::object([]).unwrap()),
         (
             "cells".into(),
@@ -270,7 +272,10 @@ fn jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss() {
                             .unwrap(),
                         ),
                         ("metadata".into(), CanonicalJson::object([]).unwrap()),
-                        ("execution_count".into(), CanonicalJson::integer("1").unwrap()),
+                        (
+                            "execution_count".into(),
+                            CanonicalJson::integer("1").unwrap(),
+                        ),
                     ])
                     .unwrap()]),
                 ),
@@ -349,7 +354,8 @@ fn rich_output_trust_quarantines_imports_and_binds_grants() {
 
 #[test]
 fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
-    let mut kernel = Kernel::open(None, "proto-env").expect("open headless-protocol notebook kernel");
+    let mut kernel =
+        Kernel::open(None, "proto-env").expect("open headless-protocol notebook kernel");
     let out = run_headless_script(
         &mut kernel,
         &[
@@ -380,7 +386,7 @@ fn headless_protocol_interrupt_stdin_debug_perf_and_clients() {
 fn notebook_first_hour_uses_shared_prelude_ambients_and_path() {
     let scratch = common::Scratch::new("notebook-first-hour");
     let document = scratch.join("journey.jetnb");
-let source = r#"#Abilities(caps: IO, FS) {
+    let source = r#"#Abilities(caps: IO, FS) {
     eprint("ambient-eprint")
     name :: input("name: ") ?? "fallback"
     assert(name == "Ada")
@@ -398,14 +404,21 @@ let source = r#"#Abilities(caps: IO, FS) {
     let result = kernel
         .execute_cell(ClientKind::FirstParty, &cell_id)
         .unwrap();
-    assert!(result.ok(), "shared Prelude cell failed: {}", result.eval.text);
+    assert!(
+        result.ok(),
+        "shared Prelude cell failed: {}",
+        result.eval.text
+    );
     assert!(result.bundle.text_plain.contains("ambient-eprint"));
     assert!(result.bundle.text_plain.contains("Ada"));
-    assert_eq!(std::fs::read_to_string(scratch.join("notes.txt")).unwrap(), "Ada");
+    assert_eq!(
+        std::fs::read_to_string(scratch.join("notes.txt")).unwrap(),
+        "Ada"
+    );
 
     kernel.save_document(Some(&document)).unwrap();
-    let reopened = Kernel::open(Some(&document), environment)
-        .expect("reopen first-hour notebook document");
+    let reopened =
+        Kernel::open(Some(&document), environment).expect("reopen first-hour notebook document");
     assert_eq!(reopened.document_path.as_deref(), Some(document.as_path()));
     assert_eq!(reopened.notebook.cells[0].source, source);
 }
@@ -436,13 +449,34 @@ fn notebook_cli_headless_journey_uses_production_session() {
         .expect("finish production notebook protocol");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(output.status.success(), "protocol journey failed:\n{stdout}\n{stderr}");
-    assert!(stdout.contains("\"status\":\"ok\""), "missing successful execution: {stdout}");
-    assert!(stdout.contains("\"body\":\"answer\""), "missing completion response: {stdout}");
-    assert!(stdout.contains("saved=journey.jetnb"), "missing save response: {stdout}");
-    assert!(stdout.contains("reopened"), "missing reopen response: {stdout}");
-    assert!(stdout.contains("ipynb_bytes=") && stdout.contains("jet_bytes="), "missing export responses: {stdout}");
-    assert!(document.is_file(), "headless protocol did not save the notebook");
+    assert!(
+        output.status.success(),
+        "protocol journey failed:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains("\"status\":\"ok\""),
+        "missing successful execution: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"body\":\"answer\""),
+        "missing completion response: {stdout}"
+    );
+    assert!(
+        stdout.contains("saved=journey.jetnb"),
+        "missing save response: {stdout}"
+    );
+    assert!(
+        stdout.contains("reopened"),
+        "missing reopen response: {stdout}"
+    );
+    assert!(
+        stdout.contains("ipynb_bytes=") && stdout.contains("jet_bytes="),
+        "missing export responses: {stdout}"
+    );
+    assert!(
+        document.is_file(),
+        "headless protocol did not save the notebook"
+    );
 }
 
 struct RunningNotebook(Child);
@@ -476,7 +510,10 @@ fn free_loopback_port() -> u16 {
 fn wait_for_notebook_server(port: u16, token: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        assert!(Instant::now() < deadline, "notebook server did not become ready");
+        assert!(
+            Instant::now() < deadline,
+            "notebook server did not become ready"
+        );
         if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
             let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
             let request = format!(

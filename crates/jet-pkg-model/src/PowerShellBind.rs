@@ -1,34 +1,165 @@
 //! Persistent PowerShell 7 object-pipeline binder (D-FFI-PWSH1=A).
 
 use std::io::Read;
-use std::path::{Path,PathBuf};
-use std::process::{Command,Stdio};
-use std::time::{Duration,Instant};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-#[derive(Debug,Clone,PartialEq,Eq)]
-pub struct BindResult { pub source:String,pub bound:Vec<String>,pub archive:PathBuf,pub provenance:String }
-#[derive(Debug,Clone,PartialEq,Eq)]
-pub enum BindError { Source(String),ToolMissing(&'static str),ToolFailed(&'static str,String),IO(String) }
-impl std::fmt::Display for BindError { fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { match self { Self::Source(v)|Self::IO(v)=>f.write_str(v),Self::ToolMissing(v)=>write!(f,"the provisioned `{v}` tool was not found"),Self::ToolFailed(t,v)=>write!(f,"`{t}` rejected the PowerShell binding input: {v}") } } }
-#[derive(Clone)]struct BoundFunction{pwsh:String,jet:String}
-
-pub fn bind(path:&Path,source:&str,lib:&str,cache:&Path)->Result<BindResult,BindError>{
-    require_supported_host(cfg!(unix))?;
-    if !ident(lib){return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name")))}
-    let pwsh=tool_path("pwsh").ok_or(BindError::ToolMissing("pwsh"))?;let script=std::fs::canonicalize(path).map_err(|e|BindError::IO(format!("could not resolve the PowerShell script: {e}")))?;
-    std::fs::create_dir_all(cache).map_err(|e|BindError::IO(format!("could not create PowerShell binding cache: {e}")))?;let build=cache.join(format!(".pwsh-build-{lib}"));let _=std::fs::remove_dir_all(&build);std::fs::create_dir_all(&build).map_err(|e|BindError::IO(format!("could not create PowerShell build directory: {e}")))?;
-    let validator=build.join("validate.ps1");std::fs::write(&validator,"$tokens = $null\n$errors = $null\n$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)\nif ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }\n$ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] } | ForEach-Object { [Console]::Out.WriteLine($_.Name) }\n").map_err(|e|BindError::IO(format!("could not write PowerShell validator: {e}")))?;
-    let discovered=run_capture(Command::new(&pwsh).args(["-NoLogo","-NoProfile","-NonInteractive","-File"]).arg(&validator).arg(&script),"pwsh")?;let functions=parse_function_names(&discovered)?;
-    let worker=cache.join(format!("{lib}_worker.ps1"));std::fs::write(&worker,render_worker(&functions)).map_err(|e|BindError::IO(format!("could not write PowerShell worker: {e}")))?;let worker=std::fs::canonicalize(&worker).map_err(|e|BindError::IO(format!("could not resolve the PowerShell worker: {e}")))?;
-    let c=build.join(format!("jet_pwsh_{lib}.c"));let object=build.join(format!("jet_pwsh_{lib}.o"));std::fs::write(&c,render_c(lib,&pwsh,&worker,&script,&functions)).map_err(|e|BindError::IO(format!("could not write PowerShell process bridge: {e}")))?;
-    run(Command::new("cc").args(["-std=c11","-D_POSIX_C_SOURCE=200809L","-fPIC","-c"]).arg(&c).arg("-o").arg(&object),"cc")?;let archive=cache.join(format!("libjet_pwsh_{lib}.a"));let _=std::fs::remove_file(&archive);run(Command::new("ar").arg("rcs").arg(&archive).arg(&object),"ar")?;
-    let mut identity=b"jet-pwsh-bind-v1\0".to_vec();identity.extend_from_slice(source.as_bytes());identity.push(0);identity.extend_from_slice(script.to_string_lossy().as_bytes());identity.push(0);identity.extend_from_slice(pwsh.to_string_lossy().as_bytes());identity.push(0);identity.extend_from_slice(render_worker(&functions).as_bytes());
-    let result=BindResult{source:render_jet(lib,&functions),bound:functions.iter().map(|v|v.jet.clone()).collect(),archive,provenance:format!("schema=jet-pwsh-bind-v1\nsha256={}\npwsh={}\nscript={}\nworker={}\n",crate::SHA256::sha256_hex(&identity),pwsh.display(),script.display(),worker.display())};let _=std::fs::remove_dir_all(&build);Ok(result)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BindResult {
+    pub source: String,
+    pub bound: Vec<String>,
+    pub archive: PathBuf,
+    pub provenance: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindError {
+    Source(String),
+    ToolMissing(&'static str),
+    ToolFailed(&'static str, String),
+    IO(String),
+}
+impl std::fmt::Display for BindError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(v) | Self::IO(v) => f.write_str(v),
+            Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
+            Self::ToolFailed(t, v) => write!(f, "`{t}` rejected the PowerShell binding input: {v}"),
+        }
+    }
+}
+#[derive(Clone)]
+struct BoundFunction {
+    pwsh: String,
+    jet: String,
 }
 
-fn parse_function_names(bytes:&[u8])->Result<Vec<BoundFunction>,BindError>{let text=std::str::from_utf8(bytes).map_err(|_|BindError::Source("PowerShell returned non-UTF-8 function metadata".into()))?;let mut out=Vec::new();for line in text.lines(){let name=line.trim();if name.is_empty(){continue}if !powershell_ident(name){return Err(BindError::Source(format!("PowerShell function `{name}` cannot be projected as a Jet identifier")))}let jet=name.split('-').map(|part|part.to_ascii_lowercase()).collect::<Vec<_>>().join("_");if reserved_jet_function(&jet){return Err(BindError::Source(format!("PowerShell function `{name}` projects to reserved Jet name `{jet}`")))}if out.iter().any(|v:&BoundFunction|v.jet.eq_ignore_ascii_case(&jet)){return Err(BindError::Source(format!("PowerShell function `{name}` collides with another generated Jet function `{jet}`")))}out.push(BoundFunction{pwsh:name.to_string(),jet});}if out.is_empty(){return Err(BindError::Source("no top-level PowerShell functions were found".into()))}Ok(out)}
+pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindResult, BindError> {
+    require_supported_host(cfg!(unix))?;
+    if !ident(lib) {
+        return Err(BindError::Source(format!(
+            "`{lib}` is not a valid Jet library name"
+        )));
+    }
+    let pwsh = tool_path("pwsh").ok_or(BindError::ToolMissing("pwsh"))?;
+    let script = std::fs::canonicalize(path)
+        .map_err(|e| BindError::IO(format!("could not resolve the PowerShell script: {e}")))?;
+    std::fs::create_dir_all(cache)
+        .map_err(|e| BindError::IO(format!("could not create PowerShell binding cache: {e}")))?;
+    let build = cache.join(format!(".pwsh-build-{lib}"));
+    let _ = std::fs::remove_dir_all(&build);
+    std::fs::create_dir_all(&build)
+        .map_err(|e| BindError::IO(format!("could not create PowerShell build directory: {e}")))?;
+    let validator = build.join("validate.ps1");
+    std::fs::write(&validator,"$tokens = $null\n$errors = $null\n$ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)\nif ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }\n$ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] } | ForEach-Object { [Console]::Out.WriteLine($_.Name) }\n").map_err(|e|BindError::IO(format!("could not write PowerShell validator: {e}")))?;
+    let discovered = run_capture(
+        Command::new(&pwsh)
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
+            .arg(&validator)
+            .arg(&script),
+        "pwsh",
+    )?;
+    let functions = parse_function_names(&discovered)?;
+    let worker = cache.join(format!("{lib}_worker.ps1"));
+    std::fs::write(&worker, render_worker(&functions))
+        .map_err(|e| BindError::IO(format!("could not write PowerShell worker: {e}")))?;
+    let worker = std::fs::canonicalize(&worker)
+        .map_err(|e| BindError::IO(format!("could not resolve the PowerShell worker: {e}")))?;
+    let c = build.join(format!("jet_pwsh_{lib}.c"));
+    let object = build.join(format!("jet_pwsh_{lib}.o"));
+    std::fs::write(&c, render_c(lib, &pwsh, &worker, &script, &functions))
+        .map_err(|e| BindError::IO(format!("could not write PowerShell process bridge: {e}")))?;
+    run(
+        Command::new("cc")
+            .args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c"])
+            .arg(&c)
+            .arg("-o")
+            .arg(&object),
+        "cc",
+    )?;
+    let archive = cache.join(format!("libjet_pwsh_{lib}.a"));
+    let _ = std::fs::remove_file(&archive);
+    run(
+        Command::new("ar").arg("rcs").arg(&archive).arg(&object),
+        "ar",
+    )?;
+    let mut identity = b"jet-pwsh-bind-v1\0".to_vec();
+    identity.extend_from_slice(source.as_bytes());
+    identity.push(0);
+    identity.extend_from_slice(script.to_string_lossy().as_bytes());
+    identity.push(0);
+    identity.extend_from_slice(pwsh.to_string_lossy().as_bytes());
+    identity.push(0);
+    identity.extend_from_slice(render_worker(&functions).as_bytes());
+    let result = BindResult {
+        source: render_jet(lib, &functions),
+        bound: functions.iter().map(|v| v.jet.clone()).collect(),
+        archive,
+        provenance: format!(
+            "schema=jet-pwsh-bind-v1\nsha256={}\npwsh={}\nscript={}\nworker={}\n",
+            crate::SHA256::sha256_hex(&identity),
+            pwsh.display(),
+            script.display(),
+            worker.display()
+        ),
+    };
+    let _ = std::fs::remove_dir_all(&build);
+    Ok(result)
+}
 
-fn render_worker(functions:&[BoundFunction])->String{let allowed=functions.iter().map(|v|format!("'{}'",v.pwsh.replace('\'',"''"))).collect::<Vec<_>>().join(", ");format!(r#"$ErrorActionPreference = 'Stop'
+fn parse_function_names(bytes: &[u8]) -> Result<Vec<BoundFunction>, BindError> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| BindError::Source("PowerShell returned non-UTF-8 function metadata".into()))?;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let name = line.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if !powershell_ident(name) {
+            return Err(BindError::Source(format!(
+                "PowerShell function `{name}` cannot be projected as a Jet identifier"
+            )));
+        }
+        let jet = name
+            .split('-')
+            .map(|part| part.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join("_");
+        if reserved_jet_function(&jet) {
+            return Err(BindError::Source(format!(
+                "PowerShell function `{name}` projects to reserved Jet name `{jet}`"
+            )));
+        }
+        if out
+            .iter()
+            .any(|v: &BoundFunction| v.jet.eq_ignore_ascii_case(&jet))
+        {
+            return Err(BindError::Source(format!(
+                "PowerShell function `{name}` collides with another generated Jet function `{jet}`"
+            )));
+        }
+        out.push(BoundFunction {
+            pwsh: name.to_string(),
+            jet,
+        });
+    }
+    if out.is_empty() {
+        return Err(BindError::Source(
+            "no top-level PowerShell functions were found".into(),
+        ));
+    }
+    Ok(out)
+}
+
+fn render_worker(functions: &[BoundFunction]) -> String {
+    let allowed = functions
+        .iter()
+        .map(|v| format!("'{}'", v.pwsh.replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        r#"$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [Console]::OpenStandardOutput()
@@ -76,7 +207,9 @@ while ($true) {{
   $outputStream.Write($bytes, 0, $bytes.Length)
   $outputStream.Flush()
 }}
-"#)}
+"#
+    )
+}
 
 fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
     let abi = format!("jet_pwsh_{lib}");
@@ -152,17 +285,57 @@ pub fn cancel(session: Session) {{ abi.cancel(session.value) }}
     out
 }
 
-fn render_c(lib:&str,pwsh:&Path,worker:&Path,script:&Path,functions:&[BoundFunction])->String{let abi=format!("jet_pwsh_{lib}");let mut wrappers=String::new();for f in functions{wrappers.push_str(&format!("const char* {abi}_invoke_{}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{}\",input,deadline);}}\n",f.jet,f.pwsh));}render_supervisor_c(&abi,pwsh,worker,script,&wrappers,"\"-NoLogo\",\"-NoProfile\",\"-NonInteractive\",\"-File\",worker_path,script_path")}
+fn render_c(
+    lib: &str,
+    pwsh: &Path,
+    worker: &Path,
+    script: &Path,
+    functions: &[BoundFunction],
+) -> String {
+    let abi = format!("jet_pwsh_{lib}");
+    let mut wrappers = String::new();
+    for f in functions {
+        wrappers.push_str(&format!("const char* {abi}_invoke_{}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{}\",input,deadline);}}\n",f.jet,f.pwsh));
+    }
+    render_supervisor_c(
+        &abi,
+        pwsh,
+        worker,
+        script,
+        &wrappers,
+        "\"-NoLogo\",\"-NoProfile\",\"-NonInteractive\",\"-File\",worker_path,script_path",
+    )
+}
 
 /// Shared bounded process/wire supervisor. Language binders still own worker
 /// semantics; this only centralizes the audited framing, deadline, handle,
 /// cancellation, and child-reaping machinery.
-pub(crate) fn render_supervisor_c(abi:&str,executable:&Path,worker:&Path,script:&Path,wrappers:&str,exec_args:&str)->String{render_supervisor_c_with_temp(abi,executable,worker,script,wrappers,exec_args,None)}
+pub(crate) fn render_supervisor_c(
+    abi: &str,
+    executable: &Path,
+    worker: &Path,
+    script: &Path,
+    wrappers: &str,
+    exec_args: &str,
+) -> String {
+    render_supervisor_c_with_temp(abi, executable, worker, script, wrappers, exec_args, None)
+}
 
 /// Variant for workers needing a private scratch directory. The supervisor
 /// creates it after fork, exports it as `JET_BIND_TEMP`, and removes its one
 /// declared artifact on every reap path, including timeout and cancellation.
-pub(crate) fn render_supervisor_c_with_temp(abi:&str,executable:&Path,worker:&Path,script:&Path,wrappers:&str,exec_args:&str,temp_prefix:Option<&str>)->String{let temp_prefix=temp_prefix.unwrap_or("");format!(r#"#include <errno.h>
+pub(crate) fn render_supervisor_c_with_temp(
+    abi: &str,
+    executable: &Path,
+    worker: &Path,
+    script: &Path,
+    wrappers: &str,
+    exec_args: &str,
+    temp_prefix: Option<&str>,
+) -> String {
+    let temp_prefix = temp_prefix.unwrap_or("");
+    format!(
+        r#"#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -200,27 +373,205 @@ int64_t {abi}_open(void){{pthread_once(&once,finish_once);failed=0;pid_t pid;int
 static const char* invoke(int64_t h,const char*command,const char*json,int64_t deadline){{failed=0;result[0]=0;if(!json){{failed=4;return result;}}size_t json_n=strlen(json);if(json_n>LIMIT-256){{failed=5;return result;}}if(deadline<1||deadline>300000){{failed=2;return result;}}int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){{failed=1;return result;}}pthread_mutex_lock(&slots[idx].io);if(!snapshot(h,&idx,&pid,&input,&output)){{pthread_mutex_unlock(&slots[idx].io);failed=1;return result;}}uint64_t id=__atomic_add_fetch(&request_id,1,__ATOMIC_RELAXED);char*request=malloc(json_n+256);if(!request){{pthread_mutex_unlock(&slots[idx].io);failed=5;return result;}}int n=snprintf(request,json_n+256,"{{\"id\":%llu,\"op\":\"invoke\",\"command\":\"%s\",\"input\":%s}}",(unsigned long long)id,command,json);if(n<1||(size_t)n>LIMIT){{free(request);pthread_mutex_unlock(&slots[idx].io);failed=5;return result;}}unsigned char header[4]={{(unsigned char)n,(unsigned char)(n>>8),(unsigned char)(n>>16),(unsigned char)(n>>24)}};int64_t end=now_ms()+deadline;int io=write_all(input,header,4,end);if(io>0)io=write_all(input,(unsigned char*)request,(size_t)n,end);free(request);unsigned char response_header[4],response_id[8];if(io>0)io=read_all(output,response_header,4,end);uint32_t size=0;if(io>0){{size=(uint32_t)response_header[0]|((uint32_t)response_header[1]<<8)|((uint32_t)response_header[2]<<16)|((uint32_t)response_header[3]<<24);if(size>LIMIT)io=-2;}}if(io>0)io=read_all(output,response_id,8,end);if(io>0){{uint64_t received=0;for(int b=0;b<8;b++)received|=(uint64_t)response_id[b]<<(8*b);if(received!=id)io=-3;}}if(io>0)io=read_all(output,(unsigned char*)result,size,end);if(io>0)result[size]=0;if(io<=0){{pthread_mutex_lock(&lock);int cancelled=slots[idx].pid==pid&&slots[idx].cancelled;pthread_mutex_unlock(&lock);reap(pid);clear_pid(pid);failed=cancelled?3:(io==0?2:(io==-2?5:4));result[0]=0;}}pthread_mutex_unlock(&slots[idx].io);return result;}}
 void {abi}_cancel(int64_t h){{failed=0;int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){{failed=1;return;}}pthread_mutex_lock(&lock);if(slots[idx].pid==pid)slots[idx].cancelled=1;pthread_mutex_unlock(&lock);if(kill(-pid,SIGKILL)<0&&errno==ESRCH)kill(pid,SIGKILL);}}
 void {abi}_close(int64_t h){{failed=0;int idx,input,output;pid_t pid;if(!snapshot(h,&idx,&pid,&input,&output)){{failed=1;return;}}pthread_mutex_lock(&slots[idx].io);if(snapshot(h,&idx,&pid,&input,&output)){{unsigned char frame[21]={{17,0,0,0,'{{','\"','o','p','\"',':','\"','s','h','u','t','d','o','w','n','\"','}}'}};int64_t end=now_ms()+250;write_all(input,frame,sizeof(frame),end);reap(pid);clear_pid(pid);}}pthread_mutex_unlock(&slots[idx].io);}}
-{wrappers}"#,c_escape(&executable.to_string_lossy()),c_escape(&worker.to_string_lossy()),c_escape(&script.to_string_lossy()),c_escape(temp_prefix))}
+{wrappers}"#,
+        c_escape(&executable.to_string_lossy()),
+        c_escape(&worker.to_string_lossy()),
+        c_escape(&script.to_string_lossy()),
+        c_escape(temp_prefix)
+    )
+}
 
-fn tool_path(tool:&str)->Option<PathBuf>{let path=std::env::var_os("PATH")?;std::env::split_paths(&path).map(|v|v.join(tool)).find(|v|v.is_file()).and_then(|v|std::fs::canonicalize(v).ok())}
-fn run_capture(command:&mut Command,tool:&'static str)->Result<Vec<u8>,BindError>{const CAP:usize=64*1024;command.stdout(Stdio::piped()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;let stdout=child.stdout.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stdout")))?;let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;let out=std::thread::spawn(move||drain(stdout,CAP));let err=std::thread::spawn(move||drain(stderr,CAP));let deadline=Instant::now()+Duration::from_secs(60);let status=loop{match child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{Some(v)=>break v,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))},None=>std::thread::sleep(Duration::from_millis(10))}};let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??;let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(stdout)}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}}
-fn run(command:&mut Command,tool:&'static str)->Result<(),BindError>{const CAP:usize=64*1024;command.stdout(Stdio::piped()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;let stdout=child.stdout.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stdout")))?;let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;let out=std::thread::spawn(move||drain(stdout,CAP));let err=std::thread::spawn(move||drain(stderr,CAP));let deadline=Instant::now()+Duration::from_secs(60);let status=loop{match child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{Some(v)=>break v,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))},None=>std::thread::sleep(Duration::from_millis(10))}};let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??;let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(())}else{let detail=if stderr.is_empty(){&stdout}else{&stderr};Err(BindError::ToolFailed(tool,launder(detail)))}}
-fn drain(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=(limit-out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
-fn launder(v:&[u8])->String{let text=String::from_utf8_lossy(v);if text.contains("ParserError"){return "the script has a PowerShell parse error".into()}text.lines().map(str::trim).find(|v|!v.is_empty()).map(|v|v.chars().take(160).collect()).unwrap_or_else(||"the foreign tool returned a failure status".into())}
-fn c_escape(v:&str)->String{let mut out=String::new();for b in v.bytes(){match b{b'\\'=>out.push_str("\\\\"),b'"'=>out.push_str("\\\""),b'\n'=>out.push_str("\\n"),b'\r'=>out.push_str("\\r"),b'\t'=>out.push_str("\\t"),0x20..=0x7e=>out.push(b as char),_=>out.push_str(&format!("\\{:03o}",b))}}out}
-fn ident(v:&str)->bool{let mut chars=v.chars();matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')&&chars.all(|c|c.is_ascii_alphanumeric()||c=='_')}
-fn powershell_ident(v:&str)->bool{let mut chars=v.chars();matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')&&chars.all(|c|c.is_ascii_alphanumeric()||c=='_'||c=='-')}
-fn reserved_jet_function(v:&str)->bool{matches!(v,"open"|"take_error"|"cancel"|"close"|"abi"|"json"|"Session"|"PowerShellError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
-fn require_supported_host(unix:bool)->Result<(),BindError>{if unix{Ok(())}else{Err(BindError::Source("persistent PowerShell bindings require a POSIX host process supervisor".into()))}}
+fn tool_path(tool: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|v| v.join(tool))
+        .find(|v| v.is_file())
+        .and_then(|v| std::fs::canonicalize(v).ok())
+}
+fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, BindError> {
+    const CAP: usize = 64 * 1024;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let out = std::thread::spawn(move || drain(stdout, CAP));
+    let err = std::thread::spawn(move || drain(stderr, CAP));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
+            Some(v) => break v,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out.join();
+                let _ = err.join();
+                return Err(BindError::ToolFailed(
+                    tool,
+                    "the tool exceeded the 60 second limit".into(),
+                ));
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    };
+    let stdout = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    if status.success() {
+        Ok(stdout)
+    } else {
+        Err(BindError::ToolFailed(tool, launder(&stderr)))
+    }
+}
+fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
+    const CAP: usize = 64 * 1024;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let out = std::thread::spawn(move || drain(stdout, CAP));
+    let err = std::thread::spawn(move || drain(stderr, CAP));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
+            Some(v) => break v,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = out.join();
+                let _ = err.join();
+                return Err(BindError::ToolFailed(
+                    tool,
+                    "the tool exceeded the 60 second limit".into(),
+                ));
+            }
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    };
+    let stdout = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    if status.success() {
+        Ok(())
+    } else {
+        let detail = if stderr.is_empty() { &stdout } else { &stderr };
+        Err(BindError::ToolFailed(tool, launder(detail)))
+    }
+}
+fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = input
+            .read(&mut buf)
+            .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        let keep = (limit - out.len()).min(n);
+        out.extend_from_slice(&buf[..keep]);
+    }
+    Ok(out)
+}
+fn launder(v: &[u8]) -> String {
+    let text = String::from_utf8_lossy(v);
+    if text.contains("ParserError") {
+        return "the script has a PowerShell parse error".into();
+    }
+    text.lines()
+        .map(str::trim)
+        .find(|v| !v.is_empty())
+        .map(|v| v.chars().take(160).collect())
+        .unwrap_or_else(|| "the foreign tool returned a failure status".into())
+}
+fn c_escape(v: &str) -> String {
+    let mut out = String::new();
+    for b in v.bytes() {
+        match b {
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            0x20..=0x7e => out.push(b as char),
+            _ => out.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    out
+}
+fn ident(v: &str) -> bool {
+    let mut chars = v.chars();
+    matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+fn powershell_ident(v: &str) -> bool {
+    let mut chars = v.chars();
+    matches!(chars.next(),Some(c)if c.is_ascii_alphabetic()||c=='_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+fn reserved_jet_function(v: &str) -> bool {
+    matches!(
+        v,
+        "open" | "take_error" | "cancel" | "close" | "abi" | "json" | "Session" | "PowerShellError"
+    ) || crate::Syntax::JET_KEYWORD_LIST.contains(&v)
+        || crate::Syntax::JET_TYPE_LIST.contains(&v)
+}
+fn require_supported_host(unix: bool) -> Result<(), BindError> {
+    if unix {
+        Ok(())
+    } else {
+        Err(BindError::Source(
+            "persistent PowerShell bindings require a POSIX host process supervisor".into(),
+        ))
+    }
+}
 
 #[cfg(test)]
-mod tests{
+mod tests {
     #[test]
-    fn projects_powershell_names_without_changing_foreign_lookup(){
-        let functions=super::parse_function_names(b"Get-Stateful\nFail\n").unwrap();
-        assert_eq!(functions.iter().map(|v|v.jet.as_str()).collect::<Vec<_>>(),["get_stateful","fail"]);
-        let jet=super::render_jet("ops",&functions);
-        let worker=super::render_worker(&functions);
+    fn projects_powershell_names_without_changing_foreign_lookup() {
+        let functions = super::parse_function_names(b"Get-Stateful\nFail\n").unwrap();
+        assert_eq!(
+            functions.iter().map(|v| v.jet.as_str()).collect::<Vec<_>>(),
+            ["get_stateful", "fail"]
+        );
+        let jet = super::render_jet("ops", &functions);
+        let worker = super::render_worker(&functions);
         assert!(jet.contains("pub fn get_stateful("));
         assert!(jet.contains("fn open() Int ="));
         assert!(jet.contains("pub fn open() Session PowerShellError! -> {"));
@@ -231,13 +582,28 @@ mod tests{
     }
 
     #[test]
-    fn rejects_generated_powershell_helper_and_alias_collisions(){
-        for (name,jet) in [("Take-Error","take_error"),("ABI","abi")]{
-            let Err(error)=super::parse_function_names(name.as_bytes())else{panic!("generated PowerShell name collision was accepted")};
-            assert_eq!(error,super::BindError::Source(format!("PowerShell function `{name}` projects to reserved Jet name `{jet}`")));
+    fn rejects_generated_powershell_helper_and_alias_collisions() {
+        for (name, jet) in [("Take-Error", "take_error"), ("ABI", "abi")] {
+            let Err(error) = super::parse_function_names(name.as_bytes()) else {
+                panic!("generated PowerShell name collision was accepted")
+            };
+            assert_eq!(
+                error,
+                super::BindError::Source(format!(
+                    "PowerShell function `{name}` projects to reserved Jet name `{jet}`"
+                ))
+            );
         }
     }
 
     #[test]
-    fn non_posix_hosts_fail_instead_of_emitting_a_posix_facade(){let error=super::require_supported_host(false).unwrap_err();assert_eq!(error,super::BindError::Source("persistent PowerShell bindings require a POSIX host process supervisor".into()));}
+    fn non_posix_hosts_fail_instead_of_emitting_a_posix_facade() {
+        let error = super::require_supported_host(false).unwrap_err();
+        assert_eq!(
+            error,
+            super::BindError::Source(
+                "persistent PowerShell bindings require a POSIX host process supervisor".into()
+            )
+        );
+    }
 }

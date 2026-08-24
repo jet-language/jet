@@ -1,8 +1,8 @@
 //! D-SHAPE-MODULEINTERNAL1=A: one parsed project-part index shared by
 //! explicit import resolution and user-facing tooling.
 
-use crate::AST::{ImportKind, Item};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{ImportKind, Item};
 use crate::{Lexer, Parser, Syntax};
 use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver};
 use std::collections::{BTreeMap, BTreeSet};
@@ -179,7 +179,9 @@ pub fn source_files(root: &Path) -> Vec<PathBuf> {
         .filter(|file| {
             !is_manifest_file(&file.relative)
                 && !is_command_role_file(&file.relative)
-                && !nested.iter().any(|package| file.relative.starts_with(package))
+                && !nested
+                    .iter()
+                    .any(|package| file.relative.starts_with(package))
         })
         .map(|file| file.path.clone())
         .collect()
@@ -210,16 +212,18 @@ pub fn scan_with_diagnostics(
     let (resolver, checked_files, authority_failure) = match AuthorityResolver::open(root) {
         Ok(resolver) => match resolver.discover_source_files() {
             Ok(files) => (Some(resolver), files, None),
-            Err(error) => (Some(resolver), Vec::new(), Some((root.to_path_buf(), error))),
+            Err(error) => (
+                Some(resolver),
+                Vec::new(),
+                Some((root.to_path_buf(), error)),
+            ),
         },
         Err(error) if error.is_missing() => (None, Vec::new(), None),
         Err(error) => (None, Vec::new(), Some((root.to_path_buf(), error))),
     };
     let mut files = checked_files
         .iter()
-        .filter(|file| {
-            !is_manifest_file(&file.relative) && !is_command_role_file(&file.relative)
-        })
+        .filter(|file| !is_manifest_file(&file.relative) && !is_command_role_file(&file.relative))
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     files.extend(
@@ -395,10 +399,8 @@ mod tests {
     use super::*;
 
     fn tempdir(tag: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "jet-project-parts-{tag}-{}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("jet-project-parts-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         path
@@ -467,7 +469,10 @@ mod tests {
                     .replace('\\', "/")
             })
             .collect::<Vec<_>>();
-        assert_eq!(names, vec!["run.jet".to_string(), "src/math.jet".to_string()]);
+        assert_eq!(
+            names,
+            vec!["run.jet".to_string(), "src/math.jet".to_string()]
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -497,15 +502,13 @@ mod tests {
         let report = scan(&root);
         let scanned_fifo = observed.try_recv().is_ok();
         if !scanned_fifo {
-            drop(
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .open(&fifo)
-                    .unwrap(),
-            );
+            drop(std::fs::OpenOptions::new().read(true).open(&fifo).unwrap());
         }
         writer.join().unwrap();
-        assert!(!scanned_fifo, "project scans must not open a FIFO as source");
+        assert!(
+            !scanned_fifo,
+            "project scans must not open a FIFO as source"
+        );
         assert!(report.parts.is_empty());
         let _ = std::fs::remove_dir_all(root);
     }

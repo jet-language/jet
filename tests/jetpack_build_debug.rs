@@ -130,7 +130,11 @@ fn bare_jet_logs_is_a_teaching_error_naming_jet_inspect_logs() {
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
-    assert_eq!(logs.status.code(), Some(2), "bare `jet logs` must be rejected");
+    assert_eq!(
+        logs.status.code(),
+        Some(2),
+        "bare `jet logs` must be rejected"
+    );
     // E2101 in --json mode reports on stdout, not stderr (see cli.rs's
     // every_moved_bare_action_is_e2101_in_human_and_json_modes).
     let stdout = String::from_utf8_lossy(&logs.stdout);

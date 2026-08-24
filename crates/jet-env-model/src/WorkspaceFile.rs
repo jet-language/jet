@@ -26,16 +26,16 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::Overlay;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Overlay;
 use crate::Syntax;
 use crate::AST::{ComptimeInput, Expr, Func, Item, StrPart};
 
 // Re-export types so callers can use `jet_env_model::WorkspaceFile::WorkspacePlan` etc.
 pub use jet_pkg_model::WorkspacePlan::{
-    resolve_workspace_source, AuthorityError, AuthorityKind, AuthorityResolver,
-    CheckedDirectory, CheckedFile, CheckedManifest, CheckedMember, FileIdentity, WorkspaceMember,
-    WorkspacePlan, WorkspaceSource, WorkspaceSourceRole,
+    resolve_workspace_source, AuthorityError, AuthorityKind, AuthorityResolver, CheckedDirectory,
+    CheckedFile, CheckedManifest, CheckedMember, FileIdentity, WorkspaceMember, WorkspacePlan,
+    WorkspaceSource, WorkspaceSourceRole,
 };
 
 /// A workspace source and the plan evaluated from its still-open snapshot.
@@ -181,9 +181,10 @@ pub fn has_build_entry(src: &str) -> bool {
     }
     crate::Parser::parse(&tokens)
         .map(|program| {
-            program.items.iter().any(|item| {
-                matches!(item, Item::Func(func) if func.name == "build")
-            })
+            program
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Func(func) if func.name == "build"))
         })
         .unwrap_or(false)
 }
@@ -213,13 +214,12 @@ pub fn evaluate_checked_source(
     resolver
         .revalidate_source(source)
         .map_err(|error| error.diagnostic())?;
-    let plan = if source.path.file_name().and_then(|name| name.to_str())
-        == Some(Syntax::PACKAGE_FILE)
-    {
-        evaluate_package_source(source, resolver)?
-    } else {
-        evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)?
-    };
+    let plan =
+        if source.path.file_name().and_then(|name| name.to_str()) == Some(Syntax::PACKAGE_FILE) {
+            evaluate_package_source(source, resolver)?
+        } else {
+            evaluate_with_resolver(&source.source, resolver.root(), source.role, resolver)?
+        };
     resolver
         .revalidate_source(source)
         .map_err(|error| error.diagnostic())?;
@@ -294,17 +294,14 @@ fn evaluate_with_resolver(
     // `members:` field, so policy stripping may leave it as an ordinary code
     // module (`module workspace {}`); that still proves the declaration was
     // syntactically present without turning it into an index.
-    let ws_module = program
-        .items
-        .iter()
-        .find_map(|item| {
-            if let Item::Module(m) = item {
-                if m.name == Syntax::NS_WORKSPACE && m.is_auto_discovered() {
-                    return Some(m);
-                }
+    let ws_module = program.items.iter().find_map(|item| {
+        if let Item::Module(m) = item {
+            if m.name == Syntax::NS_WORKSPACE && m.is_auto_discovered() {
+                return Some(m);
             }
-            None
-        });
+        }
+        None
+    });
     let code_workspace = program.items.iter().any(|item| {
         matches!(
             item,
@@ -430,11 +427,17 @@ fn validate_member_path(
     let canonical_path = resolver
         .relative_identity(&member.directory)
         .map_err(|error| authority_diagnostic(error, span))?;
-    if members.iter().any(|member| member.canonical_path == canonical_path) {
+    if members
+        .iter()
+        .any(|member| member.canonical_path == canonical_path)
+    {
         return Err(Diagnostic::error(
             "E1324",
-            format!("workspace member `{rel_path}` has the same physical identity as another member"),
-            "a workspace member is identified by its real directory, not by two spelling variants".to_string(),
+            format!(
+                "workspace member `{rel_path}` has the same physical identity as another member"
+            ),
+            "a workspace member is identified by its real directory, not by two spelling variants"
+                .to_string(),
             "keep one member path for this directory".to_string(),
             span,
         ));
@@ -461,7 +464,8 @@ fn validate_member_path(
         return Err(Diagnostic::error(
             "E1325",
             format!("workspace member name `{name}` is declared more than once"),
-            "Package references use a stable name; two physical members cannot claim the same name".to_string(),
+            "Package references use a stable name; two physical members cannot claim the same name"
+                .to_string(),
             "rename one package or remove the duplicate member reference".to_string(),
             span,
         ));
@@ -743,7 +747,11 @@ module workspace {
         for (relative, name) in [("packages/hello", "hello"), ("packages/ranker", "ranker")] {
             let dir = tmp.join(relative);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(Syntax::PACKAGE_FILE), format!("name: \"{name}\"\n")).unwrap();
+            std::fs::write(
+                dir.join(Syntax::PACKAGE_FILE),
+                format!("name: \"{name}\"\n"),
+            )
+            .unwrap();
         }
         let src =
             "module workspace {\n    members: [\"./packages/hello\", \"./packages/ranker\"]\n}\n";
@@ -760,11 +768,8 @@ module workspace {
     fn member_can_be_the_workspace_root() {
         let tmp = tempdir("member-root");
         std::fs::write(tmp.join(Syntax::PACKAGE_FILE), "name: \"root\"\n").unwrap();
-        let plan = evaluate(
-            "module workspace { members: [\".\"] }\n",
-            &tmp,
-        )
-        .expect("the workspace root may be an explicit member");
+        let plan = evaluate("module workspace { members: [\".\"] }\n", &tmp)
+            .expect("the workspace root may be an explicit member");
         assert_eq!(plan.members.len(), 1);
         assert_eq!(plan.members[0].path, ".");
         assert_eq!(plan.members[0].name, "root");
@@ -816,11 +821,8 @@ module workspace {
             "name: \"app\"\nmembers: [\"./child\"]\n",
         )
         .unwrap();
-        let error = evaluate(
-            "module workspace { members: [\"./packages/app\"] }\n",
-            &tmp,
-        )
-        .expect_err("nested Package membership is not allowed");
+        let error = evaluate("module workspace { members: [\"./packages/app\"] }\n", &tmp)
+            .expect_err("nested Package membership is not allowed");
         assert_eq!(error.code, "E1323");
         assert!(error
             .what
@@ -835,11 +837,8 @@ module workspace {
         let package = tmp.join("packages/app");
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(package.join(Syntax::PACKAGE_FILE), "not package metadata\n").unwrap();
-        let error = evaluate(
-            "module workspace { members: [\"./packages/app\"] }\n",
-            &tmp,
-        )
-        .expect_err("malformed member metadata must be surfaced");
+        let error = evaluate("module workspace { members: [\"./packages/app\"] }\n", &tmp)
+            .expect_err("malformed member metadata must be surfaced");
         assert_eq!(error.code, "E1334");
         std::fs::remove_dir_all(tmp).ok();
     }
@@ -875,7 +874,11 @@ module workspace {
         for (relative, name) in [("packages/hello", "hello"), ("packages/ranker", "ranker")] {
             let dir = tmp.join(relative);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(Syntax::PACKAGE_FILE), format!("name: \"{name}\"\n")).unwrap();
+            std::fs::write(
+                dir.join(Syntax::PACKAGE_FILE),
+                format!("name: \"{name}\"\n"),
+            )
+            .unwrap();
         }
         let plan = evaluate(src, &tmp).unwrap();
         let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
@@ -892,7 +895,11 @@ module workspace {
         for (relative, name) in [("workspace-packages/a", "a"), ("workspace-packages/b", "b")] {
             let dir = tmp.join(relative);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(Syntax::PACKAGE_FILE), format!("name: \"{name}\"\n")).unwrap();
+            std::fs::write(
+                dir.join(Syntax::PACKAGE_FILE),
+                format!("name: \"{name}\"\n"),
+            )
+            .unwrap();
         }
         let plan = evaluate(src, &tmp).unwrap();
         let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();
@@ -909,7 +916,11 @@ module workspace {
         for (relative, name) in [("pkgs/hello", "hello"), ("pkgs/ranker", "ranker")] {
             let dir = tmp.join(relative);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join(Syntax::PACKAGE_FILE), format!("name: \"{name}\"\n")).unwrap();
+            std::fs::write(
+                dir.join(Syntax::PACKAGE_FILE),
+                format!("name: \"{name}\"\n"),
+            )
+            .unwrap();
         }
         let plan = evaluate(src, &tmp).unwrap();
         let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();
@@ -995,11 +1006,8 @@ module workspace {
         std::fs::create_dir_all(&package).unwrap();
         symlink("missing-package.jet", package.join(Syntax::PACKAGE_FILE)).unwrap();
 
-        let error = evaluate(
-            "module workspace { members: find(\"./packages\") }\n",
-            &tmp,
-        )
-        .expect_err("find must surface unreadable member metadata");
+        let error = evaluate("module workspace { members: find(\"./packages\") }\n", &tmp)
+            .expect_err("find must surface unreadable member metadata");
         assert_eq!(error.code, "E1334");
         std::fs::remove_dir_all(tmp).ok();
     }

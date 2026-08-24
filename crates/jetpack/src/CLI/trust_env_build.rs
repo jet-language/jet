@@ -247,21 +247,19 @@ pub(super) fn compose_env(
         );
         return Err(2);
     }
-    let profile_bin = match super::profile::dev_shell_projection(
-        &plan.project_root,
-        &plan.environment,
-    ) {
-        Ok(profile_bin) => profile_bin,
-        Err(error) => {
-            theme.error_coded(
-                "E1335",
-                "the active package profile cannot project into the dev shell",
-                &error.to_string(),
-                "build and switch the named package profile, then retry the shell",
-            );
-            return Err(2);
-        }
-    };
+    let profile_bin =
+        match super::profile::dev_shell_projection(&plan.project_root, &plan.environment) {
+            Ok(profile_bin) => profile_bin,
+            Err(error) => {
+                theme.error_coded(
+                    "E1335",
+                    "the active package profile cannot project into the dev shell",
+                    &error.to_string(),
+                    "build and switch the named package profile, then retry the shell",
+                );
+                return Err(2);
+            }
+        };
     let mut bin_dirs = profile_bin
         .into_iter()
         .map(|path| path.to_string_lossy().into_owned())
@@ -770,11 +768,7 @@ mod tests {
     #[test]
     fn sandbox_claim_rejects_unknown_or_incomplete_receipts() {
         assert_eq!(
-            build_sandbox_outcome(
-                1,
-                0,
-                &[("linux-userns".into(), "not-enforced".into())],
-            ),
+            build_sandbox_outcome(1, 0, &[("linux-userns".into(), "not-enforced".into())],),
             "sandbox receipt missing for 1 built output(s)"
         );
         assert_eq!(

@@ -210,10 +210,7 @@ impl<P: Plane> Facts<P> {
 
     /// Every fact in the store, at every depth.
     pub(crate) fn all_mut(&mut self) -> impl Iterator<Item = &mut P::Fact> {
-        self.rows
-            .values_mut()
-            .flatten()
-            .map(|row| &mut row.fact)
+        self.rows.values_mut().flatten().map(|row| &mut row.fact)
     }
 
     /// Every fact in the store, at every depth, with its binding.
@@ -256,11 +253,7 @@ impl<P: Plane> Facts<P> {
 
     /// The one two-path join. Every binding either side knows about is joined
     /// by the plane, depth by depth; a plane that proves nothing drops it.
-    pub(crate) fn join_paths(
-        &self,
-        other: &Self,
-        diverged: &mut Vec<Divergence<P::Fact>>,
-    ) -> Self {
+    pub(crate) fn join_paths(&self, other: &Self, diverged: &mut Vec<Divergence<P::Fact>>) -> Self {
         let mut out = Self::new();
         let mut seen = std::collections::HashSet::new();
         for name in self.rows.keys().chain(other.rows.keys()) {
@@ -388,8 +381,7 @@ impl Plane for Binding {
                 // though the rest of LocalInfo describes the declaration.
                 // A callback is safe after a branch only when every path kept
                 // the Send-safe representation.
-                joined.interrupt_sendable =
-                    left.interrupt_sendable && right.interrupt_sendable;
+                joined.interrupt_sendable = left.interrupt_sendable && right.interrupt_sendable;
                 joined.invalid = left.invalid || right.invalid;
                 Some(joined)
             }
@@ -467,8 +459,7 @@ impl Plane for Narrow {
                 // D-OSINTERRUPT1: a narrowed callback alias is still a
                 // path-sensitive proof. A branch join may retain it only when
                 // both reaching refinements carry the canonical Send form.
-                joined.interrupt_sendable =
-                    left.interrupt_sendable && right.interrupt_sendable;
+                joined.interrupt_sendable = left.interrupt_sendable && right.interrupt_sendable;
                 joined.invalid = left.invalid || right.invalid;
                 Some(joined)
             }

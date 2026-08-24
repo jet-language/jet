@@ -66,7 +66,11 @@ pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
 /// called from there.
 pub fn render_prompt(turn_no: usize, color: bool) -> String {
     let theme = Theme::new(color);
-    format!("{} {} ", theme.dim(&turn_no.to_string()), theme.accent("user>"))
+    format!(
+        "{} {} ",
+        theme.dim(&turn_no.to_string()),
+        theme.accent("user>")
+    )
 }
 
 /// `name :: value` (immutable) / `name := value` (mutable) —
@@ -272,7 +276,13 @@ mod tests {
 
     #[test]
     fn format_binding_matches_workspace_shape() {
-        assert_eq!(format_binding("total", &CtValue::Int(15), false), "total :: 15");
-        assert_eq!(format_binding("total", &CtValue::Int(15), true), "total := 15");
+        assert_eq!(
+            format_binding("total", &CtValue::Int(15), false),
+            "total :: 15"
+        );
+        assert_eq!(
+            format_binding("total", &CtValue::Int(15), true),
+            "total := 15"
+        );
     }
 }

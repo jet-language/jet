@@ -62,6 +62,8 @@ mod common;
 mod jetpack_fixtures;
 #[path = "support/nix_index_cache_server.rs"]
 mod nix_index_cache_server;
+#[path = "support/no_nix_namespace.rs"]
+mod no_nix_namespace;
 use jetpack_fixtures::*;
 
 #[test]
@@ -335,7 +337,10 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     assert_eq!(verified.output_hash, entry.envelope.output_hash);
     assert_eq!(verified.builder, published.builder);
     assert_eq!(verified.provenance, published.provenance);
-    assert!(published.witness.as_deref().is_some_and(|witness| !witness.is_empty()));
+    assert!(published
+        .witness
+        .as_deref()
+        .is_some_and(|witness| !witness.is_empty()));
     assert_eq!(verified.witness, published.witness);
     assert_eq!(published.receipt_version, Some(1));
     assert!(published.receipt_expires_unix.is_some());
@@ -552,14 +557,11 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     )
     .is_err());
     assert!(!revoked_destination.join("out").exists());
-    let revoked_explanation = jetpack::Store::explain_package(
-        &roots,
-        &entry.id,
-        jetpack::Store::ExplainLens::Rebuild,
-    )
-    .unwrap()
-    .unwrap()
-    .to_json();
+    let revoked_explanation =
+        jetpack::Store::explain_package(&roots, &entry.id, jetpack::Store::ExplainLens::Rebuild)
+            .unwrap()
+            .unwrap()
+            .to_json();
     assert!(revoked_explanation.contains("\"decision\":\"denied\""));
     assert!(revoked_explanation.contains("cache builder is revoked"));
 }
@@ -731,12 +733,13 @@ fn binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match() {
         .get("cache.action")
         .cloned()
         .unwrap();
-    let without_closure_action = jetpack::Store::ProducerRecord::decode(&no_closure.producer_record)
-        .unwrap()
-        .facts
-        .get("cache.action")
-        .cloned()
-        .unwrap();
+    let without_closure_action =
+        jetpack::Store::ProducerRecord::decode(&no_closure.producer_record)
+            .unwrap()
+            .facts
+            .get("cache.action")
+            .cloned()
+            .unwrap();
     assert_ne!(
         with_closure_action, without_closure_action,
         "the production Store action identity must bind the realized closure"
@@ -1957,11 +1960,14 @@ fn cargo_import_keeps_unlocked_target_identity_without_duplicate_selector_facts(
         .get("cc#platform=cfg(unix)@cargo")
         .expect("unlocked target provider facts");
     assert!(facts.losses.iter().all(|loss| {
-        !loss.reason.contains("duplicate selector fact `platform=cfg(unix)`")
+        !loss
+            .reason
+            .contains("duplicate selector fact `platform=cfg(unix)`")
     }));
-    assert!(plan.todos.iter().any(|todo| {
-        todo.source_path == "Cargo.lock" && todo.message.contains("unresolved")
-    }));
+    assert!(plan
+        .todos
+        .iter()
+        .any(|todo| { todo.source_path == "Cargo.lock" && todo.message.contains("unresolved") }));
     assert!(!plan.emit_pkg_jet().contains("cc:"));
 }
 
@@ -1988,7 +1994,11 @@ fn jet_registry_dependency_roles_features_and_constraints_round_trip() {
     }
 
     let lock = report
-        .lock_record("engine-test", "rolekit#version=1.0.0@jet-registry", "x86_64-linux")
+        .lock_record(
+            "engine-test",
+            "rolekit#version=1.0.0@jet-registry",
+            "x86_64-linux",
+        )
         .expect("registry provider lock");
     let facts = ProviderFacts::from_json(
         lock.future_fields
@@ -2159,13 +2169,9 @@ fn provider_conformance_homebrew_github_binary_reports_loss_and_conflict_without
         .iter()
         .any(|conflict| conflict.contains("conflicting version")));
     assert!(homebrew.validate().is_err());
-    assert!(homebrew
-        .shared_facts()
-        .conflicts
-        .iter()
-        .any(|conflict| {
-            conflict.right.contains("conflicting version") && conflict.left != conflict.right
-        }));
+    assert!(homebrew.shared_facts().conflicts.iter().any(|conflict| {
+        conflict.right.contains("conflicting version") && conflict.left != conflict.right
+    }));
 
     let github = normalize_provider_document(
         ProviderFamily::Github,
@@ -2870,9 +2876,7 @@ fn no_nix_projects_external_output_and_build_facts() {
         .expect("Nix producer provider facts must remain lossless");
     assert_eq!(provider_facts.native_format, "json");
     assert!(provider_facts.native_document.contains("drvPath"));
-    assert!(provider_facts
-        .facts
-        .contains_key("nix.native.document"));
+    assert!(provider_facts.facts.contains_key("nix.native.document"));
 
     let entered = jetpack()
         .args(["enter", "--no-color", "--trust", "--offline", "--fixtures"])
@@ -3004,10 +3008,7 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
     );
 
     let orphan_bytes = b"orphan receipt";
-    let orphan_digest = format!(
-        "sha256-{}",
-        jetpack::SHA256::sha256_hex(orphan_bytes)
-    );
+    let orphan_digest = format!("sha256-{}", jetpack::SHA256::sha256_hex(orphan_bytes));
     let orphan_path = root.join("hangar/receipts").join(&orphan_digest);
     fs::write(&orphan_path, orphan_bytes).unwrap();
     let cleaned = jetpack()
@@ -3021,7 +3022,10 @@ fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
         "receipt cleanup failed: {}",
         String::from_utf8_lossy(&cleaned.stderr)
     );
-    assert!(!orphan_path.exists(), "unreachable receipt was not collected");
+    assert!(
+        !orphan_path.exists(),
+        "unreachable receipt was not collected"
+    );
     assert_eq!(fs::read(&receipt_path).unwrap(), receipt);
 }
 
@@ -3348,16 +3352,16 @@ fn clean_reclaims_unreachable_canonical_hangar_objects() {
     .unwrap()
     .entry;
     let output = Path::new(&entry.out).to_path_buf();
-    let receipt = roots
-        .hangar_dir()
-        .join("receipts")
-        .join(&entry.receipt);
+    let receipt = roots.hangar_dir().join("receipts").join(&entry.receipt);
     assert!(output.is_dir());
     assert!(receipt.is_file());
     assert!(jetpack::Store::remove_closure_record(&roots, &entry.id).unwrap());
 
     let plan = jetpack::Store::clean_plan(&roots).unwrap();
-    assert!(plan.removed_objects >= 1, "canonical object missing from GC plan");
+    assert!(
+        plan.removed_objects >= 1,
+        "canonical object missing from GC plan"
+    );
     assert_eq!(plan.removed_receipts, 1);
     let report = jetpack::Store::clean(&roots).unwrap();
     assert!(report.removed_objects >= 1);
@@ -4140,6 +4144,165 @@ fn no_nix_unindexed_nixpkgs_package_reports_e1349() {
 }
 
 #[test]
+fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
+    const TEST_NAME: &str = "indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object";
+    const PHASE_ENV: &str = "JETPACK_INDEXED_NIX_PHASE";
+
+    let project = Scratch::new("indexed-nixpkgs-project");
+    let root = Scratch::new("root");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project.path);
+    server.install(&root.path);
+    fs::write(
+        project.join("env.jet"),
+        "module dev {\n    sources: { default: NixOS/nixpkgs/nixos-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::CHANNEL,
+            nix_index_cache_server::REVISION,
+        ),
+    )
+    .unwrap();
+
+    let run = |offline: bool| {
+        let mut command = jetpack();
+        command
+            .args(["enter", "--no-color", "--trust"])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("PATH", "")
+            .env_remove("JETPACK_FIXTURES");
+        if offline {
+            command.arg("--offline");
+        }
+        command.args(["--", "rg", "--version"]);
+        command.output().unwrap()
+    };
+
+    if let Ok(phase) = std::env::var(PHASE_ENV) {
+        let network = match phase.as_str() {
+            "online-initial" | "online-repair" => no_nix_namespace::NetworkMode::Enabled,
+            "offline-reuse" | "offline-missing" => no_nix_namespace::NetworkMode::Disabled,
+            other => panic!("unknown indexed Nix test phase `{other}`"),
+        };
+        no_nix_namespace::run_in_no_nix_namespace(TEST_NAME, network, || {
+            let output = run(phase.starts_with("offline-"));
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            match phase.as_str() {
+                "online-initial" | "offline-reuse" | "online-repair" => {
+                    assert!(output.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+                    assert!(stdout.contains("ripgrep 15.2.0"), "stdout: {stdout}");
+                }
+                "offline-missing" => {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(2),
+                        "stdout: {stdout}\nstderr: {stderr}"
+                    );
+                    assert!(stderr.contains("E1350"), "stderr: {stderr}");
+                    assert!(
+                        stderr.contains(nix_index_cache_server::RUNTIME_PATH),
+                        "offline error must name missing reference: {stderr}"
+                    );
+                }
+                _ => unreachable!(),
+            }
+        });
+        return;
+    }
+
+    for (phase, network) in [
+        ("online-initial", no_nix_namespace::NetworkMode::Enabled),
+        ("offline-reuse", no_nix_namespace::NetworkMode::Disabled),
+    ] {
+        std::env::set_var(PHASE_ENV, phase);
+        no_nix_namespace::run_in_no_nix_namespace(TEST_NAME, network, || {});
+    }
+    std::env::remove_var(PHASE_ENV);
+
+    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let entries = jetpack::Store::list_checked(&roots).unwrap();
+    let producer = |entry: &jetpack::Store::StoreEntry| {
+        jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap()
+    };
+    let package = entries
+        .iter()
+        .find(|entry| producer(entry).facts.contains_key("nix.index.proof.v1"))
+        .expect("indexed Nix package entry");
+    let package_producer = producer(package);
+    assert!(!package_producer.facts["nix.index.proof.v1"].is_empty());
+    assert!(!package_producer.facts["nix.cache.output.out.proof.sha256"].is_empty());
+    assert!(!package_producer.facts["nix.cache.closure.receipt.sha256"].is_empty());
+
+    let object_digest = |store_path: &str| {
+        entries
+            .iter()
+            .find_map(|entry| {
+                let producer = producer(entry);
+                (producer.facts.get("nix.store-path").map(String::as_str) == Some(store_path))
+                    .then(|| entry.envelope.output_hash.clone())
+            })
+            .unwrap_or_else(|| panic!("missing admitted object {store_path}"))
+    };
+    let root_digest = object_digest(nix_index_cache_server::ROOT_PATH);
+    let library_digest = object_digest(nix_index_cache_server::LIB_PATH);
+    let runtime_digest = object_digest(nix_index_cache_server::RUNTIME_PATH);
+    let graph = jetpack::Store::closure_graph(&roots).unwrap();
+    assert_eq!(package.envelope.output_hash, root_digest);
+    assert_eq!(package.references, vec![library_digest.clone()]);
+    assert_eq!(
+        graph.direct_references(&root_digest),
+        vec![library_digest.clone()]
+    );
+    assert_eq!(
+        graph.direct_references(&library_digest),
+        vec![runtime_digest.clone()]
+    );
+    assert!(graph.transitive_references(&root_digest).contains(&runtime_digest));
+
+    let missing = roots.hangar_dir().join("objects").join(&runtime_digest);
+    make_tree_writable(&missing);
+    fs::remove_dir_all(&missing).unwrap();
+
+    std::env::set_var(PHASE_ENV, "offline-missing");
+    no_nix_namespace::run_in_no_nix_namespace(
+        TEST_NAME,
+        no_nix_namespace::NetworkMode::Disabled,
+        || {},
+    );
+    std::env::remove_var(PHASE_ENV);
+
+    std::env::set_var(PHASE_ENV, "online-repair");
+    no_nix_namespace::run_in_no_nix_namespace(
+        TEST_NAME,
+        no_nix_namespace::NetworkMode::Enabled,
+        || {},
+    );
+    std::env::remove_var(PHASE_ENV);
+
+    assert_eq!(
+        server.object_request_count(nix_index_cache_server::ROOT_PATH),
+        2,
+        "repair must reuse root object"
+    );
+    assert_eq!(
+        server.object_request_count(nix_index_cache_server::LIB_PATH),
+        2,
+        "repair must reuse library object"
+    );
+    assert_eq!(
+        server.object_request_count(nix_index_cache_server::RUNTIME_PATH),
+        4,
+        "repair must fetch only missing runtime object"
+    );
+}
+
+#[test]
 fn package_and_environment_paths_have_no_installed_nix_shellout() {
     let sources = [
         ("Bridge", include_str!("../crates/jetpack/src/Bridge.rs")),
@@ -4537,12 +4700,7 @@ module dev {
 "#,
     )
     .unwrap();
-    write_channel_fixture(
-        &fixtures.path,
-        "nixpkgs:omp",
-        "latest",
-        "nixpkgs:omp#1.2.3",
-    );
+    write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", "nixpkgs:omp#1.2.3");
 
     let build = jetpack()
         .args(["build", "--no-color", "--yes", "--fixtures"])
@@ -4565,6 +4723,49 @@ module dev {
     let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
         manifest.contains("#auto omp#1.2.3@nixpkgs"),
+        "manifest: {manifest}"
+    );
+}
+
+#[test]
+fn automatic_channel_refresh_moves_again_after_manifest_writeback() {
+    let proj = Scratch::new("proj");
+    let root = Scratch::new("root");
+    let fixtures = Scratch::new("fx");
+    fs::write(
+        proj.join("env.jet"),
+        r#"
+module dev {
+    sources: { automatic: #auto omp@nixpkgs }
+    env.dev: Env{ packages: [] }
+}
+"#,
+    )
+    .unwrap();
+    for exact in ["nixpkgs:omp#1.2.3", "nixpkgs:omp#1.2.4"] {
+        write_channel_fixture(&fixtures.path, "nixpkgs:omp", "latest", exact);
+        let build = jetpack()
+            .args(["build", "--no-color", "--yes", "--fixtures"])
+            .arg(&fixtures.path)
+            .current_dir(&proj.path)
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+    }
+
+    let lock = fs::read_to_string(proj.join(".jet/lock")).unwrap();
+    assert!(
+        lock.contains("exact = \"nixpkgs:omp#1.2.4\""),
+        "lock: {lock}"
+    );
+    let manifest = fs::read_to_string(proj.join("env.jet")).unwrap();
+    assert!(
+        manifest.contains("#auto omp#1.2.4@nixpkgs"),
         "manifest: {manifest}"
     );
 }
@@ -7954,7 +8155,10 @@ fn jet_audit_reads_without_exec() {
         report.contains("sandbox:"),
         "audit reports sandbox policy: {report}"
     );
-    assert!(report.contains("closure:"), "audit reports closure: {report}");
+    assert!(
+        report.contains("closure:"),
+        "audit reports closure: {report}"
+    );
     // Audit must not run a build: it never prints the realize progress line.
     assert!(
         !report.contains("resolving"),
@@ -8486,14 +8690,7 @@ fn package_host_split_preserves_system_projection_and_reaches_jetos() {
     assert_eq!(after.fleets[0].hosts[0].system, "halcyon");
 
     let plan = jet()
-        .args([
-            "os",
-            "plan",
-            "halcyon",
-            "--json",
-            "--no-color",
-            "--offline",
-        ])
+        .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", project.join("jet-root"))
         .output()

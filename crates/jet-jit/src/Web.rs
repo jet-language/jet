@@ -18,9 +18,8 @@ pub(crate) mod web_rt {
     }
 
     pub(crate) use crate::net_http_rt::{
-        jet_app_http_action, jet_app_http_assets, jet_app_http_mount,
-        jet_app_http_mux_new, jet_app_http_page, jet_app_http_reload,
-        jet_app_http_serve,
+        jet_app_http_action, jet_app_http_assets, jet_app_http_mount, jet_app_http_mux_new,
+        jet_app_http_page, jet_app_http_reload, jet_app_http_serve,
     };
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -73,13 +72,8 @@ fn jet_jit_web_page(title: i64, body: i64) -> i64 {
 /// still the Prelude App `serve` method; this function only supplies the
 /// opaque JIT handle and releases the runtime borrow before the server blocks.
 pub(crate) fn serve_app(app: i64) {
-    let app_handle = with_rt(|rt| {
-        rt.web
-            .apps
-            .get(app.saturating_sub(1) as usize)
-            .cloned()
-    })
-    .expect("jit web app: bad handle");
+    let app_handle = with_rt(|rt| rt.web.apps.get(app.saturating_sub(1) as usize).cloned())
+        .expect("jit web app: bad handle");
     app_handle.serve();
 }
 
@@ -88,13 +82,8 @@ fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
     if method_name == "serve" || method_name == "serve_on" {
         // Serving blocks. Keep the resident runtime published, but release its
         // access lock so HTTP worker callbacks can enter Jet one at a time.
-        let app_handle = with_rt(|rt| {
-            rt.web
-                .apps
-                .get(app.saturating_sub(1) as usize)
-                .cloned()
-        })
-        .expect("jit app: bad handle");
+        let app_handle = with_rt(|rt| rt.web.apps.get(app.saturating_sub(1) as usize).cloned())
+            .expect("jit app: bad handle");
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             if method_name == "serve_on" {
                 app_handle.serve_on(a0);
@@ -173,14 +162,17 @@ fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) -> i64 {
             }
             "mount" => {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
-                app_handle.mount(key, std::sync::Arc::new(move |path: &String| {
-                    Concurrency::with_http_jet_runtime(|| {
-                        let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
-                        let call: extern "C" fn(i64) =
-                            unsafe { std::mem::transmute(a1 as usize) };
-                        call(path);
-                    });
-                }))
+                app_handle.mount(
+                    key,
+                    std::sync::Arc::new(move |path: &String| {
+                        Concurrency::with_http_jet_runtime(|| {
+                            let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
+                            let call: extern "C" fn(i64) =
+                                unsafe { std::mem::transmute(a1 as usize) };
+                            call(path);
+                        });
+                    }),
+                )
             }
             "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y"
             | "adapter" => {

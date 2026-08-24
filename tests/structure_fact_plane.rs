@@ -160,12 +160,7 @@ fn inspect_structure_text_and_json_match_the_fact_report_goldens() {
     .expect("structure text golden");
     assert_eq!(text, expected_text);
 
-    let json = successful_stdout(run_jet(&[
-        "inspect",
-        "structure",
-        "--json",
-        example,
-    ]));
+    let json = successful_stdout(run_jet(&["inspect", "structure", "--json", example]));
     let expected_json = fs::read_to_string(
         repo().join("examples/features/expected/tooling/structure_plane.structure.json"),
     )
@@ -211,10 +206,8 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
     }
     jet::Codegen::TIR::lower_jit_program(&bundle).expect("structure example lowers to TIR");
 
-    let cache = std::env::temp_dir().join(format!(
-        "jet_structure_plane_tiers_{}",
-        std::process::id()
-    ));
+    let cache =
+        std::env::temp_dir().join(format!("jet_structure_plane_tiers_{}", std::process::id()));
     let _ = fs::remove_dir_all(&cache);
     for (mode, args) in [
         ("release", vec!["run", "--release", shown]),
@@ -259,7 +252,12 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
 #[test]
 fn structure_plane_web_compile_erases_the_fact_plane() {
     let rustc = Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .expect("probe wasm target");
     if !rustc.status.success() {

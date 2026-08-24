@@ -3,7 +3,7 @@
 mod common;
 
 use jet::Comptime::Build::{ActionOutcome, BuildCapability, BuildPolicy, CacheHitReason};
-use jet::Driver::{BuildQueryExpression, BuildRunOptions, compile_bundle_path_build};
+use jet::Driver::{compile_bundle_path_build, BuildQueryExpression, BuildRunOptions};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -194,9 +194,7 @@ fn run() { print("ok") }
         .expect("real execution must persist rebuild provenance");
     assert_eq!(
         rebuilt.status,
-        jet::Comptime::Build::ActionCacheStatus::Hit(
-            CacheHitReason::LocalActionRecordMatched
-        )
+        jet::Comptime::Build::ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched)
     );
     assert_eq!(rebuilt.reason, "local action record matched");
     let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -215,8 +213,7 @@ fn run() { print("ok") }
         String::from_utf8_lossy(&explain.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&explain.stdout)
-            .contains("rebuild=local action record matched"),
+        String::from_utf8_lossy(&explain.stdout).contains("rebuild=local action record matched"),
         "explain-build must expose real cache provenance: {}",
         String::from_utf8_lossy(&explain.stdout)
     );
@@ -241,13 +238,12 @@ fn build(b: BuildContext) BuildPlan ! -> {
 "#,
     );
     let entry = root.join("main.jet");
-    write(
-        &entry,
-        "fn run() { print(package_message()) }\n",
-    );
+    write(&entry, "fn run() { print(package_message()) }\n");
 
     let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
-    let build = output.build.expect("package.jet fn build should be selected");
+    let build = output
+        .build
+        .expect("package.jet fn build should be selected");
     assert_eq!(build.plan.targets()[0].name, "app");
     assert_eq!(build.generated.len(), 1);
     assert!(output.compile.rust.contains("package_message"));
@@ -332,7 +328,9 @@ fn warm_dependency_cache_still_runs_frontend_diagnostics() {
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|diagnostic| diagnostic.code != "ICE"));
-    assert!(errors.iter().any(|diagnostic| diagnostic.code.starts_with('E')));
+    assert!(errors
+        .iter()
+        .any(|diagnostic| diagnostic.code.starts_with('E')));
     assert!(
         !artifact.exists(),
         "front-end diagnostics must stop before cache restore or compiler codegen"
@@ -357,7 +355,9 @@ fn compiler_self_speed_reports_clean_and_incremental_medians() {
     for _ in 0..3 {
         let start = Instant::now();
         let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
-        let build = output.build.expect("incremental build should expose execution");
+        let build = output
+            .build
+            .expect("incremental build should expose execution");
         assert_eq!(build.execution.metrics.cache_restored_actions, 3);
         incremental.push(start.elapsed().as_micros());
     }
@@ -549,8 +549,16 @@ fn file_local_duplicate_build_entries_name_both_sites() {
         .iter()
         .find(|diagnostic| diagnostic.code == "E3520")
         .expect("duplicate file-local build entries use the conflict diagnostic");
-    assert!(diagnostic.what.contains("main.jet:1"), "{}", diagnostic.what);
-    assert!(diagnostic.what.contains("main.jet:3"), "{}", diagnostic.what);
+    assert!(
+        diagnostic.what.contains("main.jet:1"),
+        "{}",
+        diagnostic.what
+    );
+    assert!(
+        diagnostic.what.contains("main.jet:3"),
+        "{}",
+        diagnostic.what
+    );
 }
 
 #[test]
@@ -596,7 +604,9 @@ fn workspace_build_uses_batteries_for_missing_member_and_root_entries() {
         None,
     )
     .expect("workspace build should fall back to batteries for missing fn build");
-    assert!(packages.join("a/.jet/generated/a/a_generated.jet").is_file());
+    assert!(packages
+        .join("a/.jet/generated/a/a_generated.jet")
+        .is_file());
     assert!(output.rust.contains("workspace"));
 }
 
@@ -604,7 +614,10 @@ fn workspace_build_uses_batteries_for_missing_member_and_root_entries() {
 fn production_build_bridge_imports_only_the_canonical_legacy_project_file() {
     let root = project("legacy-import");
     let entry = root.join("main.jet");
-    write(&root.join("Cargo.toml"), "[package]\nname = \"legacy-import\"\n");
+    write(
+        &root.join("Cargo.toml"),
+        "[package]\nname = \"legacy-import\"\n",
+    );
     write(
         &entry,
         r#"
@@ -642,9 +655,9 @@ fn run() {}
 
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), ci_opts()).unwrap_err();
     assert!(
-        errors
-            .iter()
-            .any(|diagnostic| diagnostic.what.contains("legacy build wrappers are disabled in CI")),
+        errors.iter().any(|diagnostic| diagnostic
+            .what
+            .contains("legacy build wrappers are disabled in CI")),
         "{errors:#?}"
     );
 }
@@ -693,17 +706,16 @@ fn run() {}
     );
 
     let output = compile_bundle_path_build(entry.to_str().unwrap(), inspect_opts()).unwrap();
-    let build = output.build.expect("legacy import should produce a build plan");
+    let build = output
+        .build
+        .expect("legacy import should produce a build plan");
     let action = build
         .plan
         .actions()
         .iter()
         .find(|action| action.name == "cargo-import")
         .expect("imported action");
-    assert_eq!(
-        action.argv,
-        vec!["cargo", "build", "--bin", "cli"]
-    );
+    assert_eq!(action.argv, vec!["cargo", "build", "--bin", "cli"]);
     assert_eq!(
         action
             .inputs
@@ -724,10 +736,7 @@ fn run() {}
         action.labels.get("legacy.version").map(String::as_str),
         Some("1.2.3")
     );
-    assert_eq!(
-        action.labels.get("legacy.target").map(String::as_str),
-        None
-    );
+    assert_eq!(action.labels.get("legacy.target").map(String::as_str), None);
 }
 
 #[test]
@@ -774,10 +783,13 @@ fn run() {}
     );
 
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), inspect_opts()).unwrap_err();
-    assert!(errors.iter().any(|diagnostic| {
-        diagnostic.what.contains("unsupported construct")
-            && diagnostic.what.contains("add_custom_command")
-    }), "{errors:#?}");
+    assert!(
+        errors.iter().any(|diagnostic| {
+            diagnostic.what.contains("unsupported construct")
+                && diagnostic.what.contains("add_custom_command")
+        }),
+        "{errors:#?}"
+    );
 }
 
 #[test]
@@ -1000,8 +1012,8 @@ fn build(b: BuildContext) BuildPlan ! -> {
 fn run() {}
 "#,
     );
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
-        .unwrap_err();
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|d| d.code != "ICE"));
     assert!(errors.iter().any(|d| d.code == "E0003"));
@@ -1027,13 +1039,14 @@ pub fn helper() {}
     );
     let entry = root.join("main.jet");
     write(&entry, "use \"./dep\" as dep\nfn run() { dep.helper() }\n");
-    let out = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    let out =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
     assert!(out.build.is_none());
     assert!(!root.join(".jet/generated").exists());
 
     write(&entry, "fn build() Int -> { return 1 }\nfn run() {}\n");
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
-        .unwrap_err();
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
     assert!(errors.iter().any(|d| d.code == "E3501"));
 }
 
@@ -1055,8 +1068,8 @@ fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
 fn run() {}
 "#,
     );
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
-        .unwrap_err();
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
     assert!(errors.iter().any(|d| d.code == "E3503"));
     assert!(!root.join("out").exists());
 }
@@ -1086,7 +1099,9 @@ fn run() {}
 "#,
     );
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err();
-    assert!(errors.iter().any(|diag| diag.what.contains("generated action `bad-gen`")));
+    assert!(errors
+        .iter()
+        .any(|diag| diag.what.contains("generated action `bad-gen`")));
     assert!(!root.join(".jet/generated/main/bad.jet").exists());
 }
 
@@ -1128,7 +1143,10 @@ fn run() { print("ok") }
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(fs::read_to_string(root.join("stamp.txt")).unwrap(), "cli-built");
+    assert_eq!(
+        fs::read_to_string(root.join("stamp.txt")).unwrap(),
+        "cli-built"
+    );
 }
 
 #[test]
@@ -1169,7 +1187,9 @@ fn jet_build_positional_name_resolves_one_workspace_member() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(member.join(".jet/generated/one/member_generated.jet").is_file());
+    assert!(member
+        .join(".jet/generated/one/member_generated.jet")
+        .is_file());
 }
 
 #[test]
@@ -1193,12 +1213,21 @@ fn run() {}
         .arg("--json")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let json = String::from_utf8_lossy(&output.stdout);
     assert!(json.contains("\"name\":\"app\""));
     assert!(json.contains("\"name\":\"never-run\""));
-    assert!(!root.join("out").exists(), "graph query must never execute actions");
-    let lsp_plan = jet::Driver::query_build_plan(entry.to_str().unwrap()).unwrap().unwrap();
+    assert!(
+        !root.join("out").exists(),
+        "graph query must never execute actions"
+    );
+    let lsp_plan = jet::Driver::query_build_plan(entry.to_str().unwrap())
+        .unwrap()
+        .unwrap();
     assert_eq!(lsp_plan.graph().targets[0].name, "app");
     assert_eq!(lsp_plan.graph().actions[0].name, "never-run");
 
@@ -1225,14 +1254,15 @@ fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
 fn run() {}
 "#,
     );
-    let plan = jet::Driver::evaluate_build_query(
-        entry.to_str().unwrap(),
-        BuildQueryExpression::Build,
-    )
-    .unwrap()
-    .expect("declared effects remain inspectable without execution grants");
+    let plan =
+        jet::Driver::evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression::Build)
+            .unwrap()
+            .expect("declared effects remain inspectable without execution grants");
     assert_eq!(plan.actions()[0].name, "never-run");
-    assert!(!root.join("out").exists(), "query must never execute action");
+    assert!(
+        !root.join("out").exists(),
+        "query must never execute action"
+    );
 }
 
 #[test]
@@ -1263,13 +1293,13 @@ fn run() {{}}
     );
 
     std::env::remove_var("JET_QUERY_MUST_NOT_SET");
-    let diagnostics = jet::Driver::evaluate_build_query(
-        entry.to_str().unwrap(),
-        BuildQueryExpression::Build,
-    )
-    .expect_err("inspection must reject ambient comptime authority");
+    let diagnostics =
+        jet::Driver::evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression::Build)
+            .expect_err("inspection must reject ambient comptime authority");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3411"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3411"),
         "unexpected diagnostics: {diagnostics:?}"
     );
     assert!(!marker.exists(), "inspection wrote to the host filesystem");
@@ -1309,13 +1339,13 @@ fn graph_query_denies_each_ambient_authority_class() {
                 "use {module} as api\nfn build(b: BuildContext) BuildPlan ! -> {{\n    #Impure(\"hostile {name} probe\") {{ {call} }}\n    return b.plan()\n}}\nfn run() {{}}\n"
             ),
         );
-        let diagnostics = jet::Driver::evaluate_build_query(
-            entry.to_str().unwrap(),
-            BuildQueryExpression::Build,
-        )
-        .expect_err("inspection must reject ambient comptime authority");
+        let diagnostics =
+            jet::Driver::evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression::Build)
+                .expect_err("inspection must reject ambient comptime authority");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E3411"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E3411"),
             "{name} escaped inspection authority: {diagnostics:?}"
         );
     }
@@ -1327,22 +1357,31 @@ fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
     let entry = root.join("main.jet");
     write(&entry, "fn build(b: BuildContext) BuildPlan ! -> { app :: b.add_executable(\"disk\", [\"main.jet\"], [])?\n return b.plan(app) }\nfn run() {}\n");
     let unsaved = "fn build(b: BuildContext) BuildPlan ! -> { app :: b.add_executable(\"unsaved\", [\"main.jet\"], [])?\n return b.plan(app) }\nfn run() {}\n";
-    let disk = jet::Driver::query_build_plan(entry.to_str().unwrap()).unwrap().unwrap();
-    let overlay = jet::Driver::query_build_plan_with_overlay(entry.to_str().unwrap(), unsaved).unwrap().unwrap();
+    let disk = jet::Driver::query_build_plan(entry.to_str().unwrap())
+        .unwrap()
+        .unwrap();
+    let overlay = jet::Driver::query_build_plan_with_overlay(entry.to_str().unwrap(), unsaved)
+        .unwrap()
+        .unwrap();
     assert_eq!(disk.targets()[0].name, "disk");
     assert_eq!(overlay.targets()[0].name, "unsaved");
     let json = jet::Driver::build_plan_json(&overlay);
-    assert!(json.contains("\"files\"") && json.contains("\"toolchains\"") && json.contains("\"generated\""));
+    assert!(
+        json.contains("\"files\"")
+            && json.contains("\"toolchains\"")
+            && json.contains("\"generated\"")
+    );
     let editor_json = jet::LSP::build_graph_json(entry.to_str().unwrap(), unsaved)
         .unwrap()
         .expect("overlay has build graph");
-    assert_eq!(editor_json, json, "editor and CLI must serialize one BuildPlan graph");
-    let queried = jet::Driver::evaluate_build_query(
-        entry.to_str().unwrap(),
-        BuildQueryExpression::Build,
-    )
-    .unwrap()
-    .unwrap();
+    assert_eq!(
+        editor_json, json,
+        "editor and CLI must serialize one BuildPlan graph"
+    );
+    let queried =
+        jet::Driver::evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression::Build)
+            .unwrap()
+            .unwrap();
     assert_eq!(
         jet::Driver::build_plan_json(&queried),
         jet::Driver::build_plan_json(&disk),
@@ -1354,7 +1393,9 @@ fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
 fn unselected_action_output_never_runs_checks_or_leaks() {
     let root = project("selected-closure");
     let entry = root.join("main.jet");
-    write(&entry, r#"
+    write(
+        &entry,
+        r#"
 fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
     #Impure("declare selected closure") {
     bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])?
@@ -1365,7 +1406,8 @@ fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
     return b.plan()
 }
 fn run() {}
-"#);
+"#,
+    );
     let output = compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
     assert_eq!(output.build.unwrap().execution.metrics.actions_total, 0);
     assert!(!root.join("missing-generated.jet").exists());
@@ -1375,7 +1417,9 @@ fn run() {}
 fn malformed_generate_is_rejected_before_selection() {
     let root = project("unselected-generate");
     let entry = root.join("main.jet");
-    write(&entry, r#"
+    write(
+        &entry,
+        r#"
 fn build(b: BuildContext) BuildPlan ! -> {
     b.generate("ignored") {
         fn broken(
@@ -1384,9 +1428,10 @@ fn build(b: BuildContext) BuildPlan ! -> {
     return b.plan(app)
 }
 fn run() {}
-"#);
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
-        .unwrap_err();
+"#,
+    );
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E0003"));
     assert!(!root.join(".jet/generated/main/ignored.jet").exists());
 }
@@ -1395,7 +1440,9 @@ fn run() {}
 fn runtime_reload_error_rolls_back_action_outputs_and_lock() {
     let root = project("reload-rollback");
     let entry = root.join("main.jet");
-    write(&entry, r#"
+    write(
+        &entry,
+        r#"
 fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
     #Impure("rollback after runtime reload") {
     stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])?
@@ -1405,7 +1452,8 @@ fn build(b: BuildContext) BuildPlan ! -[Exec, FS]> {
     return b.plan()
 }
 fn run() {}
-"#);
+"#,
+    );
     assert!(compile_bundle_path_build(entry.to_str().unwrap(), opts()).is_err());
     assert!(!root.join("stamp").exists());
     assert!(!root.join(".jet/lock").exists());
@@ -1431,7 +1479,9 @@ fn run_program_info_uses_qualified_collision_free_type_function_and_method_ident
     write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() { helper(); panic(\"left\") }\npub fn answer() Int -> { return 7 }\n");
     write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
     let entry = root.join("main.jet");
-    write(&entry, r#"
+    write(
+        &entry,
+        r#"
 use "./left" as left
 use "./right" as right
 fn build(b: BuildContext) BuildPlan ! -> {
@@ -1451,16 +1501,36 @@ fn build(b: BuildContext) BuildPlan ! -> {
     return b.plan()
 }
 fn run() { left.same(); right.same() }
-"#);
-    let (check_diags, _, facts) = jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
-    assert!(!check_diags.iter().any(|diag| diag.severity == jet::Diagnostics::Severity::Error), "{check_diags:#?}");
+"#,
+    );
+    let (check_diags, _, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(
+        !check_diags
+            .iter()
+            .any(|diag| diag.severity == jet::Diagnostics::Severity::Error),
+        "{check_diags:#?}"
+    );
     assert!(facts.solved.contains_key("left::same") && facts.solved.contains_key("right::same"));
-    assert!(!facts.solved.contains_key("same"), "duplicate short aliases must not exist");
+    assert!(
+        !facts.solved.contains_key("same"),
+        "duplicate short aliases must not exist"
+    );
     assert!(facts.solved["left::same"].contains("Net"));
     assert!(!facts.solved["right::same"].contains("Net"));
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
-    let codes = errors.iter().map(|diag| diag.code.as_str()).collect::<BTreeSet<_>>();
-    assert!(codes.contains("CALL") && codes.contains("ENUM") && codes.contains("METHOD") && codes.contains("LEFT"), "{errors:#?}");
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
+    let codes = errors
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        codes.contains("CALL")
+            && codes.contains("ENUM")
+            && codes.contains("METHOD")
+            && codes.contains("LEFT"),
+        "{errors:#?}"
+    );
     assert!(!codes.contains("BAD"), "{errors:#?}");
 }
 
@@ -1493,7 +1563,10 @@ fn run() { helper() }
 "#,
     );
     let result = jet::compile_programmable_build(entry.to_str().unwrap(), &[]);
-    assert!(result.is_ok(), "shared SemIndex rows were not readable: {result:#?}");
+    assert!(
+        result.is_ok(),
+        "shared SemIndex rows were not readable: {result:#?}"
+    );
 }
 
 #[test]
@@ -1534,7 +1607,12 @@ fn run() {}
 
     let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
         .expect_err("build-time distinct conversion should reach the marker diagnostic");
-    assert!(errors.iter().any(|diagnostic| diagnostic.code == "DISTINCT"), "{errors:#?}");
+    assert!(
+        errors
+            .iter()
+            .any(|diagnostic| diagnostic.code == "DISTINCT"),
+        "{errors:#?}"
+    );
 }
 
 #[test]
@@ -1633,8 +1711,8 @@ fn build(b: BuildContext) BuildPlan ! -> {
 fn run() {}
 "#,
     );
-    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
-        .unwrap_err();
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap_err();
     let diagnostic = errors.iter().find(|diag| diag.code == "ORG01").unwrap();
     assert_eq!(diagnostic.what, "entity must define archive");
     assert_eq!(diagnostic.why, "company policy requires archival");
@@ -1646,7 +1724,9 @@ fn run() {}
 fn locked_generated_drift_fails_before_materialization() {
     let root = project("locked-drift");
     let entry = root.join("main.jet");
-    let source = |value: &str| format!(r#"
+    let source = |value: &str| {
+        format!(
+            r#"
 fn build(b: BuildContext) BuildPlan ! -> {{
     b.generate("value") {{
         fn generated_value() String -> "{value}";
@@ -1655,7 +1735,9 @@ fn build(b: BuildContext) BuildPlan ! -> {{
     return b.plan(app)
 }}
 fn run() {{ print(generated_value()) }}
-"#);
+"#
+        )
+    };
     write(&entry, &source("one"));
     compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
     let generated = root.join(".jet/generated/main/value.jet");
@@ -1787,11 +1869,24 @@ fn build(b: BuildContext) BuildPlan ! -[Exec]> {
 fn run() {}
 "#,
     );
-    jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap();
+    jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap();
     assert_eq!(fs::read_to_string(root.join("stamp")).unwrap(), "ok");
 
     fs::remove_file(root.join("stamp")).unwrap();
-    write(&root.join("workspace.jet"), "module workspace { policy: .{ deny: #(Exec) } }\n");
+    write(
+        &root.join("workspace.jet"),
+        "module workspace { policy: .{ deny: #(Exec) } }\n",
+    );
     let errors = jet::compile_programmable_build_opts(
         entry.to_str().unwrap(),
         &["exec".to_string()],
@@ -1801,7 +1896,8 @@ fn run() {}
         false,
         false,
         None,
-    ).unwrap_err();
+    )
+    .unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"));
     assert!(!root.join("stamp").exists());
 }
@@ -1850,7 +1946,9 @@ fn run() {}
 fn malformed_package_and_workspace_build_policy_fail_closed() {
     let root = project("malformed-policy");
     let entry = root.join("run.jet");
-    write(&entry, r#"
+    write(
+        &entry,
+        r#"
 fn build(b: BuildContext) BuildPlan ! -[Exec]> {
     #Impure("must never run under malformed policy") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
@@ -1860,15 +1958,48 @@ fn build(b: BuildContext) BuildPlan ! -[Exec]> {
     return b.plan()
 }
 fn run() {}
-"#);
-    write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: Exec }\n");
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
-    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E1221"), "{errors:#?}");
+"#,
+    );
+    write(
+        &root.join("package.jet"),
+        "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: Exec }\n",
+    );
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E1221"),
+        "{errors:#?}"
+    );
     assert!(!root.join("stamp").exists());
 
-    write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
-    write(&root.join("workspace.jet"), "module workspace { policy: .{ deny: Exec } }\n");
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
+    write(
+        &root.join("package.jet"),
+        "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n",
+    );
+    write(
+        &root.join("workspace.jet"),
+        "module workspace { policy: .{ deny: Exec } }\n",
+    );
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
     assert!(errors.iter().any(|diagnostic| {
         diagnostic.code == "E3503"
             && diagnostic.what == "This root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
@@ -1879,10 +2010,23 @@ fn run() {}
 
     fs::remove_file(root.join("workspace.jet")).unwrap();
     fs::create_dir(root.join("workspace.jet")).unwrap();
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
-    assert!(errors.iter().any(|diagnostic| {
-        diagnostic.code == "E3503" && diagnostic.why.contains("present but unavailable")
-    }), "{errors:#?}");
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|diagnostic| {
+            diagnostic.code == "E3503" && diagnostic.why.contains("present but unavailable")
+        }),
+        "{errors:#?}"
+    );
 }
 
 #[test]
@@ -1919,9 +2063,12 @@ fn run() {}
         None,
     )
     .unwrap_err();
-    assert!(errors.iter().any(|diagnostic| {
-        diagnostic.code == "E3503" && diagnostic.why.contains("policy.allow")
-    }), "{errors:#?}");
+    assert!(
+        errors.iter().any(|diagnostic| {
+            diagnostic.code == "E3503" && diagnostic.why.contains("policy.allow")
+        }),
+        "{errors:#?}"
+    );
     assert!(!root.join("stamp").exists());
 }
 
@@ -1986,7 +2133,10 @@ fn module_directory_entry_requires_run_jet_not_main_jet() {
         diagnostic.why,
         "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`"
     );
-    assert_eq!(diagnostic.fix, "add `tool.jet` under this project, or fix the `use` name");
+    assert_eq!(
+        diagnostic.fix,
+        "add `tool.jet` under this project, or fix the `use` name"
+    );
     assert!(diagnostic.why.contains("run.jet"));
     assert!(!diagnostic.why.contains("main.jet"));
 }
@@ -1996,10 +2146,15 @@ fn outer_package_grant_cannot_override_inner_workspace_deny() {
     let root = project("policy-precedence");
     let child = root.join("child");
     fs::create_dir_all(&child).unwrap();
-    write(&root.join("package.jet"), "name: \"parent\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
+    write(
+        &root.join("package.jet"),
+        "name: \"parent\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n",
+    );
     write(&child.join("boundary.jet"), "module workspace { policy_note: .{ deny: #(FS) }, policy: .{ trust: .{ nested: .{ deny: #(FS) } }, deny: #(Exec) } }\n");
     let entry = child.join("run.jet");
-    write(&entry, r#"
+    write(
+        &entry,
+        r#"
 fn build(b: BuildContext) BuildPlan ! -[Exec]> {
     #Impure("workspace ceiling wins last") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
@@ -2009,9 +2164,23 @@ fn build(b: BuildContext) BuildPlan ! -[Exec]> {
     return b.plan()
 }
 fn run() {}
-"#);
-    let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure), false, false, false, None).unwrap_err();
-    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"), "{errors:#?}");
+"#,
+    );
+    let errors = jet::compile_programmable_build_opts(
+        entry.to_str().unwrap(),
+        &[],
+        false,
+        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
+        false,
+        false,
+        false,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E3503"),
+        "{errors:#?}"
+    );
     assert!(!child.join("stamp").exists());
 }
 
@@ -2055,7 +2224,10 @@ fn run() {}
         None,
     )
     .unwrap_err();
-    assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503"), "{errors:#?}");
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E3503"),
+        "{errors:#?}"
+    );
     assert!(!child.join("stamp").exists());
 }
 
@@ -2122,16 +2294,28 @@ fn run() {}
     );
     let mut web = BuildRunOptions::default();
     web.web_target = true;
-    assert!(compile_bundle_path_build(entry.to_str().unwrap(), web).unwrap().compile.web.is_some());
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), web)
+        .unwrap()
+        .compile
+        .web
+        .is_some());
 
     let mut cross = BuildRunOptions::default();
     cross.cross_target = Some("x86_64-unknown-linux-gnu".to_string());
-    assert!(compile_bundle_path_build(entry.to_str().unwrap(), cross).unwrap().compile.rust.contains("fn main"));
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), cross)
+        .unwrap()
+        .compile
+        .rust
+        .contains("fn main"));
 
     let mut freestanding = BuildRunOptions::default();
     freestanding.freestanding = true;
     let freestanding_result = compile_bundle_path_build(entry.to_str().unwrap(), freestanding);
-    assert!(freestanding_result.is_ok(), "{:#?}", freestanding_result.err());
+    assert!(
+        freestanding_result.is_ok(),
+        "{:#?}",
+        freestanding_result.err()
+    );
 
     write(
         &entry,
@@ -2145,14 +2329,20 @@ pub fn transform(value: Int) Int -> { return value + 1 }
     );
     let mut plugin = BuildRunOptions::default();
     plugin.plugin_target = true;
-    assert!(compile_bundle_path_build(entry.to_str().unwrap(), plugin).unwrap().compile.plugin.is_some());
+    assert!(compile_bundle_path_build(entry.to_str().unwrap(), plugin)
+        .unwrap()
+        .compile
+        .plugin
+        .is_some());
 }
 
 #[test]
 fn locked_action_output_drift_rolls_back_filesystem() {
     let root = project("locked-action-output");
     let entry = root.join("main.jet");
-    let source = |value: &str| format!(r#"
+    let source = |value: &str| {
+        format!(
+            r#"
 fn build(b: BuildContext) BuildPlan ! -[Exec]> {{
     #Impure("locked action output") {{
     action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf {value} > artifact"], ["Exec"])?
@@ -2162,7 +2352,9 @@ fn build(b: BuildContext) BuildPlan ! -[Exec]> {{
     return b.plan()
 }}
 fn run() {{}}
-"#);
+"#
+        )
+    };
     write(&entry, &source("one"));
     compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap();
     assert_eq!(fs::read_to_string(root.join("artifact")).unwrap(), "one");
@@ -2195,8 +2387,13 @@ fn build(b: BuildContext) BuildPlan ! -[FS]> {
 fn run() { print(generated_asset()) }
 "#,
     );
-    let output = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
-    assert!(output.compile.comptime_inputs.iter().any(|input| input.path == "assets/message.txt"));
+    let output =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    assert!(output
+        .compile
+        .comptime_inputs
+        .iter()
+        .any(|input| input.path == "assets/message.txt"));
     let lock = fs::read_to_string(root.join(".jet/lock")).unwrap();
     assert!(lock.contains("assets/message.txt"));
 }
@@ -2437,7 +2634,10 @@ fn build_entry_program_runs_the_same_on_every_tier() {
         !jet_jit::fallback_invoked_for_test(),
         "the build-entry program must not reach a forbidden fallback"
     );
-    assert_eq!(jit, interpreted, "resident JIT drifted from the interpreter");
+    assert_eq!(
+        jit, interpreted,
+        "resident JIT drifted from the interpreter"
+    );
 
     if common::have_rustc() {
         let aot = common::build_and_run("jet_build_entry_tiers", "run", BUILD_ENTRY_PROGRAM);
@@ -2470,10 +2670,9 @@ fn build_entry_program_runs_the_same_on_every_tier() {
 #[test]
 fn the_compiler_api_exemption_stays_paired_with_the_drivers_projection() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let pipeline = fs::read_to_string(
-        root.join("crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs"),
-    )
-    .unwrap();
+    let pipeline =
+        fs::read_to_string(root.join("crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs"))
+            .unwrap();
     let driver = fs::read_to_string(root.join("crates/jet-driver/src/Driver/mod.rs")).unwrap();
     let sema_entry = fs::read_to_string(root.join("crates/jet-sema/src/Sema/Bundle.rs")).unwrap();
 

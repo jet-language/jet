@@ -96,8 +96,7 @@ fn jit_runs_the_channel_readiness_example() {
 
 #[test]
 fn interpreter_runs_the_channel_readiness_example() {
-    let (code, stdout, stderr) =
-        tir_support::interpreter_run("channel_tiers_interpreter", SOURCE);
+    let (code, stdout, stderr) = tir_support::interpreter_run("channel_tiers_interpreter", SOURCE);
     assert_eq!(code, 0, "interpreter failed: {stderr}");
     assert_eq!(
         stdout, EXPECTED,
@@ -130,20 +129,18 @@ const EXPECTED_REPL: &str = "7\n";
 #[test]
 fn web_runs_the_same_channel_readiness_example() {
     let scratch = common::Scratch::new("channel-readiness-web");
-    let output = jet::compile_web_with_path(
-        SOURCE,
-        "examples/features/concurrency/select_channel.jet",
-    )
-    .unwrap_or_else(|diagnostics| {
-        panic!(
-            "web target rejected channel/readiness:\n{}",
-            jet::render_diagnostics(
-                "examples/features/concurrency/select_channel.jet",
-                SOURCE,
-                &diagnostics
-            )
-        )
-    });
+    let output =
+        jet::compile_web_with_path(SOURCE, "examples/features/concurrency/select_channel.jet")
+            .unwrap_or_else(|diagnostics| {
+                panic!(
+                    "web target rejected channel/readiness:\n{}",
+                    jet::render_diagnostics(
+                        "examples/features/concurrency/select_channel.jet",
+                        SOURCE,
+                        &diagnostics
+                    )
+                )
+            });
     let web = output.web.expect("web target must produce artifacts");
     assert!(
         web.js_app.contains("jet_scheduler_select"),

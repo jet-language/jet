@@ -5,8 +5,8 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, substitute_type, COMPARABLE};
-use crate::AST::{BinOp, CtValue, Dimension, Expr, Type};
 use crate::Sema::{KnowledgeGate, KnowledgePlane};
+use crate::AST::{BinOp, CtValue, Dimension, Expr, Type};
 use std::collections::HashMap;
 
 /// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
@@ -52,9 +52,7 @@ fn known_comptime_value(expr: &Expr) -> Option<CtValue> {
 
 fn is_folded_fact_expr(expr: &Expr) -> bool {
     match expr {
-        Expr::ComptimeName {
-            value: Some(_), ..
-        } => true,
+        Expr::ComptimeName { value: Some(_), .. } => true,
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => is_folded_fact_expr(inner),
         _ => false,
     }
@@ -66,7 +64,10 @@ impl<'a> Checker<'a> {
     }
 
     fn is_complex_scalar(ty: &Type) -> bool {
-        matches!(ty, Type::Int | Type::IntN { .. } | Type::Float | Type::Float32)
+        matches!(
+            ty,
+            Type::Int | Type::IntN { .. } | Type::Float | Type::Float32
+        )
     }
 
     fn complexize_operand(&mut self, expr: &mut Box<Expr>, span: Span) -> Option<Type> {
@@ -111,11 +112,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn decimalize_integer_literal(
-        &mut self,
-        expr: &mut Box<Expr>,
-        span: Span,
-    ) -> Option<Type> {
+    fn decimalize_integer_literal(&mut self, expr: &mut Box<Expr>, span: Span) -> Option<Type> {
         let value = match expr.as_ref() {
             Expr::Int(value, _, None, raw) => {
                 super::exact_integer_literal(*value, raw.as_deref()).to_string_rep()
@@ -181,9 +178,9 @@ impl<'a> Checker<'a> {
             }
             Expr::Int(value, _, width, raw)
                 if width.is_none()
-                    && super::exact_integer_literal(*value, raw.as_deref()).compare(
-                        &crate::Numeric::CtBigInt::from_int(0),
-                    ) != std::cmp::Ordering::Less =>
+                    && super::exact_integer_literal(*value, raw.as_deref())
+                        .compare(&crate::Numeric::CtBigInt::from_int(0))
+                        != std::cmp::Ordering::Less =>
             {
                 let exact = super::exact_integer_literal(*value, raw.as_deref());
                 let minimal = Self::minimal_literal_width(&exact, peer);
@@ -200,21 +197,14 @@ impl<'a> Checker<'a> {
     fn take_numeric_approx_operand(expr: &mut Expr, span: Span) -> Option<Expr> {
         match expr {
             Expr::Paren(inner, _) => Self::take_numeric_approx_operand(inner, span),
-            Expr::Call(call) if call.widen_approx && call.args.len() == 1 => {
-                Some(std::mem::replace(
-                    &mut call.args[0].expr,
-                    Expr::Absent(span),
-                ))
-            }
+            Expr::Call(call) if call.widen_approx && call.args.len() == 1 => Some(
+                std::mem::replace(&mut call.args[0].expr, Expr::Absent(span)),
+            ),
             _ => None,
         }
     }
 
-    fn contextualize_numeric_literal(
-        &mut self,
-        expr: &mut Expr,
-        target: &Type,
-    ) -> Option<Type> {
+    fn contextualize_numeric_literal(&mut self, expr: &mut Expr, target: &Type) -> Option<Type> {
         match expr {
             Expr::Paren(inner, _) => self.contextualize_numeric_literal(inner, target),
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => match (inner.as_mut(), target) {
@@ -224,10 +214,7 @@ impl<'a> Checker<'a> {
                     if !super::exact_integer_fits(&negated, interval.lo, interval.hi) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
-                                &negated,
-                                *lo,
-                                *hi,
-                                *span,
+                                &negated, *lo, *hi, *span,
                             ),
                         );
                     }
@@ -262,10 +249,7 @@ impl<'a> Checker<'a> {
                     if !super::exact_integer_fits(&exact, interval.lo, interval.hi) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
-                                &exact,
-                                *lo,
-                                *hi,
-                                *span,
+                                &exact, *lo, *hi, *span,
                             ),
                         );
                     }
@@ -312,8 +296,7 @@ impl<'a> Checker<'a> {
                             ),
                             format!(
                                 "use a whole-number type, or write a value from -{} through {}",
-                                limit,
-                                limit
+                                limit, limit
                             ),
                             Some(*span),
                         ));
@@ -340,12 +323,7 @@ impl<'a> Checker<'a> {
 
     /// Record sema's numeric widening decision on the expression itself.
     /// Lowering consumes the explicit conversion and checked-crossing marker.
-    pub(crate) fn widen_numeric_expr(
-        &mut self,
-        expr: &mut Expr,
-        source: &Type,
-        target: &Type,
-    ) {
+    pub(crate) fn widen_numeric_expr(&mut self, expr: &mut Expr, source: &Type, target: &Type) {
         if source == target {
             return;
         }
@@ -376,9 +354,7 @@ impl<'a> Checker<'a> {
         let approximate = Self::take_numeric_approx_operand(expr, span);
         let checked = crate::Sema::knowledge_loss_requires_gate(
             KnowledgePlane::Exactness,
-            approximate
-                .as_ref()
-                .map(|_| KnowledgeGate::Approximation),
+            approximate.as_ref().map(|_| KnowledgeGate::Approximation),
         );
 
         if checked {
@@ -591,10 +567,8 @@ impl<'a> Checker<'a> {
             BinOp::Eq | BinOp::Ne => {
                 let has_comparable = ty.as_ref().is_some_and(|ty| match ty {
                     Type::Named(name) => {
-                        (self.type_implements_trait_for_name(
-                            name,
-                            crate::Syntax::TRAIT_COMPARABLE,
-                        ) || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
+                        (self.type_implements_trait_for_name(name, crate::Syntax::TRAIT_COMPARABLE)
+                            || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
                             && (self.type_implements_trait_for_name(
                                 name,
                                 crate::Syntax::TRAIT_EQUATABLE,
@@ -647,10 +621,9 @@ impl<'a> Checker<'a> {
                 if call.name == "measurement"
                     && self.funcs.get(&call.name).is_none()
                     && self.lookup(&call.name).is_none()
-        )
-            || self
-                .operator_expr_type(expr)
-                .is_some_and(|ty| Self::is_measurement_type(&ty))
+        ) || self
+            .operator_expr_type(expr)
+            .is_some_and(|ty| Self::is_measurement_type(&ty))
     }
 
     fn zero_uncertainty(expr: &mut Box<Expr>, span: Span) {
@@ -877,10 +850,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     return Some(Type::Result {
-                        ok: Box::new(Type::compute_shape_type(
-                            "Matrix",
-                            &[left_rows, right_cols],
-                        )),
+                        ok: Box::new(Type::compute_shape_type("Matrix", &[left_rows, right_cols])),
                         err: Box::new(Type::Named("ComputeError".to_string())),
                     });
                 }
@@ -950,8 +920,10 @@ impl<'a> Checker<'a> {
                 | BinOp::Le
                 | BinOp::Gt
                 | BinOp::Ge
-        ) || (matches!(op, BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
-            && lt.is_integer()
+        ) || (matches!(
+            op,
+            BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor
+        ) && lt.is_integer()
             && rt.is_integer());
         if joins_numeric && lt != rt {
             if let Some(join) = lt.numeric_join(&rt) {
@@ -1002,19 +974,17 @@ impl<'a> Checker<'a> {
         // Otherwise `Meter * Meter` stays `Meter` forever and exponent
         // overflow never reaches the sema dimension check.
         let dimensional_multiplicative = matches!(op, BinOp::Mul | BinOp::Div)
-            && (self.quantity_dimension(&lt).is_some()
-                || self.quantity_dimension(&rt).is_some());
-        let unit_operator = self.unit_fact_for_type(&lt).is_some()
-            || self.unit_fact_for_type(&rt).is_some();
+            && (self.quantity_dimension(&lt).is_some() || self.quantity_dimension(&rt).is_some());
+        let unit_operator =
+            self.unit_fact_for_type(&lt).is_some() || self.unit_fact_for_type(&rt).is_some();
         if lt == rt && !dimensional_multiplicative && !unit_operator {
             if let Type::Named(type_name) = &lt {
                 let comparable_hook = (self
                     .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_COMPARABLE)
                     || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE))
-                    && (self.type_implements_trait_for_name(
-                        type_name,
-                        crate::Syntax::TRAIT_EQUATABLE,
-                    ) || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_EQUATABLE));
+                    && (self
+                        .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_EQUATABLE)
+                        || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_EQUATABLE));
                 let hook = match op {
                     BinOp::Add => Some((crate::Syntax::TRAIT_ADD, "add", lt.clone())),
                     BinOp::Sub => Some((crate::Syntax::TRAIT_SUB, "sub", lt.clone())),
@@ -1082,7 +1052,11 @@ impl<'a> Checker<'a> {
                                 spread: false,
                             }],
                             recv_type: Some(
-                                if self.type_param_scope.iter().any(|param| param.name == type_name.as_str()) {
+                                if self
+                                    .type_param_scope
+                                    .iter()
+                                    .any(|param| param.name == type_name.as_str())
+                                {
                                     trait_name.to_string()
                                 } else {
                                     Self::split_type_name(type_name).1.to_string()
@@ -1093,7 +1067,11 @@ impl<'a> Checker<'a> {
                         };
                         *replacement = Some(match op {
                             BinOp::Eq | BinOp::Ne if comparable_hook => Expr::Binary(
-                                if op == BinOp::Eq { BinOp::Eq } else { BinOp::Ne },
+                                if op == BinOp::Eq {
+                                    BinOp::Eq
+                                } else {
+                                    BinOp::Ne
+                                },
                                 Box::new(call),
                                 Box::new(Expr::EnumLit {
                                     type_name: crate::Syntax::TYPE_ORDERING.to_string(),
@@ -1161,7 +1139,9 @@ impl<'a> Checker<'a> {
                     && lfact.family == rfact.family
                 {
                     use QuantityKind::{Delta, Linear, Point};
-                    if lfact.family == "Time" && lfact.package == std::path::PathBuf::from("core.units") {
+                    if lfact.family == "Time"
+                        && lfact.package == std::path::PathBuf::from("core.units")
+                    {
                         let result = match (op, lfact.kind, rfact.kind) {
                             (BinOp::Add | BinOp::Sub, Delta, Delta) => {
                                 Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
@@ -1174,18 +1154,21 @@ impl<'a> Checker<'a> {
                             (BinOp::Sub, Point, Point) => {
                                 Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))
                             }
-                            (BinOp::Eq
-                            | BinOp::Ne
-                            | BinOp::Lt
-                            | BinOp::Gt
-                            | BinOp::Le
-                            | BinOp::Ge
-                            | BinOp::Compare, left_kind, right_kind)
-                                if left_kind == right_kind => Some(if op == BinOp::Compare {
-                                    Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
-                                } else {
-                                    Type::Bool
-                                }),
+                            (
+                                BinOp::Eq
+                                | BinOp::Ne
+                                | BinOp::Lt
+                                | BinOp::Gt
+                                | BinOp::Le
+                                | BinOp::Ge
+                                | BinOp::Compare,
+                                left_kind,
+                                right_kind,
+                            ) if left_kind == right_kind => Some(if op == BinOp::Compare {
+                                Type::Named(crate::Syntax::TYPE_ORDERING.to_string())
+                            } else {
+                                Type::Bool
+                            }),
                             (BinOp::Add, Point, Point) | (BinOp::Sub, Delta, Point) => {
                                 self.diags.push(Diagnostic::error(
                                     "E0127",
@@ -1224,23 +1207,23 @@ impl<'a> Checker<'a> {
                             ) {
                                 return Some(Type::Named(dest_name.clone()));
                             }
-                            self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);
-                            self.convert_unit_operand(rhs, rname, rfact, dest_name, dest_fact, span);
+                            self.convert_unit_operand(
+                                lhs, lname, lfact, dest_name, dest_fact, span,
+                            );
+                            self.convert_unit_operand(
+                                rhs, rname, rfact, dest_name, dest_fact, span,
+                            );
                             return Some(Type::Named(dest_name.clone()));
                         }
                         (BinOp::Add, Point, Delta) | (BinOp::Sub, Point, Delta) => {
-                            let Some(delta_name) = self.counterpart_unit_type(lname, lfact, Delta) else {
+                            let Some(delta_name) = self.counterpart_unit_type(lname, lfact, Delta)
+                            else {
                                 return None;
                             };
                             let (_, delta_fact) = self
                                 .unit_fact_for_type(&Type::Named(delta_name.clone()))
                                 .expect("counterpart unit fact");
-                            if self.reject_implicit_unit_conversion(
-                                &delta_name,
-                                rname,
-                                rhs,
-                                span,
-                            ) {
+                            if self.reject_implicit_unit_conversion(&delta_name, rname, rhs, span) {
                                 return Some(Type::Named(lname.clone()));
                             }
                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
@@ -1254,23 +1237,25 @@ impl<'a> Checker<'a> {
                                 span,
                             );
                             *replacement = Some(self.unit_wrapped_binary(
-                                op, left, lname, right, &delta_name, lname, span,
+                                op,
+                                left,
+                                lname,
+                                right,
+                                &delta_name,
+                                lname,
+                                span,
                             ));
                             return Some(Type::Named(lname.clone()));
                         }
                         (BinOp::Add, Delta, Point) => {
-                            let Some(delta_name) = self.counterpart_unit_type(rname, rfact, Delta) else {
+                            let Some(delta_name) = self.counterpart_unit_type(rname, rfact, Delta)
+                            else {
                                 return None;
                             };
                             let (_, delta_fact) = self
                                 .unit_fact_for_type(&Type::Named(delta_name.clone()))
                                 .expect("counterpart unit fact");
-                            if self.reject_implicit_unit_conversion(
-                                &delta_name,
-                                lname,
-                                lhs,
-                                span,
-                            ) {
+                            if self.reject_implicit_unit_conversion(&delta_name, lname, lhs, span) {
                                 return Some(Type::Named(rname.clone()));
                             }
                             let left = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
@@ -1284,7 +1269,13 @@ impl<'a> Checker<'a> {
                                 span,
                             );
                             *replacement = Some(self.unit_wrapped_binary(
-                                BinOp::Add, right, rname, left, &delta_name, rname, span,
+                                BinOp::Add,
+                                right,
+                                rname,
+                                left,
+                                &delta_name,
+                                rname,
+                                span,
                             ));
                             return Some(Type::Named(rname.clone()));
                         }
@@ -1295,7 +1286,9 @@ impl<'a> Checker<'a> {
                             } else {
                                 (rname, rfact)
                             };
-                            let Some(delta_name) = self.counterpart_unit_type(point_name, point_fact, Delta) else {
+                            let Some(delta_name) =
+                                self.counterpart_unit_type(point_name, point_fact, Delta)
+                            else {
                                 return None;
                             };
                             let source_name = if left_wins { rname } else { lname };
@@ -1337,11 +1330,23 @@ impl<'a> Checker<'a> {
                             ));
                             return None;
                         }
-                        (BinOp::Eq | BinOp::Ne | BinOp::Compare | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge, left_kind, right_kind)
-                            if left_kind == right_kind =>
-                        {
+                        (
+                            BinOp::Eq
+                            | BinOp::Ne
+                            | BinOp::Compare
+                            | BinOp::Lt
+                            | BinOp::Gt
+                            | BinOp::Le
+                            | BinOp::Ge,
+                            left_kind,
+                            right_kind,
+                        ) if left_kind == right_kind => {
                             let left_wins = lfact.scale.abs() <= rfact.scale.abs();
-                            let (dest_name, dest_fact) = if left_wins { (lname, lfact) } else { (rname, rfact) };
+                            let (dest_name, dest_fact) = if left_wins {
+                                (lname, lfact)
+                            } else {
+                                (rname, rfact)
+                            };
                             let source_name = if left_wins { rname } else { lname };
                             let source_expr = if left_wins { &**rhs } else { &**lhs };
                             if self.reject_implicit_unit_conversion(
@@ -1356,8 +1361,12 @@ impl<'a> Checker<'a> {
                                     Type::Bool
                                 });
                             }
-                            self.convert_unit_operand(lhs, lname, lfact, dest_name, dest_fact, span);
-                            self.convert_unit_operand(rhs, rname, rfact, dest_name, dest_fact, span);
+                            self.convert_unit_operand(
+                                lhs, lname, lfact, dest_name, dest_fact, span,
+                            );
+                            self.convert_unit_operand(
+                                rhs, rname, rfact, dest_name, dest_fact, span,
+                            );
                             return Some(Type::Bool);
                         }
                         _ => {}
@@ -1521,12 +1530,7 @@ impl<'a> Checker<'a> {
                     // every backend through the existing raw projection seam.
                     let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
                     let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
-                    *lhs = Box::new(Self::distinct_raw(
-                        *left,
-                        distinct_name,
-                        base.clone(),
-                        span,
-                    ));
+                    *lhs = Box::new(Self::distinct_raw(*left, distinct_name, base.clone(), span));
                     *rhs = Box::new(Self::distinct_raw(
                         *right,
                         distinct_name,
@@ -1611,7 +1615,11 @@ impl<'a> Checker<'a> {
                 lt = self.complexize_operand(lhs, span)?;
             }
             if Self::is_complex_type(&lt) && Self::is_complex_type(&rt) {
-                if let Some(result) = precise_binop_result(op, crate::Syntax::TYPE_COMPLEX, crate::Syntax::TYPE_COMPLEX) {
+                if let Some(result) = precise_binop_result(
+                    op,
+                    crate::Syntax::TYPE_COMPLEX,
+                    crate::Syntax::TYPE_COMPLEX,
+                ) {
                     return Some(result);
                 }
             }
@@ -1702,18 +1710,17 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-                let fraction_and_integer_literal =
-                    (lname == crate::Syntax::TYPE_FRACTION
-                        && rt == Type::Int
-                        && Self::is_bare_integer_literal(rhs))
-                        || (rname == crate::Syntax::TYPE_FRACTION
-                            && lt == Type::Int
-                            && Self::is_bare_integer_literal(lhs));
+                let fraction_and_integer_literal = (lname == crate::Syntax::TYPE_FRACTION
+                    && rt == Type::Int
+                    && Self::is_bare_integer_literal(rhs))
+                    || (rname == crate::Syntax::TYPE_FRACTION
+                        && lt == Type::Int
+                        && Self::is_bare_integer_literal(lhs));
                 if fraction_and_integer_literal {
                     return match op {
-                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => Some(Type::Named(
-                            crate::Syntax::TYPE_FRACTION.to_string(),
-                        )),
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                            Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
+                        }
                         BinOp::Eq | BinOp::Ne => Some(Type::Bool),
                         _ => None,
                     };
@@ -1729,8 +1736,10 @@ impl<'a> Checker<'a> {
                         lt.name(),
                         rt.name()
                     ),
-                    "`Decimal` supports `+`, `-`, `*`, and `==`/`!=` on matching values only".to_string(),
-                    "use a method like `.add(other)` or make both operands the same precise type".to_string(),
+                    "`Decimal` supports `+`, `-`, `*`, and `==`/`!=` on matching values only"
+                        .to_string(),
+                    "use a method like `.add(other)` or make both operands the same precise type"
+                        .to_string(),
                     Some(span),
                 ));
                 return None;
@@ -1809,12 +1818,9 @@ impl<'a> Checker<'a> {
                                     "user arithmetic dispatches only through one ",
                                     "`impl {}.{}` hook"
                                 ),
-                                type_name,
-                                trait_name
+                                type_name, trait_name
                             ),
-                            format!(
-                                "implement `{type_name}.{trait_name}`, or call a named method"
-                            ),
+                            format!("implement `{type_name}.{trait_name}`, or call a named method"),
                             Some(span),
                         ));
                         None
@@ -1970,9 +1976,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            if self.types_comparable_type(lt)
-                || self.type_param_has_bound(lt, COMPARABLE)
-            {
+            if self.types_comparable_type(lt) || self.type_param_has_bound(lt, COMPARABLE) {
                 Some(Type::Bool)
             } else if *lt == Type::String {
                 self.diags.push(Diagnostic::error(
@@ -2022,8 +2026,7 @@ impl<'a> Checker<'a> {
                                 self.type_implements_trait_for_name(
                                     type_name,
                                     crate::Syntax::TRAIT_COMPARABLE,
-                                ) || self
-                                    .type_param_has_bound(lt, crate::Syntax::TRAIT_COMPARABLE)
+                                ) || self.type_param_has_bound(lt, crate::Syntax::TRAIT_COMPARABLE)
                             }
                             _ => false,
                         };
@@ -2149,13 +2152,7 @@ impl<'a> Checker<'a> {
             )
     }
 
-    fn dimension_mismatch(
-        &mut self,
-        op: BinOp,
-        left: Dimension,
-        right: Dimension,
-        span: Span,
-    ) {
+    fn dimension_mismatch(&mut self, op: BinOp, left: Dimension, right: Dimension, span: Span) {
         self.diags.push(Diagnostic::error(
             "E0359",
             format!(
@@ -2173,7 +2170,10 @@ impl<'a> Checker<'a> {
     fn dimension_overflow(&mut self, op: BinOp, span: Span) {
         self.diags.push(Diagnostic::error(
             "E0359",
-            format!("{} makes the physical dimension too large", operator_label(op)),
+            format!(
+                "{} makes the physical dimension too large",
+                operator_label(op)
+            ),
             "physical dimension exponents are checked compiler facts and cannot overflow"
                 .to_string(),
             "simplify the repeated physical multiplication or division".to_string(),

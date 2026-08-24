@@ -79,10 +79,7 @@ fn fn_body<'a>(source: &'a str, name: &str) -> &'a str {
 
 fn assert_no_wildcard_at_indent(body: &str, indent: usize, ctx: &str) {
     let marker = format!("{}_ =>", " ".repeat(indent));
-    let hits: Vec<&str> = body
-        .lines()
-        .filter(|l| l.starts_with(&marker))
-        .collect();
+    let hits: Vec<&str> = body.lines().filter(|l| l.starts_with(&marker)).collect();
     assert!(
         hits.is_empty(),
         "{ctx}: found bare `_ =>` at indent {indent} (hides new TIR variants): {hits:?}"
@@ -130,8 +127,7 @@ fn assert_no_execution_fallback(body: &str, ctx: &str) {
 #[test]
 fn jit_lower_stmt_is_exhaustive_over_tstmt() {
     let root = root();
-    let source =
-        fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
+    let source = fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
     let body = fn_body(&source, "lower_stmt");
     assert_no_wildcard_at_indent(body, 12, "lower_stmt (TStmt)");
 }
@@ -139,8 +135,7 @@ fn jit_lower_stmt_is_exhaustive_over_tstmt() {
 #[test]
 fn jit_lower_expr_is_exhaustive_over_texprkind() {
     let root = root();
-    let source =
-        fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
+    let source = fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
     let body = fn_body(&source, "lower_expr");
     assert_no_wildcard_at_indent(body, 12, "lower_expr (TExprKind)");
 }
@@ -148,8 +143,7 @@ fn jit_lower_expr_is_exhaustive_over_texprkind() {
 #[test]
 fn jit_lower_builtin_method_is_exhaustive_over_tbuiltinop() {
     let root = root();
-    let source =
-        fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
+    let source = fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
     let body = fn_body(&source, "lower_builtin_method");
     assert_no_wildcard_at_indent(body, 12, "lower_builtin_method (TBuiltinOp)");
 }
@@ -157,8 +151,7 @@ fn jit_lower_builtin_method_is_exhaustive_over_tbuiltinop() {
 #[test]
 fn jit_lower_handle_method_is_exhaustive_over_thandleop() {
     let root = root();
-    let source =
-        fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
+    let source = fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
     let body = fn_body(&source, "lower_handle_method");
     assert_no_wildcard_at_indent(body, 12, "lower_handle_method (THandleOp)");
 }
@@ -166,8 +159,7 @@ fn jit_lower_handle_method_is_exhaustive_over_thandleop() {
 #[test]
 fn jit_lower_stmt_if_cond_is_exhaustive_over_tifcond() {
     let root = root();
-    let source =
-        fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
+    let source = fs::read_to_string(root.join("crates/jet-jit/src/jit/lower_ctx.rs")).unwrap();
     let body = fn_body(&source, "lower_stmt");
     assert_no_wildcard_at_indent(body, 16, "lower_stmt's TIfCond match");
 }
@@ -175,10 +167,9 @@ fn jit_lower_stmt_if_cond_is_exhaustive_over_tifcond() {
 #[test]
 fn aot_emit_tir_stmt_is_exhaustive_over_tstmt() {
     let root = root();
-    let source = fs::read_to_string(
-        root.join("crates/jet-codegen/src/Codegen/TIR/emit/statements.rs"),
-    )
-    .unwrap();
+    let source =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/emit/statements.rs"))
+            .unwrap();
     let body = fn_body(&source, "emit_tir_stmt");
     assert_no_wildcard_at_indent(body, 8, "emit_tir_stmt (TStmt)");
 }
@@ -186,10 +177,9 @@ fn aot_emit_tir_stmt_is_exhaustive_over_tstmt() {
 #[test]
 fn aot_emit_tir_expr_is_exhaustive_over_texprkind() {
     let root = root();
-    let source = fs::read_to_string(
-        root.join("crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs"),
-    )
-    .unwrap();
+    let source =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs"))
+            .unwrap();
     let body = fn_body(&source, "emit_tir_expr");
     assert_no_wildcard_at_indent(body, 8, "emit_tir_expr (TExprKind)");
 }
@@ -215,10 +205,9 @@ fn eval_expr_is_exhaustive_over_texprkind() {
 #[test]
 fn eval_builtin_is_exhaustive_over_tbuiltinop() {
     let root = root();
-    let source = fs::read_to_string(
-        root.join("crates/jet-codegen/src/Codegen/TIR/eval/builtins.rs"),
-    )
-    .unwrap();
+    let source =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/builtins.rs"))
+            .unwrap();
     let body = fn_body(&source, "eval_builtin");
     assert_no_wildcard_at_indent(body, 8, "eval_builtin (TBuiltinOp)");
 }
@@ -226,10 +215,9 @@ fn eval_builtin_is_exhaustive_over_tbuiltinop() {
 #[test]
 fn eval_handle_is_exhaustive_over_thandleop() {
     let root = root();
-    let source = fs::read_to_string(
-        root.join("crates/jet-codegen/src/Codegen/TIR/eval/handles.rs"),
-    )
-    .unwrap();
+    let source =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/handles.rs"))
+            .unwrap();
     let body = fn_body(&source, "eval_handle");
     assert_no_wildcard_at_indent(body, 8, "eval_handle (THandleOp)");
 }
@@ -248,7 +236,8 @@ fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
         ],
     );
 
-    let comptime = fs::read_to_string(root.join("crates/jet-comptime/src/Comptime/mod.rs")).unwrap();
+    let comptime =
+        fs::read_to_string(root.join("crates/jet-comptime/src/Comptime/mod.rs")).unwrap();
     let repl_step = fn_body(&comptime, "run_repl_step");
     let repl_step_interruptible = fn_body(&comptime, "run_repl_step_interruptible");
     let repl_inner = fn_body(&comptime, "run_repl_step_inner");
@@ -383,10 +372,8 @@ fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
         &["self.exec_stmts(&func.body, scope)"],
     );
 
-    let eval_stmts = fs::read_to_string(
-        root.join("crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs"),
-    )
-    .unwrap();
+    let eval_stmts =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs")).unwrap();
     let exec_stmts = fn_body(&eval_stmts, "exec_stmts");
     let exec_stmt = fn_body(&eval_stmts, "exec_stmt_inner");
     assert_contains_all(
@@ -394,15 +381,9 @@ fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
         "canonical TIR statement list",
         &["self.exec_stmt(stmt, scope)"],
     );
-    assert_contains_all(
-        exec_stmt,
-        "canonical TIR statement",
-        &["self.eval_expr("],
-    );
-    let eval_exprs = fs::read_to_string(
-        root.join("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs"),
-    )
-    .unwrap();
+    assert_contains_all(exec_stmt, "canonical TIR statement", &["self.eval_expr("]);
+    let eval_exprs =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs")).unwrap();
     let eval_expr = fn_body(&eval_exprs, "eval_expr_inner");
     assert_contains_all(eval_expr, "canonical TIR expression", &["match &expr.kind"]);
 

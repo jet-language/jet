@@ -155,12 +155,27 @@ fn run() {
     let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with('{')).collect();
     assert_eq!(lines.len(), 1, "stderr:\n{stderr}");
     let line = lines[0];
-    assert!(line.contains("\"trace_id\":\"req-1\""), "trace missing: {line}");
-    assert!(line.contains("\"route\":\"/health\""), "field missing: {line}");
+    assert!(
+        line.contains("\"trace_id\":\"req-1\""),
+        "trace missing: {line}"
+    );
+    assert!(
+        line.contains("\"route\":\"/health\""),
+        "field missing: {line}"
+    );
     assert!(line.contains("\"status\":200"), "int field missing: {line}");
-    assert!(line.contains("\"cache\":true"), "bool field missing: {line}");
-    assert!(line.contains("\"metric.counter.requests\":1"), "counter missing: {line}");
-    assert!(line.contains("\"spans\":[\"request\"]"), "span missing: {line}");
+    assert!(
+        line.contains("\"cache\":true"),
+        "bool field missing: {line}"
+    );
+    assert!(
+        line.contains("\"metric.counter.requests\":1"),
+        "counter missing: {line}"
+    );
+    assert!(
+        line.contains("\"spans\":[\"request\"]"),
+        "span missing: {line}"
+    );
 }
 
 #[test]
@@ -255,7 +270,11 @@ fn run() {
 "#;
     let (code, _stdout, stderr) = build_and_run_debug("safe_locals", src);
     assert_eq!(code, 70, "expected exit 70");
-    assert!(stderr.contains("Stop [E3001]"), "missing E3001 stop: {}", stderr);
+    assert!(
+        stderr.contains("Stop [E3001]"),
+        "missing E3001 stop: {}",
+        stderr
+    );
     // Scalars appear.
     assert!(
         stderr.contains("count = 3"),
@@ -347,7 +366,8 @@ fn panic_context_uses_only_lexically_live_locals() {
     ];
 
     for (name, scoped_stmt, dead_names) in cases {
-        let src = format!(r#"
+        let src = format!(
+            r#"
 fn missing() (Int?) -> None
 fn capture(live: Int) {{
     {scoped_stmt}
@@ -356,7 +376,8 @@ fn capture(live: Int) {{
 fn run() {{
     capture(3)
 }}
-"#);
+"#
+        );
         let test_name = format!("panic_lexical_{name}");
         let (code, _stdout, stderr) = build_and_run_debug(&test_name, &src);
         assert_eq!(
@@ -476,7 +497,10 @@ fn run() ParseError! {
 "#;
     let (code, stdout, stderr) = build_and_run_debug("error_trace", src);
     assert_eq!(code, 1, "escaping failure must exit 1: {stderr}");
-    assert!(stdout.is_empty(), "nothing printed before the failure: {stdout}");
+    assert!(
+        stdout.is_empty(),
+        "nothing printed before the failure: {stdout}"
+    );
     // Root failure first, then the trail: one numbered hop per `?` site,
     // origin first, each carrying its own note.
     let (root, trail) = stderr
@@ -607,7 +631,10 @@ fn run() ! {
 "#;
     let (code, stdout, stderr) = build_and_run_debug("error_trace_collapse", src);
     assert_eq!(code, 1, "an escaping failure must exit 1: {stderr}");
-    assert!(stdout.is_empty(), "the failure precedes the print: {stdout}");
+    assert!(
+        stdout.is_empty(),
+        "the failure precedes the print: {stdout}"
+    );
     let dive_hops = stderr
         .lines()
         .filter(|line| line.contains(". dive ("))

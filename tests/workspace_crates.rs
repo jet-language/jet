@@ -83,12 +83,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
     );
     assert_deps(
         "crates/jet-sema/Cargo.toml",
-        &[
-            "jet-comptime",
-            "jet-foundation",
-            "jet-lexer",
-            "jet-parser",
-        ],
+        &["jet-comptime", "jet-foundation", "jet-lexer", "jet-parser"],
     );
     assert_deps(
         "crates/jet-codegen/Cargo.toml",
@@ -232,10 +227,7 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     // scope gate, not part of the completed product-split slice).
     // Canvas's WorkspaceFile/WorkspaceLock calls moved off jetpack onto
     // jet-env-model (slice 5), removing jet-devserver from this debt list.
-    let allowed = [
-        "Cargo.toml",
-        "crates/jetos/Cargo.toml",
-    ];
+    let allowed = ["Cargo.toml", "crates/jetos/Cargo.toml"];
     let mut actual = Vec::new();
     for manifest in repo_files_with_suffix("crates", "Cargo.toml")
         .into_iter()
@@ -296,9 +288,9 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
         // Match the crate token, not internal modules such as
         // `Syntax::jetpack_config`.
         if code_text.contains("crate::Jetpack")
-            || code_text.lines().any(|line| {
-                matches!(line.trim(), "use jetpack;" | "pub use jetpack;")
-            })
+            || code_text
+                .lines()
+                .any(|line| matches!(line.trim(), "use jetpack;" | "pub use jetpack;"))
             || code_text.contains("pub use jetpack as ")
             || code_text.contains("use jetpack as ")
             || code_text.contains("jetpack::")

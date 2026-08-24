@@ -268,9 +268,7 @@ fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
     let tokens: Vec<_> = tokens
         .into_iter()
         .enumerate()
-        .filter(|(index, _)| {
-            !enum_group_commas[*index] && !declaration_field_commas[*index]
-        })
+        .filter(|(index, _)| !enum_group_commas[*index] && !declaration_field_commas[*index])
         .map(|(_, token)| token)
         .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
         .collect();
@@ -293,7 +291,10 @@ fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
         // canonical spelling rewrite out of the loss comparison without
         // matching ordinary `Err(...)` constructor expressions.
         if matches!(&tokens[index].kind, TokKind::Ident(name) if name == jet::Syntax::TYPE_ERR)
-            && matches!(canonical.last().map(|token| &token.kind), Some(TokKind::Bang))
+            && matches!(
+                canonical.last().map(|token| &token.kind),
+                Some(TokKind::Bang)
+            )
             && matches!(
                 tokens.get(index + 1).map(|token| &token.kind),
                 Some(TokKind::LBrace | TokKind::Eq)
@@ -444,9 +445,7 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         .collect();
     match kinds.as_slice() {
         [TokKind::KwUse, ..] => 1,
-        [TokKind::KwPub, rest @ ..] if rest.iter().any(|kind| matches!(kind, TokKind::KwUse)) => {
-            1
-        }
+        [TokKind::KwPub, rest @ ..] if rest.iter().any(|kind| matches!(kind, TokKind::KwUse)) => 1,
         [TokKind::Hash, TokKind::Ident(name), ..]
             if matches!(
                 name.as_str(),
@@ -456,7 +455,10 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
             0
         }
         [TokKind::Hash, TokKind::Ident(name), ..]
-            if matches!(name.as_str(), jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML) =>
+            if matches!(
+                name.as_str(),
+                jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML
+            ) =>
         {
             2
         }
@@ -469,7 +471,10 @@ fn expand_marker_groups(tokens: Vec<Token>) -> Vec<Token> {
     let mut index = 0;
     while index < tokens.len() {
         if matches!(tokens[index].kind, TokKind::Hash)
-            && matches!(tokens.get(index + 1).map(|t| &t.kind), Some(TokKind::LBracket))
+            && matches!(
+                tokens.get(index + 1).map(|t| &t.kind),
+                Some(TokKind::LBracket)
+            )
         {
             if let Some(end) = matching_bracket(&tokens, index + 1) {
                 let mut group_start = index + 2;
@@ -549,8 +554,14 @@ fn canonicalize_static_generic_calls(tokens: Vec<Token>) -> Vec<Token> {
             }
             if let Some(close) = close {
                 if matches!(tokens.get(close + 1).map(|t| &t.kind), Some(TokKind::Dot))
-                    && matches!(tokens.get(close + 2).map(|t| &t.kind), Some(TokKind::Ident(_)))
-                    && matches!(tokens.get(close + 3).map(|t| &t.kind), Some(TokKind::LParen))
+                    && matches!(
+                        tokens.get(close + 2).map(|t| &t.kind),
+                        Some(TokKind::Ident(_))
+                    )
+                    && matches!(
+                        tokens.get(close + 3).map(|t| &t.kind),
+                        Some(TokKind::LParen)
+                    )
                 {
                     out.push(tokens[index].clone());
                     out.push(tokens[close + 1].clone());
@@ -572,10 +583,19 @@ fn canonicalize_external_methods(tokens: Vec<Token>) -> Vec<Token> {
     let mut index = 0;
     while index < tokens.len() {
         if matches!(tokens[index].kind, TokKind::KwFn)
-            && matches!(tokens.get(index + 1).map(|t| &t.kind), Some(TokKind::Ident(_)))
+            && matches!(
+                tokens.get(index + 1).map(|t| &t.kind),
+                Some(TokKind::Ident(_))
+            )
             && matches!(tokens.get(index + 2).map(|t| &t.kind), Some(TokKind::Dot))
-            && matches!(tokens.get(index + 3).map(|t| &t.kind), Some(TokKind::Ident(_)))
-            && matches!(tokens.get(index + 4).map(|t| &t.kind), Some(TokKind::LParen))
+            && matches!(
+                tokens.get(index + 3).map(|t| &t.kind),
+                Some(TokKind::Ident(_))
+            )
+            && matches!(
+                tokens.get(index + 4).map(|t| &t.kind),
+                Some(TokKind::LParen)
+            )
         {
             if let Some(body_open) = tokens[index + 4..]
                 .iter()
@@ -676,8 +696,14 @@ fn enum_group_commas(tokens: &[Token]) -> Vec<bool> {
             }
             TokKind::Comma
                 if enum_base_depth.is_some_and(|base| brace_stack.len() > base)
-                    && matches!(tokens.get(index.wrapping_sub(1)).map(|t| &t.kind), Some(TokKind::Ident(_)))
-                    && matches!(tokens.get(index + 1).map(|t| &t.kind), Some(TokKind::Ident(_))) =>
+                    && matches!(
+                        tokens.get(index.wrapping_sub(1)).map(|t| &t.kind),
+                        Some(TokKind::Ident(_))
+                    )
+                    && matches!(
+                        tokens.get(index + 1).map(|t| &t.kind),
+                        Some(TokKind::Ident(_))
+                    ) =>
             {
                 let group_open = *brace_stack.last().unwrap();
                 let group_has_field_colon = tokens[group_open + 1..index]
@@ -721,9 +747,7 @@ fn declaration_field_commas(tokens: &[Token]) -> Vec<bool> {
             TokKind::LBracket => bracket_depth += 1,
             TokKind::RBracket => bracket_depth -= 1,
             TokKind::Comma
-                if struct_depth == Some(brace_depth)
-                    && paren_depth == 0
-                    && bracket_depth == 0 =>
+                if struct_depth == Some(brace_depth) && paren_depth == 0 && bracket_depth == 0 =>
             {
                 ignored[index] = true;
             }
@@ -778,28 +802,31 @@ fn token_kinds_equal(left: &TokKind, right: &TokKind) -> bool {
 
 fn string_parts_equal(left: &[StrTokPart], right: &[StrTokPart]) -> bool {
     left.len() == right.len()
-        && left.iter().zip(right).all(|(left, right)| match (left, right) {
-            (StrTokPart::Lit(left), StrTokPart::Lit(right)) => left == right,
-            (StrTokPart::Interp(left), StrTokPart::Interp(right)) => {
-                let left: Vec<_> = left
-                    .iter()
-                    .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
-                    .cloned()
-                    .collect();
-                let right: Vec<_> = right
-                    .iter()
-                    .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
-                    .cloned()
-                    .collect();
-                ordered_token_diff(
-                    std::path::Path::new("<string interpolation>"),
-                    &left,
-                    &right,
-                )
-                .is_ok()
-            }
-            _ => false,
-        })
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| match (left, right) {
+                (StrTokPart::Lit(left), StrTokPart::Lit(right)) => left == right,
+                (StrTokPart::Interp(left), StrTokPart::Interp(right)) => {
+                    let left: Vec<_> = left
+                        .iter()
+                        .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
+                        .cloned()
+                        .collect();
+                    let right: Vec<_> = right
+                        .iter()
+                        .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
+                        .cloned()
+                        .collect();
+                    ordered_token_diff(
+                        std::path::Path::new("<string interpolation>"),
+                        &left,
+                        &right,
+                    )
+                    .is_ok()
+                }
+                _ => false,
+            })
 }
 
 fn assert_fmt_preserves_token_stream(path: &std::path::Path, src: &str, formatted: &str) {
@@ -829,8 +856,9 @@ fn format_supported_source(
 ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
     match jet::format_source(src) {
         Ok(formatted) => Ok(formatted),
-        Err(diagnostics) => jet::Package::format_source(src, path.display().to_string())
-            .or(Err(diagnostics)),
+        Err(diagnostics) => {
+            jet::Package::format_source(src, path.display().to_string()).or(Err(diagnostics))
+        }
     }
 }
 
@@ -875,14 +903,20 @@ fn ordered_token_diff(
             continue;
         }
         if formatted_arm_block_opens(formatted, formatted_i)
-            && !matches!(original.get(original_i).map(|t| &t.kind), Some(TokKind::LBrace))
+            && !matches!(
+                original.get(original_i).map(|t| &t.kind),
+                Some(TokKind::LBrace)
+            )
         {
             inserted_arm_braces += 1;
             formatted_i += 1;
             continue;
         }
         if formatted_lambda_params_open(formatted, formatted_i)
-            && !matches!(original.get(original_i).map(|t| &t.kind), Some(TokKind::LParen))
+            && !matches!(
+                original.get(original_i).map(|t| &t.kind),
+                Some(TokKind::LParen)
+            )
         {
             inserted_lambda_parens += 1;
             formatted_i += 1;
@@ -893,7 +927,10 @@ fn ordered_token_diff(
             continue;
         }
         if inserted_lambda_parens > 0
-            && matches!(formatted.get(formatted_i).map(|t| &t.kind), Some(TokKind::RParen))
+            && matches!(
+                formatted.get(formatted_i).map(|t| &t.kind),
+                Some(TokKind::RParen)
+            )
             && matches!(
                 formatted.get(formatted_i + 1).map(|t| &t.kind),
                 Some(TokKind::UnifiedArrow | TokKind::LambdaArrow | TokKind::Arrow)
@@ -908,14 +945,12 @@ fn ordered_token_diff(
             continue;
         }
         if inserted_arm_braces > 0
-            && matches!(formatted.get(formatted_i).map(|t| &t.kind), Some(TokKind::RBrace))
+            && matches!(
+                formatted.get(formatted_i).map(|t| &t.kind),
+                Some(TokKind::RBrace)
+            )
             && (next_token_matches(original, original_i, formatted, formatted_i + 1)
-                || formatted_variant_pattern_dot(
-                    original,
-                    original_i,
-                    formatted,
-                    formatted_i + 1,
-                ))
+                || formatted_variant_pattern_dot(original, original_i, formatted, formatted_i + 1))
         {
             inserted_arm_braces -= 1;
             formatted_i += 1;
@@ -1016,10 +1051,8 @@ fn reordered_simple_union_type(
     {
         return None;
     }
-    let (mut original_members, next_original) =
-        simple_union_members(original, original_i)?;
-    let (mut formatted_members, next_formatted) =
-        simple_union_members(formatted, formatted_i)?;
+    let (mut original_members, next_original) = simple_union_members(original, original_i)?;
+    let (mut formatted_members, next_formatted) = simple_union_members(formatted, formatted_i)?;
     original_members.sort();
     formatted_members.sort();
     (original_members == formatted_members).then_some((next_original, next_formatted))
@@ -1123,7 +1156,10 @@ fn simple_union_type_annotation(tokens: &[Token], start: usize) -> bool {
     let Some(colon) = start.checked_sub(1) else {
         return false;
     };
-    if !matches!(tokens.get(colon).map(|token| &token.kind), Some(TokKind::Colon)) {
+    if !matches!(
+        tokens.get(colon).map(|token| &token.kind),
+        Some(TokKind::Colon)
+    ) {
         return false;
     }
 
@@ -1185,7 +1221,10 @@ fn simple_union_members(tokens: &[Token], start: usize) -> Option<(Vec<&str>, us
     };
     let mut members = vec![first.as_str()];
     let mut cursor = start + 1;
-    while matches!(tokens.get(cursor).map(|token| &token.kind), Some(TokKind::Pipe)) {
+    while matches!(
+        tokens.get(cursor).map(|token| &token.kind),
+        Some(TokKind::Pipe)
+    ) {
         let TokKind::Ident(member) = &tokens.get(cursor + 1)?.kind else {
             return None;
         };
@@ -1206,11 +1245,18 @@ fn formatted_variant_pattern_dot(
     formatted: &[Token],
     formatted_i: usize,
 ) -> bool {
-    let (Some(original_token), Some(Token { kind: TokKind::Dot, .. }), Some(formatted_token)) = (
+    let (
+        Some(original_token),
+        Some(Token {
+            kind: TokKind::Dot, ..
+        }),
+        Some(formatted_token),
+    ) = (
         original.get(original_i),
         formatted.get(formatted_i),
         formatted.get(formatted_i + 1),
-    ) else {
+    )
+    else {
         return false;
     };
     let same_variant = match (&original_token.kind, &formatted_token.kind) {
@@ -1225,7 +1271,10 @@ fn formatted_variant_pattern_dot(
 
 fn variant_pattern_context(tokens: &[Token], index: usize) -> bool {
     if matches!(
-        index.checked_sub(1).and_then(|i| tokens.get(i)).map(|token| &token.kind),
+        index
+            .checked_sub(1)
+            .and_then(|i| tokens.get(i))
+            .map(|token| &token.kind),
         Some(TokKind::EqEq)
     ) {
         return true;
@@ -1248,7 +1297,9 @@ fn variant_pattern_context(tokens: &[Token], index: usize) -> bool {
         return false;
     };
     matches!(
-        open.checked_sub(1).and_then(|i| tokens.get(i)).map(|token| &token.kind),
+        open.checked_sub(1)
+            .and_then(|i| tokens.get(i))
+            .map(|token| &token.kind),
         Some(TokKind::EqEq)
     ) && same_brace_scope_has_if(tokens, open - 1)
         && pattern_reaches_arrow(tokens, index)
@@ -1258,7 +1309,11 @@ fn same_brace_scope_has_if(tokens: &[Token], before: usize) -> bool {
     for token in tokens[..before].iter().rev() {
         match token.kind {
             TokKind::KwIf => return true,
-            TokKind::LBrace | TokKind::RBrace | TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow => return false,
+            TokKind::LBrace
+            | TokKind::RBrace
+            | TokKind::UnifiedArrow
+            | TokKind::Arrow
+            | TokKind::LambdaArrow => return false,
             _ => {}
         }
     }
@@ -1275,7 +1330,10 @@ fn pattern_reaches_arrow(tokens: &[Token], index: usize) -> bool {
             TokKind::LBracket => bracket_depth += 1,
             TokKind::RBracket if bracket_depth > 0 => bracket_depth -= 1,
             TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
-                if paren_depth == 0 && bracket_depth == 0 => return true,
+                if paren_depth == 0 && bracket_depth == 0 =>
+            {
+                return true
+            }
             TokKind::LBrace | TokKind::RBrace if paren_depth == 0 && bracket_depth == 0 => {
                 return false;
             }
@@ -1288,7 +1346,10 @@ fn pattern_reaches_arrow(tokens: &[Token], index: usize) -> bool {
 fn formatted_arm_block_opens(tokens: &[Token], index: usize) -> bool {
     matches!(tokens.get(index).map(|t| &t.kind), Some(TokKind::LBrace))
         && matches!(
-            index.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind),
+            index
+                .checked_sub(1)
+                .and_then(|i| tokens.get(i))
+                .map(|t| &t.kind),
             Some(TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
         )
 }
@@ -1330,14 +1391,20 @@ fn next_token_matches(
 }
 
 fn struct_literal_head_before_brace(tokens: &[Token], open: usize) -> bool {
-    match open.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind) {
-        Some(TokKind::Dot
+    match open
+        .checked_sub(1)
+        .and_then(|i| tokens.get(i))
+        .map(|t| &t.kind)
+    {
+        Some(
+            TokKind::Dot
             | TokKind::Colon
             | TokKind::ColonColon
             | TokKind::Comma
             | TokKind::LParen
             | TokKind::Eq
-            | TokKind::KwReturn) => true,
+            | TokKind::KwReturn,
+        ) => true,
         Some(TokKind::Ident(name)) => name.starts_with(char::is_uppercase),
         Some(TokKind::RBracket) => {
             let Some(bracket_open) = open.checked_sub(2) else {
@@ -1360,13 +1427,23 @@ fn struct_literal_head_before_brace(tokens: &[Token], open: usize) -> bool {
 }
 
 fn formatted_struct_shorthand_expansion(tokens: &[Token], index: usize) -> bool {
-    let (Some(Token { kind: TokKind::Colon, .. }), Some(Token { kind: TokKind::Ident(value), .. })) =
-        (tokens.get(index), tokens.get(index + 1))
+    let (
+        Some(Token {
+            kind: TokKind::Colon,
+            ..
+        }),
+        Some(Token {
+            kind: TokKind::Ident(value),
+            ..
+        }),
+    ) = (tokens.get(index), tokens.get(index + 1))
     else {
         return false;
     };
-    let Some(Token { kind: TokKind::Ident(field), .. }) =
-        index.checked_sub(1).and_then(|i| tokens.get(i))
+    let Some(Token {
+        kind: TokKind::Ident(field),
+        ..
+    }) = index.checked_sub(1).and_then(|i| tokens.get(i))
     else {
         return false;
     };
@@ -1388,8 +1465,16 @@ fn formatted_struct_shorthand_expansion(tokens: &[Token], index: usize) -> bool 
 }
 
 fn formatted_default_module_alias(tokens: &[Token], index: usize) -> bool {
-    let (Some(Token { kind: TokKind::Ident(as_kw), .. }), Some(Token { kind: TokKind::Ident(alias), .. })) =
-        (tokens.get(index), tokens.get(index + 1))
+    let (
+        Some(Token {
+            kind: TokKind::Ident(as_kw),
+            ..
+        }),
+        Some(Token {
+            kind: TokKind::Ident(alias),
+            ..
+        }),
+    ) = (tokens.get(index), tokens.get(index + 1))
     else {
         return false;
     };
@@ -1399,7 +1484,10 @@ fn formatted_default_module_alias(tokens: &[Token], index: usize) -> bool {
             Some(TokKind::Ident(segment)) if segment == alias
         )
         && matches!(
-            index.checked_sub(2).and_then(|i| tokens.get(i)).map(|t| &t.kind),
+            index
+                .checked_sub(2)
+                .and_then(|i| tokens.get(i))
+                .map(|t| &t.kind),
             Some(TokKind::Dot)
         )
         && exact_use_path_before_alias(tokens, index)
@@ -1531,8 +1619,8 @@ fn run_supported_source_corpus() {
         // `Compiler::parse_source` intentionally flattens both outcomes into
         // a public syntax-tree view.
         let (tokens, lex_diags) = jet::Lexer::lex(&src);
-        let actual_is_invalid = !lex_diags.is_empty()
-            || jet::Parser::parse_for_check(&tokens).is_err();
+        let actual_is_invalid =
+            !lex_diags.is_empty() || jet::Parser::parse_for_check(&tokens).is_err();
         if actual_is_invalid != expected_invalid {
             mismatches.push(format!(
                 "UI parser-validity changed for {relative}; update the pinned manifest only after review (expected_invalid={expected_invalid}, actual_is_invalid={actual_is_invalid})"
@@ -1583,8 +1671,7 @@ fn run_supported_source_corpus() {
         "UI parse-invalid manifest must be sorted and duplicate-free"
     );
     assert_eq!(
-        actual_invalid,
-        UI_PARSE_INVALID,
+        actual_invalid, UI_PARSE_INVALID,
         "discovered parser-invalid UI set must exactly equal the pinned manifest"
     );
     eprintln!(

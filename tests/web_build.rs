@@ -87,7 +87,9 @@ fn build_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
             )
         )
     });
-    let web = out.web.expect("web target compile must produce web artifacts");
+    let web = out
+        .web
+        .expect("web target compile must produce web artifacts");
     fs::write(dir.join("build/web.manifest.json"), &web.manifest_json).unwrap();
     fs::write(dir.join("build/jet_dom_runtime.js"), &web.dom_runtime).unwrap();
     fs::write(dir.join("build/app.js"), &web.js_app).unwrap();
@@ -223,7 +225,11 @@ fn run() {
     print(lazy_evens[1])
 }
 "#;
-    let dir = build_web_fixture("eager_collection_adapters", src, "tests/fixtures/web_eager_collection_adapters.jet");
+    let dir = build_web_fixture(
+        "eager_collection_adapters",
+        src,
+        "tests/fixtures/web_eager_collection_adapters.jet",
+    );
     assert_eq!(run_web_app(&dir), "2\n8\n3\n4\n30\n40\n");
     let app = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
@@ -785,8 +791,14 @@ fn web_named_caps_scope_uses_shared_tir() {
         .expect("web should accept the canonical #Abilities scope")
         .web
         .expect("web output");
-    assert!(out.wasm_rust.contains("jet_export_run"), "web run export missing");
-    assert!(!out.wasm_rust.contains("Authority"), "web handle leaked into emission");
+    assert!(
+        out.wasm_rust.contains("jet_export_run"),
+        "web run export missing"
+    );
+    assert!(
+        !out.wasm_rust.contains("Authority"),
+        "web handle leaked into emission"
+    );
 }
 
 #[test]
@@ -854,7 +866,10 @@ fn decode_source_map_mappings(map: &str) -> Vec<(usize, usize, usize, usize, usi
     let mut source = 0i64;
     let mut original_line = 0i64;
     let mut original_column = 0i64;
-    for (generated_line, line) in source_map_string_field(map, "mappings").split(';').enumerate() {
+    for (generated_line, line) in source_map_string_field(map, "mappings")
+        .split(';')
+        .enumerate()
+    {
         let mut generated_column = 0i64;
         for encoded in line.split(',').filter(|segment| !segment.is_empty()) {
             let values = segment(encoded);
@@ -958,7 +973,10 @@ fn web_build_publishes_maps_and_release_omits_them() {
         String::from_utf8_lossy(&default_out.stderr)
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("//# sourceMappingURL=app.js.map"), "missing js map URL:\n{js}");
+    assert!(
+        js.contains("//# sourceMappingURL=app.js.map"),
+        "missing js map URL:\n{js}"
+    );
     let js_map = fs::read_to_string(dir.join("build/app.js.map")).unwrap();
     assert!(js_map.contains("\"version\":3"), "{js_map}");
     assert!(js_map.contains("\"sourcesContent\":["), "{js_map}");
@@ -993,8 +1011,14 @@ fn web_build_publishes_maps_and_release_omits_them() {
         !release_js.contains("sourceMappingURL="),
         "release app.js must not reference maps"
     );
-    assert!(!dir.join("build/app.js.map").is_file(), "release must not write app.js.map");
-    assert!(!dir.join("build/app.wasm.map").is_file(), "release must not write app.wasm.map");
+    assert!(
+        !dir.join("build/app.js.map").is_file(),
+        "release must not write app.js.map"
+    );
+    assert!(
+        !dir.join("build/app.wasm.map").is_file(),
+        "release must not write app.wasm.map"
+    );
     let release_manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
     assert!(
         !release_manifest.contains("\"sourceMap\""),
@@ -1067,7 +1091,10 @@ fn run() {
 #[test]
 fn web_executable_emission_is_structurally_tir_only() {
     let source = include_str!("../crates/jet-codegen/src/Codegen/Web.rs");
-    assert!(source.contains("tir: TIR::TFunc"), "web functions must retain lowered TFunc");
+    assert!(
+        source.contains("tir: TIR::TFunc"),
+        "web functions must retain lowered TFunc"
+    );
     assert!(
         source.contains("WebEmitResult<WebArtifacts>"),
         "validator/emitter drift must return a structured data fact"
@@ -1103,9 +1130,15 @@ fn run() {}
         .expect("supported Wasm helpers should compile");
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tick()"));
-    assert!(wasm.contains("jet_wasm_tick();"), "void body side effect was dropped:\n{wasm}");
+    assert!(
+        wasm.contains("jet_wasm_tick();"),
+        "void body side effect was dropped:\n{wasm}"
+    );
     assert!(wasm.contains("fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetWasmInt"));
-    assert!(wasm.contains("jet_wasm_twice(__jet_n)"), "export did not call internal helper:\n{wasm}");
+    assert!(
+        wasm.contains("jet_wasm_twice(__jet_n)"),
+        "export did not call internal helper:\n{wasm}"
+    );
 }
 
 #[test]
@@ -1409,7 +1442,8 @@ fn run() {}
         web.wasm_rust
     );
     assert!(
-        web.wasm_rust.contains("matches!(&(__jet_toggle), __jet_Toggle::__jet_On)")
+        web.wasm_rust
+            .contains("matches!(&(__jet_toggle), __jet_Toggle::__jet_On)")
             && web.wasm_rust.contains("if __jet_flag"),
         "Wasm Matches + And must emit both short-circuit tests:\n{}",
         web.wasm_rust
@@ -1450,8 +1484,14 @@ fn run() {
         "tests/fixtures/web_declared_default_error_conversion.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("errconv_StoreErr_to_Err"), "Wasm conversion body missing:\n{wasm}");
-    assert!(wasm.contains("store unavailable"), "Wasm conversion message missing:\n{wasm}");
+    assert!(
+        wasm.contains("errconv_StoreErr_to_Err"),
+        "Wasm conversion body missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("store unavailable"),
+        "Wasm conversion message missing:\n{wasm}"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -1508,8 +1548,7 @@ fn run() {}
         web.js_app
     );
     assert!(
-        web.js_app.contains("values[0] >= 1")
-            && web.js_app.contains("values[0] <= 3"),
+        web.js_app.contains("values[0] >= 1") && web.js_app.contains("values[0] <= 3"),
         "JS EnumMatch must test payload ranges:\n{}",
         web.js_app
     );
@@ -1546,11 +1585,7 @@ fn classify(n: Int) Int -[]> {
 #Target(JS)
 fn run() { print(classify(2)) }
 "#;
-    let dir = build_web_fixture(
-        "matches_once",
-        src,
-        "tests/fixtures/web_matches_once.jet",
-    );
+    let dir = build_web_fixture("matches_once", src, "tests/fixtures/web_matches_once.jet");
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert_eq!(
         js.matches("const __jet___match_subject = toggle;").count(),
@@ -1623,7 +1658,10 @@ fn run() {
         .arg("app.js")
         .output()
         .unwrap();
-    assert!(!node.status.success(), "a reached stop must fail the JS process");
+    assert!(
+        !node.status.success(),
+        "a reached stop must fail the JS process"
+    );
     let stderr = String::from_utf8_lossy(&node.stderr);
     assert!(
         stderr.contains("Stop [E3010]: `the list has 1 items, so position 9 doesn't exist`"),
@@ -1638,7 +1676,10 @@ fn run() {
             && stderr.contains("Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome."),
         "missing shared why/fix:\n{stderr}"
     );
-    assert!(!stderr.contains("thread 'main' panicked"), "raw host panic leaked:\n{stderr}");
+    assert!(
+        !stderr.contains("thread 'main' panicked"),
+        "raw host panic leaked:\n{stderr}"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -1673,8 +1714,14 @@ for (const code of ["E9999", "E1001"]) {
 }
 "#;
     let stdout = run_node_harness(&dir, "js_unknown_runtime_stop_harness.mjs", harness);
-    assert!(stdout.contains("E9999:status=101:name=JetHostError"), "{stdout}");
-    assert!(stdout.contains("E1001:status=101:name=JetHostError"), "{stdout}");
+    assert!(
+        stdout.contains("E9999:status=101:name=JetHostError"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("E1001:status=101:name=JetHostError"),
+        "{stdout}"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -1879,8 +1926,9 @@ try {
             "{stem} lost the canonical Todo frame:\n{stdout}"
         );
         assert!(
-            stdout.contains("Why: This code is deliberately incomplete and reached a running program.")
-                && stdout.contains("Fix: Implement the missing code before running the program."),
+            stdout.contains(
+                "Why: This code is deliberately incomplete and reached a running program."
+            ) && stdout.contains("Fix: Implement the missing code before running the program."),
             "{stem} lost the canonical Todo why/fix:\n{stdout}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -1971,7 +2019,8 @@ fn web_edge_preserves_one_error_wire_across_js_and_wasm() {
         return;
     }
     let source = include_str!("../examples/features/errors/default_err_edge.jet");
-    let expected = include_str!("../examples/features/expected/errors/default_err_edge.err.out").trim_end();
+    let expected =
+        include_str!("../examples/features/expected/errors/default_err_edge.err.out").trim_end();
     let expected_frame_line = format!("frame={expected:?}");
     let harness = r#"
 process.on("unhandledRejection", (error) => {
@@ -2031,7 +2080,11 @@ try {
         .current_dir(&cli_dir)
         .output()
         .unwrap();
-    assert_eq!(cli_run.status.code(), Some(1), "CLI edge failed unexpectedly");
+    assert_eq!(
+        cli_run.status.code(),
+        Some(1),
+        "CLI edge failed unexpectedly"
+    );
     assert_eq!(
         String::from_utf8_lossy(&cli_run.stderr).trim_end(),
         expected,
@@ -2045,7 +2098,10 @@ try {
     );
     let wasm = fs::read_to_string(wasm_dir.join("build/app_wasm.rs")).unwrap();
     let wasm_js = fs::read_to_string(wasm_dir.join("build/app.js")).unwrap();
-    assert!(wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"), "{wasm}");
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_export_run() -> i32"),
+        "{wasm}"
+    );
     assert!(wasm.contains("jet_wasm_error_len"), "{wasm}");
     assert!(wasm.contains("jet_wasm_error_status"), "{wasm}");
     assert!(wasm.contains("jet.err/v1"), "{wasm}");
@@ -2054,8 +2110,14 @@ try {
     assert!(wasm.contains("Ok(value) =>"), "{wasm}");
     assert!(wasm.contains("jet_wasm_store_ok("), "{wasm}");
     assert!(!wasm.contains("jet_wasm_store_ok();"), "{wasm}");
-    assert!(!wasm.contains("jet_wasm_report_"), "human report parsing survived:\n{wasm}");
-    assert!(!wasm.contains("error.to_string()"), "JetErr was stringified at the edge:\n{wasm}");
+    assert!(
+        !wasm.contains("jet_wasm_report_"),
+        "human report parsing survived:\n{wasm}"
+    );
+    assert!(
+        !wasm.contains("error.to_string()"),
+        "JetErr was stringified at the edge:\n{wasm}"
+    );
     assert!(
         !wasm.contains("panic_any(report.rendered)"),
         "raw Wasm panic survived:\n{wasm}"
@@ -2063,9 +2125,19 @@ try {
     assert!(wasm_js.contains("jetDom.takeWasmError"), "{wasm_js}");
     assert!(wasm_js.contains("jet_wasm_error_status"), "{wasm_js}");
     assert!(wasm_js.contains("jet_web_wasm_host_error"), "{wasm_js}");
-    assert!(wasm_js.contains("const JET_EDGE_TARGET = \"web\";"), "{wasm_js}");
-    assert!(!wasm_js.contains("_isMain") && !wasm_js.contains("process.argv[1]"), "{wasm_js}");
-    fs::write(wasm_dir.join("build/failure_edge_harness.mjs"), wasm_harness).unwrap();
+    assert!(
+        wasm_js.contains("const JET_EDGE_TARGET = \"web\";"),
+        "{wasm_js}"
+    );
+    assert!(
+        !wasm_js.contains("_isMain") && !wasm_js.contains("process.argv[1]"),
+        "{wasm_js}"
+    );
+    fs::write(
+        wasm_dir.join("build/failure_edge_harness.mjs"),
+        wasm_harness,
+    )
+    .unwrap();
     let wasm_run = Command::new("node")
         .current_dir(wasm_dir.join("build"))
         .arg("failure_edge_harness.mjs")
@@ -2084,11 +2156,16 @@ try {
     assert!(wasm_stdout.contains("instance=true"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("name=JetError"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("code=RUNFAIL"), "{wasm_stdout}");
-    assert!(wasm_stdout.contains("message=unhandled default error"), "{wasm_stdout}");
+    assert!(
+        wasm_stdout.contains("message=unhandled default error"),
+        "{wasm_stdout}"
+    );
     assert!(wasm_stdout.contains("cause=disk offline"), "{wasm_stdout}");
     assert!(wasm_stdout.contains("journey="), "{wasm_stdout}");
     assert!(
-        wasm_stdout.lines().any(|line| line == expected_frame_line.as_str()),
+        wasm_stdout
+            .lines()
+            .any(|line| line == expected_frame_line.as_str()),
         "{wasm_stdout}"
     );
 
@@ -2117,7 +2194,11 @@ if (bridge !== 42) throw new Error("JS Wasm bridge changed: " + bridge);
 console.log(JSON.stringify({ raw, bridge }));
 "#;
     assert_eq!(
-        run_node_harness(&wasm_ok_dir, "failure_edge_wasm_ok_harness.mjs", wasm_ok_harness),
+        run_node_harness(
+            &wasm_ok_dir,
+            "failure_edge_wasm_ok_harness.mjs",
+            wasm_ok_harness
+        ),
         r#"{"raw":{"tag":"Ok","value":42},"bridge":42}
 "#,
         "fallible Wasm success edge changed"
@@ -2132,9 +2213,15 @@ console.log(JSON.stringify({ raw, bridge }));
     let js = fs::read_to_string(js_dir.join("build/app.js")).unwrap();
     assert!(js.contains("class JetError extends Error"), "{js}");
     assert!(js.contains("toJSON()"), "{js}");
-    assert!(!js.contains("class JetWebRuntimeError"), "replaced JS error survived:\n{js}");
+    assert!(
+        !js.contains("class JetWebRuntimeError"),
+        "replaced JS error survived:\n{js}"
+    );
     assert!(js.contains("jet_web_edge_result"), "{js}");
-    assert!(!js.contains("_isMain") && !js.contains("process.argv[1]"), "{js}");
+    assert!(
+        !js.contains("_isMain") && !js.contains("process.argv[1]"),
+        "{js}"
+    );
     fs::write(js_dir.join("build/failure_edge_harness.mjs"), harness).unwrap();
     let js_run = Command::new("node")
         .current_dir(js_dir.join("build"))
@@ -2152,12 +2239,17 @@ console.log(JSON.stringify({ raw, bridge }));
     assert!(js_stdout.contains("instance=true"), "{js_stdout}");
     assert!(js_stdout.contains("name=JetError"), "{js_stdout}");
     assert!(js_stdout.contains("code=RUNFAIL"), "{js_stdout}");
-    assert!(js_stdout.contains("message=unhandled default error"), "{js_stdout}");
+    assert!(
+        js_stdout.contains("message=unhandled default error"),
+        "{js_stdout}"
+    );
     assert!(js_stdout.contains("cause=disk offline"), "{js_stdout}");
     assert!(js_stdout.contains("wire={\"schema\":\"jet.err/v1\",\"message\":\"unhandled default error\",\"code\":\"RUNFAIL\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":null,\"cause\":null}}"), "{js_stdout}");
     assert!(js_stdout.contains("journey="), "{js_stdout}");
     assert!(
-        js_stdout.lines().any(|line| line == expected_frame_line.as_str()),
+        js_stdout
+            .lines()
+            .any(|line| line == expected_frame_line.as_str()),
         "{js_stdout}"
     );
 
@@ -2218,7 +2310,8 @@ try {
   }));
 }
 "#;
-    let dom_expected = include_str!("../examples/features/expected/web/default_err_edge.harness.out");
+    let dom_expected =
+        include_str!("../examples/features/expected/web/default_err_edge.harness.out");
     assert_eq!(
         run_node_harness(&js_dir, "failure_edge_dom_harness.mjs", dom_harness),
         dom_expected,
@@ -2234,11 +2327,17 @@ try {
 #[test]
 fn web_edge_target_is_build_fact_not_runtime_probe() {
     let source = include_str!("../examples/features/errors/default_err_edge.jet");
-    let output = jet::compile_web_with_path(source, "examples/features/errors/default_err_edge.jet")
-        .expect("failure-edge example must compile for web");
+    let output =
+        jet::compile_web_with_path(source, "examples/features/errors/default_err_edge.jet")
+            .expect("failure-edge example must compile for web");
     let web = output.web.expect("web target must emit artifacts");
 
-    assert_eq!(web.js_app.matches("const JET_EDGE_TARGET = \"web\";").count(), 1);
+    assert_eq!(
+        web.js_app
+            .matches("const JET_EDGE_TARGET = \"web\";")
+            .count(),
+        1
+    );
     for runtime_probe in [
         "_isMain",
         "process.argv",
@@ -2247,7 +2346,10 @@ fn web_edge_target_is_build_fact_not_runtime_probe() {
         "window.location",
         "navigator.userAgent",
     ] {
-        assert!(!web.js_app.contains(runtime_probe), "runtime target probe survived: {runtime_probe}");
+        assert!(
+            !web.js_app.contains(runtime_probe),
+            "runtime target probe survived: {runtime_probe}"
+        );
     }
     assert!(web.dom_runtime.contains("class JetHostAbiError"));
     assert!(web.dom_runtime.contains("class JetHostWasmError"));
@@ -2313,7 +2415,10 @@ console.log(JSON.stringify({
     );
     assert_eq!(
         stdout,
-        concat!(r#"{"tag":"Host","status":73,"cleared":1,"name":"JetHostError","code":"__malformed_wasm_error__","errorStatus":73,"exitCode":73,"frame":"{bad"}"#, "\n")
+        concat!(
+            r#"{"tag":"Host","status":73,"cleared":1,"name":"JetHostError","code":"__malformed_wasm_error__","errorStatus":73,"exitCode":73,"frame":"{bad"}"#,
+            "\n"
+        )
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2347,7 +2452,10 @@ fn run() ! {
         "tests/fixtures/failure_edge_js_try.jet",
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("jet_web_try("), "JS `?` did not use the edge adapter:\n{js}");
+    assert!(
+        js.contains("jet_web_try("),
+        "JS `?` did not use the edge adapter:\n{js}"
+    );
     let harness = r#"
 process.on("unhandledRejection", (error) => {
   if (error?.name !== "JetError") throw error;
@@ -2377,7 +2485,10 @@ try {
     let stdout = String::from_utf8_lossy(&node.stdout);
     assert!(stdout.contains("kind=JetError"), "{stdout}");
     assert!(stdout.contains("code=TRYFAIL"), "{stdout}");
-    assert!(stdout.contains("read") && stdout.contains("run"), "journey lost a propagation site:\n{stdout}");
+    assert!(
+        stdout.contains("read") && stdout.contains("run"),
+        "journey lost a propagation site:\n{stdout}"
+    );
     assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
     assert!(String::from_utf8_lossy(&node.stderr).contains("Error [TRYFAIL]: try failed"));
     let _ = fs::remove_dir_all(dir);
@@ -2412,7 +2523,10 @@ fn run() ! {
         "tests/fixtures/failure_edge_wasm_try.jet",
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("jet_journey_take"), "Wasm edge did not carry the shared journey:\n{wasm}");
+    assert!(
+        wasm.contains("jet_journey_take"),
+        "Wasm edge did not carry the shared journey:\n{wasm}"
+    );
     let harness = r#"
 process.on("unhandledRejection", (error) => {
   if (error?.name !== "JetError") throw error;
@@ -2442,7 +2556,10 @@ try {
     let stdout = String::from_utf8_lossy(&node.stdout);
     assert!(stdout.contains("kind=JetError"), "{stdout}");
     assert!(stdout.contains("code=TRYFAIL"), "{stdout}");
-    assert!(stdout.contains("read") && stdout.contains("run"), "journey lost a propagation site:\n{stdout}");
+    assert!(
+        stdout.contains("read") && stdout.contains("run"),
+        "journey lost a propagation site:\n{stdout}"
+    );
     assert!(stdout.contains("Error [TRYFAIL]: try failed"), "{stdout}");
     assert!(String::from_utf8_lossy(&node.stderr).contains("Error [TRYFAIL]: try failed"));
     let _ = fs::remove_dir_all(dir);
@@ -2529,7 +2646,10 @@ fn run() ! {
             "AOT",
             tir_support::build_and_run_full("jet_web_two_hop_aot", "web_two_hop_journey", source),
         ),
-        ("default JIT", tir_support::jit_run("web_two_hop_journey", source)),
+        (
+            "default JIT",
+            tir_support::jit_run("web_two_hop_journey", source),
+        ),
         (
             "interpreter",
             tir_support::interpreter_run("web_two_hop_journey", source),
@@ -2537,7 +2657,10 @@ fn run() ! {
     ];
     for (tier, (code, stdout, stderr)) in native_runs {
         assert_eq!(code, 1, "{tier} two-hop run must return an error");
-        assert!(stdout.is_empty(), "{tier} two-hop run printed stdout: {stdout:?}");
+        assert!(
+            stdout.is_empty(),
+            "{tier} two-hop run printed stdout: {stdout:?}"
+        );
         assert_eq!(
             normalize_journey_paths(stderr.trim_end(), shown, 0),
             expected_report,
@@ -2785,10 +2908,20 @@ module right {
 #Target(JS)
 fn run() { print(left.value() + right.value()) }
 "#;
-    let dir = build_web_fixture("module_identity", src, "tests/fixtures/web_module_identity.jet");
+    let dir = build_web_fixture(
+        "module_identity",
+        src,
+        "tests/fixtures/web_module_identity.jet",
+    );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("function __jet_left__value()"), "left module identity was dropped:\n{js}");
-    assert!(js.contains("function __jet_right__value()"), "right module identity was dropped:\n{js}");
+    assert!(
+        js.contains("function __jet_left__value()"),
+        "left module identity was dropped:\n{js}"
+    );
+    assert!(
+        js.contains("function __jet_right__value()"),
+        "right module identity was dropped:\n{js}"
+    );
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2807,12 +2940,28 @@ fn total() Int -[]> { return left.value() + right.value() }
 #Target(JS)
 fn run() { print(total()) }
 "#;
-    let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
+    let dir = build_web_fixture(
+        "wasm_module_identity",
+        src,
+        "tests/fixtures/web_wasm_module_identity.jet",
+    );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"), "left Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"), "right Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm___jet_left__value()"), "left qualified call was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm___jet_right__value()"), "right qualified call was dropped:\n{wasm}");
+    assert!(
+        wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"),
+        "left Wasm identity was dropped:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"),
+        "right Wasm identity was dropped:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_wasm___jet_left__value()"),
+        "left qualified call was dropped:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_wasm___jet_right__value()"),
+        "right qualified call was dropped:\n{wasm}"
+    );
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2841,8 +2990,14 @@ fn web_file_modules_keep_qualified_js_function_identity() {
         ],
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(js.contains("function __jet_left__value()"), "left identity was dropped:\n{js}");
-    assert!(js.contains("function __jet_right__value()"), "right identity was dropped:\n{js}");
+    assert!(
+        js.contains("function __jet_left__value()"),
+        "left identity was dropped:\n{js}"
+    );
+    assert!(
+        js.contains("function __jet_right__value()"),
+        "right identity was dropped:\n{js}"
+    );
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2865,10 +3020,22 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"), "left identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"), "right identity was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm___jet_left__value()"), "left call was dropped:\n{wasm}");
-    assert!(wasm.contains("jet_wasm___jet_right__value()"), "right call was dropped:\n{wasm}");
+    assert!(
+        wasm.contains("fn jet_wasm___jet_left__value() -> JetWasmInt"),
+        "left identity was dropped:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_wasm___jet_right__value() -> JetWasmInt"),
+        "right identity was dropped:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_wasm___jet_left__value()"),
+        "left call was dropped:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_wasm___jet_right__value()"),
+        "right call was dropped:\n{wasm}"
+    );
     assert_eq!(run_web_app(&dir), "3\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2973,11 +3140,21 @@ module helper { pub fn run() Int -[]> { return 7 } }
 #Target(JS)
 fn run() { print("top-level") }
 "#;
-    let dir = build_web_fixture("entry_identity", src, "tests/fixtures/web_entry_identity.jet");
+    let dir = build_web_fixture(
+        "entry_identity",
+        src,
+        "tests/fixtures/web_entry_identity.jet",
+    );
     let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
-    assert!(manifest.contains("\"entry\": \"JS\""), "module-local run hijacked manifest entry:\n{manifest}");
+    assert!(
+        manifest.contains("\"entry\": \"JS\""),
+        "module-local run hijacked manifest entry:\n{manifest}"
+    );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
-    assert!(!js.contains("wasm.jet_export_run()"), "module-local run hijacked JS startup:\n{js}");
+    assert!(
+        !js.contains("wasm.jet_export_run()"),
+        "module-local run hijacked JS startup:\n{js}"
+    );
     assert_eq!(run_web_app(&dir), "top-level\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -3018,7 +3195,10 @@ fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
     let src = "#Target(Web)\n\n#Target(JS)\nfn browser_value() Int -[]> { return 1 }\n#WasmExport\nfn compute() Int -[]> { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
-    assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -3035,8 +3215,14 @@ fn run() { print(summarize(4)) }
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_canvas_tir.jet")
         .expect("ordinary Canvas control flow and print must compile through TIR");
     let wasm = &out.web.expect("web artifacts").wasm_rust;
-    assert!(wasm.contains("if (__jet_total > JetWasmInt::from_i64(10))"), "TIR if was not emitted:\n{wasm}");
-    assert!(wasm.contains("jet_wasm_print("), "TIR print was not emitted:\n{wasm}");
+    assert!(
+        wasm.contains("if (__jet_total > JetWasmInt::from_i64(10))"),
+        "TIR if was not emitted:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_wasm_print("),
+        "TIR print was not emitted:\n{wasm}"
+    );
     assert!(
         wasm.contains("__jet_text: &String") || wasm.contains("__jet_text: String"),
         "internal String parameter was rejected:\n{wasm}"
@@ -3091,7 +3277,10 @@ fn run() { print("hello") }
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_host_dev_wasm.jet")
         .expect("default-Wasm host dev entry must stay outside web runtime");
     let wasm = &out.web.expect("web artifacts").wasm_rust;
-    assert!(!wasm.contains("jet_wasm_dev"), "top-level host dev leaked into Wasm runtime:\n{wasm}");
+    assert!(
+        !wasm.contains("jet_wasm_dev"),
+        "top-level host dev leaked into Wasm runtime:\n{wasm}"
+    );
 }
 
 #[test]
@@ -3107,7 +3296,9 @@ fn run() { print("hello") }
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_module_dev_unsupported.jet")
         .expect_err("unsupported module-local dev body must not receive host-entry exemption");
     assert!(
-        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED" && d.what.contains("`dev`")),
+        diags
+            .iter()
+            .any(|d| d.code == "E-WEB-TIR-UNSUPPORTED" && d.what.contains("`dev`")),
         "{diags:?}"
     );
 }
@@ -3134,11 +3325,7 @@ fn web_plain_run_loads_wasm_before_dom_print() {
     }
     let shown = "tests/fixtures/web_plain_run_startup.jet";
     let src = include_str!("../tests/fixtures/web_plain_run_startup.jet");
-    let dir = build_web_fixture(
-        "plain_run_startup",
-        src,
-        shown,
-    );
+    let dir = build_web_fixture("plain_run_startup", src, shown);
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
         js.contains("async function loadWasm()"),
@@ -3148,7 +3335,10 @@ fn web_plain_run_loads_wasm_before_dom_print() {
         js.contains("raw = wasm.jet_export_run();"),
         "plain Wasm run must call its emitted export:\n{js}"
     );
-    assert!(js.contains("jetDom.print(\"hello, web\")"), "JS print path missing:\n{js}");
+    assert!(
+        js.contains("jetDom.print(\"hello, web\")"),
+        "JS print path missing:\n{js}"
+    );
     let harness = r#"
 const { jet_main, hello } = await import("./app.js");
 await jet_main();
@@ -3274,7 +3464,11 @@ fn run() {
     right.set(11)
 }
 "#;
-    let dir = build_web_fixture("reactive_stale", src, "tests/fixtures/web_reactive_stale.jet");
+    let dir = build_web_fixture(
+        "reactive_stale",
+        src,
+        "tests/fixtures/web_reactive_stale.jet",
+    );
     assert_eq!(run_web_app(&dir), "1\n10\n11\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -3335,16 +3529,33 @@ fn run() {}
     let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
     let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
     let sources = jet::DevServer::BrowserTrace::sources_from_manifest(&manifest).unwrap();
-    let source = sources.iter().find(|source| source.path == "tests/fixtures/web_api.jet").unwrap();
+    let source = sources
+        .iter()
+        .find(|source| source.path == "tests/fixtures/web_api.jet")
+        .unwrap();
     assert_eq!(source.sha256, jet::SHA256::sha256_hex(src.as_bytes()));
-    assert!(source.symbols.contains(&("init".into(), "fn".into())), "{source:?}");
-    assert!(source.symbols.contains(&("init$handler0".into(), "handler".into())), "{source:?}");
+    assert!(
+        source.symbols.contains(&("init".into(), "fn".into())),
+        "{source:?}"
+    );
+    assert!(
+        source
+            .symbols
+            .contains(&("init$handler0".into(), "handler".into())),
+        "{source:?}"
+    );
     assert!(js.contains("jetDom.on(\"#new-task\", \"input\""), "{js}");
     assert!(js.contains("\"init$handler0\""), "{js}");
     assert!(!js.contains("__JET_INLINE_HANDLER__"), "{js}");
-    assert!(runtime.contains("const handlerSymbol = String(symbol)"), "{runtime}");
+    assert!(
+        runtime.contains("const handlerSymbol = String(symbol)"),
+        "{runtime}"
+    );
     assert!(!runtime.contains("symbol || jetDomScopeName"), "{runtime}");
-    assert!(runtime.contains("perfRecord(handlerSymbol, \"event\""), "{runtime}");
+    assert!(
+        runtime.contains("perfRecord(handlerSymbol, \"event\""),
+        "{runtime}"
+    );
     let stdout = run_web_api_harness(&dir);
     assert_eq!(
         stdout, "tasks=[]\ndraft=write flagship slice\n",
@@ -3365,13 +3576,28 @@ module handlers {
 fn init() { handlers.init() }
 fn run() {}
 "##;
-    let dir = build_web_fixture("qualified_handler", src, "tests/fixtures/web_qualified_handler.jet");
+    let dir = build_web_fixture(
+        "qualified_handler",
+        src,
+        "tests/fixtures/web_qualified_handler.jet",
+    );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
     let sources = jet::DevServer::BrowserTrace::sources_from_manifest(&manifest).unwrap();
     assert!(js.contains("\"__jet_handlers__init$handler0\""), "{js}");
-    assert!(sources.iter().any(|source| source.symbols.contains(&("__jet_handlers__init$handler0".into(), "handler".into()))), "{sources:?}");
-    assert!(!sources.iter().any(|source| source.symbols.iter().any(|(name, _)| name == "init$handler0")), "qualified handler was attributed to an unqualified suffix: {sources:?}");
+    assert!(
+        sources.iter().any(|source| source
+            .symbols
+            .contains(&("__jet_handlers__init$handler0".into(), "handler".into()))),
+        "{sources:?}"
+    );
+    assert!(
+        !sources.iter().any(|source| source
+            .symbols
+            .iter()
+            .any(|(name, _)| name == "init$handler0")),
+        "qualified handler was attributed to an unqualified suffix: {sources:?}"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -3440,7 +3666,11 @@ pub fn compute() Int -[]> {
 #Target(JS)
 fn run() { print(compute()) }
 "#;
-    let dir = build_web_fixture("grouped_use_list", src, "tests/fixtures/web_grouped_use_list.jet");
+    let dir = build_web_fixture(
+        "grouped_use_list",
+        src,
+        "tests/fixtures/web_grouped_use_list.jet",
+    );
     assert_eq!(run_web_app(&dir), "12\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -3453,7 +3683,10 @@ fn codable_struct_wasm_bridge_reconstructs_typed_argument() {
     let signature = "fn jet_export_sum_point(__jet_p_x: i64, __jet_p_y: i64) -> i64";
     let reconstruction = "let __jet_p = __jet_Point { __jet_x: __jet_p_x, __jet_y: __jet_p_y };";
     let field_read = "((__jet_p).__jet_x + (__jet_p).__jet_y)";
-    assert!(wasm_rust.contains(signature), "flattened ABI drifted:\n{wasm_rust}");
+    assert!(
+        wasm_rust.contains(signature),
+        "flattened ABI drifted:\n{wasm_rust}"
+    );
     assert!(
         wasm_rust.find(reconstruction) < wasm_rust.find(field_read),
         "typed Point must be reconstructed before its fields are read:\n{wasm_rust}"
@@ -3490,11 +3723,16 @@ fn web_showcase_dashboard_roundtrip() {
         lines[0], "nodes=4",
         "expected 4 independently-mounted DOM boxes:\n{stdout}"
     );
-    for label in ["Altitude: 12,400 ft", "Airspeed: 410 kt", "Boosts: 0", "Fuel: 40%"] {
+    for label in [
+        "Altitude: 12,400 ft",
+        "Airspeed: 410 kt",
+        "Boosts: 0",
+        "Fuel: 40%",
+    ] {
         assert!(
-            lines.iter().any(|line| {
-                line.contains(&format!("role=label aria={label:?}"))
-            }),
+            lines
+                .iter()
+                .any(|line| { line.contains(&format!("role=label aria={label:?}")) }),
             "styled card lost its accessible role/name for {label:?}:\n{stdout}"
         );
     }
@@ -3576,7 +3814,11 @@ fn web_wasm_range_loop_bridge_roundtrip() {
         return;
     }
     let src = include_str!("../examples/features/web/web_wasm_range.jet");
-    let dir = build_web_fixture("wasm_range", src, "examples/features/web/web_wasm_range.jet");
+    let dir = build_web_fixture(
+        "wasm_range",
+        src,
+        "examples/features/web/web_wasm_range.jet",
+    );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
         wasm.contains("jet_wasm_int_range("),
@@ -3603,7 +3845,11 @@ fn web_wasm_for_in_bridge_roundtrip() {
         return;
     }
     let src = include_str!("../examples/features/web/web_wasm_for_in.jet");
-    let dir = build_web_fixture("wasm_for_in", src, "examples/features/web/web_wasm_for_in.jet");
+    let dir = build_web_fixture(
+        "wasm_for_in",
+        src,
+        "examples/features/web/web_wasm_for_in.jet",
+    );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
         wasm.contains(".iter().cloned()")
@@ -3629,7 +3875,11 @@ fn web_wasm_string_export_hostile_roundtrip() {
         return;
     }
     let src = include_str!("../examples/features/web/web_wasm_string.jet");
-    let dir = build_web_fixture("wasm_string", src, "examples/features/web/web_wasm_string.jet");
+    let dir = build_web_fixture(
+        "wasm_string",
+        src,
+        "examples/features/web/web_wasm_string.jet",
+    );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
         wasm.contains("fn jet_abi_string_ret(s: String) -> u64"),
@@ -3760,8 +4010,7 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
         "export wrapper must unpack [Int] param:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_list_int_ret(jet_wasm_")
-            && wasm.contains("-> u64 "),
+        wasm.contains("jet_abi_list_int_ret(jet_wasm_") && wasm.contains("-> u64 "),
         "export must pack [Int] return as u64:\n{wasm}"
     );
     assert!(
@@ -3836,8 +4085,7 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         "export wrapper must unpack [String] param:\n{wasm}"
     );
     assert!(
-        wasm.contains("jet_abi_list_string_ret(jet_wasm_")
-            && wasm.contains("-> u64 "),
+        wasm.contains("jet_abi_list_string_ret(jet_wasm_") && wasm.contains("-> u64 "),
         "export must pack [String] return as u64:\n{wasm}"
     );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
@@ -4130,7 +4378,11 @@ fn web_wasm_event_callback_bridge_roundtrip() {
         return;
     }
     let src = include_str!("../examples/features/web/web_wasm_callback.jet");
-    let dir = build_web_fixture("wasm_callback", src, "examples/features/web/web_wasm_callback.jet");
+    let dir = build_web_fixture(
+        "wasm_callback",
+        src,
+        "examples/features/web/web_wasm_callback.jet",
+    );
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(
         js.contains("await bridge_double(21n)"),

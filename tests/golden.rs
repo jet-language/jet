@@ -165,8 +165,7 @@ fn examples_compile_and_run() {
     // per-run directory would instead pay one cold runtime compile per key on
     // every golden run, which is the exact cost this substrate exists to
     // remove. Living under the target dir keeps `cargo clean` as the reset.
-    let runtime_cache =
-        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-runtime-rlibs");
+    let runtime_cache = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-runtime-rlibs");
     std::env::set_var("JET_CACHE_DIR", &build_cache);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
     std::env::set_var("JET_RUNTIME_CACHE_DIR", &runtime_cache);
@@ -285,7 +284,9 @@ fn examples_compile_and_run() {
         );
     }
     for handle in handles {
-        handle.join().expect("golden worker panicked outside harness");
+        handle
+            .join()
+            .expect("golden worker panicked outside harness");
     }
     let failures = failures.lock().unwrap();
     assert!(
@@ -336,8 +337,7 @@ fn golden_uses_release_run(stem: &str) -> bool {
 /// their own file name, which a plain substring scan could not tell from code.
 static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>> =
     std::sync::LazyLock::new(|| {
-        let baseline_path =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/safety.md");
+        let baseline_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/safety.md");
         let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|err| {
             panic!(
                 "cannot read the approved unsafe-region baseline {}: {err}",
@@ -361,7 +361,9 @@ static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>
             .filter_map(|line| {
                 let quoted = line.trim().strip_prefix("\"file\":")?.trim_start();
                 let file = quoted.strip_prefix('"')?.split('"').next()?;
-                let stem = file.strip_prefix(example_prefix)?.strip_suffix(&jet_suffix)?;
+                let stem = file
+                    .strip_prefix(example_prefix)?
+                    .strip_suffix(&jet_suffix)?;
                 Some(stem.to_owned())
             })
             .collect();
@@ -454,7 +456,10 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         ),
     };
     assert!(
-        !compiled.lints.iter().any(|diagnostic| diagnostic.code == "L0507"),
+        !compiled
+            .lints
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L0507"),
         "feature example {stem} still teaches the discouraged braced/chained branch form:\n{}",
         jet::render_diagnostics(&entry.shown, &src, &compiled.lints)
     );
@@ -464,7 +469,9 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
 
     if GATED_UNSAFE_STEMS.contains(stem) {
         assert!(
-            user_code.lines().any(|line| !unsafe_keyword_columns(line).is_empty()),
+            user_code
+                .lines()
+                .any(|line| !unsafe_keyword_columns(line).is_empty()),
             "the audited example {} should exercise the gated `unsafe` tier",
             stem
         );
@@ -524,16 +531,14 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     }
     let flat_stem = stem.replace('/', "_");
     let dir = std::env::temp_dir();
-    let rs = dir.join(format!("jet_golden_{}_{}.rs", std::process::id(), flat_stem));
+    let rs = dir.join(format!(
+        "jet_golden_{}_{}.rs",
+        std::process::id(),
+        flat_stem
+    ));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
     let mut rustc_cmd = Command::new("rustc");
-    add_generated_rust(
-        &mut rustc_cmd,
-        &rs,
-        &rust_code,
-        ffi_link.is_some(),
-        &[],
-    );
+    add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
     if let Some(link) = &ffi_link {
         rustc_cmd
@@ -601,13 +606,18 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         run_cmd.output().unwrap()
     };
     if needs_gtk && !run.status.success() && gtk_loader_unavailable(&run.stderr) {
-        eprintln!("note: skipping examples/features/{stem}.jet run (gtk4 runtime loader unavailable)");
+        eprintln!(
+            "note: skipping examples/features/{stem}.jet run (gtk4 runtime loader unavailable)"
+        );
         return;
     }
     // Suffix rule (examples/README.md "Auxiliary golden stream suffix"):
     // `.err.out` = expected non-zero exit (panic/uncaught Err); `.stderr.out`
     // = expected exit 0 with pinned incidental stderr. Never a third suffix.
-    let err_path = env.ex_dir.join("expected").join(format!("{}.err.out", stem));
+    let err_path = env
+        .ex_dir
+        .join("expected")
+        .join(format!("{}.err.out", stem));
     let success_err_path = env
         .ex_dir
         .join("expected")
@@ -912,20 +922,12 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
     }
 
     let flat_stem = entry.stem.replace('/', "_");
-    let dir = std::env::temp_dir().join(format!(
-        "jet_golden_{}_{}",
-        std::process::id(),
-        flat_stem
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let source_dir = entry.path.parent().expect("polyglot example directory");
     fs::copy(&entry.path, dir.join("run.jet")).unwrap();
-    fs::copy(
-        source_dir.join(foreign_source),
-        dir.join(foreign_source),
-    )
-    .unwrap();
+    fs::copy(source_dir.join(foreign_source), dir.join(foreign_source)).unwrap();
     if language == "ada" {
         fs::copy(source_dir.join("geodesy.adb"), dir.join("geodesy.adb")).unwrap();
     }
@@ -972,7 +974,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .output()
-        .unwrap()
+            .unwrap()
     };
     assert!(
         run.status.success(),
@@ -1046,13 +1048,22 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
             .all(|line| unsafe_keyword_columns(line).is_empty()),
         "generated Rust for job_runner contains ungated `unsafe`"
     );
-    assert!(compiled.rust.contains("fn main()"), "job_runner has no fn main");
+    assert!(
+        compiled.rust.contains("fn main()"),
+        "job_runner has no fn main"
+    );
     if !env.have_rustc {
         return;
     }
     let dir = std::env::temp_dir();
-    let rs = dir.join(format!("jet_golden_{}_devloop_job_runner.rs", std::process::id()));
-    let bin = dir.join(format!("jet_golden_{}_devloop_job_runner", std::process::id()));
+    let rs = dir.join(format!(
+        "jet_golden_{}_devloop_job_runner.rs",
+        std::process::id()
+    ));
+    let bin = dir.join(format!(
+        "jet_golden_{}_devloop_job_runner",
+        std::process::id()
+    ));
     let mut rustc = Command::new("rustc");
     add_generated_rust(&mut rustc, &rs, &compiled.rust, compiled.ffi.is_some(), &[]);
     rustc.arg("-o").arg(&bin);
@@ -1061,7 +1072,9 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+            rustc
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
         }
     }
     let out = rustc.output().unwrap();
@@ -1070,7 +1083,10 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
         "I2 violated: rustc rejected job_runner:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    for (job, expected_name) in [("greet", "job_runner.greet"), ("seed_data", "job_runner.seed_data")] {
+    for (job, expected_name) in [
+        ("greet", "job_runner.greet"),
+        ("seed_data", "job_runner.seed_data"),
+    ] {
         let run = Command::new(&bin).arg(job).output().unwrap();
         assert!(
             run.status.success(),
@@ -1078,7 +1094,10 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)
         );
-        let out_path = env.ex_dir.join("expected").join(format!("devloop/{expected_name}.out"));
+        let out_path = env
+            .ex_dir
+            .join("expected")
+            .join(format!("devloop/{expected_name}.out"));
         assert!(out_path.is_file(), "missing expected output for `{job}`");
         record_golden_receipt_at(
             entry,
@@ -1129,7 +1148,11 @@ fn check_golden_entry_release_run(entry: &GoldenEntry, env: &GoldenEnv) {
 
     let jet_bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let mut run_cmd = Command::new(&jet_bin);
-    run_cmd.args(["run", "--release", entry.path.to_str().expect("example path is utf8")]);
+    run_cmd.args([
+        "run",
+        "--release",
+        entry.path.to_str().expect("example path is utf8"),
+    ]);
     let run = run_cmd.output().expect("jet run --release should spawn");
     assert!(
         run.status.success(),

@@ -503,10 +503,18 @@ impl SemIndex {
         self.bypasses = bypasses;
     }
 
-    pub(crate) fn set_instances(&mut self, instances: Vec<InstanceFact>) { self.instances = instances; }
-    pub fn instances(&self) -> &[InstanceFact] { &self.instances }
-    pub(crate) fn set_outputs(&mut self, outputs: Vec<OutputFact>) { self.outputs = outputs; }
-    pub fn outputs(&self) -> &[OutputFact] { &self.outputs }
+    pub(crate) fn set_instances(&mut self, instances: Vec<InstanceFact>) {
+        self.instances = instances;
+    }
+    pub fn instances(&self) -> &[InstanceFact] {
+        &self.instances
+    }
+    pub(crate) fn set_outputs(&mut self, outputs: Vec<OutputFact>) {
+        self.outputs = outputs;
+    }
+    pub fn outputs(&self) -> &[OutputFact] {
+        &self.outputs
+    }
 
     pub fn package_facts(&self) -> Option<&PackageFacts> {
         self.package_facts.as_ref()

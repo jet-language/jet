@@ -39,7 +39,9 @@ impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BindError::Source(message) | BindError::IO(message) => f.write_str(message),
-            BindError::ToolMissing(tool) => write!(f, "the provisioned `{tool}` tool was not found"),
+            BindError::ToolMissing(tool) => {
+                write!(f, "the provisioned `{tool}` tool was not found")
+            }
             BindError::ToolFailed { tool, detail } => {
                 write!(f, "`{tool}` rejected the ISO_C_BINDING source: {detail}")
             }
@@ -101,9 +103,16 @@ impl Scalar {
 
 /// Discover supported routines, generate the Jet wrapper, compile the Fortran
 /// object, and archive it beside the generated cache.
-pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Result<BindResult, BindError> {
+pub fn bind(
+    source_path: &Path,
+    source: &str,
+    lib: &str,
+    cache_dir: &Path,
+) -> Result<BindResult, BindError> {
     if !is_ident(lib) {
-        return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name")));
+        return Err(BindError::Source(format!(
+            "`{lib}` is not a valid Jet library name"
+        )));
     }
     let routines = parse_routines(source)?;
     let has_arrays = routines.iter().any(Routine::has_arrays);
@@ -132,14 +141,12 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Re
             &bridge_source,
             render_bridge(module.as_deref().unwrap_or_default(), lib, &routines),
         )
-            .map_err(|e| BindError::IO(format!("could not write the Fortran array bridge: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write the Fortran array bridge: {e}")))?;
         compile_fortran(&bridge_source, &bridge_object, cache_dir)?;
         archive_inputs.push(bridge_object.clone());
     }
     let mut archive_command = Command::new("ar");
-    archive_command
-        .arg("rcs")
-        .arg(&archive);
+    archive_command.arg("rcs").arg(&archive);
     archive_command.args(&archive_inputs);
     let output = supervised_output(&mut archive_command, "ar")?;
     if !output.status.success() {
@@ -153,17 +160,23 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Re
     let _ = std::fs::remove_file(&bridge_source);
 
     let source = render(lib, &routines);
-    let layouts = routines.iter().flat_map(|routine| {
-        routine.params.iter().filter_map(|(parameter, param)| match param {
-            Param::Array { extents, .. } => Some(ArrayLayoutFact {
-                routine: routine.jet_name.clone(),
-                parameter: parameter.clone(),
-                extents: extents.clone(),
-                order: "column-major",
-            }),
-            Param::Scalar(_) => None,
+    let layouts = routines
+        .iter()
+        .flat_map(|routine| {
+            routine
+                .params
+                .iter()
+                .filter_map(|(parameter, param)| match param {
+                    Param::Array { extents, .. } => Some(ArrayLayoutFact {
+                        routine: routine.jet_name.clone(),
+                        parameter: parameter.clone(),
+                        extents: extents.clone(),
+                        order: "column-major",
+                    }),
+                    Param::Scalar(_) => None,
+                })
         })
-    }).collect();
+        .collect();
     Ok(BindResult {
         source,
         bound: routines.into_iter().map(|r| r.jet_name).collect(),
@@ -173,15 +186,18 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Re
 }
 
 fn compile_fortran(source: &Path, object: &Path, module_dir: &Path) -> Result<(), BindError> {
-    let output = supervised_output(Command::new("gfortran")
-        .args(["-c", "-fPIC", "-ffree-line-length-none"])
-        .arg("-J")
-        .arg(module_dir)
-        .arg("-I")
-        .arg(module_dir)
-        .arg(source)
-        .arg("-o")
-        .arg(object), "gfortran")?;
+    let output = supervised_output(
+        Command::new("gfortran")
+            .args(["-c", "-fPIC", "-ffree-line-length-none"])
+            .arg("-J")
+            .arg(module_dir)
+            .arg("-I")
+            .arg(module_dir)
+            .arg(source)
+            .arg("-o")
+            .arg(object),
+        "gfortran",
+    )?;
     if output.status.success() {
         Ok(())
     } else {
@@ -200,31 +216,49 @@ struct ToolOutput {
 fn supervised_output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> {
     const CAPTURE_LIMIT: usize = 64 * 1024;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
-        BindError::ToolMissing(tool)
-    } else {
-        BindError::IO(format!("could not start `{tool}`: {e}"))
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            BindError::ToolMissing(tool)
+        } else {
+            BindError::IO(format!("could not start `{tool}`: {e}"))
+        }
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || bounded_read(stdout, CAPTURE_LIMIT));
     let err = std::thread::spawn(move || bounded_read(stderr, CAPTURE_LIMIT));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
+        match child
+            .try_wait()
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
+        {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = out.join();
                 let _ = err.join();
-                return Err(BindError::ToolFailed { tool, detail: "the tool exceeded the 60 second limit".into() });
+                return Err(BindError::ToolFailed {
+                    tool,
+                    detail: "the tool exceeded the 60 second limit".into(),
+                });
             }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let _ = out.join().map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
-    let stderr = err.join().map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
+    let _ = out
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err
+        .join()
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
     Ok(ToolOutput { status, stderr })
 }
 
@@ -232,8 +266,12 @@ fn bounded_read(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError
     let mut captured = Vec::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let count = input.read(&mut buffer).map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
-        if count == 0 { break; }
+        let count = input
+            .read(&mut buffer)
+            .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
+        if count == 0 {
+            break;
+        }
         let keep = limit.saturating_sub(captured.len()).min(count);
         captured.extend_from_slice(&buffer[..keep]);
     }
@@ -265,18 +303,34 @@ fn parse_routines(source: &str) -> Result<Vec<Routine>, BindError> {
             continue;
         }
         let header = &line[function_at + "function ".len()..];
-        let open = header.find('(').ok_or_else(|| BindError::Source("malformed Fortran function header".into()))?;
+        let open = header
+            .find('(')
+            .ok_or_else(|| BindError::Source("malformed Fortran function header".into()))?;
         let jet_name = header[..open].trim().to_string();
         if !is_ident(&jet_name) {
-            return Err(BindError::Source(format!("`{jet_name}` is not a bindable routine name")));
+            return Err(BindError::Source(format!(
+                "`{jet_name}` is not a bindable routine name"
+            )));
         }
-        let close = header[open + 1..].find(')').map(|n| open + 1 + n)
-            .ok_or_else(|| BindError::Source(format!("function `{jet_name}` has no closed parameter list")))?;
+        let close = header[open + 1..]
+            .find(')')
+            .map(|n| open + 1 + n)
+            .ok_or_else(|| {
+                BindError::Source(format!(
+                    "function `{jet_name}` has no closed parameter list"
+                ))
+            })?;
         let names: Vec<String> = header[open + 1..close]
-            .split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
-        let symbol = parse_bind_name(header).ok_or_else(|| BindError::Source(format!(
-            "function `{jet_name}` must declare `bind(C, name=\"...\")`"
-        )))?;
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        let symbol = parse_bind_name(header).ok_or_else(|| {
+            BindError::Source(format!(
+                "function `{jet_name}` must declare `bind(C, name=\"...\")`"
+            ))
+        })?;
         let result_name = parse_result_name(header).unwrap_or_else(|| jet_name.clone());
         let mut declarations = Vec::new();
         i += 1;
@@ -293,18 +347,27 @@ fn parse_routines(source: &str) -> Result<Vec<Routine>, BindError> {
         }
         let mut params = Vec::new();
         for name in &names {
-            let declaration = find_decl(&declarations, name).ok_or_else(|| BindError::Source(format!(
+            let declaration = find_decl(&declarations, name).ok_or_else(|| {
+                BindError::Source(format!(
                 "parameter `{name}` in `{jet_name}` needs an explicit ISO_C_BINDING declaration"
-            )))?;
+            ))
+            })?;
             let param = match declaration.extents {
                 Some(extents) => {
                     if declaration.value {
-                        return Err(BindError::Source(format!("array parameter `{name}` in `{jet_name}` cannot use `value`")));
+                        return Err(BindError::Source(format!(
+                            "array parameter `{name}` in `{jet_name}` cannot use `value`"
+                        )));
                     }
                     if !declaration.intent_in {
-                        return Err(BindError::Source(format!("array parameter `{name}` in `{jet_name}` must declare `intent(in)`")));
+                        return Err(BindError::Source(format!(
+                            "array parameter `{name}` in `{jet_name}` must declare `intent(in)`"
+                        )));
                     }
-                    Param::Array { scalar: declaration.scalar, extents }
+                    Param::Array {
+                        scalar: declaration.scalar,
+                        extents,
+                    }
                 }
                 None => {
                     if !declaration.value {
@@ -317,14 +380,23 @@ fn parse_routines(source: &str) -> Result<Vec<Routine>, BindError> {
             };
             params.push((name.clone(), param));
         }
-        let result_decl = find_decl(&declarations, &result_name).ok_or_else(|| BindError::Source(format!(
+        let result_decl = find_decl(&declarations, &result_name).ok_or_else(|| {
+            BindError::Source(format!(
             "result `{result_name}` in `{jet_name}` needs an explicit ISO_C_BINDING declaration"
-        )))?;
+        ))
+        })?;
         if result_decl.extents.is_some() {
-            return Err(BindError::Source(format!("result `{result_name}` in `{jet_name}` must be a scalar")));
+            return Err(BindError::Source(format!(
+                "result `{result_name}` in `{jet_name}` must be a scalar"
+            )));
         }
         let result = result_decl.scalar;
-        routines.push(Routine { jet_name, symbol, params, result });
+        routines.push(Routine {
+            jet_name,
+            symbol,
+            params,
+            result,
+        });
         i += 1;
     }
     if routines.is_empty() {
@@ -346,7 +418,12 @@ fn find_decl(declarations: &[String], name: &str) -> Option<Declaration> {
     for declaration in declarations {
         let (type_part, names_part) = declaration.split_once("::")?;
         let entity = split_top_level(names_part).into_iter().find(|candidate| {
-            candidate.split('(').next().unwrap_or(candidate).trim().eq_ignore_ascii_case(name)
+            candidate
+                .split('(')
+                .next()
+                .unwrap_or(candidate)
+                .trim()
+                .eq_ignore_ascii_case(name)
         });
         let Some(entity) = entity else {
             continue;
@@ -360,8 +437,13 @@ fn find_decl(declarations: &[String], name: &str) -> Option<Declaration> {
             return None;
         };
         let value = lower.split(',').map(str::trim).any(|part| part == "value");
-        let intent_in = lower.split(',').map(str::trim).any(|part| part == "intent(in)");
-        let dims = entity.split_once('(').and_then(|(_, tail)| tail.rsplit_once(')').map(|(inside, _)| inside))
+        let intent_in = lower
+            .split(',')
+            .map(str::trim)
+            .any(|part| part == "intent(in)");
+        let dims = entity
+            .split_once('(')
+            .and_then(|(_, tail)| tail.rsplit_once(')').map(|(inside, _)| inside))
             .or_else(|| parse_dimension_attr(&lower));
         let extents = match dims {
             Some(raw) => {
@@ -370,12 +452,19 @@ fn find_decl(declarations: &[String], name: &str) -> Option<Declaration> {
                     let extent = part.parse::<usize>().ok().filter(|n| *n > 0)?;
                     extents.push(extent);
                 }
-                if extents.is_empty() { return None; }
+                if extents.is_empty() {
+                    return None;
+                }
                 Some(extents)
             }
             None => None,
         };
-        return Some(Declaration { scalar, value, intent_in, extents });
+        return Some(Declaration {
+            scalar,
+            value,
+            intent_in,
+            extents,
+        });
     }
     None
 }
@@ -393,7 +482,10 @@ fn split_top_level(value: &str) -> Vec<&str> {
         match ch {
             '(' => depth += 1,
             ')' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => { parts.push(value[start..index].trim()); start = index + 1; }
+            ',' if depth == 0 => {
+                parts.push(value[start..index].trim());
+                start = index + 1;
+            }
             _ => {}
         }
     }
@@ -408,7 +500,9 @@ fn parse_bind_name(header: &str) -> Option<String> {
     let after = header[name_at + 4..].trim_start();
     let after = after.strip_prefix('=')?.trim_start();
     let quote = after.chars().next()?;
-    if quote != '\'' && quote != '"' { return None; }
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
     let value = after[quote.len_utf8()..].split(quote).next()?;
     is_ident(value).then(|| value.to_string())
 }
@@ -441,7 +535,13 @@ fn render(lib: &str, routines: &[Routine]) -> String {
                 out.push('.');
                 out.push_str(name);
                 out.push_str(": column-major ");
-                out.push_str(&extents.iter().map(usize::to_string).collect::<Vec<_>>().join("x"));
+                out.push_str(
+                    &extents
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join("x"),
+                );
                 out.push('\n');
             }
         }
@@ -474,8 +574,14 @@ fn render(lib: &str, routines: &[Routine]) -> String {
         for (name, param) in &routine.params {
             if let Param::Array { extents, .. } = param {
                 let len: usize = extents.iter().product();
-                out.push_str("    if "); out.push_str(name); out.push_str(".len() != "); out.push_str(&len.to_string());
-                out.push_str(" { panic(\""); out.push_str(name); out.push_str(" must contain exactly "); out.push_str(&len.to_string());
+                out.push_str("    if ");
+                out.push_str(name);
+                out.push_str(".len() != ");
+                out.push_str(&len.to_string());
+                out.push_str(" { panic(\"");
+                out.push_str(name);
+                out.push_str(" must contain exactly ");
+                out.push_str(&len.to_string());
                 out.push_str(" column-major values\") }\n");
             }
         }
@@ -512,7 +618,9 @@ fn render_abi_params(out: &mut String, params: &[(String, Param)]) {
     for (name, param) in params {
         match param {
             Param::Scalar(scalar) => {
-                if !first { out.push_str(", "); }
+                if !first {
+                    out.push_str(", ");
+                }
                 first = false;
                 out.push_str(name);
                 out.push_str(": ");
@@ -520,7 +628,9 @@ fn render_abi_params(out: &mut String, params: &[(String, Param)]) {
             }
             Param::Array { scalar, extents } => {
                 for index in 0..extents.iter().product() {
-                    if !first { out.push_str(", "); }
+                    if !first {
+                        out.push_str(", ");
+                    }
                     first = false;
                     out.push_str(&format!("{name}_{index}: {}", scalar.jet()));
                 }
@@ -556,10 +666,9 @@ fn render_bridge(module: &str, lib: &str, routines: &[Routine]) -> String {
         ));
         for (name, param) in &routine.params {
             match param {
-                Param::Scalar(scalar) => out.push_str(&format!(
-                    "    {}, value :: {name}\n",
-                    scalar.fortran()
-                )),
+                Param::Scalar(scalar) => {
+                    out.push_str(&format!("    {}, value :: {name}\n", scalar.fortran()))
+                }
                 Param::Array { scalar, extents } => {
                     let len: usize = extents.iter().product();
                     let expanded = (0..len)
@@ -573,7 +682,11 @@ fn render_bridge(module: &str, lib: &str, routines: &[Routine]) -> String {
                     out.push_str(&format!(
                         "    {} :: {name}({})\n",
                         scalar.fortran(),
-                        extents.iter().map(usize::to_string).collect::<Vec<_>>().join(",")
+                        extents
+                            .iter()
+                            .map(usize::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
                     ));
                 }
             }
@@ -617,7 +730,9 @@ fn render_bridge(module: &str, lib: &str, routines: &[Routine]) -> String {
 fn render_params(out: &mut String, params: &[(String, Param)]) {
     out.push('(');
     for (index, (name, scalar)) in params.iter().enumerate() {
-        if index > 0 { out.push_str(", "); }
+        if index > 0 {
+            out.push_str(", ");
+        }
         out.push_str(name);
         out.push_str(": ");
         out.push_str(&scalar.jet());
@@ -625,7 +740,9 @@ fn render_params(out: &mut String, params: &[(String, Param)]) {
     out.push(')');
 }
 
-fn strip_comment(line: &str) -> &str { line.split('!').next().unwrap_or(line) }
+fn strip_comment(line: &str) -> &str {
+    line.split('!').next().unwrap_or(line)
+}
 
 fn is_ident(value: &str) -> bool {
     let mut chars = value.chars();

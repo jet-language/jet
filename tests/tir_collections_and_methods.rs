@@ -5,8 +5,8 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
 use jet::Interpreter::{dev_iteration, RunOutcome};
+use tir_support::{assert_tiers_agree, build_and_run, compile, have_rustc};
 
 #[test]
 fn generated_temporaries_do_not_collide_with_collection_locals() {
@@ -33,8 +33,14 @@ fn run() {
     for stem in ["i", "item", "k", "v"] {
         let user = jet::AST::mangle(stem);
         let generated = jet::AST::mangle_generated(stem);
-        assert_ne!(user, generated, "allocator lanes must stay distinct for {stem}");
-        assert!(rust.contains(&generated), "generated binding {generated} missing");
+        assert_ne!(
+            user, generated,
+            "allocator lanes must stay distinct for {stem}"
+        );
+        assert!(
+            rust.contains(&generated),
+            "generated binding {generated} missing"
+        );
     }
     assert!(rust.contains(&format!("let {}", jet::AST::mangle("v"))));
     assert!(rust.contains(&format!("let {}", jet::AST::mangle_generated("v"))));
@@ -101,10 +107,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_list_index_idioms", src);
     assert_eq!(code, 0);
-    assert_eq!(
-        stdout,
-        "0:10\n1:20\n2:30\n0\n1\n2\n0\n0:10\n1:20\n2:30\n"
-    );
+    assert_eq!(stdout, "0:10\n1:20\n2:30\n0\n1\n2\n0\n0:10\n1:20\n2:30\n");
 }
 
 /// Indexed assignment into a list (`xs[i] = v`) — the `LValue::Index` vec form.
@@ -1035,8 +1038,7 @@ fn run() {
         .collect();
     let lint_count = lints.len();
     assert_eq!(
-        lint_count,
-        1,
+        lint_count, 1,
         "local #allow should suppress one nested lint; got {lint_count}"
     );
 }

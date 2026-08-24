@@ -220,7 +220,10 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
     // payload (`.Key(key) && key == "b" -> ...`). Scan that guard only on its
     // source line; an unrelated arrow on a later line must not turn a fluent
     // chain into a new arm.
-    if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::AndAnd | TokKind::OrOr)) {
+    if matches!(
+        toks.get(j).map(|t| &t.kind),
+        Some(TokKind::AndAnd | TokKind::OrOr)
+    ) {
         let guard_start = toks[j].span.start;
         let mut depth = 0usize;
         while let Some(token) = toks.get(j) {
@@ -229,8 +232,11 @@ fn dispatch_arm_starts_at(src: &str, toks: &[Token], i: usize) -> bool {
                 TokKind::RParen | TokKind::RBracket | TokKind::RBrace => {
                     depth = depth.saturating_sub(1);
                 }
-                kind if matches!(kind, TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow)
-                    && depth == 0 => {
+                kind if matches!(
+                    kind,
+                    TokKind::UnifiedArrow | TokKind::Arrow | TokKind::LambdaArrow
+                ) && depth == 0 =>
+                {
                     return src
                         .get(guard_start..token.span.start)
                         .is_some_and(|guard| !guard.contains('\n'));
@@ -308,8 +314,7 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                         | TokKind::Eq
                         | TokKind::MinusMinus
                         | TokKind::LBrace
-                )
-                    && matches!(prev.kind, TokKind::RParen)
+                ) && matches!(prev.kind, TokKind::RParen)
                 {
                     let spelling = match &cur.kind {
                         TokKind::UnifiedArrow => "->",

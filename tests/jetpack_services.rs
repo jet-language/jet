@@ -31,11 +31,7 @@ fn jetpack() -> Command {
     {
         let fake = fake_systemd();
         let current_path = std::env::var_os("PATH").unwrap_or_default();
-        let path = format!(
-            "{}:{}",
-            fake.bin.display(),
-            current_path.to_string_lossy()
-        );
+        let path = format!("{}:{}", fake.bin.display(), current_path.to_string_lossy());
         command
             .env("PATH", path)
             .env("JETPACK_FAKE_SYSTEMD_STATE", &fake.state);
@@ -55,10 +51,7 @@ fn fake_systemd() -> &'static FakeSystemd {
     FAKE.get_or_init(|| {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = std::env::temp_dir().join(format!(
-            "jpk-fake-systemd-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("jpk-fake-systemd-{}", std::process::id()));
         let bin = root.join("bin");
         let state = root.join("state");
         fs::create_dir_all(&bin).unwrap();
@@ -272,7 +265,11 @@ fn services_from_nested_project_directory_use_the_project_state_root() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&up.stderr)
+    );
     assert!(proj.path.join(".jet/services/fixture/pid").is_file());
     assert!(!nested.join(".jet/services/fixture/pid").exists());
 
@@ -282,7 +279,11 @@ fn services_from_nested_project_directory_use_the_project_state_root() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(health.status.success(), "{}", String::from_utf8_lossy(&health.stderr));
+    assert!(
+        health.status.success(),
+        "{}",
+        String::from_utf8_lossy(&health.stderr)
+    );
 
     let down = jetpack()
         .args(["services", "down", "--no-color"])
@@ -290,7 +291,11 @@ fn services_from_nested_project_directory_use_the_project_state_root() {
         .envs(env)
         .output()
         .unwrap();
-    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    assert!(
+        down.status.success(),
+        "{}",
+        String::from_utf8_lossy(&down.stderr)
+    );
 }
 
 #[test]
@@ -314,7 +319,10 @@ fn services_wait_reports_readiness_timeout() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E1261"), "stderr: {stderr}");
-    assert!(stderr.contains("service `fixture` is not ready"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("service `fixture` is not ready"),
+        "stderr: {stderr}"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -336,7 +344,10 @@ fn services_up_readiness_timeout_preserves_startup_failure_receipt() {
         .env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "500")
         .output()
         .unwrap();
-    assert!(!out.status.success(), "readiness timeout unexpectedly succeeded");
+    assert!(
+        !out.status.success(),
+        "readiness timeout unexpectedly succeeded"
+    );
     let output = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
@@ -500,13 +511,19 @@ fn services_watch_restarts_after_nested_file_change() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&up.stderr)
+    );
 
-    let count = proj
-        .path
-        .join(".jet/services/fixture/data/restart-count");
+    let count = proj.path.join(".jet/services/fixture/data/restart-count");
     wait_for_file_lines(&count, 1);
-    fs::write(proj.path.join("src/nested/input"), "two with a changed length\n").unwrap();
+    fs::write(
+        proj.path.join("src/nested/input"),
+        "two with a changed length\n",
+    )
+    .unwrap();
     wait_for_file_lines(&count, 2);
 
     let health = jetpack()
@@ -515,14 +532,22 @@ fn services_watch_restarts_after_nested_file_change() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(health.status.success(), "{}", String::from_utf8_lossy(&health.stderr));
+    assert!(
+        health.status.success(),
+        "{}",
+        String::from_utf8_lossy(&health.stderr)
+    );
     let down = jetpack()
         .args(["services", "down", "--no-color"])
         .current_dir(&proj.path)
         .envs(env)
         .output()
         .unwrap();
-    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    assert!(
+        down.status.success(),
+        "{}",
+        String::from_utf8_lossy(&down.stderr)
+    );
 }
 
 /// Exhausting an explicit restart budget is a terminal state, not a stale
@@ -548,7 +573,11 @@ fn services_restart_exhaustion_cleans_state() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(!up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        !up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&up.stderr)
+    );
     assert!(
         String::from_utf8_lossy(&up.stderr).contains("E1261"),
         "stderr: {}",
@@ -557,7 +586,9 @@ fn services_restart_exhaustion_cleans_state() {
     let pid = proj.path.join(".jet/services/fixture/pid");
     wait_for_missing(&pid);
     assert!(
-        proj.path.join(".jet/services/fixture/supervisor.error").is_file(),
+        proj.path
+            .join(".jet/services/fixture/supervisor.error")
+            .is_file(),
         "restart exhaustion must leave a supervisor error"
     );
     let health = jetpack()
@@ -985,11 +1016,7 @@ fn production_catalog_services_prepare_state_and_pass_readiness() {
     install_catalog_tools(&tools.path);
     let fake = fake_systemd();
     let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let path = format!(
-        "{}:{}",
-        fake.bin.display(),
-        current_path.to_string_lossy()
-    );
+    let path = format!("{}:{}", fake.bin.display(), current_path.to_string_lossy());
     let env = catalog_tool_env(&tools.path, None);
 
     for name in [
@@ -1087,11 +1114,7 @@ fn production_adminer_preset_fails_closed_without_php_projection() {
     let tools = Scratch::new("adminer-owner-gate-tools");
     let fake = fake_systemd();
     let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let path = format!(
-        "{}:{}",
-        fake.bin.display(),
-        current_path.to_string_lossy()
-    );
+    let path = format!("{}:{}", fake.bin.display(), current_path.to_string_lossy());
     let worker = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -1126,11 +1149,7 @@ fn production_minio_preset_port_conflict_has_terminal_state() {
     let port = blocker.local_addr().unwrap().port();
     let fake = fake_systemd();
     let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let path = format!(
-        "{}:{}",
-        fake.bin.display(),
-        current_path.to_string_lossy()
-    );
+    let path = format!("{}:{}", fake.bin.display(), current_path.to_string_lossy());
     let worker = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -1152,7 +1171,10 @@ fn production_minio_preset_port_conflict_has_terminal_state() {
 
     let service_dir = proj.path.join(".jet/services/minio");
     let output = worker.wait_with_output().unwrap();
-    assert!(!output.status.success(), "port conflict must reach the worker");
+    assert!(
+        !output.status.success(),
+        "port conflict must reach the worker"
+    );
     assert!(!service_dir.join("pid").exists());
     assert!(!service_dir.join("ports").exists());
     assert!(service_dir.join("supervisor.error").is_file());
@@ -1170,11 +1192,7 @@ fn production_postgres_preset_initialization_failure_has_terminal_state() {
     fs::remove_file(tools.path.join("bin/initdb")).unwrap();
     let fake = fake_systemd();
     let current_path = std::env::var_os("PATH").unwrap_or_default();
-    let path = format!(
-        "{}:{}",
-        fake.bin.display(),
-        current_path.to_string_lossy()
-    );
+    let path = format!("{}:{}", fake.bin.display(), current_path.to_string_lossy());
     let worker = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -1195,7 +1213,10 @@ fn production_postgres_preset_initialization_failure_has_terminal_state() {
 
     let service_dir = proj.path.join(".jet/services/postgres");
     let output = worker.wait_with_output().unwrap();
-    assert!(!output.status.success(), "initdb failure must reach the worker");
+    assert!(
+        !output.status.success(),
+        "initdb failure must reach the worker"
+    );
     assert!(!service_dir.join("pid").exists());
     assert!(!service_dir.join("ports").exists());
     assert!(service_dir.join("supervisor.error").is_file());
@@ -1226,11 +1247,21 @@ fn production_path_persists_linux_authority_and_dependency_lifecycle() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&up.stderr)
+    );
 
     let lifecycle = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
-    assert!(lifecycle.contains("backend=linux-systemd-user"), "{lifecycle}");
-    assert!(lifecycle.contains("containment=delegated-cgroup"), "{lifecycle}");
+    assert!(
+        lifecycle.contains("backend=linux-systemd-user"),
+        "{lifecycle}"
+    );
+    assert!(
+        lifecycle.contains("containment=delegated-cgroup"),
+        "{lifecycle}"
+    );
     assert!(lifecycle.contains("phase=ready"), "{lifecycle}");
     assert!(lifecycle.contains("dependency=database"), "{lifecycle}");
 
@@ -1240,7 +1271,11 @@ fn production_path_persists_linux_authority_and_dependency_lifecycle() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(health.status.success(), "{}", String::from_utf8_lossy(&health.stderr));
+    assert!(
+        health.status.success(),
+        "{}",
+        String::from_utf8_lossy(&health.stderr)
+    );
     let json = String::from_utf8_lossy(&health.stdout);
     assert!(json.contains("linux-systemd-user"), "{json}");
     assert!(json.contains("\"after\":[\"database\"]"), "{json}");
@@ -1251,7 +1286,11 @@ fn production_path_persists_linux_authority_and_dependency_lifecycle() {
         .envs(env)
         .output()
         .unwrap();
-    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    assert!(
+        down.status.success(),
+        "{}",
+        String::from_utf8_lossy(&down.stderr)
+    );
     let stopped = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
     assert!(stopped.contains("phase=stopped"), "{stopped}");
 }
@@ -1281,7 +1320,11 @@ fn production_path_kills_descendants_in_the_supervisor_process_group() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&up.stderr)
+    );
 
     let child_file = proj.path.join(".jet/services/fixture/data/child.pid");
     wait_for_file_lines(&child_file, 1);
@@ -1295,8 +1338,14 @@ fn production_path_kills_descendants_in_the_supervisor_process_group() {
         .lines()
         .find_map(|line| line.strip_prefix("pid=")?.parse::<u32>().ok())
         .unwrap();
-    assert_ne!(child_pid, service_pid, "fixture must have a real descendant");
-    assert!(process_is_alive(child_pid), "descendant must be alive before down");
+    assert_ne!(
+        child_pid, service_pid,
+        "fixture must have a real descendant"
+    );
+    assert!(
+        process_is_alive(child_pid),
+        "descendant must be alive before down"
+    );
 
     let down = jetpack()
         .args(["services", "down", "--no-color"])
@@ -1304,10 +1353,17 @@ fn production_path_kills_descendants_in_the_supervisor_process_group() {
         .envs(env)
         .output()
         .unwrap();
-    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    assert!(
+        down.status.success(),
+        "{}",
+        String::from_utf8_lossy(&down.stderr)
+    );
     let deadline = Instant::now() + Duration::from_secs(3);
     while process_is_alive(child_pid) {
-        assert!(Instant::now() < deadline, "descendant survived systemd scope shutdown");
+        assert!(
+            Instant::now() < deadline,
+            "descendant survived systemd scope shutdown"
+        );
         std::thread::sleep(Duration::from_millis(25));
     }
 }
@@ -1345,7 +1401,10 @@ fn production_supervisor_stops_descendants_after_leader_exit() {
         .trim()
         .parse::<u32>()
         .unwrap();
-    assert!(process_is_alive(child_pid), "descendant must outlive the leader");
+    assert!(
+        process_is_alive(child_pid),
+        "descendant must outlive the leader"
+    );
     fs::write(service_dir.join("data/exit.flag"), b"exit\n").unwrap();
 
     wait_for_file_contains(&service_dir.join("lifecycle"), "phase=failed");
@@ -1415,7 +1474,11 @@ fn production_path_bounds_readiness_probe_runtime() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(started.elapsed() < Duration::from_secs(3), "readiness probe was not bounded: {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "readiness probe was not bounded: {:?}",
+        started.elapsed()
+    );
     assert!(String::from_utf8_lossy(&out.stderr).contains("E1261"));
     assert!(!proj.path.join(".jet/services/fixture/pid").exists());
 }
@@ -1442,7 +1505,11 @@ fn production_path_stops_dependents_after_dependency_failure() {
         .envs(env.clone())
         .output()
         .unwrap();
-    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    assert!(
+        up.status.success(),
+        "{}",
+        String::from_utf8_lossy(&up.stderr)
+    );
     let api_pid = proj.path.join(".jet/services/api/pid");
     assert!(api_pid.is_file());
 
@@ -1450,12 +1517,19 @@ fn production_path_stops_dependents_after_dependency_failure() {
     let error = proj.path.join(".jet/services/api/supervisor.error");
     wait_for_file_contains(&error, "dependency `database` failed");
     let lifecycle = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
-    assert!(lifecycle.contains("recovery=dependency-failed"), "{lifecycle}");
+    assert!(
+        lifecycle.contains("recovery=dependency-failed"),
+        "{lifecycle}"
+    );
     let down = jetpack()
         .args(["services", "down", "--no-color"])
         .current_dir(&proj.path)
         .envs(env)
         .output()
         .unwrap();
-    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    assert!(
+        down.status.success(),
+        "{}",
+        String::from_utf8_lossy(&down.stderr)
+    );
 }

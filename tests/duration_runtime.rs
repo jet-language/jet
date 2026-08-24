@@ -31,7 +31,8 @@ fn run() {
     assert!(compiled.rust.contains("jet_duration_in"));
 
     if jet_jit::cranelift_host_supported() {
-        let bundle = checked_bundle(r#"
+        let bundle = checked_bundle(
+            r#"
 fn make() Duration RangeError! -> {
     return Duration.seconds(1.5)
 }
@@ -39,8 +40,10 @@ fn read(d: Duration) Int RangeError! -> {
     return d.in(.Milliseconds)
 }
 fn run() {}
-"#);
-        jet_jit::try_compile_bundle(&bundle).expect("duration surface should lower to resident JIT");
+"#,
+        );
+        jet_jit::try_compile_bundle(&bundle)
+            .expect("duration surface should lower to resident JIT");
     }
 }
 
@@ -50,7 +53,10 @@ fn retired_duration_aliases_are_not_callable() {
         "use core.time as time\nfn run() { _ :: time.seconds(1) }",
         "fn run() { d :: Duration.seconds(1) ?? panic(\"duration\")\n_ :: d.millis() }",
     ] {
-        assert!(jet::compile(source).is_err(), "retired duration alias compiled: {source}");
+        assert!(
+            jet::compile(source).is_err(),
+            "retired duration alias compiled: {source}"
+        );
     }
 }
 

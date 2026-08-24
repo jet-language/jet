@@ -35,4 +35,3 @@ pub(crate) fn on_tick(id: i64, dt: i64) -> Result<i64, String> {
         jet_mod_on_tick(module, dt)
     })
 }
-

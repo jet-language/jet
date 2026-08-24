@@ -213,10 +213,7 @@ fn section_has_token(section: &str, token: &str) -> bool {
 }
 
 fn zed_generated_class(class: jet::Syntax::HighlightClass) -> bool {
-    !matches!(
-        class,
-        jet::Syntax::HighlightClass::MarkerRule
-    )
+    !matches!(class, jet::Syntax::HighlightClass::MarkerRule)
 }
 
 fn is_word_token(s: &str) -> bool {
@@ -559,7 +556,10 @@ fn run() {}
     let jet::AST::Item::Func(func) = &prog.items[1] else {
         panic!("expected area function");
     };
-    let jet::AST::Stmt::Switch { arms, else_body, .. } = &func.body[0] else {
+    let jet::AST::Stmt::Switch {
+        arms, else_body, ..
+    } = &func.body[0]
+    else {
         panic!("expected switch");
     };
     assert_eq!(arms.len(), 2);
@@ -673,7 +673,13 @@ fn run() {
     let jet::AST::Item::Func(run) = &program.items[0] else {
         panic!("expected function");
     };
-    let jet::AST::Stmt::Switch { subject, arms, else_body, span } = &run.body[2] else {
+    let jet::AST::Stmt::Switch {
+        subject,
+        arms,
+        else_body,
+        span,
+    } = &run.body[2]
+    else {
         panic!("braced statement guards must reuse dispatch AST");
     };
     assert!(matches!(subject, jet::AST::Expr::Bool(true, s) if s == span));

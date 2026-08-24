@@ -14,40 +14,27 @@
 // Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
 // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
 pub use jet_driver::{
+    boot_tir_eval,
     // Top-level re-exports from Compile module:
     bundle_uses_unsafe,
-    boot_tir_eval,
-    program_allocator,
     development_receipt,
-    AdaBind,
-    CBind,
-    CppBind,
-    CobolBind,
-    ComBind,
-    DartBind,
-    DotNetBind,
-    PowerShellBind,
-    FortranBind,
-    GoBind,
-    JavaBind,
-    JavaScriptBind,
-    LuaBind,
-    PascalBind,
-    PerlBind,
-    RubyBind,
-    PhpBind,
-    PythonBind,
-    RBind,
-    OctaveBind,
-    TclBind,
-    CanonicalAST,
+    program_allocator,
     Abilities,
+    AdaBind,
+    Authority,
+    CBind,
+    CanonicalAST,
+    CobolBind,
     Codegen,
     Collections,
+    ComBind,
     Compile,
     CompileOutput,
     Comptime,
+    CppBind,
+    DartBind,
     Diagnostics,
+    DotNetBind,
     Driver,
     // Card #367 / D-PRODUCT-SPLIT1=C slice 3: the read-only package/config
     // model and its pure policy computation (effect budget, lint policy) —
@@ -59,27 +46,40 @@ pub use jet_driver::{
     EffectBudget,
     Foreign,
     Formatter,
+    FortranBind,
     Generics,
-    Lexer,
-    LintPolicy,
-    Loader,
-    LibraryExport,
+    GoBind,
+    JavaBind,
+    JavaScriptBind,
     JetLibArtifact,
     JetLibStamp,
+    Lexer,
+    LibraryExport,
+    LintPolicy,
+    Loader,
     Lock,
+    LuaBind,
     Manifest,
+    OctaveBind,
     Package,
     Parser,
-    Policy,
+    PascalBind,
+    PerlBind,
     PhaseTiming,
+    PhpBind,
+    Policy,
+    PowerShellBind,
+    PythonBind,
+    RBind,
+    RubyBind,
     ScriptDeps,
     Sema,
     Store as PkgStore,
     Syntax,
     TargetMachine,
+    TclBind,
     Traits,
     AST,
-    Authority,
     CFFI,
     FFI,
     SHA256,
@@ -91,8 +91,8 @@ pub use jet_debug as Debug;
 // D-ARCH-SOURCE1=A: CLI registry, argument vocabulary, diagnostic reference,
 // and hybrid help UI live in the inward jet-cli seam. Public paths remain
 // `jet::CLI`, `jet::Explain`, and `jet::Help` without root wrapper modules.
-pub use jet_cli::{CLI, Explain, Help};
 pub use jet_canvas as CanvasUi;
+pub use jet_cli::{Explain, Help, CLI};
 pub use jet_devserver as DevServer;
 pub use jet_foundation::ExitCodes;
 // D-FAIL-CARRIER1=A: the one outcome carrier. It is embedded as the first
@@ -105,16 +105,16 @@ pub use jet_foundation::Outcome;
 pub use jet_repl as REPL;
 pub use jet_repl::{SemanticSymbols, Term};
 pub mod BuildCache;
+pub mod ReceiptStore;
 pub mod RunCache;
 pub mod RuntimeCache;
-pub mod ReceiptStore;
 pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
 pub mod BudgetProviders;
-mod NativeLinker;
 pub mod BudgetStore;
+mod NativeLinker;
+pub use jet_devserver::Canvas;
 pub use jet_driver::BudgetView;
 pub use jet_driver::ProjectParts;
-pub use jet_devserver::Canvas;
 pub mod Compiler;
 pub mod Doctest;
 pub mod Doctor;
@@ -126,20 +126,15 @@ pub mod LSP;
 pub mod Publish;
 pub mod Store;
 
-use Diagnostics::Diagnostic;
 use std::collections::BTreeMap;
+use Diagnostics::Diagnostic;
 
 fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     // D-FRONTENDAPI1=A: install the one read-only Core compiler callback for
     // every compiler entry point. Build uses the same ambient seam, so a
     // `comptime` binding and `fn build` cannot observe different APIs.
     jet_driver::run_compiler_work(|| {
-        Comptime::with_ambient(
-            Some(Compiler::eval_core_call_with_type),
-            None,
-            None,
-            work,
-        )
+        Comptime::with_ambient(Some(Compiler::eval_core_call_with_type), None, None, work)
     })
 }
 
@@ -301,16 +296,33 @@ fn compile_bundle_path(
     mode: Sema::CompileMode,
     cross_target: Option<&str>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, mode, false, Policy::GateSet::default(), false, cross_target)
+    compile_bundle_path_opts(
+        file,
+        mode,
+        false,
+        Policy::GateSet::default(),
+        false,
+        cross_target,
+    )
 }
 
 /// Like `compile_with_path` but with `--freestanding` mode (E2-M15).
 /// Rejects OS-dependent std APIs (E3301) and emits `panic = "abort"` hint.
 pub fn compile_freestanding(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts(file, Sema::CompileMode::Run, true, Policy::GateSet::default(), false, None)
+    compile_bundle_path_opts(
+        file,
+        Sema::CompileMode::Run,
+        true,
+        Policy::GateSet::default(),
+        false,
+        None,
+    )
 }
 
-pub fn compile_freestanding_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+pub fn compile_freestanding_with_gates(
+    file: &str,
+    gates: Policy::GateSet,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, true, gates, false, None)
 }
 
@@ -331,7 +343,10 @@ pub fn compile_freestanding_with_gates_and_settings(
 }
 
 /// Compile with the selected audited-gate invocation permissions.
-pub fn compile_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+pub fn compile_with_gates(
+    file: &str,
+    gates: Policy::GateSet,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_bundle_path_opts(file, Sema::CompileMode::Run, false, gates, false, None)
 }
 
@@ -814,7 +829,8 @@ fn compile_programmable_build_opts_inner(
                 vec![Diagnostic::error(
                     "E3502",
                     format!("remote builder binding could not be loaded: {error}"),
-                    "remote endpoints and credentials come only from host-owned bindings".to_string(),
+                    "remote endpoints and credentials come only from host-owned bindings"
+                        .to_string(),
                     "run `jet remote list`, or bind the builder with `jet remote bind`".to_string(),
                     None,
                 )]
@@ -919,11 +935,14 @@ fn compile_workspace_build_opts(
         .revalidate_source(&workspace_source)
         .map_err(|error| vec![error.diagnostic()])?;
     let workspace_path = workspace_source.path.clone();
-    let plan = jetpack::WorkspaceFile::evaluate_checked_source(
-        &workspace_source,
-        &workspace_resolver,
-    )
-    .map_err(|diagnostic| vec![workspace_build_root_diagnostic(&workspace_path, &diagnostic)])?;
+    let plan =
+        jetpack::WorkspaceFile::evaluate_checked_source(&workspace_source, &workspace_resolver)
+            .map_err(|diagnostic| {
+                vec![workspace_build_root_diagnostic(
+                    &workspace_path,
+                    &diagnostic,
+                )]
+            })?;
     let members = jetpack::MemberSelect::dependency_order_packages_checked(
         &workspace_resolver,
         &plan.members,
@@ -931,11 +950,8 @@ fn compile_workspace_build_opts(
     .map_err(|error| vec![error.diagnostic()])?;
 
     for (member, checked_package) in members {
-        let entry = match workspace_member_entry(
-            &workspace_resolver,
-            &member.path,
-            checked_package,
-        ) {
+        let entry = match workspace_member_entry(&workspace_resolver, &member.path, checked_package)
+        {
             Ok(entry) => entry,
             Err(diagnostic) => return Err(vec![diagnostic]),
         };
@@ -943,7 +959,8 @@ fn compile_workspace_build_opts(
             return Err(vec![Diagnostic::error(
                 "E3501",
                 format!("workspace member `{}` has no build entry", member.name),
-                "workspace members run their own unit-local build entry before the workspace entry".to_string(),
+                "workspace members run their own unit-local build entry before the workspace entry"
+                    .to_string(),
                 "add `run.jet` or `src/run.jet`, or name the member source explicitly".to_string(),
                 None,
             )]);
@@ -956,10 +973,7 @@ fn compile_workspace_build_opts(
         let raw_entry_source = source_file
             .text()
             .map_err(|error| vec![error.diagnostic()])?;
-        let entry_source = if source_file
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
+        let entry_source = if source_file.path.file_name().and_then(|name| name.to_str())
             == Some(Syntax::PACKAGE_FILE)
         {
             Package::build_entry_source(&raw_entry_source).unwrap_or(raw_entry_source)
@@ -1015,9 +1029,7 @@ fn compile_workspace_build_opts(
     // Refresh the workspace authority after that intentional child mutation,
     // while requiring the selected workspace source bytes and path to remain
     // exactly the snapshot used to order members.
-    let workspace_root = workspace_path
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let workspace_root = workspace_path.parent().unwrap_or(std::path::Path::new("."));
     let original_workspace_source = workspace_source.source.clone();
     let workspace_resolver = jet_driver::Authority::AuthorityResolver::open(workspace_root)
         .map_err(|error| vec![error.diagnostic()])?;
@@ -1028,7 +1040,8 @@ fn compile_workspace_build_opts(
             vec![Diagnostic::error(
                 "E1334",
                 "workspace source disappeared during member builds".to_string(),
-                "workspace orchestration requires the same declared source through the root build".to_string(),
+                "workspace orchestration requires the same declared source through the root build"
+                    .to_string(),
                 "restore workspace.jet and retry the build".to_string(),
                 None,
             )]
@@ -1039,7 +1052,8 @@ fn compile_workspace_build_opts(
         return Err(vec![Diagnostic::error(
             "E1334",
             "workspace source changed during member builds".to_string(),
-            "member builds cannot replace the workspace declaration selected for orchestration".to_string(),
+            "member builds cannot replace the workspace declaration selected for orchestration"
+                .to_string(),
             "restore workspace.jet and retry the build".to_string(),
             None,
         )]);
@@ -1047,9 +1061,7 @@ fn compile_workspace_build_opts(
     workspace_resolver
         .revalidate_source(&workspace_source)
         .map_err(|error| vec![error.diagnostic()])?;
-    let workspace_entry_source = if workspace_path
-        .file_name()
-        .and_then(|name| name.to_str())
+    let workspace_entry_source = if workspace_path.file_name().and_then(|name| name.to_str())
         == Some(Syntax::PACKAGE_FILE)
     {
         Package::build_entry_source(&workspace_source.source)
@@ -1121,7 +1133,10 @@ fn export_generated_sources(
         let source = read_real_generated_file(&project_root, &generated.path).map_err(|error| {
             vec![Diagnostic::error(
                 "E3510",
-                format!("could not read generated module `{}`: {error}", generated.name),
+                format!(
+                    "could not read generated module `{}`: {error}",
+                    generated.name
+                ),
                 "the visible export must copy the exact source that was compiled".to_string(),
                 "remove the damaged generated file and rerun the build".to_string(),
                 None,
@@ -1130,15 +1145,17 @@ fn export_generated_sources(
         exports.push((generated.name.as_str(), destination, source));
     }
     let paths = exports.iter().map(|(_, path, _)| path.clone());
-    let mut transaction = GeneratedExportTransaction::new(&project_root, paths).map_err(|error| {
-        vec![Diagnostic::error(
-            "E3510",
-            format!("could not prepare generated export: {error}"),
-            "the visible export must be all-or-nothing and must not alter the compiled source".to_string(),
-            "fix the build/generated directory permissions and try again".to_string(),
-            None,
-        )]
-    })?;
+    let mut transaction =
+        GeneratedExportTransaction::new(&project_root, paths).map_err(|error| {
+            vec![Diagnostic::error(
+                "E3510",
+                format!("could not prepare generated export: {error}"),
+                "the visible export must be all-or-nothing and must not alter the compiled source"
+                    .to_string(),
+                "fix the build/generated directory permissions and try again".to_string(),
+                None,
+            )]
+        })?;
     for (name, destination, source) in exports {
         write_exported_generated_file(&project_root, &destination, &source).map_err(|error| {
             vec![Diagnostic::error(
@@ -1194,7 +1211,10 @@ impl GeneratedExportTransaction {
             if path_has_symlinked_component(project_root, &path) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
-                    format!("generated export path `{}` contains a symlink", path.display()),
+                    format!(
+                        "generated export path `{}` contains a symlink",
+                        path.display()
+                    ),
                 ));
             }
             let before = match std::fs::symlink_metadata(&path) {
@@ -1269,9 +1289,12 @@ fn workspace_build_authority(
         Err(error) if error.is_missing() => return Ok(None),
         Err(error) => return Err(vec![error.diagnostic()]),
     };
-    let Some(source) = resolver
-        .resolve_workspace_source()
-        .map_err(|error| vec![workspace_build_root_diagnostic(&path, &error.workspace_diagnostic())])?
+    let Some(source) = resolver.resolve_workspace_source().map_err(|error| {
+        vec![workspace_build_root_diagnostic(
+            &path,
+            &error.workspace_diagnostic(),
+        )]
+    })?
     else {
         return Ok(None);
     };
@@ -1327,10 +1350,9 @@ impl CheckedBuildEntry {
         workspace_resolver: &jet_driver::Authority::AuthorityResolver,
     ) -> Result<(), jet_driver::Authority::AuthorityError> {
         workspace_resolver.revalidate_member(&self.package.member)?;
-        let member_resolver =
-            jet_driver::Authority::AuthorityResolver::from_checked_directory(
-                &self.package.member.directory,
-            );
+        let member_resolver = jet_driver::Authority::AuthorityResolver::from_checked_directory(
+            &self.package.member.directory,
+        );
         match &self.file {
             Some(file) => member_resolver.revalidate_file(file),
             None => workspace_resolver.revalidate_file(&self.package.member.manifest.file),
@@ -1353,14 +1375,16 @@ fn workspace_member_entry(
         .facts
         .resolve_run_entry_checked(&member_resolver)
         .map_err(|error| {
-        Diagnostic::error(
-            "E3501",
-            format!("workspace member `{member}` has an invalid typed output"),
-            error,
-            "repair the member's typed Package output before building the workspace".to_string(),
-            None,
-        )
-    })? {
+            Diagnostic::error(
+                "E3501",
+                format!("workspace member `{member}` has an invalid typed output"),
+                error,
+                "repair the member's typed Package output before building the workspace"
+                    .to_string(),
+                None,
+            )
+        })?
+    {
         return Ok(Some(CheckedBuildEntry {
             package: checked_package,
             file: Some(entry),
@@ -1428,8 +1452,7 @@ fn read_real_generated_file(
     path: &std::path::Path,
 ) -> std::io::Result<Vec<u8>> {
     if path_has_symlinked_component(project_root, path)
-        || std::fs::symlink_metadata(path)
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        || std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -1445,8 +1468,7 @@ fn write_exported_generated_file(
     bytes: &[u8],
 ) -> std::io::Result<()> {
     if path_has_symlinked_component(project_root, path)
-        || std::fs::symlink_metadata(path)
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        || std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -1523,7 +1545,10 @@ fn ensure_real_directory(path: &std::path::Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
-                    format!("generated export directory `{}` is not real", current.display()),
+                    format!(
+                        "generated export directory `{}` is not real",
+                        current.display()
+                    ),
                 ));
             }
             Ok(_) => {}
@@ -1549,11 +1574,10 @@ fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>>
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
-    let workspace_root = Loader::find_workspace_root_checked(&directory).map_err(|diagnostic| {
-        vec![workspace_build_root_diagnostic(&directory, &diagnostic)]
-    })?;
-    let package_root = Loader::find_manifest_root_checked(&directory)
-        .map_err(|diagnostic| vec![diagnostic])?;
+    let workspace_root = Loader::find_workspace_root_checked(&directory)
+        .map_err(|diagnostic| vec![workspace_build_root_diagnostic(&directory, &diagnostic)])?;
+    let package_root =
+        Loader::find_manifest_root_checked(&directory).map_err(|diagnostic| vec![diagnostic])?;
     Ok(match (workspace_root, package_root) {
         (Some(workspace), Some(package)) if Loader::is_physically_within(&workspace, &package) => {
             package
@@ -1565,12 +1589,13 @@ fn build_project_root(file: &str) -> Result<std::path::PathBuf, Vec<Diagnostic>>
 }
 
 fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
-    let mut allowed = cli.iter().cloned().collect::<std::collections::BTreeSet<_>>();
+    let mut allowed = cli
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
     let mut workspace_denies = std::collections::BTreeSet::new();
-    let mut workspace_grants = std::collections::BTreeMap::<
-        String,
-        std::collections::BTreeSet<String>,
-    >::new();
+    let mut workspace_grants =
+        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
     let mut package_name = None;
     // Build policy is rooted at the entry's real location.  A relative entry
     // such as `src/run.jet` must still discover the package/workspace files
@@ -1584,25 +1609,30 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join(entry)
     };
-    let entry_dir = absolute
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
-    let workspace_root = Loader::find_workspace_root_checked(entry_dir).map_err(|diagnostic| {
-        vec![workspace_build_root_diagnostic(entry_dir, &diagnostic)]
-    })?;
+    let entry_dir = absolute.parent().unwrap_or(std::path::Path::new("."));
+    let workspace_root = Loader::find_workspace_root_checked(entry_dir)
+        .map_err(|diagnostic| vec![workspace_build_root_diagnostic(entry_dir, &diagnostic)])?;
     let workspace_checked = workspace_root
         .as_deref()
         .map(|root| {
-            let resolver = jet_driver::Authority::AuthorityResolver::open(root)
-                .map_err(|error| vec![workspace_build_root_diagnostic(root, &error.diagnostic())])?;
+            let resolver =
+                jet_driver::Authority::AuthorityResolver::open(root).map_err(|error| {
+                    vec![workspace_build_root_diagnostic(root, &error.diagnostic())]
+                })?;
             let source = resolver
                 .resolve_workspace_source()
-                .map_err(|error| vec![workspace_build_root_diagnostic(root, &error.workspace_diagnostic())])?
+                .map_err(|error| {
+                    vec![workspace_build_root_diagnostic(
+                        root,
+                        &error.workspace_diagnostic(),
+                    )]
+                })?
                 .ok_or_else(|| {
                     vec![Diagnostic::error(
                         "E3503",
                         format!("build policy in `{}` is malformed", root.display()),
-                        "the workspace root disappeared before build policy was selected".to_string(),
+                        "the workspace root disappeared before build policy was selected"
+                            .to_string(),
                         "restore the workspace declaration before running build code".to_string(),
                         None,
                     )]
@@ -1684,8 +1714,9 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     }
     let package_name = match package_name {
         Some(name) => name,
-        None if workspace_root.is_some() => Loader::authority_name_for_entry(&absolute)
-            .map_err(|diagnostic| vec![diagnostic])?,
+        None if workspace_root.is_some() => {
+            Loader::authority_name_for_entry(&absolute).map_err(|diagnostic| vec![diagnostic])?
+        }
         None => absolute
             .file_stem()
             .and_then(|name| name.to_str())
@@ -1696,7 +1727,9 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     if let Some(grants) = workspace_grants.get(&package_name) {
         allowed.extend(grants.iter().cloned());
     }
-    for denied in workspace_denies { allowed.remove(&denied); }
+    for denied in workspace_denies {
+        allowed.remove(&denied);
+    }
     Ok(allowed.into_iter().collect())
 }
 
@@ -1716,23 +1749,27 @@ fn load_workspace_build_policy(
 fn package_policy_diagnostic(error: jet_driver::Authority::AuthorityError) -> Vec<Diagnostic> {
     match error {
         jet_driver::Authority::AuthorityError::Invalid { path, detail }
-            if detail.contains("build") || detail.contains("effect") => {
-                vec![Diagnostic::error(
-                    "E1221",
-                    format!("invalid build policy in `{}`", path.display()),
-                    detail,
-                    "use `build: { allow: #(FS, Exec) }` with a valid effect tuple".to_string(),
-                    None,
-                )]
-            }
+            if detail.contains("build") || detail.contains("effect") =>
+        {
+            vec![Diagnostic::error(
+                "E1221",
+                format!("invalid build policy in `{}`", path.display()),
+                detail,
+                "use `build: { allow: #(FS, Exec) }` with a valid effect tuple".to_string(),
+                None,
+            )]
+        }
         other => vec![other.diagnostic()],
     }
 }
 
 fn production_build_policy() -> Comptime::Build::BuildPolicy {
-    let ci = std::env::var("CI")
-        .ok()
-        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"));
+    let ci = std::env::var("CI").ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes"
+        )
+    });
     if ci {
         Comptime::Build::BuildPolicy::ci_default()
     } else {
@@ -1787,7 +1824,10 @@ pub fn compile_web(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_web_with_gates(file, Policy::GateSet::default())
 }
 
-pub fn compile_web_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+pub fn compile_web_with_gates(
+    file: &str,
+    gates: Policy::GateSet,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_web_with_gates_and_settings(file, gates, &BTreeMap::new())
 }
 
@@ -1826,9 +1866,17 @@ pub fn compile_web_with_gates_and_settings(
     })
 }
 
-pub fn compile_plugin_with_gates(file: &str, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+pub fn compile_plugin_with_gates(
+    file: &str,
+    gates: Policy::GateSet,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_plugin_with_gates(file, Sema::CompileMode::Check, gates, Some(Syntax::TARGET_SANDBOX))
+        Driver::compile_bundle_path_opts_plugin_with_gates(
+            file,
+            Sema::CompileMode::Check,
+            gates,
+            Some(Syntax::TARGET_SANDBOX),
+        )
     })
 }
 
@@ -1866,18 +1914,24 @@ pub fn compile_plugin(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 /// Compile a package's selected `Library` output. Library-shaped sources do
 /// not need an executable `fn run`; the native build adapter consumes the
 /// checked projections on `CompileOutput`.
-pub fn compile_library(
-    file: &str,
-    output: Option<&str>,
-) -> Result<CompileOutput, Vec<Diagnostic>> {
+pub fn compile_library(file: &str, output: Option<&str>) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         Driver::compile_bundle_path_opts_library(file, Sema::CompileMode::Check, output)
     })
 }
 
-pub fn compile_library_with_gates(file: &str, output: Option<&str>, gates: Policy::GateSet) -> Result<CompileOutput, Vec<Diagnostic>> {
+pub fn compile_library_with_gates(
+    file: &str,
+    output: Option<&str>,
+    gates: Policy::GateSet,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_opts_library_with_gates(file, Sema::CompileMode::Check, gates, output)
+        Driver::compile_bundle_path_opts_library_with_gates(
+            file,
+            Sema::CompileMode::Check,
+            gates,
+            output,
+        )
     })
 }
 
@@ -2075,17 +2129,19 @@ pub fn compile_fuzz_with_path(
     with_compiler_stack(|| Driver::compile_fuzz(file, test_name))
 }
 
-
 /// Does the entry file define one command-named function? The loader owns
 /// source discovery, so imported functions never accidentally become command
 /// overrides.
 pub fn has_entry_fn(file: &str, name: &str) -> bool {
-    with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle.modules[bundle.entry].items.iter().any(|item| {
-            matches!(item, AST::Item::Func(function) if function.name == name)
-        }),
-        Err(_) => false,
-    })
+    with_compiler_stack(
+        || match Loader::load_entry_with_overlay(file, None, false) {
+            Ok(bundle) => bundle.modules[bundle.entry]
+                .items
+                .iter()
+                .any(|item| matches!(item, AST::Item::Func(function) if function.name == name)),
+            Err(_) => false,
+        },
+    )
 }
 
 /// Does the entry file declare any `#Test` block? `jet test` runs the test
@@ -2093,14 +2149,16 @@ pub fn has_entry_fn(file: &str, name: &str) -> bool {
 /// a file with only doctests is still testable. A load failure returns `true` so
 /// the caller surfaces the real compile error on the normal harness path.
 pub fn has_test_blocks(file: &str) -> bool {
-    with_compiler_stack(|| match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(bundle) => bundle
-            .modules
-            .iter()
-            .flat_map(|module| module.items.iter())
-            .any(|i| matches!(i, AST::Item::Test(_))),
-        Err(_) => true,
-    })
+    with_compiler_stack(
+        || match Loader::load_entry_with_overlay(file, None, false) {
+            Ok(bundle) => bundle
+                .modules
+                .iter()
+                .flat_map(|module| module.items.iter())
+                .any(|i| matches!(i, AST::Item::Test(_))),
+            Err(_) => true,
+        },
+    )
 }
 
 /// D-COV1: every user function the `jet test --coverage` probes can record, as
@@ -2212,11 +2270,17 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 /// or `to_json()` (machine/`--json`).
 ///
 /// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
-pub fn eval_pure_program_value(src: &str, file: &str) -> Result<(CtValue, String), Vec<Diagnostic>> {
+pub fn eval_pure_program_value(
+    src: &str,
+    file: &str,
+) -> Result<(CtValue, String), Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_value_inner(src, file))
 }
 
-fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<(CtValue, String), Vec<Diagnostic>> {
+fn eval_pure_program_value_inner(
+    src: &str,
+    file: &str,
+) -> Result<(CtValue, String), Vec<Diagnostic>> {
     use std::collections::HashMap;
 
     let (toks, lex_diags) = Lexer::lex(src);

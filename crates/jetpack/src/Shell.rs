@@ -299,15 +299,21 @@ fn nix_projection_command(
     let empty_store = unique_tmp("jetpack-nix-store");
     std::fs::create_dir(&empty_store)?;
     let mut scratch = vec![Scratch::Dir(empty_store.clone())];
+    let mut fstab = String::from("jetpack-nix-store /nix tmpfs mode=0755 0 0\n");
+    fstab.push_str(&format!(
+        "{} /nix/store none bind,ro,x-mount.mkdir 0 0\n",
+        fstab_field(&empty_store.to_string_lossy())
+    ));
     for (logical, source) in &projections {
         validate_projection_path(logical)?;
+        let source = std::fs::canonicalize(source)?;
         if source.starts_with("/nix/store") {
             return Err(NixProjectionError::invalid(format!(
                 "Nix projection source `{}` is the host store",
                 source.display()
             )));
         }
-        let metadata = std::fs::metadata(source)?;
+        let metadata = std::fs::metadata(&source)?;
         if !metadata.is_dir() && !metadata.is_file() {
             return Err(NixProjectionError::invalid(format!(
                 "canonical Nix projection source `{}` is not a regular node",
@@ -323,20 +329,15 @@ fn nix_projection_command(
         } else {
             std::fs::File::create(mountpoint)?;
         }
-    }
-    let fstab_path = unique_tmp("jetpack-nix-fstab");
-    let mut fstab = String::from("jetpack-nix-store /nix tmpfs mode=0755 0 0\n");
-    fstab.push_str(&format!(
-        "{} /nix/store none bind,ro,x-mount.mkdir 0 0\n",
-        fstab_field(&empty_store.to_string_lossy())
-    ));
-    for (logical, source) in &projections {
+
         fstab.push_str(&format!(
             "{} {} none bind,ro 0 0\n",
             fstab_field(&source.to_string_lossy()),
             fstab_field(logical)
         ));
     }
+
+    let fstab_path = unique_tmp("jetpack-nix-fstab");
     let mut fstab_file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)

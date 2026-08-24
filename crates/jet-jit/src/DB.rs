@@ -7,11 +7,11 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::Marshal::{clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use crate::Marshal::{clone_string, result_ok, result_err_msg};
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -20,7 +20,6 @@ trait JetShow {
 trait JetDebug {
     fn jet_debug(&self) -> String;
 }
-
 
 /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
 trait JetDisplay {
@@ -188,9 +187,7 @@ fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
     let table = clone_string(table);
     let expression = clone_string(expression);
     match wire::jet_db_policy_compile(&table, &expression) {
-        Ok((table, compiled)) => {
-            result_ok(alloc_policy_record(&table, compiled) as u64)
-        }
+        Ok((table, compiled)) => result_ok(alloc_policy_record(&table, compiled) as u64),
         Err(message) => result_err_msg(&message),
     }
 }
@@ -199,12 +196,7 @@ fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) -> i64 {
     let Some((table, compiled)) = policy_record_parts(policy) else {
         return 0;
     };
-    let scope = new_scope(
-        connection as u64,
-        table,
-        compiled,
-        clone_string(user),
-    );
+    let scope = new_scope(connection as u64, table, compiled, clone_string(user));
     scope
 }
 
@@ -295,13 +287,15 @@ fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
     };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user) {
-        Ok(application) => match application.into_parts() {
-            Ok(value) => value,
+    let (sql, values) =
+        match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user)
+        {
+            Ok(application) => match application.into_parts() {
+                Ok(value) => value,
+                Err(error) => return result_err_msg(&error.message),
+            },
             Err(error) => return result_err_msg(&error.message),
-        },
-        Err(error) => return result_err_msg(&error.message),
-    };
+        };
     let wire_s = wire::jet_db_encode_params(&values);
     let out = runtime::jet_db_execute(base, &sql, &wire_s);
     match wire::jet_db_decode_execute_result(&out) {
@@ -316,13 +310,15 @@ fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
     };
     let values = values_from_list(params);
     let sql = clone_string(sql);
-    let (sql, values) = match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user) {
-        Ok(application) => match application.into_parts() {
-            Ok(value) => value,
+    let (sql, values) =
+        match wire::jet_db_apply_compiled_policy_with_proof(&sql, &values, &table, compiled, &user)
+        {
+            Ok(application) => match application.into_parts() {
+                Ok(value) => value,
+                Err(error) => return result_err_msg(&error.message),
+            },
             Err(error) => return result_err_msg(&error.message),
-        },
-        Err(error) => return result_err_msg(&error.message),
-    };
+        };
     let wire_s = wire::jet_db_encode_params(&values);
     let out = runtime::jet_db_query(base, &sql, &wire_s);
     match wire::jet_db_decode_query_result(&out) {
@@ -337,9 +333,8 @@ fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
     match scoped_query(handle as u64, &sql, &values, false).map(wire::jet_db_first_row) {
         Ok(Ok(row)) => {
             let list = rows_to_list_of_maps(vec![row]);
-            let map = Concurrency::with_runtime_mut(|rt| {
-                rt.heap.list_get_int(list, 0).unwrap_or(0)
-            });
+            let map =
+                Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int(list, 0).unwrap_or(0));
             result_ok(map.wrapping_add(1) as u64)
         }
         Ok(Err(_)) => result_ok(0),
@@ -371,9 +366,13 @@ fn scoped_execute(
         });
     };
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(
+            sql, params, &table, compiled, &user,
+        )?
+        .into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?
+            .into_parts()?
     };
     let result = runtime::jet_db_execute(base, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_execute_result(&result)
@@ -391,9 +390,13 @@ fn scoped_query(
         });
     };
     let (sql, values) = if allow_schema {
-        wire::jet_db_apply_compiled_migration_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
+        wire::jet_db_apply_compiled_migration_policy_with_proof(
+            sql, params, &table, compiled, &user,
+        )?
+        .into_parts()?
     } else {
-        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?.into_parts()?
+        wire::jet_db_apply_compiled_policy_with_proof(sql, params, &table, compiled, &user)?
+            .into_parts()?
     };
     let result = runtime::jet_db_query(base, &sql, &wire::jet_db_encode_params(&values));
     wire::jet_db_decode_query_result(&result)

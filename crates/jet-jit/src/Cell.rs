@@ -3,9 +3,7 @@
 use crate::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_codegen::local_cell::{
-    JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard,
-};
+use jet_codegen::local_cell::{JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard};
 use jet_codegen::{AST::CtReport, AST::CtValue, AST::Type};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -46,11 +44,7 @@ impl CellSchema {
                 args.len()
             ));
         }
-        let subst: HashMap<_, _> = params
-            .iter()
-            .cloned()
-            .zip(args.iter().cloned())
-            .collect();
+        let subst: HashMap<_, _> = params.iter().cloned().zip(args.iter().cloned()).collect();
         Ok(Some(Self::Struct {
             name: name.to_string(),
             fields: field_names
@@ -59,7 +53,10 @@ impl CellSchema {
                 .map(|(field, ty)| {
                     let ty = jet_foundation::Generics::substitute_type(ty, &subst);
                     Ok((
-                        field.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX).unwrap_or(field).to_string(),
+                        field
+                            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                            .unwrap_or(field)
+                            .to_string(),
                         Self::from_type(&ty, meta)?,
                     ))
                 })
@@ -69,16 +66,15 @@ impl CellSchema {
 
     pub(crate) fn from_type(ty: &Type, meta: &JitMeta<'_>) -> Result<Self, String> {
         match ty {
-            Type::Named(name) if name == "Unit" => {
-                Ok(Self::Unit)
-            }
+            Type::Named(name) if name == "Unit" => Ok(Self::Unit),
             Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => Ok(Self::Int),
             Type::Float | Type::Float32 => Ok(Self::Float),
             Type::Bool => Ok(Self::Bool),
             Type::Char => Ok(Self::Char),
             Type::String => Ok(Self::String),
-            Type::Apply { name, .. }
-                if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Ok(Self::String),
+            Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => {
+                Ok(Self::String)
+            }
             Type::Option(inner) => Ok(Self::Option(
                 Box::new(Self::from_type(inner, meta)?),
                 inner.as_ref().clone(),
@@ -90,15 +86,11 @@ impl CellSchema {
                 name: "tuple".to_string(),
                 fields: fields
                     .iter()
-                    .map(|(name, ty)| {
-                        Ok((name.clone(), Self::from_type(ty.as_ref(), meta)?))
-                    })
+                    .map(|(name, ty)| Ok((name.clone(), Self::from_type(ty.as_ref(), meta)?)))
                     .collect::<Result<_, String>>()?,
             }),
             Type::Tagged { inner, .. } => Self::from_type(inner, meta),
-            Type::Named(name) => {
-                Ok(Self::struct_schema(name, &[], meta)?.unwrap_or(Self::Handle))
-            }
+            Type::Named(name) => Ok(Self::struct_schema(name, &[], meta)?.unwrap_or(Self::Handle)),
             Type::Apply { name, args } => {
                 Ok(Self::struct_schema(name, args, meta)?.unwrap_or(Self::Handle))
             }
@@ -113,9 +105,7 @@ impl CellSchema {
             Type::Quantity { base, .. } => Self::from_type(base, meta),
             // A compile-time measure only ever appears as a `Vec`/`Matrix`
             // shape arg, never as its own cell/local type.
-            Type::Measure(_) => {
-                Err("a type measure is not a JIT cell type".to_string())
-            }
+            Type::Measure(_) => Err("a type measure is not a JIT cell type".to_string()),
         }
     }
 }
@@ -143,7 +133,10 @@ impl CellGuardLayout {
                     .iter()
                     .map(|(_, ty)| Self::from_type(ty, _meta))
                     .collect::<Result<Vec<_>, _>>()?;
-                fields.iter().any(Option::is_some).then_some(Self::Record(fields))
+                fields
+                    .iter()
+                    .any(Option::is_some)
+                    .then_some(Self::Record(fields))
             }
             _ => None,
         })
@@ -199,9 +192,7 @@ impl CellState {
     /// Tier-cache restore starts from a fresh `CellState`, so those programs must
     /// not publish a disk artifact (handles would dangle).
     pub(crate) fn has_compile_handles(&self) -> bool {
-        !self.schemas.is_empty()
-            || !self.projections.is_empty()
-            || !self.guard_layouts.is_empty()
+        !self.schemas.is_empty() || !self.projections.is_empty() || !self.guard_layouts.is_empty()
     }
 
     fn owner(&self) -> u64 {
@@ -224,11 +215,7 @@ impl CellState {
         self.edit_guards.len() as i64
     }
 
-    fn leave_frame(
-        &mut self,
-        returned_read: &HashSet<i64>,
-        returned_edit: &HashSet<i64>,
-    ) {
+    fn leave_frame(&mut self, returned_read: &HashSet<i64>, returned_edit: &HashSet<i64>) {
         let Some(frame) = self.frames.pop() else {
             return;
         };
@@ -281,20 +268,19 @@ fn collect_returned_guards(
 }
 
 fn schema(rt: &crate::JitRuntime, handle: i64) -> Option<CellSchema> {
-    rt.cells.schemas.get((handle as usize).checked_sub(1)?).cloned()
+    rt.cells
+        .schemas
+        .get((handle as usize).checked_sub(1)?)
+        .cloned()
 }
 
-fn decode_value(
-    rt: &mut crate::JitRuntime,
-    raw: i64,
-    schema: &CellSchema,
-) -> Option<CtValue> {
+fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Option<CtValue> {
     Some(match schema {
         CellSchema::Unit => CtValue::Unit,
         CellSchema::Int | CellSchema::Handle => CtValue::Int(raw),
-        CellSchema::Float => CtValue::Float(jet_codegen::AST::CtFloat::f64(f64::from_bits(
-            raw as u64,
-        ))),
+        CellSchema::Float => {
+            CtValue::Float(jet_codegen::AST::CtFloat::f64(f64::from_bits(raw as u64)))
+        }
         CellSchema::Bool => CtValue::Bool(raw != 0),
         CellSchema::Char => CtValue::Char(char::from_u32(raw as u32)?),
         CellSchema::String => CtValue::Str(rt.heap.clone_string(raw)?),
@@ -310,9 +296,7 @@ fn decode_value(
             let mut values = Vec::with_capacity(len as usize);
             for index in 0..len {
                 let item = match inner.as_ref() {
-                    CellSchema::Float => {
-                        rt.heap.list_get_float(raw, index)?.to_bits() as i64
-                    }
+                    CellSchema::Float => rt.heap.list_get_float(raw, index)?.to_bits() as i64,
                     _ => rt.heap.list_get_int(raw, index)?,
                 };
                 values.push(decode_value(rt, item, inner)?);
@@ -323,16 +307,11 @@ fn decode_value(
             let mut values = Vec::with_capacity(fields.len());
             for (index, (field, field_schema)) in fields.iter().enumerate() {
                 let raw = match field_schema {
-                    CellSchema::Float => rt
-                        .heap
-                        .record_get_float(raw, index as i64)?
-                        .to_bits() as i64,
-                    CellSchema::Bool => {
-                        i64::from(rt.heap.record_get_bool(raw, index as i64)?)
+                    CellSchema::Float => {
+                        rt.heap.record_get_float(raw, index as i64)?.to_bits() as i64
                     }
-                    CellSchema::Char => {
-                        rt.heap.record_get_char(raw, index as i64)? as u32 as i64
-                    }
+                    CellSchema::Bool => i64::from(rt.heap.record_get_bool(raw, index as i64)?),
+                    CellSchema::Char => rt.heap.record_get_char(raw, index as i64)? as u32 as i64,
                     CellSchema::String => rt.heap.record_get_string(raw, index as i64)?,
                     _ => rt.heap.record_get_int(raw, index as i64)?,
                 };
@@ -346,11 +325,7 @@ fn decode_value(
     })
 }
 
-fn encode_value(
-    rt: &mut crate::JitRuntime,
-    value: &CtValue,
-    schema: &CellSchema,
-) -> Option<i64> {
+fn encode_value(rt: &mut crate::JitRuntime, value: &CtValue, schema: &CellSchema) -> Option<i64> {
     match (schema, value) {
         (CellSchema::Unit, CtValue::Unit) => Some(0),
         (CellSchema::Int | CellSchema::Handle, CtValue::Int(value)) => Some(*value),
@@ -368,8 +343,7 @@ fn encode_value(
                 let raw = encode_value(rt, value, inner)?;
                 match inner.as_ref() {
                     CellSchema::Float => {
-                        rt.heap
-                            .list_push_float(list, f64::from_bits(raw as u64))?;
+                        rt.heap.list_push_float(list, f64::from_bits(raw as u64))?;
                     }
                     _ => rt.heap.list_push_int(list, raw)?,
                 }
@@ -381,10 +355,7 @@ fn encode_value(
                 name: expected,
                 fields: schemas,
             },
-            CtValue::Struct {
-                type_name,
-                fields,
-            },
+            CtValue::Struct { type_name, fields },
         ) if expected == type_name || expected == "tuple" => {
             let record = rt.heap.alloc_record(schemas.len());
             for (index, (field, field_schema)) in schemas.iter().enumerate() {
@@ -394,8 +365,11 @@ fn encode_value(
                 let raw = encode_value(rt, value, field_schema)?;
                 match field_schema {
                     CellSchema::Float => {
-                        rt.heap
-                            .record_set_float(record, index as i64, f64::from_bits(raw as u64))?;
+                        rt.heap.record_set_float(
+                            record,
+                            index as i64,
+                            f64::from_bits(raw as u64),
+                        )?;
                     }
                     CellSchema::Bool => {
                         rt.heap.record_set_bool(record, index as i64, raw != 0)?;
@@ -426,7 +400,11 @@ fn with_cell_result(f: impl FnOnce(&mut crate::JitRuntime) -> i64) -> i64 {
             let message = error
                 .downcast_ref::<String>()
                 .cloned()
-                .or_else(|| error.downcast_ref::<&str>().map(|value| (*value).to_string()))
+                .or_else(|| {
+                    error
+                        .downcast_ref::<&str>()
+                        .map(|value| (*value).to_string())
+                })
                 .unwrap_or_else(|| "Cell runtime panic".to_string());
             rt.set_trap(&message);
             0
@@ -544,11 +522,7 @@ fn jet_jit_cell_guard_set(guard: i64, raw: i64, schema_handle: i64) {
     });
 }
 
-fn jet_jit_cell_get_or_set_store(
-    guard: i64,
-    raw: i64,
-    schema_handle: i64,
-) {
+fn jet_jit_cell_get_or_set_store(guard: i64, raw: i64, schema_handle: i64) {
     with_cell(|rt| {
         let schema = schema(rt, schema_handle).expect("Cell schema");
         let value = decode_value(rt, raw, &schema).expect("Cell optional value ABI");
@@ -570,11 +544,7 @@ fn jet_jit_cell_guard_drop(kind: i64, guard: i64) {
     });
 }
 
-fn jet_jit_cell_guard_project(
-    kind: i64,
-    guard: i64,
-    projection_handle: i64,
-) -> i64 {
+fn jet_jit_cell_guard_project(kind: i64, guard: i64, projection_handle: i64) -> i64 {
     with_cell_result(|rt| {
         let projection = rt.cells.projections[(projection_handle - 1) as usize].clone();
         let owner = rt.cells.owner();
@@ -595,8 +565,12 @@ fn jet_jit_cell_guard_project(
                     let first = rt.cells.insert_edit(first, owner);
                     let second = rt.cells.insert_edit(second, owner);
                     let record = rt.heap.alloc_record(2);
-                    rt.heap.record_set_int(record, 0, first).expect("Cell tuple");
-                    rt.heap.record_set_int(record, 1, second).expect("Cell tuple");
+                    rt.heap
+                        .record_set_int(record, 0, first)
+                        .expect("Cell tuple");
+                    rt.heap
+                        .record_set_int(record, 1, second)
+                        .expect("Cell tuple");
                     record
                 }
                 _ => jet_foundation::ice!(None, "Cell projection shape"),
@@ -621,8 +595,12 @@ fn jet_jit_cell_guard_project(
                     let first = rt.cells.insert_read(first, owner);
                     let second = rt.cells.insert_read(second, owner);
                     let record = rt.heap.alloc_record(2);
-                    rt.heap.record_set_int(record, 0, first).expect("Cell tuple");
-                    rt.heap.record_set_int(record, 1, second).expect("Cell tuple");
+                    rt.heap
+                        .record_set_int(record, 0, first)
+                        .expect("Cell tuple");
+                    rt.heap
+                        .record_set_int(record, 1, second)
+                        .expect("Cell tuple");
                     record
                 }
                 _ => jet_foundation::ice!(None, "Cell projection shape"),
@@ -645,7 +623,9 @@ fn jet_jit_cell_get_or_set_begin(cell: i64, schema_handle: i64) -> i64 {
             JetCellGetOrSet::Empty(guard) => {
                 let owner = rt.cells.owner();
                 let guard = rt.cells.insert_edit(guard, owner);
-                rt.heap.record_set_bool(record, 0, false).expect("Cell init");
+                rt.heap
+                    .record_set_bool(record, 0, false)
+                    .expect("Cell init");
                 rt.heap.record_set_int(record, 1, guard).expect("Cell init");
             }
         }
@@ -689,11 +669,6 @@ host_fns! {
     guard_project: "jet_jit_cell_guard_project" => jet_jit_cell_guard_project: ternary;
     get_or_set_begin: "jet_jit_cell_get_or_set_begin" => jet_jit_cell_get_or_set_begin: binary;
 }
-
-
-
-
-
 
 fn project_ref<'a>(value: &'a CtValue, path: &[String]) -> Option<&'a CtValue> {
     let Some((field, rest)) = path.split_first() else {

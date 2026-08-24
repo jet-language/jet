@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::AST::{Expr, Func, Item, Pattern, Stmt};
 use std::collections::{HashMap, HashSet};
@@ -1903,8 +1902,8 @@ fn covers_pure_fn() {
 fn covers_todo_hole() {
     // c109 Phase 23: a `#Todo` goal is covered (registered E3011 stop). The build_cx-only
     // helper leaves `expected_type` unset (sema fills it), but the gate admits a
-        // None-typed goal too (it lowers to the `(unknown)` fallback — never reached here
-        // since this is a structural gate test). Reproduce the sema fact: a goal with an
+    // None-typed goal too (it lowers to the `(unknown)` fallback — never reached here
+    // since this is a structural gate test). Reproduce the sema fact: a goal with an
     // expected type. We can't run sema in this helper, so just assert the simpler
     // surrounding fn is covered — the end-to-end `todo_hole` test proves the emit.
     // (A bare `#Todo` body with no sema annotation has `expected_type: None`, which the

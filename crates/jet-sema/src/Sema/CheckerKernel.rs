@@ -6,9 +6,9 @@
 //! writes, captures, barriers, and provider calls remain rejected until their
 //! proof facts exist.
 
-use crate::AST::{AccessConvention, Binding, Expr, Func, KernelMode, KernelProof, Stmt};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::SendCrossing;
+use crate::AST::{AccessConvention, Binding, Expr, Func, KernelMode, KernelProof, Stmt};
 
 const SAFE_COMPUTE_CALLS: &[&str] = &[
     "abs",
@@ -75,22 +75,21 @@ impl<'a> super::Checker<'a> {
                 span: marker.span,
             })
         } else if !f.type_params.is_empty()
-            || f.params.iter().any(|param| {
-                param.variadic || !matches!(param.convention, AccessConvention::Read)
-            })
+            || f.params
+                .iter()
+                .any(|param| param.variadic || !matches!(param.convention, AccessConvention::Read))
         {
             Some(KernelFailure {
                 obligation: "read-only, monomorphic parameters",
                 span: marker.span,
             })
-        } else if f
-            .params
-            .iter()
-            .any(|param| self.crossing_problem(&param.ty, SendCrossing::Kernel, true).is_some())
-            || f.return_type
-                .as_ref()
-                .is_some_and(|ty| self.crossing_problem(ty, SendCrossing::Kernel, true).is_some())
-        {
+        } else if f.params.iter().any(|param| {
+            self.crossing_problem(&param.ty, SendCrossing::Kernel, true)
+                .is_some()
+        }) || f.return_type.as_ref().is_some_and(|ty| {
+            self.crossing_problem(ty, SendCrossing::Kernel, true)
+                .is_some()
+        }) {
             Some(KernelFailure {
                 obligation: "sendable kernel boundary values",
                 span: marker.span,
@@ -132,13 +131,7 @@ impl<'a> super::Checker<'a> {
                     self.crossing_problem(&param.ty, SendCrossing::Kernel, true)
                         .map(|problem| (param.name.clone(), param.ty.clone(), problem))
                 }) {
-                    self.report_unsendable(
-                        &name,
-                        &ty,
-                        problem,
-                        SendCrossing::Kernel,
-                        marker.span,
-                    );
+                    self.report_unsendable(&name, &ty, problem, SendCrossing::Kernel, marker.span);
                     return;
                 }
                 if let Some(ty) = f.return_type.as_ref() {
@@ -154,7 +147,8 @@ impl<'a> super::Checker<'a> {
                     }
                 }
             }
-            self.diags.push(kernel_failure(failure.obligation, failure.span));
+            self.diags
+                .push(kernel_failure(failure.obligation, failure.span));
         } else {
             marker.proof = Some(KernelProof::parallel());
         }
@@ -235,7 +229,11 @@ impl<'a> super::Checker<'a> {
                 }
                 Ok(())
             }
-            Expr::MethodCall { method: _, method_span, .. } => Err(KernelFailure {
+            Expr::MethodCall {
+                method: _,
+                method_span,
+                ..
+            } => Err(KernelFailure {
                 obligation: "audited Core compute calls only",
                 span: *method_span,
             }),

@@ -13,9 +13,9 @@ pub(crate) fn walk_stmts_for_const_refs(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e)
-            | Stmt::Yield(e, _)
-            | Stmt::DeferClose { close: e, .. } => walk_expr_for_const_refs(e, const_names, taken),
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+                walk_expr_for_const_refs(e, const_names, taken)
+            }
             Stmt::Val(b) => walk_expr_for_const_refs(&b.init, const_names, taken),
             Stmt::Assign { value, .. } => walk_expr_for_const_refs(value, const_names, taken),
             Stmt::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
@@ -29,7 +29,12 @@ pub(crate) fn walk_stmts_for_const_refs(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step, exclusive: _ } => {
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive: _,
+                    } => {
                         walk_expr_for_const_refs(start, const_names, taken);
                         walk_expr_for_const_refs(end, const_names, taken);
                         if let Some(step) = step {
@@ -77,7 +82,11 @@ pub(crate) fn walk_stmts_for_const_refs(
                 walk_expr_for_const_refs(cond, const_names, taken);
                 walk_stmts_for_const_refs(inner, const_names, taken);
                 if let Some(step) = step {
-                    walk_stmts_for_const_refs(std::slice::from_ref(step.as_ref()), const_names, taken);
+                    walk_stmts_for_const_refs(
+                        std::slice::from_ref(step.as_ref()),
+                        const_names,
+                        taken,
+                    );
                 }
             }
             Stmt::Loop { body: inner, .. }
@@ -330,7 +339,9 @@ pub(crate) fn fallback_refs_name(fallback: &OrFallback, name: &str) -> bool {
         OrFallback::Value(e) => expr_refs_name(e, name),
         OrFallback::Block { body, value, .. } => {
             body.iter().any(|stmt| stmt_refs_name(stmt, name))
-                || value.as_ref().is_some_and(|value| expr_refs_name(value, name))
+                || value
+                    .as_ref()
+                    .is_some_and(|value| expr_refs_name(value, name))
         }
         OrFallback::Return(Some(e), _) => expr_refs_name(e, name),
         OrFallback::Return(None, _)
@@ -463,27 +474,34 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
 
 pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
     match stmt {
-        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => expr_refs_name(e, name),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+            expr_refs_name(e, name)
+        }
         Stmt::Val(b) => expr_refs_name(&b.init, name),
         Stmt::Assign { target, value, .. } => {
             lvalue_refs_name(target, name) || expr_refs_name(value, name)
         }
         Stmt::Return(Some(e), _) => expr_refs_name(e, name),
-        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
-            expr_refs_name(e, name)
-        }
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => expr_refs_name(e, name),
         Stmt::While { cond, body, .. } => {
             expr_refs_name(cond, name) || body.iter().any(|s| stmt_refs_name(s, name))
         }
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => {
+                ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     expr_refs_name(start, name)
                         || expr_refs_name(end, name)
                         || step.as_ref().is_some_and(|s| expr_refs_name(s, name))
                 }
-                ForKind::In { collection, step } => expr_refs_name(collection, name)
-                    || step.as_ref().is_some_and(|s| expr_refs_name(s, name)),
+                ForKind::In { collection, step } => {
+                    expr_refs_name(collection, name)
+                        || step.as_ref().is_some_and(|s| expr_refs_name(s, name))
+                }
             };
             coll || body.iter().any(|s| stmt_refs_name(s, name))
         }
@@ -626,7 +644,9 @@ pub(crate) fn lambda_collect_free_names(
     let mut bound = params.clone();
     match body {
         LambdaBody::Expr(e) => expr_collect_captures(e, &bound, read, mut_cap, called),
-        LambdaBody::Block(stmts) => block_collect_captures(stmts, &mut bound, read, mut_cap, called),
+        LambdaBody::Block(stmts) => {
+            block_collect_captures(stmts, &mut bound, read, mut_cap, called)
+        }
     }
 }
 
@@ -874,9 +894,9 @@ pub(crate) fn stmt_collect_captures(
     called: &mut HashSet<String>,
 ) {
     match stmt {
-        Stmt::Expr(e)
-        | Stmt::Yield(e, _)
-        | Stmt::DeferClose { close: e, .. } => expr_collect_captures(e, bound, read, mut_cap, called),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+            expr_collect_captures(e, bound, read, mut_cap, called)
+        }
         Stmt::Val(b) => {
             expr_collect_captures(&b.init, bound, read, mut_cap, called);
             bound.insert(b.name.clone());
@@ -938,7 +958,12 @@ pub(crate) fn stmt_collect_captures(
             ..
         } => {
             match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => {
+                ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     expr_collect_captures(start, bound, read, mut_cap, called);
                     expr_collect_captures(end, bound, read, mut_cap, called);
                     if let Some(step) = step {

@@ -103,8 +103,8 @@ impl JetLibStamp {
             .strip_prefix(MAGIC)
             .ok_or_else(|| "not a .jetlib artifact (bad magic)".to_string())?;
         let (version, cur) = take_bytes(cur)?;
-        let compiler_version = String::from_utf8(version)
-            .map_err(|_| "compiler version is not UTF-8".to_string())?;
+        let compiler_version =
+            String::from_utf8(version).map_err(|_| "compiler version is not UTF-8".to_string())?;
         if cur.len() < 4 {
             return Err("truncated .jetlib header (effect count)".to_string());
         }
@@ -251,7 +251,10 @@ mod tests {
             stamp: JetLibStamp::for_this_compiler(EffectSet::new()),
             payload: b"native-shared-object".to_vec(),
         };
-        assert_eq!(JetLibArtifact::decode(&artifact.encode()).unwrap(), artifact);
+        assert_eq!(
+            JetLibArtifact::decode(&artifact.encode()).unwrap(),
+            artifact
+        );
     }
 
     #[test]

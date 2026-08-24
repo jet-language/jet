@@ -329,8 +329,7 @@ struct ExamplePanicBudgetEntry {
     reason: String,
 }
 
-const EXAMPLES_PANIC_BUDGET: &str =
-    include_str!("fixtures/examples_panic_budget.txt");
+const EXAMPLES_PANIC_BUDGET: &str = include_str!("fixtures/examples_panic_budget.txt");
 
 fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
     let mut entries = Vec::new();
@@ -343,31 +342,20 @@ fn parse_examples_panic_budget() -> Vec<ExamplePanicBudgetEntry> {
         }
 
         let mut fields = line.splitn(3, '\t');
-        let path = fields
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
+        let path = fields.next().unwrap_or_default().trim().to_owned();
         let baseline = fields
             .next()
             .unwrap_or_default()
             .trim()
             .parse::<usize>()
             .unwrap_or_else(|_| panic!("invalid panic budget count on line {}", line_index + 1));
-        let reason = fields
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
+        let reason = fields.next().unwrap_or_default().trim().to_owned();
 
         assert!(
             path.starts_with("examples/features/"),
             "panic budget path must be a feature-corpus source: {path}"
         );
-        assert!(
-            baseline > 0,
-            "panic budget count must be positive: {path}"
-        );
+        assert!(baseline > 0, "panic budget count must be positive: {path}");
         assert!(
             !reason.is_empty(),
             "panic budget entry needs a teaching reason: {path}"
@@ -676,7 +664,10 @@ fn seeded_leak() {
 "#;
     let count = count_bare_panics(seeded);
     let allowlisted_ceiling_before_seed = 1;
-    assert_eq!(count, 2, "fixture must contain one vetted and one seeded panic");
+    assert_eq!(
+        count, 2,
+        "fixture must contain one vetted and one seeded panic"
+    );
     assert!(
         count > allowlisted_ceiling_before_seed,
         "ban logic failed to reject growth past an existing allowlist ceiling"

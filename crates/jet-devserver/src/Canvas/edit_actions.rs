@@ -271,10 +271,7 @@ fn source_trait_path(
     )
 }
 
-fn enclosing_inline_module(
-    items: &[Item],
-    position: usize,
-) -> Option<(Vec<String>, usize)> {
+fn enclosing_inline_module(items: &[Item], position: usize) -> Option<(Vec<String>, usize)> {
     for item in items {
         let Item::CodeModule(module) = item else {
             continue;
@@ -289,10 +286,7 @@ fn enclosing_inline_module(
             scope.insert(0, module.name.clone());
             return Some((scope, close));
         }
-        return Some((
-            vec![module.name.clone()],
-            module.span.end.saturating_sub(1),
-        ));
+        return Some((vec![module.name.clone()], module.span.end.saturating_sub(1)));
     }
     None
 }
@@ -338,11 +332,9 @@ fn find_trait_location<'a>(
                     if display_path.as_deref() != Some(requested_name) && !fallback_match {
                         continue;
                     }
-                    let (scope, module_close) = enclosing_inline_module(
-                        root_items,
-                        t.name_span.start,
-                    )
-                    .unwrap_or_else(|| (scope.clone(), source_len));
+                    let (scope, module_close) =
+                        enclosing_inline_module(root_items, t.name_span.start)
+                            .unwrap_or_else(|| (scope.clone(), source_len));
                     let scope = display_path
                         .as_deref()
                         .and_then(|path| path.rsplit_once('.'))
@@ -670,10 +662,7 @@ fn call_insert_target(
     } else {
         line_after(src, node.span.end)
     };
-    Ok((
-        insert,
-        statement_indent,
-    ))
+    Ok((insert, statement_indent))
 }
 
 struct InsertCallPlan {
@@ -1728,12 +1717,18 @@ pub(super) fn apply_exec_convergence(
 }
 
 fn convergence_params(path: &Path, target: SourceSpan) -> Result<Vec<(String, String)>, String> {
-    let index = jet_semindex::open(path)
-        .map_err(|error| edit_error("check", &format!("Canvas could not resolve convergence captures: {error}")))?;
+    let index = jet_semindex::open(path).map_err(|error| {
+        edit_error(
+            "check",
+            &format!("Canvas could not resolve convergence captures: {error}"),
+        )
+    })?;
     let mut references = index
         .references()
         .iter()
-        .filter(|reference| reference.span.start >= target.start && reference.span.end <= target.end)
+        .filter(|reference| {
+            reference.span.start >= target.start && reference.span.end <= target.end
+        })
         .collect::<Vec<_>>();
     references.sort_by_key(|reference| (reference.span.start, reference.span.end));
 
@@ -1833,9 +1828,7 @@ fn find_expression_selection_in_block(
         start: selected.first()?.start,
         end: selected.last()?.end,
     };
-    if selected.len() > 1
-        && (span.start < target.start || span.end > target.end)
-    {
+    if selected.len() > 1 && (span.start < target.start || span.end > target.end) {
         return None;
     }
     Some(ExpressionSelection {
@@ -1860,9 +1853,7 @@ fn source_expression_span(src: &str, expr: &Expr) -> SourceSpan {
     let fallback_end = expr.span().end;
     let end = match expr {
         Expr::Call(call) => call_source_end(src, call.name_span.end, fallback_end),
-        Expr::MethodCall { method_span, .. } => {
-            call_source_end(src, method_span.end, fallback_end)
-        }
+        Expr::MethodCall { method_span, .. } => call_source_end(src, method_span.end, fallback_end),
         Expr::Try(inner, span, ..) => {
             let inner_end = source_expression_span(src, inner).end;
             let mut end = inner_end.max(span.end);
@@ -1873,15 +1864,17 @@ fn source_expression_span(src: &str, expr: &Expr) -> SourceSpan {
         }
         _ => fallback_end,
     };
-    SourceSpan { start, end: end.max(start) }
+    SourceSpan {
+        start,
+        end: end.max(start),
+    }
 }
 
 fn call_source_end(src: &str, name_end: usize, fallback_end: usize) -> usize {
     let Some(open) = find_unquoted_char(src, name_end, '(') else {
         return fallback_end;
     };
-    matching_delimiter(src, open, '(', ')')
-        .map_or(fallback_end, |close| close.saturating_add(1))
+    matching_delimiter(src, open, '(', ')').map_or(fallback_end, |close| close.saturating_add(1))
 }
 
 fn span_contains(outer: SourceSpan, inner: SourceSpan) -> bool {
@@ -2145,9 +2138,7 @@ fn find_exec_insertion_in_children(
         | Stmt::Live { body, .. }
         | Stmt::AssumeDet { body, .. }
         | Stmt::Transact { body, .. }
-        | Stmt::ScopeMember { body, .. } => {
-            find_exec_insertion(src, body, node_span, pin_name)
-        }
+        | Stmt::ScopeMember { body, .. } => find_exec_insertion(src, body, node_span, pin_name),
         Stmt::Switch {
             arms, else_body, ..
         }
@@ -2233,7 +2224,8 @@ fn matching_exec_branch<'a>(
         return arms.first().map(|arm| arm.body.as_slice());
     }
     let index = pin_name.strip_prefix("arm")?.parse::<usize>().ok()?;
-    arms.get(index.checked_sub(1)?).map(|arm| arm.body.as_slice())
+    arms.get(index.checked_sub(1)?)
+        .map(|arm| arm.body.as_slice())
 }
 
 fn branch_exec_insertion(
@@ -2247,16 +2239,18 @@ fn branch_exec_insertion(
             "Canvas needs a non-empty source-backed branch body to converge",
         ));
     };
-    if execution_terminates(last) || matches!(
-        last,
-        Stmt::While { .. }
-            | Stmt::For { .. }
-            | Stmt::Loop { .. }
-            | Stmt::CountedLoop { .. }
-            | Stmt::Switch { .. }
-            | Stmt::ComptimeSwitch { .. }
-            | Stmt::ComptimeIf { .. }
-    ) {
+    if execution_terminates(last)
+        || matches!(
+            last,
+            Stmt::While { .. }
+                | Stmt::For { .. }
+                | Stmt::Loop { .. }
+                | Stmt::CountedLoop { .. }
+                | Stmt::Switch { .. }
+                | Stmt::ComptimeSwitch { .. }
+                | Stmt::ComptimeIf { .. }
+        )
+    {
         return Err(edit_error(
             "ambiguous",
             "Canvas cannot prove a convergence path after this branch body",
@@ -2269,8 +2263,8 @@ fn branch_exec_insertion(
             Stmt::Expr(expr) => source_expression_span(src, expr).end,
             _ => stmt_source_span(last).end,
         };
-        let Some(close) = find_unquoted_char(src, last_end, '}')
-            .filter(|offset| *offset < owner.end)
+        let Some(close) =
+            find_unquoted_char(src, last_end, '}').filter(|offset| *offset < owner.end)
         else {
             return Err(edit_error(
                 "ambiguous",
@@ -2280,10 +2274,7 @@ fn branch_exec_insertion(
         // The formatter may keep a one-statement branch on the declaration line.
         // Insert a new line before its closing brace, then let the formatter
         // restore the canonical block layout.
-        (
-            close,
-            format!("\n{}    ", indentation_at(src, owner.start)),
-        )
+        (close, format!("\n{}    ", indentation_at(src, owner.start)))
     } else {
         (full.end, indentation_at(src, full.start))
     };
@@ -2314,12 +2305,7 @@ fn exact_body_helper_name(
     target: &str,
     current: &str,
 ) -> Option<String> {
-    fn in_items(
-        items: &[Item],
-        src: &str,
-        target: &str,
-        current: &str,
-    ) -> Option<String> {
+    fn in_items(items: &[Item], src: &str, target: &str, current: &str) -> Option<String> {
         for item in items {
             match item {
                 Item::Func(func) if func.name != current => {
@@ -2335,8 +2321,7 @@ fn exact_body_helper_name(
                             return None;
                         }
                         expression_body_source(src, &method.body).and_then(|body| {
-                            formatted_expression_matches(&body, target)
-                                .then(|| method.name.clone())
+                            formatted_expression_matches(&body, target).then(|| method.name.clone())
                         })
                     }) {
                         return Some(found);
@@ -2348,8 +2333,7 @@ fn exact_body_helper_name(
                             return None;
                         }
                         expression_body_source(src, &method.body).and_then(|body| {
-                            formatted_expression_matches(&body, target)
-                                .then(|| method.name.clone())
+                            formatted_expression_matches(&body, target).then(|| method.name.clone())
                         })
                     }) {
                         return Some(found);
@@ -2367,9 +2351,10 @@ fn exact_body_helper_name(
         }
         None
     }
-    bundle.modules.iter().find_map(|module| {
-        in_items(&module.items, src, target, current)
-    })
+    bundle
+        .modules
+        .iter()
+        .find_map(|module| in_items(&module.items, src, target, current))
 }
 
 fn expression_body_source(src: &str, body: &[Stmt]) -> Option<String> {
@@ -2382,18 +2367,23 @@ fn expression_body_source(src: &str, body: &[Stmt]) -> Option<String> {
     }
     let start = spans.first()?.start;
     let end = spans.last()?.end;
-    Some(source_snippet(src, SourceSpan { start, end }).trim().to_string())
+    Some(
+        source_snippet(src, SourceSpan { start, end })
+            .trim()
+            .to_string(),
+    )
 }
 
 fn source_snippet(src: &str, span: SourceSpan) -> String {
-    src.get(span.start..span.end).unwrap_or_default().to_string()
+    src.get(span.start..span.end)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn formatted_expression_matches(left: &str, right: &str) -> bool {
     let wrap = |expr: &str| {
         let candidate = format!("fn canvas_match() {{\n    {}\n}}\n", expr.trim());
-        jet_driver::Formatter::format_source(&candidate)
-            .unwrap_or_else(|_| candidate.clone())
+        jet_driver::Formatter::format_source(&candidate).unwrap_or_else(|_| candidate.clone())
     };
     let left = wrap(left);
     let right = wrap(right);
@@ -2429,7 +2419,10 @@ fn function_name_exists(bundle: &AST::ProgramBundle, name: &str) -> bool {
         items.iter().any(|item| match item {
             Item::Func(func) => func.name == name,
             Item::Struct(structure) => structure.methods.iter().any(|method| method.name == name),
-            Item::Impl(implementation) => implementation.methods.iter().any(|method| method.name == name),
+            Item::Impl(implementation) => implementation
+                .methods
+                .iter()
+                .any(|method| method.name == name),
             Item::CodeModule(module) => module
                 .body
                 .as_deref()
@@ -2437,7 +2430,10 @@ fn function_name_exists(bundle: &AST::ProgramBundle, name: &str) -> bool {
             _ => false,
         })
     }
-    bundle.modules.iter().any(|module| in_items(&module.items, name))
+    bundle
+        .modules
+        .iter()
+        .any(|module| in_items(&module.items, name))
 }
 
 pub(super) fn apply_add_pattern_arm(

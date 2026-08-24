@@ -5,13 +5,13 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{
-    build_and_run, build_and_run_full, have_rustc, interpreter_run, run_default_multi,
-};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use tir_support::{
+    build_and_run, build_and_run_full, have_rustc, interpreter_run, run_default_multi,
+};
 
 static RESTART_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -20,8 +20,8 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
     if !have_rustc() {
         return;
     }
-    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/tooling/service_runtime.jet");
+    let source_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/features/tooling/service_runtime.jet");
     let source = fs::read_to_string(source_path).unwrap();
     let expected = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -30,7 +30,10 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
     .unwrap();
     let (aot_code, aot_stdout, aot_stderr) =
         build_and_run_full("services_observability", "service_runtime", &source);
-    assert_eq!(aot_code, 0, "AOT observability dogfood failed: {aot_stderr}");
+    assert_eq!(
+        aot_code, 0,
+        "AOT observability dogfood failed: {aot_stderr}"
+    );
     assert_eq!(
         aot_stdout, expected,
         "AOT observability dogfood diverged from its golden"
@@ -41,7 +44,10 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
         "main.jet",
         &[("main.jet", source.as_str())],
     );
-    assert_eq!(jit_code, 0, "default observability dogfood failed: {jit_stderr}");
+    assert_eq!(
+        jit_code, 0,
+        "default observability dogfood failed: {jit_stderr}"
+    );
     assert_eq!(
         jit_stdout, expected,
         "default observability dogfood diverged from AOT/golden\n{jit_stderr}"
@@ -165,8 +171,12 @@ fn service_authority_receipts_match_default_run() {
 
 #[test]
 fn service_authority_receipts_match_interpreter() {
-    let (code, stdout, stderr) = interpreter_run("services_authority_interpreter", AUTHORITY_SOURCE);
-    assert_eq!(code, 0, "interpreter service authority run failed: {stderr}");
+    let (code, stdout, stderr) =
+        interpreter_run("services_authority_interpreter", AUTHORITY_SOURCE);
+    assert_eq!(
+        code, 0,
+        "interpreter service authority run failed: {stderr}"
+    );
     assert_eq!(
         stdout,
         "first:enqueued\nrecovered:enqueued\ndelivered:order\ncommitted:ok\nrestarted:1\nduplicate:executed\nretain:retained\nretry:retained\nredelivered:order\ndead:dead\nstopped:rejected\nreplay:dead\n"
@@ -229,7 +239,11 @@ fn run() {
 
 fn compile_restart_binary(source: &str) -> (PathBuf, PathBuf) {
     let serial = RESTART_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("jet_service_restart_{}_{}", std::process::id(), serial));
+    let dir = std::env::temp_dir().join(format!(
+        "jet_service_restart_{}_{}",
+        std::process::id(),
+        serial
+    ));
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join("restart.jet");
     fs::write(&jet_path, source).unwrap();
@@ -244,13 +258,21 @@ fn compile_restart_binary(source: &str) -> (PathBuf, PathBuf) {
     let bin = dir.join("restart");
     fs::write(&rs, &out.rust).unwrap();
     let mut rustc = Command::new("rustc");
-    rustc.args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
+    rustc.args([
+        "--edition",
+        "2021",
+        rs.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
     if let Some(link) = &out.ffi {
         rustc
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+            rustc
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
         }
     }
     let result = rustc.output().unwrap();
@@ -317,7 +339,10 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     let default_store = dir.join("authority-default.log");
     let id = run_restart_default_process(&dir, &default_store, "send", None);
     let id = id.trim();
-    assert!(!id.is_empty(), "default send process did not return a receipt id");
+    assert!(
+        !id.is_empty(),
+        "default send process did not return a receipt id"
+    );
     assert_eq!(
         run_restart_process(&bin, &default_store, "recover", Some(id)),
         "restarted:1\nenqueued\norder\n"
@@ -326,7 +351,10 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     let aot_store = dir.join("authority-aot-to-default.log");
     let id = run_restart_process(&bin, &aot_store, "send", None);
     let id = id.trim();
-    assert!(!id.is_empty(), "AOT send process did not return a receipt id");
+    assert!(
+        !id.is_empty(),
+        "AOT send process did not return a receipt id"
+    );
     assert_eq!(
         run_restart_default_process(&dir, &aot_store, "recover", Some(id)),
         "restarted:1\nenqueued\norder\n"
@@ -343,11 +371,21 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
         .enumerate()
         .filter_map(|(index, byte)| (*byte == b'|').then_some(index))
         .collect();
-    assert!(pipes.len() >= 7, "receipt record did not contain its framed fields");
+    assert!(
+        pipes.len() >= 7,
+        "receipt record did not contain its framed fields"
+    );
     let message_end = pipes[6];
-    assert!(message_end > pipes[5] + 1, "receipt message field was empty");
+    assert!(
+        message_end > pipes[5] + 1,
+        "receipt message field was empty"
+    );
     let last_message_hex = message_end - 1;
-    corrupt[last_message_hex] = if corrupt[last_message_hex] == b'0' { b'1' } else { b'0' };
+    corrupt[last_message_hex] = if corrupt[last_message_hex] == b'0' {
+        b'1'
+    } else {
+        b'0'
+    };
     fs::write(&corrupt_store, corrupt).unwrap();
     assert!(
         !restart_status(&bin, &corrupt_store, "recover", corrupt_id.trim()).success(),
@@ -400,8 +438,14 @@ fn rollout_identity_and_receipt_survive_process_restart() {
     }
     let (dir, bin) = compile_restart_binary(ROLLOUT_RESTART_SOURCE);
     let store = dir.join("rollout.log");
-    assert_eq!(run_restart_process(&bin, &store, "write", None), "handoff:2\n");
-    assert_eq!(run_restart_process(&bin, &store, "recover", None), ROLLOUT_RESTART_OUTPUT);
+    assert_eq!(
+        run_restart_process(&bin, &store, "write", None),
+        "handoff:2\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &store, "recover", None),
+        ROLLOUT_RESTART_OUTPUT
+    );
 
     let default_store = dir.join("rollout-default.log");
     assert_eq!(
@@ -431,7 +475,10 @@ fn forged_rollout_generation_is_rejected_on_restart() {
     }
     let (dir, bin) = compile_restart_binary(ROLLOUT_RESTART_SOURCE);
     let store = dir.join("rollout-forged.log");
-    assert_eq!(run_restart_process(&bin, &store, "write", None), "handoff:2\n");
+    assert_eq!(
+        run_restart_process(&bin, &store, "write", None),
+        "handoff:2\n"
+    );
 
     let rollout = PathBuf::from(format!("{}.rollout", store.display()));
     let journal = fs::read_to_string(&rollout).unwrap();
@@ -703,7 +750,10 @@ fn workflow_history_survives_process_restart() {
     );
 
     let crossed = dir.join("workflow-aot-to-default.log");
-    assert_eq!(run_restart_process(&bin, &crossed, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &crossed, "write", None),
+        "run:1\n"
+    );
     assert_eq!(
         run_restart_default_process(&dir, &crossed, "read", None),
         WORKFLOW_RESTART_HISTORY
@@ -722,7 +772,10 @@ fn workflow_history_survives_process_restart() {
     // A truncated tail is the shape a crash mid-append leaves behind.  The
     // next process must say so, not silently drop the run it cannot read.
     let corrupt = dir.join("workflow-corrupt.log");
-    assert_eq!(run_restart_process(&bin, &corrupt, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &corrupt, "write", None),
+        "run:1\n"
+    );
     let log = corrupt.with_extension("log.workflows");
     let bytes = fs::read(&log).unwrap();
     fs::write(&log, &bytes[..bytes.len() - 4]).unwrap();
@@ -741,7 +794,10 @@ fn workflow_history_survives_process_restart() {
     // process only sees run 2 if the second process numbered and recorded it
     // from replayed state.
     let extended = dir.join("workflow-extended.log");
-    assert_eq!(run_restart_process(&bin, &extended, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &extended, "write", None),
+        "run:1\n"
+    );
     assert_eq!(
         run_restart_process(&bin, &extended, "extend", None),
         format!("{WORKFLOW_RESTART_HISTORY}refund:2\n")
@@ -921,7 +977,10 @@ fn workflow_wait_methods_replay_their_history() {
         "main.jet",
         &[("main.jet", WORKFLOW_WAIT_SOURCE)],
     );
-    assert_eq!(jit_code, 0, "default workflow wait run failed: {jit_stderr}");
+    assert_eq!(
+        jit_code, 0,
+        "default workflow wait run failed: {jit_stderr}"
+    );
     assert_eq!(jit_stdout, stdout, "default workflow wait replay diverged");
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
@@ -930,7 +989,10 @@ fn workflow_wait_methods_replay_their_history() {
         interpreter_code, 0,
         "interpreter workflow wait run failed: {interpreter_stderr}"
     );
-    assert_eq!(interpreter_stdout, stdout, "interpreter workflow wait replay diverged");
+    assert_eq!(
+        interpreter_stdout, stdout,
+        "interpreter workflow wait replay diverged"
+    );
 }
 
 const WORKFLOW_SLEEP_CANCEL_SOURCE: &str = r#"
@@ -981,7 +1043,10 @@ fn workflow_sleep_cancellation_is_recorded() {
     }
     let expected = "cancelled\nhistory:start@v1|sleep:10000000000|sleep-cancelled\n";
 
-    let (code, stdout) = build_and_run("services_workflow_sleep_cancel", WORKFLOW_SLEEP_CANCEL_SOURCE);
+    let (code, stdout) = build_and_run(
+        "services_workflow_sleep_cancel",
+        WORKFLOW_SLEEP_CANCEL_SOURCE,
+    );
     assert_eq!(code, 0);
     assert_eq!(stdout, expected);
 
@@ -990,16 +1055,24 @@ fn workflow_sleep_cancellation_is_recorded() {
         "main.jet",
         &[("main.jet", WORKFLOW_SLEEP_CANCEL_SOURCE)],
     );
-    assert_eq!(jit_code, 0, "default workflow cancellation failed: {jit_stderr}");
+    assert_eq!(
+        jit_code, 0,
+        "default workflow cancellation failed: {jit_stderr}"
+    );
     assert_eq!(jit_stdout, stdout, "default workflow cancellation diverged");
 
-    let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_workflow_sleep_cancel_interpreter", WORKFLOW_SLEEP_CANCEL_SOURCE);
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(
+        "services_workflow_sleep_cancel_interpreter",
+        WORKFLOW_SLEEP_CANCEL_SOURCE,
+    );
     assert_eq!(
         interpreter_code, 0,
         "interpreter workflow cancellation failed: {interpreter_stderr}"
     );
-    assert_eq!(interpreter_stdout, stdout, "interpreter workflow cancellation diverged");
+    assert_eq!(
+        interpreter_stdout, stdout,
+        "interpreter workflow cancellation diverged"
+    );
 }
 
 /// Activity retry and terminal workflow results must remain typed after a
@@ -1082,14 +1155,24 @@ fn services_reject_duplicate_conflicts_full_mailboxes_and_drained_receive_aot() 
     }
     let (code, stdout) = build_and_run("services_failure_paths", SOURCE);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n");
+    assert_eq!(
+        stdout,
+        "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n"
+    );
 }
 
 #[test]
 fn services_failure_paths_match_default_run() {
-    let (code, stdout, stderr) = run_default_multi("services_failure_paths_jit", "main.jet", &[("main.jet", SOURCE)]);
+    let (code, stdout, stderr) = run_default_multi(
+        "services_failure_paths_jit",
+        "main.jet",
+        &[("main.jet", SOURCE)],
+    );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert_eq!(stdout, "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n");
+    assert_eq!(
+        stdout,
+        "conflict:rejected\nfull:rejected\ndead_letters:1\ndrained_receive:rejected\n"
+    );
 }
 
 const DRAIN_HANDOFF_SOURCE: &str = r#"
@@ -1150,10 +1233,8 @@ fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_default
 
 #[test]
 fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
-        "services_drain_handoff_interpreter",
-        DRAIN_HANDOFF_SOURCE,
-    );
+    let (code, stdout, stderr) =
+        interpreter_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, DRAIN_HANDOFF_OUTPUT);
 }
@@ -1196,8 +1277,7 @@ fn run() {
 }
 "#;
 
-const DRAIN_DURABLE_OUTPUT: &str =
-    "accepted\nfirst:before\nsecond:after\ngeneration:2\n";
+const DRAIN_DURABLE_OUTPUT: &str = "accepted\nfirst:before\nsecond:after\ngeneration:2\n";
 
 #[test]
 fn service_drain_consumes_in_flight_durable_receipts_before_handoff_aot() {
@@ -1437,10 +1517,8 @@ fn durable_retry_is_the_only_explicit_redelivery_default_run() {
 
 #[test]
 fn durable_retry_is_the_only_explicit_redelivery_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
-        "services_durable_retry_interpreter",
-        DURABLE_RETRY_SOURCE,
-    );
+    let (code, stdout, stderr) =
+        interpreter_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
 }
@@ -1478,8 +1556,7 @@ fn run() {
 }
 "#;
 
-const TREE_DRAIN_REJECT_OUTPUT: &str =
-    "direct:rejected\nhandoff:2\npending:rejected\n";
+const TREE_DRAIN_REJECT_OUTPUT: &str = "direct:rejected\nhandoff:2\npending:rejected\n";
 
 #[test]
 fn tree_durable_send_during_drain_is_rejected_before_admission_aot() {
@@ -1584,8 +1661,7 @@ fn run() {
 }
 "#;
 
-const ROLLOUT_PINNED_ROLLBACK_OUTPUT: &str =
-    "handoff:2\nrolled:1\nmessage:queued\n";
+const ROLLOUT_PINNED_ROLLBACK_OUTPUT: &str = "handoff:2\nrolled:1\nmessage:queued\n";
 
 #[test]
 fn service_rollout_rollback_restores_pinned_shard_aot() {
@@ -1966,7 +2042,10 @@ fn grouped_durable_partition_reconciles_in_interpreter() {
         "services_partition_reconcile_interpreter",
         PARTITION_RECONCILE_SOURCE,
     );
-    assert_eq!(code, 0, "interpreter service partition run failed: {stderr}");
+    assert_eq!(
+        code, 0,
+        "interpreter service partition run failed: {stderr}"
+    );
     assert_eq!(
         stdout,
         "foreign:rejected\ndrained:ok\nexpired:rejected\npartition_route:rejected\npartitioned:ok\nhandoff:2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=api)\nreconciled:g2\nServiceUpgradeReceipt(from=1, to=2, migration=reversible, rollback_available=true, pinned=)\nrejoined:rejoined\n"

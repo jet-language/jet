@@ -17,7 +17,7 @@ use super::project_transactions::{
     project_revision_after_changes, rel_path, validate_project_rename_overlay,
 };
 use super::schema_api::{
-    ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION, Projection, source_revision,
+    source_revision, Projection, ACTION_SCHEMA_VERSION, CORE_CATALOG_SCHEMA_VERSION,
 };
 use super::validation_json::{json_optional_str, json_str, json_string_field, span_json};
 
@@ -121,14 +121,14 @@ pub(super) fn canvas_project_find(
             expected_project_revision,
         )?;
         let needle = query.trim();
-        let projection = if needle.is_empty() {
-            None
-        } else {
-            Some(
-                project_file(selected_path)
-                    .map_err(|diags| query_diagnostics_error(selected_path, selected_src, &diags))?,
-            )
-        };
+        let projection =
+            if needle.is_empty() {
+                None
+            } else {
+                Some(project_file(selected_path).map_err(|diags| {
+                    query_diagnostics_error(selected_path, selected_src, &diags)
+                })?)
+            };
         let mut results = Vec::new();
         let mut seen = HashSet::new();
         if !needle.is_empty() {
@@ -320,11 +320,7 @@ pub(super) fn canvas_project_references(
                     .sources
                     .iter()
                     .find(|candidate| {
-                        module_belongs_to(
-                            &context.project_root,
-                            &candidate.path,
-                            &def.module_path,
-                        )
+                        module_belongs_to(&context.project_root, &candidate.path, &def.module_path)
                     })
                     .unwrap_or(source);
                 (owner, def)
@@ -512,7 +508,11 @@ pub(super) fn canvas_project_preview_rename(
                     json_str(&change.rel),
                     json_str(&source_revision(&change.before)),
                     json_str(&source_revision(&change.after)),
-                    if change.before != change.after { "true" } else { "false" },
+                    if change.before != change.after {
+                        "true"
+                    } else {
+                        "false"
+                    },
                 )
             })
             .collect::<Vec<_>>()
@@ -520,7 +520,13 @@ pub(super) fn canvas_project_preview_rename(
         let diff_text = plan
             .changes
             .iter()
-            .map(|change| format!("diff -- {}\n{}", change.rel, simple_diff(&change.before, &change.after)))
+            .map(|change| {
+                format!(
+                    "diff -- {}\n{}",
+                    change.rel,
+                    simple_diff(&change.before, &change.after)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
         let after_project_revision = project_revision_after_changes(&project, &plan.changes);
@@ -575,7 +581,10 @@ fn open_project_query_context(
             continue;
         }
         let source = fs::read_to_string(&path).map_err(|error| {
-            query_error("stale", &format!("Canvas project source moved or unreadable: {error}"))
+            query_error(
+                "stale",
+                &format!("Canvas project source moved or unreadable: {error}"),
+            )
         })?;
         let revision = source_revision(&source);
         if revision != file.revision {
@@ -584,8 +593,8 @@ fn open_project_query_context(
                 "project source changed while Canvas was building its query",
             ));
         }
-        let index = jet_semindex::open(&path)
-            .map_err(|error| query_error("check", &error.to_string()))?;
+        let index =
+            jet_semindex::open(&path).map_err(|error| query_error("check", &error.to_string()))?;
         sources.push(ProjectSourceIndex {
             path,
             source_id: file.path.trim_start_matches("./").to_string(),
@@ -594,7 +603,10 @@ fn open_project_query_context(
             index,
         });
     }
-    let Some(selected) = sources.iter().find(|source| source.source_id == selected_source_id) else {
+    let Some(selected) = sources
+        .iter()
+        .find(|source| source.source_id == selected_source_id)
+    else {
         return Err(query_error(
             "not_found",
             "Canvas query source is not in the projected project",
@@ -632,7 +644,8 @@ fn reference_targets<'a>(
     };
     definitions.iter().any(|(_, definition)| {
         target.semantic_identity.as_deref() == Some(definition.identity.as_str())
-            || (target.module_path == definition.module_path && target.def_span == definition.def_span)
+            || (target.module_path == definition.module_path
+                && target.def_span == definition.def_span)
     })
 }
 
@@ -651,7 +664,10 @@ fn push_project_result(
     let node = (source.path == selected_path)
         .then(|| projection.and_then(|value| node_for_span(value, span)))
         .flatten();
-    let key = format!("{kind}|{}|{}|{}|{title}", source.source_id, span.start, span.end);
+    let key = format!(
+        "{kind}|{}|{}|{}|{title}",
+        source.source_id, span.start, span.end
+    );
     if !seen.insert(key) {
         return;
     }
@@ -701,7 +717,11 @@ fn project_query_ok(
     )
 }
 
-pub(super) fn canvas_source_to_graph(path: &Path, src: &str, span: SourceSpan) -> Result<String, String> {
+pub(super) fn canvas_source_to_graph(
+    path: &Path,
+    src: &str,
+    span: SourceSpan,
+) -> Result<String, String> {
     let projection =
         project_file(path).map_err(|diags| query_diagnostics_error(path, src, &diags))?;
     let mut results = projection
@@ -741,7 +761,12 @@ pub(super) fn canvas_source_to_graph(path: &Path, src: &str, span: SourceSpan) -
     ))
 }
 
-pub(super) fn canvas_preview_rename(path: &Path, src: &str, symbol: &str, to: &str) -> Result<String, String> {
+pub(super) fn canvas_preview_rename(
+    path: &Path,
+    src: &str,
+    symbol: &str,
+    to: &str,
+) -> Result<String, String> {
     let (projection, index) = open_query_context(path, src)?;
     let mut edits = Vec::new();
     let mut results = Vec::new();
@@ -803,9 +828,11 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         if def.module_path.starts_with("core.") {
             continue;
         }
-        let Some(export) = projection.callable_exports.iter().find(|export| {
-            export.module_path == def.module_path && export.span == def.def_span
-        }) else {
+        let Some(export) = projection
+            .callable_exports
+            .iter()
+            .find(|export| export.module_path == def.module_path && export.span == def.def_span)
+        else {
             continue;
         };
         let pure = symbol_def_is_pure(def);
@@ -853,7 +880,11 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
     ))
 }
 
-pub(super) fn canvas_core_catalog_query(path: &Path, src: &str, request: &str) -> Result<String, String> {
+pub(super) fn canvas_core_catalog_query(
+    path: &Path,
+    src: &str,
+    request: &str,
+) -> Result<String, String> {
     let query = json_string_field(request, "query").unwrap_or_default();
     canvas_core_catalog(path, src, &query)
 }
@@ -885,12 +916,9 @@ fn canvas_core_catalog_action_jsons(src: &str, authority: &CanvasAuthority) -> V
         .flat_map(|module| {
             let module_path = module.path.clone();
             let source_callee = core_source_callee(src, &module_path);
-            module
-                .members
-                .into_iter()
-                .map(move |member| {
-                    core_catalog_action_json(&module_path, &source_callee, &member, authority)
-                })
+            module.members.into_iter().map(move |member| {
+                core_catalog_action_json(&module_path, &source_callee, &member, authority)
+            })
         })
         .collect()
 }
@@ -964,10 +992,11 @@ struct CoreCatalogMember {
 
 fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
     let needle = query.trim();
-    let mut modules = parse_core_catalog_markdown(include_str!("../../../../docs/reference/core-library.md"));
-    let exports = parse_sema_core_module_items(
-        include_str!("../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
-    );
+    let mut modules =
+        parse_core_catalog_markdown(include_str!("../../../../docs/reference/core-library.md"));
+    let exports = parse_sema_core_module_items(include_str!(
+        "../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"
+    ));
     merge_sema_core_registry(
         &mut modules,
         include_str!("../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"),
@@ -1190,7 +1219,11 @@ fn core_member_requires_unsafe(module_path: &str, member: &str) -> bool {
     }
 }
 
-fn core_export_resolves(exports: &[(String, Vec<String>)], module_path: &str, member: &str) -> bool {
+fn core_export_resolves(
+    exports: &[(String, Vec<String>)],
+    module_path: &str,
+    member: &str,
+) -> bool {
     exports
         .iter()
         .any(|(path, names)| path == module_path && names.iter().any(|name| name == member))
@@ -1229,8 +1262,9 @@ fn core_member_receiver_type(module_path: &str, member_name: &str, signature: &s
     if module_path == "core.args" {
         let arity = core_member_params(module_path, member_name, signature).len();
         return match member_name {
-            "flag" | "option" | "option_int" | "option_float" | "positional"
-                if arity == 1 => "ParsedArgs".to_string(),
+            "flag" | "option" | "option_int" | "option_float" | "positional" if arity == 1 => {
+                "ParsedArgs".to_string()
+            }
             "options" | "subcommand" if arity <= 1 => "ParsedArgs".to_string(),
             _ => "ArgsSpec".to_string(),
         };
@@ -1379,9 +1413,7 @@ fn parse_core_catalog_markdown(markdown: &str) -> Vec<CoreCatalogModule> {
 
 fn core_paths_in_markdown(markdown: &str) -> Vec<String> {
     let mut paths = Vec::new();
-    for token in markdown.split(|c: char| {
-        !(c.is_ascii_alphanumeric() || c == '_' || c == '.')
-    }) {
+    for token in markdown.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.')) {
         if token == "core" || token.starts_with("core.") {
             let path = token.trim_matches('.');
             if !path.is_empty() && !paths.iter().any(|existing| existing == path) {
@@ -1446,15 +1478,15 @@ fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
         signature: signature.to_string(),
         summary,
         source: "docs/reference/core-library.md".to_string(),
-                pure: core_member_pure_for_signature(signature),
-                available: true,
-                stageable: false,
-                stage_reason_code: String::new(),
-                stage_reason: String::new(),
-                receiver_type: String::new(),
-                unavailable_reason_code: String::new(),
-                unavailable_reason: String::new(),
-            })
+        pure: core_member_pure_for_signature(signature),
+        available: true,
+        stageable: false,
+        stage_reason_code: String::new(),
+        stage_reason: String::new(),
+        receiver_type: String::new(),
+        unavailable_reason_code: String::new(),
+        unavailable_reason: String::new(),
+    })
 }
 
 fn core_source_callee(src: &str, module_path: &str) -> String {
@@ -1541,7 +1573,21 @@ fn core_member_pure(module_path: &str, name: &str) -> bool {
         return name != "set_current_dir" && name != "on_interrupt";
     }
     if module_path == "core.time" {
-        return matches!(name, "ms" | "secs" | "seconds" | "minutes" | "hours" | "from_unix_ms" | "period" | "period_days" | "period_months" | "period_years" | "zone" | "utc" | "zoned");
+        return matches!(
+            name,
+            "ms" | "secs"
+                | "seconds"
+                | "minutes"
+                | "hours"
+                | "from_unix_ms"
+                | "period"
+                | "period_days"
+                | "period_months"
+                | "period_years"
+                | "zone"
+                | "utc"
+                | "zoned"
+        );
     }
     false
 }
@@ -1808,7 +1854,11 @@ fn canvas_builtin_action_json(
     )
 }
 
-pub(super) fn core_member_params(module_path: &str, member_name: &str, signature: &str) -> Vec<(String, String)> {
+pub(super) fn core_member_params(
+    module_path: &str,
+    member_name: &str,
+    signature: &str,
+) -> Vec<(String, String)> {
     if let Some(params) = params_from_signature(signature) {
         return params;
     }
@@ -1938,10 +1988,7 @@ fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
             "Check project",
             &["jet", "check", source],
             "none",
-            &[
-                "canvas.command:check",
-                authority.grant.as_str(),
-            ],
+            &["canvas.command:check", authority.grant.as_str()],
             true,
             None,
             authority,
@@ -1989,7 +2036,9 @@ fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
             authority,
         ),
     ];
-    let services_available = !env_project_json(&authority.project_root).services.is_empty();
+    let services_available = !env_project_json(&authority.project_root)
+        .services
+        .is_empty();
     actions.push(canvas_command_action_json(
         "service.start",
         "Start service",
@@ -2104,17 +2153,29 @@ mod tests {
 
     #[test]
     fn event_catalog_keeps_incomplete_constructors_recoverable() {
-        for name in ["new", "with_policy", "async_result", "hook", "decision_hook"] {
+        for name in [
+            "new",
+            "with_policy",
+            "async_result",
+            "hook",
+            "decision_hook",
+        ] {
             let member = event_member(name);
             let (code, reason) = core_member_direct_exclusion("core.event", &member)
                 .expect("incomplete event constructor must be excluded");
             assert_eq!(code, "needs_signature", "wrong refusal for {name}");
-            assert!(reason.contains("explicit event type arguments"), "{name}: {reason}");
+            assert!(
+                reason.contains("explicit event type arguments"),
+                "{name}: {reason}"
+            );
         }
         assert!(core_member_direct_exclusion("core.event", &event_member("scope")).is_none());
         let (code, _) = core_member_direct_exclusion("core.event", &event_member("policy_sync"))
             .expect("sema-only event policy constructor must remain excluded");
         assert_eq!(code, "needs_signature");
-        assert_eq!(core_member_return_type("core.event", "policy_sync"), "EventPolicy");
+        assert_eq!(
+            core_member_return_type("core.event", "policy_sync"),
+            "EventPolicy"
+        );
     }
 }

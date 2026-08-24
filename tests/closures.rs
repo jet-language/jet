@@ -22,7 +22,10 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("closures should compile");
-    assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
+    assert!(
+        !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
+        "invariant I1"
+    );
     assert!(
         out.rust.contains("jet_list_map"),
         "map should lower to prelude helper"
@@ -141,8 +144,8 @@ fn run() {
 "#,
         ),
     ] {
-        let diags = jet::compile(source)
-            .expect_err("function-typed worker values must fail in sema");
+        let diags =
+            jet::compile(source).expect_err("function-typed worker values must fail in sema");
         assert!(
             diags.iter().any(|diag| diag.code == "E1102"),
             "function {role} must stop before rustc: {diags:#?}"
@@ -182,7 +185,10 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("bare lambda to fn-typed param should compile");
-    assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
+    assert!(
+        !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
+        "invariant I1"
+    );
     assert!(
         out.rust.contains("__jet_x: i64"),
         "bare lambda param must get its type from the fn-typed slot, got:\n{}",
@@ -240,8 +246,7 @@ fn run() {
     print(g())
 }
 "#;
-    jet::compile(src)
-        .expect("captures should copy cloneable values and move non-cloneable values");
+    jet::compile(src).expect("captures should copy cloneable values and move non-cloneable values");
 }
 
 #[test]
@@ -296,7 +301,10 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
-    assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
+    assert!(
+        !common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
+        "invariant I1"
+    );
     assert!(
         out.rust.contains("jet_iter_take"),
         "take should lower to lazy jet_iter_take"
@@ -349,7 +357,10 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("chunks/windows should compile");
-    assert!(out.rust.contains("jet_iter_chunks"), "chunks should lower lazily");
+    assert!(
+        out.rust.contains("jet_iter_chunks"),
+        "chunks should lower lazily"
+    );
     assert!(
         out.rust.contains("jet_iter_windows"),
         "windows should lower lazily"

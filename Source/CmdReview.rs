@@ -11,8 +11,8 @@ use std::process::exit;
 use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
 use jet::Sema::GateLedger::GateLedger;
-use jet_foundation::JSON::{json_get, json_str, parse, JSONValue};
 use jet_foundation::Report::render_status_json;
+use jet_foundation::JSON::{json_get, json_str, parse, JSONValue};
 use jet_semindex::{
     review_semantic_ops_with_receipts, semantic_ops_for_file, ReviewSemanticOp, SemIndex,
     SemanticOp,
@@ -507,12 +507,7 @@ fn render_json(
     );
     println!(
         "{}",
-        render_status_json(
-            "ok",
-            true,
-            "review",
-            &format!(",\"review\":{payload}"),
-        )
+        render_status_json("ok", true, "review", &format!(",\"review\":{payload}"),)
     );
 }
 

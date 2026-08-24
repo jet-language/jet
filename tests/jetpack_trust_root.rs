@@ -5,14 +5,14 @@ mod common;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use jetpack::SHA256;
 use jetpack::TrustRoot::{
-    canonical_root, canonical_snapshot, canonical_targets, fixture_threshold_root, sign_root,
-    sign_snapshot, sign_targets, sign_timestamp, BoundIdentity, CacheProvenance,
-    allow_cache_witness, is_cache_witness_allowed, CacheReceipt, FixedClock, IdentityKind,
+    allow_cache_witness, canonical_root, canonical_snapshot, canonical_targets,
+    fixture_threshold_root, is_cache_witness_allowed, sign_root, sign_snapshot, sign_targets,
+    sign_timestamp, BoundIdentity, CacheProvenance, CacheReceipt, FixedClock, IdentityKind,
     PublisherIdentity, RootBootstrap, SnapshotMetaEntry, SnapshotMetadata, TargetMeta,
     TargetsMetadata, TimestampMetadata, TrustEngine, TrustError, TrustKey, TrustPolicy,
 };
+use jetpack::SHA256;
 
 #[test]
 fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {
@@ -105,10 +105,7 @@ fn jp6a_bootstrap_threshold_delegation_snapshot_and_identities() {
             SnapshotMetaEntry {
                 version: 3,
                 length: t_canon.len() as u64,
-                hashes: BTreeMap::from([(
-                    "sha256".into(),
-                    SHA256::sha256_hex(t_canon.as_bytes()),
-                )]),
+                hashes: BTreeMap::from([("sha256".into(), SHA256::sha256_hex(t_canon.as_bytes()))]),
             },
         )]),
     };

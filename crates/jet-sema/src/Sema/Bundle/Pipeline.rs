@@ -250,10 +250,7 @@ fn derive_member_collision(
         ),
         format!(
             "`derive T.{}` and {} both define a member named `{}` on `{}`",
-            derive_name,
-            existing_site,
-            method.name,
-            type_name
+            derive_name, existing_site, method.name, type_name
         ),
         format!(
             "rename the generated member in `derive T.{}`, or rename the colliding member",
@@ -350,7 +347,9 @@ fn register_text_head_contracts(
         }),
         _ => None,
     }) {
-        state.registry.register_text_head(declaration.0, declaration.1);
+        state
+            .registry
+            .register_text_head(declaration.0, declaration.1);
     }
 }
 
@@ -417,17 +416,22 @@ pub(super) fn check_bundle_opts_for_output_with_context(
     }
     let (ambient_core_call, ambient_handle, ambient_extern_call) = crate::Comptime::ambient_hooks();
     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
-        crate::Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, || {
-            check_bundle_opts_for_output_on_stack(
-                bundle,
-                mode,
-                freestanding,
-                gates,
-                explicit_output,
-                incremental,
-                allow_compiler_api,
-            )
-        })
+        crate::Comptime::with_ambient(
+            ambient_core_call,
+            ambient_handle,
+            ambient_extern_call,
+            || {
+                check_bundle_opts_for_output_on_stack(
+                    bundle,
+                    mode,
+                    freestanding,
+                    gates,
+                    explicit_output,
+                    incremental,
+                    allow_compiler_api,
+                )
+            },
+        )
     })
 }
 
@@ -510,7 +514,9 @@ fn check_bundle_opts_for_output_inner(
     // D-UNSAFE-OBLIG1=A: run after compile-time branch selection and generic
     // module expansion, but before registration/TIR. Assertions are checked and
     // erased here so no generated or untaken body bypasses the policy.
-    diags.extend(super::super::UnsafeObligations::check_and_strip_with_gates(bundle, gates));
+    diags.extend(super::super::UnsafeObligations::check_and_strip_with_gates(
+        bundle, gates,
+    ));
     // D-STRUCT-POLICY1=A: collect the one package-local setting vocabulary
     // before any function signature or body is checked. Built-in callable
     // names remain owned by `CallablePolicyChain`; user names are nominal and
@@ -518,15 +524,10 @@ fn check_bundle_opts_for_output_inner(
     // package scope is part of the key: dependency packages may independently
     // own the same setting name.
     let mut callable_policy_declarations =
-        std::collections::BTreeMap::<
-            (String, String),
-            (usize, crate::AST::UserPolicyDecl),
-        >::new();
+        std::collections::BTreeMap::<(String, String), (usize, crate::AST::UserPolicyDecl)>::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let package_scope = jet_foundation::Names::package_scope_for(
-            &module.path,
-            &bundle.project_root,
-        );
+        let package_scope =
+            jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
         for declaration in &module.user_policy_declarations {
             if crate::AST::CallablePolicyChain::is_builtin(&declaration.name) {
                 diags.push(Diagnostic::error(
@@ -543,13 +544,12 @@ fn check_bundle_opts_for_output_inner(
                 continue;
             }
             let key = (package_scope.clone(), declaration.name.clone());
-            if let Some((first_module, first)) = callable_policy_declarations
-                .insert(key.clone(), (module_idx, declaration.clone()))
+            if let Some((first_module, first)) =
+                callable_policy_declarations.insert(key.clone(), (module_idx, declaration.clone()))
             {
                 // Restore the first declaration as the lookup winner. The
                 // duplicate still gets reported exactly once.
-                callable_policy_declarations
-                    .insert(key, (first_module, first.clone()));
+                callable_policy_declarations.insert(key, (first_module, first.clone()));
                 diags.push(
                     Diagnostic::error(
                         "E0105",
@@ -582,10 +582,7 @@ fn check_bundle_opts_for_output_inner(
         .enumerate()
         .map(|(module_idx, m)| ModuleState {
             module_path: m.display.clone(),
-            package_scope: jet_foundation::Names::package_scope_for(
-                &m.path,
-                &bundle.project_root,
-            ),
+            package_scope: jet_foundation::Names::package_scope_for(&m.path, &bundle.project_root),
             module_alias: m.alias.clone(),
             items: m.items.clone(),
             build_facts: bundle.build_facts.clone(),
@@ -606,11 +603,7 @@ fn check_bundle_opts_for_output_inner(
                 .filter_map(|item| match item {
                     Item::StateDecl(state) => Some((
                         state.type_name.clone(),
-                        state
-                            .states
-                            .iter()
-                            .map(|(name, _)| name.clone())
-                            .collect(),
+                        state.states.iter().map(|(name, _)| name.clone()).collect(),
                     )),
                     _ => None,
                 })
@@ -639,21 +632,37 @@ fn check_bundle_opts_for_output_inner(
     // Generic-instance declarations have one AST/codegen owner, while every
     // consumer registry receives the same nominal metadata. This is not a
     // declaration clone: generated Rust/TIR still sees the owner item once.
-    let shared_instance_nominals: Vec<(usize, Item)> = bundle.modules.iter().enumerate().flat_map(|(owner, module)| {
-        let prefixes: Vec<String> = module.items.iter().filter_map(|item| match item {
-            Item::CodeModule(cm) if cm.instance_identity.is_some() =>
-                Some(GenericModules::module_type_prefix(&cm.name)),
-            _ => None,
-        }).collect();
-        module.items.iter().filter_map(move |item| match item {
-            Item::Struct(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => Some((owner, Item::Struct(clone_struct(def)))),
-            Item::Enum(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => Some((owner, Item::Enum(clone_enum(def)))),
-            _ => None,
+    let shared_instance_nominals: Vec<(usize, Item)> = bundle
+        .modules
+        .iter()
+        .enumerate()
+        .flat_map(|(owner, module)| {
+            let prefixes: Vec<String> = module
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::CodeModule(cm) if cm.instance_identity.is_some() => {
+                        Some(GenericModules::module_type_prefix(&cm.name))
+                    }
+                    _ => None,
+                })
+                .collect();
+            module.items.iter().filter_map(move |item| match item {
+                Item::Struct(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => {
+                    Some((owner, Item::Struct(clone_struct(def))))
+                }
+                Item::Enum(def) if prefixes.iter().any(|prefix| def.name.starts_with(prefix)) => {
+                    Some((owner, Item::Enum(clone_enum(def))))
+                }
+                _ => None,
+            })
         })
-    }).collect();
+        .collect();
     for (owner, item) in &shared_instance_nominals {
         for (consumer, st) in states.iter_mut().enumerate() {
-            if consumer == *owner { continue; }
+            if consumer == *owner {
+                continue;
+            }
             match item {
                 Item::Struct(def) => {
                     register_struct(def, &mut st.registry, &mut diags, &st.funcs, &st.consts);
@@ -672,7 +681,9 @@ fn check_bundle_opts_for_output_inner(
             };
             if let Some(generated_name) = generated_name {
                 if let Some(display) = bundle.modules[*owner].items.iter().find_map(|item| {
-                    let Item::CodeModule(instance) = item else { return None };
+                    let Item::CodeModule(instance) = item else {
+                        return None;
+                    };
                     if instance.instance_identity.is_none() {
                         return None;
                     }
@@ -745,12 +756,10 @@ fn check_bundle_opts_for_output_inner(
         for item in &module.items {
             match item {
                 Item::MarkerDecl(declaration) => {
-                    if let Some((first_module, first_span)) =
-                        marker_declaration_spans.insert(
-                            declaration.name.clone(),
-                            (module_idx, declaration.name_span),
-                        )
-                    {
+                    if let Some((first_module, first_span)) = marker_declaration_spans.insert(
+                        declaration.name.clone(),
+                        (module_idx, declaration.name_span),
+                    ) {
                         diags.push(Diagnostic::error(
                             "E0105",
                             format!(
@@ -809,7 +818,9 @@ fn check_bundle_opts_for_output_inner(
         }
     }
     let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives_and_declarations(
-        derive_providers.iter().map(|(_, name, _, _, _)| name.clone()),
+        derive_providers
+            .iter()
+            .map(|(_, name, _, _, _)| name.clone()),
         marker_declarations,
     );
     let ct_core_imports: Vec<HashMap<String, String>> = bundle
@@ -886,21 +897,18 @@ fn check_bundle_opts_for_output_inner(
         // same-project named type resolves. Type names are unique
         // program-wide (a duplicate definition is its own error elsewhere),
         // so this union is sound.
-        let ffi_named_types: Option<HashMap<String, TypeDef>> = if module
-            .items
-            .iter()
-            .any(|i| matches!(i, Item::CModule(_)))
-        {
-            Some(
-                states[..idx]
-                    .iter()
-                    .flat_map(|s| s.registry.types.iter())
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-            )
-        } else {
-            None
-        };
+        let ffi_named_types: Option<HashMap<String, TypeDef>> =
+            if module.items.iter().any(|i| matches!(i, Item::CModule(_))) {
+                Some(
+                    states[..idx]
+                        .iter()
+                        .flat_map(|s| s.registry.types.iter())
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                )
+            } else {
+                None
+            };
         let st = &mut states[idx];
         for item in module
             .items
@@ -910,13 +918,7 @@ fn check_bundle_opts_for_output_inner(
             match item {
                 Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                 Item::Struct(s) => {
-                    register_struct(
-                        s,
-                        &mut st.registry,
-                        &mut diags,
-                        &st.funcs,
-                        &st.consts,
-                    );
+                    register_struct(s, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                 }
                 Item::Enum(e) => {
                     register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
@@ -964,12 +966,9 @@ fn check_bundle_opts_for_output_inner(
                             .as_deref()
                             .filter(|_| uf.base.is_some() || dimension.is_some())
                         {
-                            if let Some(fact) = unit_fact(
-                                uf,
-                                &d.name,
-                                dimension.clone(),
-                                PathBuf::from(owner),
-                            ) {
+                            if let Some(fact) =
+                                unit_fact(uf, &d.name, dimension.clone(), PathBuf::from(owner))
+                            {
                                 st.registry.unit_facts.insert(d.name.clone(), fact);
                             }
                         }
@@ -984,9 +983,7 @@ fn check_bundle_opts_for_output_inner(
                                 format!("{}::{}", uf.family, member.name),
                                 UnitFact {
                                     package: PathBuf::from(
-                                        uf.resolved_owner
-                                            .as_deref()
-                                            .unwrap_or("core.units"),
+                                        uf.resolved_owner.as_deref().unwrap_or("core.units"),
                                     ),
                                     family: uf.family.clone(),
                                     member: member.name.clone(),
@@ -1055,8 +1052,7 @@ fn check_bundle_opts_for_output_inner(
                         }
                     }
                 }
-                Item::Trait(_) => {
-                }
+                Item::Trait(_) => {}
                 Item::Module(_) => {}
                 Item::CodeModule(cm) => {
                     if let Some(body) = &cm.body {
@@ -1065,9 +1061,12 @@ fn check_bundle_opts_for_output_inner(
                         st.code_modules.insert(cm.name.clone(), cm.name.clone());
                         st.code_module_identities.insert(
                             cm.name.clone(),
-                            cm.instance_identity.as_ref()
+                            cm.instance_identity
+                                .as_ref()
                                 .map(|identity| format!("instance:{}", identity.fingerprint))
-                                .unwrap_or_else(|| format!("module:{}::{}", st.module_path, cm.name)),
+                                .unwrap_or_else(|| {
+                                    format!("module:{}::{}", st.module_path, cm.name)
+                                }),
                         );
                         for inner in body {
                             if let Item::Func(f) = inner {
@@ -1095,9 +1094,7 @@ fn check_bundle_opts_for_output_inner(
                 Item::TemplateLoop(_) => {}
                 // D-META-USER1=A: declaration rows were consumed by the
                 // bundle-local marker registry before ordinary registration.
-                Item::EffectDecl(_)
-                | Item::GenericModule(_)
-                | Item::ModuleAlias(_) => {}
+                Item::EffectDecl(_) | Item::GenericModule(_) | Item::ModuleAlias(_) => {}
                 Item::MarkerDecl(_) | Item::FactDecl(_) => {
                     unreachable!("declaration items are consumed by the bundle registry")
                 }
@@ -1124,8 +1121,7 @@ fn check_bundle_opts_for_output_inner(
                 let mut new_items: Vec<Item> = Vec::new();
 
                 for s in &struct_infos {
-                    let mut existing_member_sites: HashMap<String, (String, Span)> =
-                        HashMap::new();
+                    let mut existing_member_sites: HashMap<String, (String, Span)> = HashMap::new();
                     for item in &module.items {
                         match item {
                             Item::Struct(candidate) if candidate.name == s.name => {
@@ -1180,7 +1176,8 @@ fn check_bundle_opts_for_output_inner(
                                     2
                                 }
                             });
-                        let Some((provider_idx, _, type_param, body, helper_funcs)) = provider else {
+                        let Some((provider_idx, _, type_param, body, helper_funcs)) = provider
+                        else {
                             continue;
                         };
                         if idx > 0 && *provider_idx > 0 {
@@ -1244,69 +1241,69 @@ fn check_bundle_opts_for_output_inner(
                             &actual_funcs,
                             &bundle.project_root,
                         ) {
-                                Ok(expanded) => {
-                                    let mut methods = Vec::new();
-                                    for item in expanded {
-                                        match item {
-                                            Item::Func(function) => {
-                                                if let Some((existing_site, existing_span)) =
-                                                    existing_member_sites.get(&function.name)
-                                                {
-                                                    diags.push(derive_member_collision(
-                                                        derive_name,
-                                                        &s.name,
-                                                        &function,
-                                                        existing_site,
-                                                        *existing_span,
-                                                    ));
-                                                    continue;
-                                                }
-                                                if let Some((generated_derive, generated_span)) =
-                                                    generated_method_spans.get(&function.name)
-                                                {
-                                                    let existing_site = format!(
-                                                        "generated member `{}` from `derive T.{}`",
-                                                        function.name, generated_derive
-                                                    );
-                                                    diags.push(derive_member_collision(
-                                                        derive_name,
-                                                        &s.name,
-                                                        &function,
-                                                        &existing_site,
-                                                        *generated_span,
-                                                    ));
-                                                    continue;
-                                                }
-                                                generated_method_spans.insert(
-                                                    function.name.clone(),
-                                                    (derive_name.clone(), function.name_span),
-                                                );
-                                                methods.push(function)
+                            Ok(expanded) => {
+                                let mut methods = Vec::new();
+                                for item in expanded {
+                                    match item {
+                                        Item::Func(function) => {
+                                            if let Some((existing_site, existing_span)) =
+                                                existing_member_sites.get(&function.name)
+                                            {
+                                                diags.push(derive_member_collision(
+                                                    derive_name,
+                                                    &s.name,
+                                                    &function,
+                                                    existing_site,
+                                                    *existing_span,
+                                                ));
+                                                continue;
                                             }
-                                            other => new_items.push(other),
+                                            if let Some((generated_derive, generated_span)) =
+                                                generated_method_spans.get(&function.name)
+                                            {
+                                                let existing_site = format!(
+                                                    "generated member `{}` from `derive T.{}`",
+                                                    function.name, generated_derive
+                                                );
+                                                diags.push(derive_member_collision(
+                                                    derive_name,
+                                                    &s.name,
+                                                    &function,
+                                                    &existing_site,
+                                                    *generated_span,
+                                                ));
+                                                continue;
+                                            }
+                                            generated_method_spans.insert(
+                                                function.name.clone(),
+                                                (derive_name.clone(), function.name_span),
+                                            );
+                                            methods.push(function)
                                         }
-                                    }
-                                    if !methods.is_empty() {
-                                        new_items.push(Item::Impl(crate::AST::ImplDef {
-                                            span: s.span,
-                                            type_name: s.name.clone(),
-                                            type_span: s.name_span,
-                                            // A derive provider names the
-                                            // capability that selects it; its
-                                            // body supplies ordinary members
-                                            // on the target. The provider name
-                                            // is not a Rust/Jet trait
-                                            // conformance requirement.
-                                            trait_name: None,
-                                            trait_span: None,
-                                            methods,
-                                            delegation_field: None,
-                                            assoc_type_impls: Vec::new(),
-                                            is_generated_serde: false,
-                                            os_target: None,
-                                        }));
+                                        other => new_items.push(other),
                                     }
                                 }
+                                if !methods.is_empty() {
+                                    new_items.push(Item::Impl(crate::AST::ImplDef {
+                                        span: s.span,
+                                        type_name: s.name.clone(),
+                                        type_span: s.name_span,
+                                        // A derive provider names the
+                                        // capability that selects it; its
+                                        // body supplies ordinary members
+                                        // on the target. The provider name
+                                        // is not a Rust/Jet trait
+                                        // conformance requirement.
+                                        trait_name: None,
+                                        trait_span: None,
+                                        methods,
+                                        delegation_field: None,
+                                        assoc_type_impls: Vec::new(),
+                                        is_generated_serde: false,
+                                        os_target: None,
+                                    }));
+                                }
+                            }
                             Err(inner) => {
                                 diags.push(inner);
                             }
@@ -1320,22 +1317,10 @@ fn check_bundle_opts_for_output_inner(
                     match item {
                         Item::Func(f) => register_func_item(f, st, &mut diags, !module.no_prelude),
                         Item::Struct(s) => {
-                            register_struct(
-                                s,
-                                &mut st.registry,
-                                &mut diags,
-                                &st.funcs,
-                                &st.consts,
-                            );
+                            register_struct(s, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                         }
                         Item::Enum(e) => {
-                            register_enum(
-                                e,
-                                &mut st.registry,
-                                &mut diags,
-                                &st.funcs,
-                                &st.consts,
-                            );
+                            register_enum(e, &mut st.registry, &mut diags, &st.funcs, &st.consts);
                         }
                         Item::Tag(_) => {}
                         Item::Impl(_) => {}
@@ -1416,13 +1401,14 @@ fn check_bundle_opts_for_output_inner(
                         &bundle.build_facts.target_triple,
                     ),
                 );
-                let type_info = crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
-                    &target,
-                    &states,
-                    &type_path,
-                    Some(&marker_vocabulary),
-                    &layout_engine,
-                );
+                let type_info =
+                    crate::Comptime::build_struct_type_info_with_path_and_vocabulary_and_engine(
+                        &target,
+                        &states,
+                        &type_path,
+                        Some(&marker_vocabulary),
+                        &layout_engine,
+                    );
                 match crate::Comptime::expand_derive_body(
                     body,
                     "target",
@@ -1498,7 +1484,9 @@ fn check_bundle_opts_for_output_inner(
                 .items
                 .iter()
                 .flat_map(|item| {
-                    let Item::Func(function) = item else { return None };
+                    let Item::Func(function) = item else {
+                        return None;
+                    };
                     Some(function.markers.iter().filter_map(|marker| {
                         let declaration = marker_vocabulary.declaration(&marker.name)?.clone();
                         declaration.body.as_ref()?;
@@ -1565,20 +1553,12 @@ fn check_bundle_opts_for_output_inner(
                     Item::Func(function) => {
                         register_func_item(function, st, &mut diags, !module.no_prelude)
                     }
-                    Item::Struct(def) => register_struct(
-                        def,
-                        &mut st.registry,
-                        &mut diags,
-                        &st.funcs,
-                        &st.consts,
-                    ),
-                    Item::Enum(def) => register_enum(
-                        def,
-                        &mut st.registry,
-                        &mut diags,
-                        &st.funcs,
-                        &st.consts,
-                    ),
+                    Item::Struct(def) => {
+                        register_struct(def, &mut st.registry, &mut diags, &st.funcs, &st.consts)
+                    }
+                    Item::Enum(def) => {
+                        register_enum(def, &mut st.registry, &mut diags, &st.funcs, &st.consts)
+                    }
                     Item::Tag(_) => {}
                     Item::Impl(_) => {}
                     Item::Test(_) => {}
@@ -1730,11 +1710,7 @@ fn check_bundle_opts_for_output_inner(
             .map(|link| link.importing_idx)
             .collect::<std::collections::BTreeSet<_>>();
         if importers.is_empty() {
-            validate_foreign_undo_contracts(
-                &module.items,
-                &states[module_idx].funcs,
-                &mut diags,
-            );
+            validate_foreign_undo_contracts(&module.items, &states[module_idx].funcs, &mut diags);
             continue;
         }
 
@@ -1745,16 +1721,12 @@ fn check_bundle_opts_for_output_inner(
                 .filter(|owner| states[*owner].funcs.contains_key(contract.inverse))
                 .collect::<Vec<_>>();
             match owners.as_slice() {
-                [owner] => validate_foreign_undo_contract(
-                    &contract,
-                    &states[*owner].funcs,
-                    &mut diags,
-                ),
-                [] => validate_foreign_undo_contract(
-                    &contract,
-                    &states[module_idx].funcs,
-                    &mut diags,
-                ),
+                [owner] => {
+                    validate_foreign_undo_contract(&contract, &states[*owner].funcs, &mut diags)
+                }
+                [] => {
+                    validate_foreign_undo_contract(&contract, &states[module_idx].funcs, &mut diags)
+                }
                 _ => {
                     let modules = owners
                         .iter()
@@ -1798,12 +1770,7 @@ fn check_bundle_opts_for_output_inner(
         for item in &module.items {
             if let Item::Func(function) = item {
                 if !states[idx].funcs.contains_key(&function.name) {
-                    register_func_item(
-                        function,
-                        &mut states[idx],
-                        &mut diags,
-                        !module.no_prelude,
-                    );
+                    register_func_item(function, &mut states[idx], &mut diags, !module.no_prelude);
                 }
             }
         }
@@ -1996,8 +1963,7 @@ fn check_bundle_opts_for_output_inner(
             if let Some(module) = imp.core_module_path() {
                 if !crate::Syntax::is_known_core_module(&module) {
                     diags.push(crate::Sema::CheckerCoreLib::unknown_core_module(
-                        &module,
-                        imp.span,
+                        &module, imp.span,
                     ));
                     continue;
                 }
@@ -2266,11 +2232,8 @@ fn check_bundle_opts_for_output_inner(
                         .expect("member walker returned a binding without a member");
                     let local = binding.local.clone();
                     let is_pub = name_ledger.visible(idx, target_idx, orig);
-                    let file_module_target = states[target_idx]
-                        .imports
-                        .get(orig)
-                        .copied()
-                        .filter(|_| {
+                    let file_module_target =
+                        states[target_idx].imports.get(orig).copied().filter(|_| {
                             name_ledger
                                 .declaration(target_idx, orig)
                                 .is_some_and(|declaration| declaration.kind == "file_module")
@@ -2291,12 +2254,15 @@ fn check_bundle_opts_for_output_inner(
                             diags.push(Diagnostic::error(
                                 "E0609",
                                 format!("`{}` is private in module `{}`", orig, module_alias),
-                                "only public modules can be brought into scope with `use`".to_string(),
+                                "only public modules can be brought into scope with `use`"
+                                    .to_string(),
                                 format!("add `pub` before `module {}` in the imported file", orig),
                                 Some(*module_alias_span),
                             ));
                         } else {
-                            states[idx].imports.insert(local.clone(), file_module_target);
+                            states[idx]
+                                .imports
+                                .insert(local.clone(), file_module_target);
                             inserted_imports.push(local.clone());
                         }
                         continue;
@@ -2396,7 +2362,10 @@ fn check_bundle_opts_for_output_inner(
 /// the registry guard in sema so no downstream engine can become the first
 /// place that notices a structure row lost its direction or gate.
 fn guard_fact_registry_law() {
-    if let Some(violation) = jet_foundation::Registry::law_violations().into_iter().next() {
+    if let Some(violation) = jet_foundation::Registry::law_violations()
+        .into_iter()
+        .next()
+    {
         jet_foundation::ice!(None, "fact registry law violation: {violation}");
     }
 }

@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax;
 use crate::Sema::Diagnostics::{is_core_error_family_type, is_default_error};
+use crate::Syntax;
 use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
 
 impl<'a> Checker<'a> {
@@ -168,17 +168,14 @@ impl<'a> Checker<'a> {
                     // D-FAIL-ERROR1=A: older String-returning callees cross into
                     // the default family through one explicit Prelude conversion.
                     Type::Result { err: ret_err, .. }
-                        if is_default_error(ret_err)
-                            && matches!(err.as_ref(), Type::String) =>
+                        if is_default_error(ret_err) && matches!(err.as_ref(), Type::String) =>
                     {
                         *convert = TryConvert::DefaultErr;
                         self.task_body_propagates = true;
                         Some((*ok).clone())
                     }
                     // D-UNIONTYPE1=A: member error widens into the return's union.
-                    Type::Result { err: ret_err, .. }
-                        if ret_err.union_contains(err.as_ref()) =>
-                    {
+                    Type::Result { err: ret_err, .. } if ret_err.union_contains(err.as_ref()) => {
                         let members = ret_err
                             .unwrap_union()
                             .expect("union_contains implies Union");
@@ -204,10 +201,8 @@ impl<'a> Checker<'a> {
                         if is_default_error(ret_err) {
                             let err_name = err.name();
                             // D-FAIL-CONV2=A: demand-driven family conversion onto Err.
-                            if !self.no_prelude && is_core_error_family_type(&err_name)
-                            {
-                                let fn_name =
-                                    error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
+                            if !self.no_prelude && is_core_error_family_type(&err_name) {
+                                let fn_name = error_conv_fn_name(&err_name, Syntax::TYPE_ERR);
                                 *convert = TryConvert::Typed(fn_name);
                                 self.task_body_propagates = true;
                                 return Some((*ok).clone());
@@ -348,8 +343,8 @@ impl<'a> Checker<'a> {
             Some(&value_ty),
             "supply an owned exhaustion-route payload",
         );
-        let compute_failure_fallback = value_ty.is_compute_tensor_family()
-            && self.is_core_compute_call(value.as_ref());
+        let compute_failure_fallback =
+            value_ty.is_compute_tensor_family() && self.is_core_compute_call(value.as_ref());
         let Some(label) = value_loop_route_label(&mut value) else {
             *expr = *value;
             return Some(value_ty);
@@ -382,12 +377,7 @@ impl<'a> Checker<'a> {
                 }
                 attach_value_loop_route(
                     &mut value,
-                    Stmt::BreakLabelValue(
-                        label,
-                        span,
-                        *fallback_expr,
-                        fallback_span,
-                    ),
+                    Stmt::BreakLabelValue(label, span, *fallback_expr, fallback_span),
                 );
             }
             OrFallback::Return(mut ret_expr, ret_span) => {
@@ -429,12 +419,12 @@ impl<'a> Checker<'a> {
                     }
                     (None, None) => {}
                 }
-                attach_value_loop_route(
-                    &mut value,
-                    Stmt::Return(ret_expr.map(|e| *e), span),
-                );
+                attach_value_loop_route(&mut value, Stmt::Return(ret_expr.map(|e| *e), span));
             }
-            OrFallback::Block { span: fallback_span, .. } => {
+            OrFallback::Block {
+                span: fallback_span,
+                ..
+            } => {
                 mark_value_loop_route_unattached(&mut value);
                 self.diags.push(Diagnostic::error(
                     "E0405",
@@ -464,7 +454,10 @@ impl<'a> Checker<'a> {
                 let (route, route_span) = match &route {
                     OrFallback::Break(span) => ("break".to_string(), *span),
                     OrFallback::Continue(span) => ("next".to_string(), *span),
-                    OrFallback::Value(_) | OrFallback::Block { .. } | OrFallback::Return(..) | OrFallback::Panic { .. }
+                    OrFallback::Value(_)
+                    | OrFallback::Block { .. }
+                    | OrFallback::Return(..)
+                    | OrFallback::Panic { .. }
                     | OrFallback::BreakLabel(..)
                     | OrFallback::ContinueLabel(..) => {
                         unreachable!("matched immediate loop-control fallback")
@@ -490,11 +483,12 @@ impl<'a> Checker<'a> {
                         .push(loop_control_outside(Syntax::KW_BREAK, route_span));
                 } else if !self.loop_labels.iter().any(|label| label == &name) {
                     mark_value_loop_route_unattached(&mut value);
-                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
-                        &name,
-                        &self.loop_labels,
-                        route_span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undefined_loop_label(
+                            &name,
+                            &self.loop_labels,
+                            route_span,
+                        ));
                 } else {
                     self.check_break_without_value(Some((&name, route_span)), route_span);
                     attach_value_loop_route(&mut value, Stmt::BreakLabel(name, route_span));
@@ -507,11 +501,12 @@ impl<'a> Checker<'a> {
                         .push(loop_control_outside(Syntax::KW_NEXT, route_span));
                 } else if !self.loop_labels.iter().any(|label| label == &name) {
                     mark_value_loop_route_unattached(&mut value);
-                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
-                        &name,
-                        &self.loop_labels,
-                        route_span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undefined_loop_label(
+                            &name,
+                            &self.loop_labels,
+                            route_span,
+                        ));
                 } else {
                     attach_value_loop_route(&mut value, Stmt::ContinueLabel(name, route_span));
                 }
@@ -569,8 +564,8 @@ impl<'a> Checker<'a> {
             Some(&val_ty),
             "supply an owned fallback payload",
         );
-        let compute_failure_fallback = payload.is_compute_tensor_family()
-            && self.is_core_compute_call(value.as_ref());
+        let compute_failure_fallback =
+            payload.is_compute_tensor_family() && self.is_core_compute_call(value.as_ref());
         // D-FAIL-BIND1=A: make the report a normal typed local in a fresh
         // scope while checking every fallback form. Optional fallbacks keep
         // the context marker without declaring a local, so `err` receives the
@@ -758,11 +753,12 @@ impl<'a> Checker<'a> {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_BREAK, *span));
                 } else if !self.loop_labels.iter().any(|label| label == name) {
-                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
-                        name,
-                        &self.loop_labels,
-                        *span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undefined_loop_label(
+                            name,
+                            &self.loop_labels,
+                            *span,
+                        ));
                 } else {
                     self.check_break_without_value(Some((name, *span)), *span);
                 }
@@ -773,11 +769,12 @@ impl<'a> Checker<'a> {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_NEXT, *span));
                 } else if !self.loop_labels.iter().any(|label| label == name) {
-                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
-                        name,
-                        &self.loop_labels,
-                        *span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undefined_loop_label(
+                            name,
+                            &self.loop_labels,
+                            *span,
+                        ));
                 }
                 Some(payload)
             }
@@ -801,8 +798,7 @@ impl<'a> Checker<'a> {
     ) {
         let saved_fallback_has_err = self.fallback_has_err;
         let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
-        self.fallback_is_shape_miss =
-            !matches!(subject_ty, Type::Option(_) | Type::Result { .. });
+        self.fallback_is_shape_miss = !matches!(subject_ty, Type::Option(_) | Type::Result { .. });
         let has_err = matches!(subject_ty, Type::Result { .. });
         self.fallback_has_err = Some(has_err);
         if has_err {
@@ -834,7 +830,10 @@ impl<'a> Checker<'a> {
                 self.infer(value);
                 self.diags.push(Diagnostic::error(
                     "E0405",
-                    format!("`{}` must diverge after a refutable binding", Syntax::OP_FALLBACK),
+                    format!(
+                        "`{}` must diverge after a refutable binding",
+                        Syntax::OP_FALLBACK
+                    ),
                     "a failed pattern match cannot continue without defining the captures"
                         .to_string(),
                     "use `return`, `panic(...)`, `break`, or `next` as the fallback".to_string(),
@@ -854,7 +853,10 @@ impl<'a> Checker<'a> {
                 if !diverges {
                     self.diags.push(Diagnostic::error(
                         "E0405",
-                        format!("`{}` fallback blocks cannot continue after a refutable binding", Syntax::OP_FALLBACK),
+                        format!(
+                            "`{}` fallback blocks cannot continue after a refutable binding",
+                            Syntax::OP_FALLBACK
+                        ),
                         "a refutable binding needs one direct diverging miss route".to_string(),
                         "end the block with `return`, `panic(...)`, `break`, or `next`".to_string(),
                         Some(*fallback_span),
@@ -876,13 +878,19 @@ impl<'a> Checker<'a> {
                     (Some(ret_ty), None) => self.diags.push(Diagnostic::error(
                         "E0405",
                         format!("`{} return` here needs a value", Syntax::OP_FALLBACK),
-                        format!("this function returns {}, so its return route needs a value", ret_ty.show()),
+                        format!(
+                            "this function returns {}, so its return route needs a value",
+                            ret_ty.show()
+                        ),
                         format!("write `{} return <value>`", Syntax::OP_FALLBACK),
                         Some(*ret_span),
                     )),
                     (None, Some(expr)) => self.diags.push(Diagnostic::error(
                         "E0405",
-                        format!("`{} return` cannot return a value here", Syntax::OP_FALLBACK),
+                        format!(
+                            "`{} return` cannot return a value here",
+                            Syntax::OP_FALLBACK
+                        ),
                         "this function returns nothing".to_string(),
                         "drop the value from the return route".to_string(),
                         Some(expr.span()),
@@ -915,11 +923,12 @@ impl<'a> Checker<'a> {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_BREAK, *route_span));
                 } else if !self.loop_labels.iter().any(|label| label == name) {
-                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
-                        name,
-                        &self.loop_labels,
-                        *route_span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undefined_loop_label(
+                            name,
+                            &self.loop_labels,
+                            *route_span,
+                        ));
                 } else {
                     self.check_break_without_value(Some((name, *route_span)), *route_span);
                 }
@@ -929,11 +938,12 @@ impl<'a> Checker<'a> {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_NEXT, *route_span));
                 } else if !self.loop_labels.iter().any(|label| label == name) {
-                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
-                        name,
-                        &self.loop_labels,
-                        *route_span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undefined_loop_label(
+                            name,
+                            &self.loop_labels,
+                            *route_span,
+                        ));
                 }
             }
         }

@@ -112,8 +112,12 @@ module fleet.prod {
 "#;
     let plan = evaluate_env(src, &std::env::temp_dir()).unwrap();
     let override_plan = plan.fleets[0].hosts[0].overrides.as_ref().unwrap();
-    let jet_env_model::ModuleEval::HostOverrideValue::Options(options) = &override_plan.fields[0].1 else {
-        panic!("expected options override, got {:?}", override_plan.fields[0]);
+    let jet_env_model::ModuleEval::HostOverrideValue::Options(options) = &override_plan.fields[0].1
+    else {
+        panic!(
+            "expected options override, got {:?}",
+            override_plan.fields[0]
+        );
     };
     assert_eq!(
         options

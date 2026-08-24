@@ -158,7 +158,16 @@ fn render_page(
 
 /// Representative error codes always generated (M14 subset).
 const REPRESENTATIVE: &[&str] = &[
-    "E0101", "E0102", "E0103", "E0104", "E0105", "E0107", "E0108", "E0109", "E0110", "E0111",
+    "E0101",
+    "E0102",
+    "E0103",
+    "E0104",
+    "E0105",
+    "E0107",
+    "E0108",
+    "E0109",
+    "E0110",
+    "E0111",
     "E0119",
     "E0120",
     "E0356",
@@ -220,7 +229,11 @@ fn gen_error_pages() {
         let _snapshot_diag = load_preferred_diag(&root, code, jet_rel);
         let row = jet_foundation::Registry::diagnostic(code)
             .unwrap_or_else(|| panic!("missing typed diagnostic row for {code}"));
-        let _ = (&_snapshot_diag.what, &_snapshot_diag.why, &_snapshot_diag.fix);
+        let _ = (
+            &_snapshot_diag.what,
+            &_snapshot_diag.why,
+            &_snapshot_diag.fix,
+        );
         let jet_path = root.join(jet_rel);
         let fixed_path = jet_path.with_file_name(
             jet_path

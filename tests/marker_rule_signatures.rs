@@ -1,9 +1,6 @@
 mod common;
 
-fn checked(
-    source: &str,
-    mode: jet::Sema::CompileMode,
-) -> (jet::AST::ProgramBundle, Vec<String>) {
+fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBundle, Vec<String>) {
     let dir = std::env::temp_dir().join(format!(
         "jet_marker_rule_signatures_{}_{}",
         std::process::id(),
@@ -58,13 +55,14 @@ fn core_lang_marker_enums_accept_dot_literals_without_imports() {
 
 #[test]
 fn job_scope_and_cli_name_collisions_use_the_job_diagnostic() {
-    let valid = codes(
-        "#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\nfn run() {}",
-    );
+    let valid = codes("#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\nfn run() {}");
     assert!(valid.is_empty(), "{valid:?}");
 
     let diagnostics = codes("#Job fn output() {}\nfn run() {}");
-    assert!(diagnostics.iter().any(|code| code == "E0928"), "{diagnostics:?}");
+    assert!(
+        diagnostics.iter().any(|code| code == "E0928"),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -92,16 +90,18 @@ fn qualified_state_namespace_is_valid_and_not_a_value() {
     );
     assert!(!valid.iter().any(|code| code == "E0151"), "{valid:?}");
 
-    let value = codes(
-        "state Door { Closed Open }\nstruct Door {}\nfn run() { print(Door.State.Open) }",
-    );
+    let value =
+        codes("state Door { Closed Open }\nstruct Door {}\nfn run() { print(Door.State.Open) }");
     assert!(value.iter().any(|code| code == "E0302"), "{value:?}");
 }
 
 #[test]
 fn retired_bench_marker_teaches_measured_test() {
     let diagnostics = codes("#Bench(\"old\") { assert(true) }\nfn run() {}\n");
-    assert!(diagnostics.iter().any(|code| code == "E0927"), "{diagnostics:?}");
+    assert!(
+        diagnostics.iter().any(|code| code == "E0927"),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -121,10 +121,7 @@ fn signed_auto_derive_markers_parse_on_types() {
 
 #[test]
 fn negative_sign_is_reserved_for_auto_derive_traits() {
-    for source in [
-        "#!Pure\nfn run() {}",
-        "#[!Inline]\nfn run() {}",
-    ] {
+    for source in ["#!Pure\nfn run() {}", "#[!Inline]\nfn run() {}"] {
         let diagnostics = parse_codes(source);
         assert_eq!(diagnostics, vec!["E0931"], "{diagnostics:?}\n{source}");
     }
@@ -164,7 +161,10 @@ fn run() {}
     };
     assert!(door.methods[0].is_inline);
     assert_eq!(
-        door.methods[0].state_requires.as_ref().map(|state| state.0.as_str()),
+        door.methods[0]
+            .state_requires
+            .as_ref()
+            .map(|state| state.0.as_str()),
         Some("Ready")
     );
 
@@ -216,7 +216,10 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
     ];
     for (label, source, expected_site) in fixtures {
         let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
-        assert!(lexer_diagnostics.is_empty(), "{label}: {lexer_diagnostics:?}");
+        assert!(
+            lexer_diagnostics.is_empty(),
+            "{label}: {lexer_diagnostics:?}"
+        );
         let program = jet::Parser::parse(&tokens)
             .unwrap_or_else(|diagnostics| panic!("{label}: {diagnostics:?}"));
         assert!(
@@ -229,8 +232,7 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
         );
     }
 
-    let (tokens, lexer_diagnostics) =
-        jet::Lexer::lex("#Policy(copies: .Explicit)\nfn run() {}");
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex("#Policy(copies: .Explicit)\nfn run() {}");
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
     let program = jet::Parser::parse(&tokens)
         .unwrap_or_else(|diagnostics| panic!("#Policy module declaration: {diagnostics:?}"));
@@ -308,8 +310,14 @@ fn task_metadata_binds_typed_platform_skip_limits_and_formats_stably() {
             .as_ref()
             .and_then(|metadata| metadata.skip.as_ref())
             .expect("typed task skip");
-        assert_eq!(skip.reason_for_host("aarch64-macos").is_none(), platform == "MacOS");
-        assert_eq!(skip.reason_for_host("x86_64-linux").is_none(), platform == "Linux");
+        assert_eq!(
+            skip.reason_for_host("aarch64-macos").is_none(),
+            platform == "MacOS"
+        );
+        assert_eq!(
+            skip.reason_for_host("x86_64-linux").is_none(),
+            platform == "Linux"
+        );
 
         let formatted = jet::format_source(&source).expect("typed task skip should format");
         assert!(
@@ -370,7 +378,9 @@ fn run() {
         1,
         "{wrong:?}"
     );
-    assert!(!wrong.iter().any(|code| matches!(code.as_str(), "E0345" | "E0347")));
+    assert!(!wrong
+        .iter()
+        .any(|code| matches!(code.as_str(), "E0345" | "E0347")));
 }
 
 #[test]
@@ -383,7 +393,9 @@ fn run() {
 }
 "#,
     );
-    assert!(!valid.iter().any(|code| matches!(code.as_str(), "E0930" | "E0762")));
+    assert!(!valid
+        .iter()
+        .any(|code| matches!(code.as_str(), "E0930" | "E0762")));
 
     let wrong = codes(
         r#"
@@ -519,9 +531,7 @@ fn run() {}
     let mut saw_range = false;
     for item in &module.items {
         match item {
-            jet::AST::Item::Test(test) => {
-                saw_test = test.name.as_deref() == Some("shared")
-            }
+            jet::AST::Item::Test(test) => saw_test = test.name.as_deref() == Some("shared"),
             jet::AST::Item::Distinct(distinct) if distinct.name == "Tiny" => {
                 saw_range = distinct
                     .range
@@ -611,11 +621,14 @@ fn invariant_marker_is_retired_in_favor_of_range_types() {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
     let diagnostics = jet::Parser::parse(&tokens).expect_err("retired marker must not parse");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "E0927"
-            && diagnostic.what.contains("#Invariant")
-            && diagnostic.fix.contains("distinct Int(lo..hi)")
-    }), "{diagnostics:?}");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0927"
+                && diagnostic.what.contains("#Invariant")
+                && diagnostic.fix.contains("distinct Int(lo..hi)")
+        }),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -693,10 +706,7 @@ fn run() {}
         })
         .collect::<Vec<_>>();
     names.sort();
-    assert_eq!(
-        names,
-        ["first_case", "second_other"]
-    );
+    assert_eq!(names, ["first_case", "second_other"]);
 }
 
 #[test]

@@ -103,41 +103,181 @@ fn rust_enum_variants(source: &str, rust_name: &str) -> Vec<String> {
 
 fn write_prelude_enum_meta(manifest: &PathBuf) {
     let specs = [
-        ("TaskFailure", "../jet-codegen/src/Prelude/TaskGroup.rs", "JetTaskFailure"),
-        ("ProcessStreamMode", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "ProcessStreamMode"),
-        ("IOOperation", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "IOOperation"),
-        ("IOError", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "IOError"),
-        ("ProcessResourceLimit", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "ProcessResourceLimit"),
-        ("TextWidthAmbiguous", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "TextWidthAmbiguous"),
-        ("TextWidthControls", "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs", "TextWidthControls"),
-        ("TerminalMode", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "TerminalMode"),
-        ("WatchDomain", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "WatchDomain"),
-        ("WatchKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "WatchKind"),
-        ("Key", "../jet-codegen/src/Prelude/Core/TermKey.rs", "JetKey"),
-        ("EncodingFormat", "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs", "EncodingFormat"),
-        ("EncodingErrorKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs", "EncodingErrorKind"),
-        ("CBORErrorKind", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "CBORErrorKind"),
-        ("XMLReason", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "XMLReason"),
-        ("DataEvent", "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs", "DataEvent"),
-        ("AuthError", "../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs", "JetAuthError"),
-        ("HookOutcome", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetHookOutcome"),
-        ("HookDecision", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetHookDecision"),
-        ("HookPolicy", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetHookPolicy"),
-        ("Loadable", "../jet-codegen/src/Prelude/Core/Values.rs", "JetLoadable"),
-        ("Overflow", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetEventOverflow"),
-        ("FailurePolicy", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetFailurePolicy"),
-        ("EventResult", "../jet-codegen/src/Prelude/Ui.rs", "JetEventResult"),
-        ("DispatchState", "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs", "JetDispatchState"),
-        ("ServiceReceipt", "../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs", "JetServiceReceipt"),
-        ("TaskOutcome", "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs", "JetTaskOutcome"),
-        ("TaskStatus", "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs", "JetTaskStatus"),
-        ("SMTPSecurity", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "SMTPSecurity"),
-        ("RecipientPolicy", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "RecipientPolicy"),
-        ("SMTPAuth", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "SMTPAuth"),
-        ("TLSTrust", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "TLSTrust"),
-        ("EmailError", "../jet-codegen/src/Prelude/CoreLib/Email.rs", "Error"),
-        ("TLSVersion", "../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs", "JetTLSVersion"),
-        ("DataTree", "../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs", "DataTree"),
+        (
+            "TaskFailure",
+            "../jet-codegen/src/Prelude/TaskGroup.rs",
+            "JetTaskFailure",
+        ),
+        (
+            "ProcessStreamMode",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "ProcessStreamMode",
+        ),
+        (
+            "IOOperation",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+            "IOOperation",
+        ),
+        (
+            "IOError",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+            "IOError",
+        ),
+        (
+            "ProcessResourceLimit",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+            "ProcessResourceLimit",
+        ),
+        (
+            "TextWidthAmbiguous",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+            "TextWidthAmbiguous",
+        ),
+        (
+            "TextWidthControls",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs",
+            "TextWidthControls",
+        ),
+        (
+            "TerminalMode",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "TerminalMode",
+        ),
+        (
+            "WatchDomain",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "WatchDomain",
+        ),
+        (
+            "WatchKind",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "WatchKind",
+        ),
+        (
+            "Key",
+            "../jet-codegen/src/Prelude/Core/TermKey.rs",
+            "JetKey",
+        ),
+        (
+            "EncodingFormat",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
+            "EncodingFormat",
+        ),
+        (
+            "EncodingErrorKind",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
+            "EncodingErrorKind",
+        ),
+        (
+            "CBORErrorKind",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "CBORErrorKind",
+        ),
+        (
+            "XMLReason",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "XMLReason",
+        ),
+        (
+            "DataEvent",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+            "DataEvent",
+        ),
+        (
+            "AuthError",
+            "../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs",
+            "JetAuthError",
+        ),
+        (
+            "HookOutcome",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+            "JetHookOutcome",
+        ),
+        (
+            "HookDecision",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+            "JetHookDecision",
+        ),
+        (
+            "HookPolicy",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+            "JetHookPolicy",
+        ),
+        (
+            "Loadable",
+            "../jet-codegen/src/Prelude/Core/Values.rs",
+            "JetLoadable",
+        ),
+        (
+            "Overflow",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+            "JetEventOverflow",
+        ),
+        (
+            "FailurePolicy",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+            "JetFailurePolicy",
+        ),
+        (
+            "EventResult",
+            "../jet-codegen/src/Prelude/Ui.rs",
+            "JetEventResult",
+        ),
+        (
+            "DispatchState",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
+            "JetDispatchState",
+        ),
+        (
+            "ServiceReceipt",
+            "../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs",
+            "JetServiceReceipt",
+        ),
+        (
+            "TaskOutcome",
+            "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
+            "JetTaskOutcome",
+        ),
+        (
+            "TaskStatus",
+            "../jet-codegen/src/Prelude/CoreLib/Top/Services.rs",
+            "JetTaskStatus",
+        ),
+        (
+            "SMTPSecurity",
+            "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+            "SMTPSecurity",
+        ),
+        (
+            "RecipientPolicy",
+            "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+            "RecipientPolicy",
+        ),
+        (
+            "SMTPAuth",
+            "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+            "SMTPAuth",
+        ),
+        (
+            "TLSTrust",
+            "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+            "TLSTrust",
+        ),
+        (
+            "EmailError",
+            "../jet-codegen/src/Prelude/CoreLib/Email.rs",
+            "Error",
+        ),
+        (
+            "TLSVersion",
+            "../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs",
+            "JetTLSVersion",
+        ),
+        (
+            "DataTree",
+            "../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs",
+            "DataTree",
+        ),
     ];
     let mut entries = Vec::new();
     for (jet_name, relative, rust_name) in specs {
@@ -156,7 +296,9 @@ fn write_prelude_enum_meta(manifest: &PathBuf) {
         entries.push((alias, data_tree.clone()));
     }
 
-    let mut body = String::from("pub(crate) fn all() -> &'static [(&'static str, &'static [&'static str])] {\n    &[\n");
+    let mut body = String::from(
+        "pub(crate) fn all() -> &'static [(&'static str, &'static [&'static str])] {\n    &[\n",
+    );
     for (name, variants) in &entries {
         body.push_str(&format!("        ({name:?}, &["));
         for variant in variants {

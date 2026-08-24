@@ -54,10 +54,14 @@ fn http_manifests_have_no_new_external_http_or_compression_crates() {
             let needle_eq = format!("{needle} =");
             let needle_dot = format!("{needle}.");
             assert!(
-                !text.contains(&needle_eq) && !text.lines().any(|line| {
-                    let trimmed = line.trim_start();
-                    trimmed.starts_with(needle) && (trimmed[needle.len()..].starts_with(" =") || trimmed[needle.len()..].starts_with("."))
-                }) && !text.contains(&needle_dot),
+                !text.contains(&needle_eq)
+                    && !text.lines().any(|line| {
+                        let trimmed = line.trim_start();
+                        trimmed.starts_with(needle)
+                            && (trimmed[needle.len()..].starts_with(" =")
+                                || trimmed[needle.len()..].starts_with("."))
+                    })
+                    && !text.contains(&needle_dot),
                 "{path} must not depend on `{needle}`"
             );
         }
@@ -94,10 +98,7 @@ fn http_prelude_sources_do_not_import_forbidden_http_crates() {
     for path in sources {
         let text = read(path);
         for needle in forbidden_imports {
-            assert!(
-                !text.contains(needle),
-                "{path} must not import `{needle}`"
-            );
+            assert!(!text.contains(needle), "{path} must not import `{needle}`");
         }
     }
     // Comment noise in HTTPClient.rs historically mentioned ureq; keep it gone.

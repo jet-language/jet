@@ -2,8 +2,8 @@
 //! Clang's JSONValue is the declaration source of truth. The binder never parses
 //! header text, and every native input participates in provenance/cache identity.
 
-use crate::JSON::{self, JSONValue};
 use crate::ForeignBridge::IdentityBuilder;
+use crate::JSON::{self, JSONValue};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -134,10 +134,16 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     validate_options(options)?;
     let mut resolved = options.clone();
     resolved.clang = std::fs::canonicalize(&options.clang).map_err(|e| {
-        BindError::IO(format!("could not resolve `{}`: {e}", options.clang.display()))
+        BindError::IO(format!(
+            "could not resolve `{}`: {e}",
+            options.clang.display()
+        ))
     })?;
     resolved.archiver = std::fs::canonicalize(&options.archiver).map_err(|e| {
-        BindError::IO(format!("could not resolve `{}`: {e}", options.archiver.display()))
+        BindError::IO(format!(
+            "could not resolve `{}`: {e}",
+            options.archiver.display()
+        ))
     })?;
     let options = &resolved;
     let canonical = std::fs::canonicalize(header)
@@ -154,8 +160,9 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     for ast in &asts {
         ast_identity.extend_from_slice(&ast.stdout);
         ast_identity.push(0);
-        let parsed = JSON::parse(&String::from_utf8_lossy(&ast.stdout))
-            .map_err(|e| BindError::ToolFailed(format!("clang returned malformed AST data: {e}")))?;
+        let parsed = JSON::parse(&String::from_utf8_lossy(&ast.stdout)).map_err(|e| {
+            BindError::ToolFailed(format!("clang returned malformed AST data: {e}"))
+        })?;
         let projected = project_surface(&parsed, &canonical, &options.namespaces)?;
         surface.classes.extend(projected.classes);
         surface.functions.extend(projected.functions);
@@ -212,7 +219,12 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
                     .map(|method| format!("{}.{}", class.name, method.jet_name)),
             )
         })
-        .chain(surface.functions.iter().map(|function| function.jet_name.clone()))
+        .chain(
+            surface
+                .functions
+                .iter()
+                .map(|function| function.jet_name.clone()),
+        )
         .collect();
     Ok(BindResult {
         source: jet,
@@ -257,11 +269,16 @@ fn validate_options(options: &BindOptions) -> Result<(), BindError> {
         )));
     }
     if options.target.trim().is_empty() {
-        return Err(BindError::Source("a selected target triple is required".into()));
+        return Err(BindError::Source(
+            "a selected target triple is required".into(),
+        ));
     }
     for (name, path) in [("clang++", &options.clang), ("ar", &options.archiver)] {
         if !path.is_absolute() || !path.is_file() {
-            return Err(BindError::ToolMissing(format!("{name}` at `{}`", path.display())));
+            return Err(BindError::ToolMissing(format!(
+                "{name}` at `{}`",
+                path.display()
+            )));
         }
     }
     for library in &options.libraries {
@@ -289,16 +306,24 @@ fn clang_asts(header: &Path, options: &BindOptions) -> Result<Vec<Output>, BindE
     let filters = if options.namespaces.is_empty() {
         vec![None]
     } else {
-        options.namespaces.iter().map(|name| Some(name.as_str())).collect()
+        options
+            .namespaces
+            .iter()
+            .map(|name| Some(name.as_str()))
+            .collect()
     };
     let mut outputs = Vec::new();
     for filter in filters {
         let mut command = Command::new(&options.clang);
         command.args(["-std=c++17", "-Xclang", "-ast-dump=json"]);
         if let Some(filter) = filter {
-            command.arg("-Xclang").arg(format!("-ast-dump-filter={filter}"));
+            command
+                .arg("-Xclang")
+                .arg(format!("-ast-dump-filter={filter}"));
         }
-        command.args(["-fsyntax-only", "-target"]).arg(&options.target);
+        command
+            .args(["-fsyntax-only", "-target"])
+            .arg(&options.target);
         for dir in &options.include_dirs {
             command.arg("-I").arg(dir);
         }
@@ -346,9 +371,18 @@ fn binding_identity(
         "undefined_symbols",
         crate::FFI::undefined_symbol_flag_for_target(target).as_bytes(),
     );
-    identity.field("cxx_runtime", crate::FFI::cxx_runtime_for_target(target).as_bytes());
-    identity.field("fixed_flags", b"-std=c++17\0-fPIC\0-c\0-target\0-shared\0rcs");
-    identity.field("include_dirs_count", &(options.include_dirs.len() as u64).to_le_bytes());
+    identity.field(
+        "cxx_runtime",
+        crate::FFI::cxx_runtime_for_target(target).as_bytes(),
+    );
+    identity.field(
+        "fixed_flags",
+        b"-std=c++17\0-fPIC\0-c\0-target\0-shared\0rcs",
+    );
+    identity.field(
+        "include_dirs_count",
+        &(options.include_dirs.len() as u64).to_le_bytes(),
+    );
     for value in &options.include_dirs {
         identity.field("include_dir", value.as_os_str().as_encoded_bytes());
     }
@@ -359,17 +393,29 @@ fn binding_identity(
     for value in &options.library_dirs {
         identity.field("library_dir", value.as_os_str().as_encoded_bytes());
     }
-    identity.field("libraries_count", &(options.libraries.len() as u64).to_le_bytes());
+    identity.field(
+        "libraries_count",
+        &(options.libraries.len() as u64).to_le_bytes(),
+    );
     for value in &options.libraries {
         identity.field("library", value.as_bytes());
     }
-    identity.field("namespaces_count", &(options.namespaces.len() as u64).to_le_bytes());
+    identity.field(
+        "namespaces_count",
+        &(options.namespaces.len() as u64).to_le_bytes(),
+    );
     for value in &options.namespaces {
         identity.field("namespace", value.as_bytes());
     }
-    identity.field("templates_count", &(options.templates.len() as u64).to_le_bytes());
+    identity.field(
+        "templates_count",
+        &(options.templates.len() as u64).to_le_bytes(),
+    );
     for template in &options.templates {
-        identity.field("template.qualified_name", template.qualified_name.as_bytes());
+        identity.field(
+            "template.qualified_name",
+            template.qualified_name.as_bytes(),
+        );
         identity.field(
             "template.cpp_args_count",
             &(template.cpp_args.len() as u64).to_le_bytes(),
@@ -382,14 +428,25 @@ fn binding_identity(
     identity.finish()
 }
 
-fn project_surface(ast: &JSONValue, header: &Path, selected: &[String]) -> Result<Surface, BindError> {
+fn project_surface(
+    ast: &JSONValue,
+    header: &Path,
+    selected: &[String],
+) -> Result<Surface, BindError> {
     let mut surface = Surface {
         classes: Vec::new(),
         functions: Vec::new(),
         templates: Vec::new(),
     };
     let canonical = header.to_string_lossy();
-    walk_ast(ast, &canonical, false, &mut Vec::new(), selected, &mut surface)?;
+    walk_ast(
+        ast,
+        &canonical,
+        false,
+        &mut Vec::new(),
+        selected,
+        &mut surface,
+    )?;
     disambiguate(&mut surface.functions);
     Ok(surface)
 }
@@ -402,7 +459,9 @@ fn walk_ast(
     selected: &[String],
     surface: &mut Surface,
 ) -> Result<(), BindError> {
-    let Some(map) = object(value) else { return Ok(()) };
+    let Some(map) = object(value) else {
+        return Ok(());
+    };
     let kind = string(map, "kind").unwrap_or("");
     let in_main = location_file(map)
         .map(|file| file == header)
@@ -433,7 +492,11 @@ fn walk_ast(
                 return Ok(());
             }
             "FunctionDecl" if !bool_field(map, "isImplicit") => {
-                surface.functions.push(parse_routine(map, qualified(namespace, string(map, "name").unwrap_or("")), None)?);
+                surface.functions.push(parse_routine(
+                    map,
+                    qualified(namespace, string(map, "name").unwrap_or("")),
+                    None,
+                )?);
                 return Ok(());
             }
             _ => {}
@@ -445,10 +508,15 @@ fn walk_ast(
     Ok(())
 }
 
-fn parse_class(map: &BTreeMap<String, JSONValue>, namespace: &[String]) -> Result<Class, BindError> {
+fn parse_class(
+    map: &BTreeMap<String, JSONValue>,
+    namespace: &[String],
+) -> Result<Class, BindError> {
     let name = string(map, "name").unwrap_or("");
     if !ident(name) {
-        return Err(BindError::Source("clang reported an unnamed C++ class".into()));
+        return Err(BindError::Source(
+            "clang reported an unnamed C++ class".into(),
+        ));
     }
     let mut public = string(map, "tagUsed") == Some("struct");
     let mut ctor = None;
@@ -480,7 +548,9 @@ fn parse_class(map: &BTreeMap<String, JSONValue>, namespace: &[String]) -> Resul
         name: name.to_string(),
         cpp_name: qualified(namespace, name),
         ctor: ctor.ok_or_else(|| {
-            BindError::Source(format!("class `{name}` needs one public scalar constructor"))
+            BindError::Source(format!(
+                "class `{name}` needs one public scalar constructor"
+            ))
         })?,
         methods,
     })
@@ -506,7 +576,9 @@ fn parse_template(
         }
     }
     let function = function.ok_or_else(|| {
-        BindError::Source(format!("template `{name}` has no callable clang declaration"))
+        BindError::Source(format!(
+            "template `{name}` has no callable clang declaration"
+        ))
     })?;
     let result = return_type(function)?.to_string();
     let params = raw_params(function)?;
@@ -538,7 +610,12 @@ fn instantiate_templates(
                 BindError::Source(format!(
                     "clang found no function template `{}` (selected templates: {})",
                     request.qualified_name,
-                    surface.templates.iter().map(|template| template.cpp_name.as_str()).collect::<Vec<_>>().join(", ")
+                    surface
+                        .templates
+                        .iter()
+                        .map(|template| template.cpp_name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ))
             })?;
         if template.type_params.len() != request.cpp_args.len() {
@@ -593,9 +670,8 @@ fn parse_routine(
     jet_name: Option<String>,
 ) -> Result<Routine, BindError> {
     let raw_name = string(map, "name").unwrap_or("");
-    let result = scalar(return_type(map)?).ok_or_else(|| {
-        BindError::Source(format!("`{cpp_name}` has an unsupported return type"))
-    })?;
+    let result = scalar(return_type(map)?)
+        .ok_or_else(|| BindError::Source(format!("`{cpp_name}` has an unsupported return type")))?;
     Ok(Routine {
         cpp_name,
         jet_name: jet_name
@@ -685,7 +761,10 @@ fn scalar(raw: &str) -> Option<Scalar> {
 }
 
 fn namespace_selected(namespace: &[String], selected: &[String]) -> bool {
-    selected.is_empty() || selected.iter().any(|choice| choice == &namespace.join("::"))
+    selected.is_empty()
+        || selected
+            .iter()
+            .any(|choice| choice == &namespace.join("::"))
 }
 
 fn qualified(namespace: &[String], name: &str) -> String {
@@ -722,7 +801,9 @@ fn children(map: &BTreeMap<String, JSONValue>) -> &[JSONValue] {
 }
 
 fn location_file(map: &BTreeMap<String, JSONValue>) -> Option<&str> {
-    map.get("loc").and_then(object).and_then(|loc| string(loc, "file"))
+    map.get("loc")
+        .and_then(object)
+        .and_then(|loc| string(loc, "file"))
 }
 
 fn disambiguate(routines: &mut [Routine]) {
@@ -741,7 +822,11 @@ fn disambiguate(routines: &mut [Routine]) {
             routines[index].jet_name = format!(
                 "{}_{}",
                 routines[index].jet_name,
-                if labels.is_empty() { "no_args" } else { &labels }
+                if labels.is_empty() {
+                    "no_args"
+                } else {
+                    &labels
+                }
             );
         }
     }
@@ -793,7 +878,9 @@ fn build_archive(
 
     let mut link = Command::new(&options.clang);
     link.arg("-target").arg(&options.target).arg("-shared");
-    link.arg(crate::FFI::undefined_symbol_flag_for_target(&options.target));
+    link.arg(crate::FFI::undefined_symbol_flag_for_target(
+        &options.target,
+    ));
     link.arg(&object);
     add_link_inputs(&mut link, options);
     link.arg("-o").arg(&proof);
@@ -867,8 +954,14 @@ fn render_provenance(
     );
     value.push_str(&format!(
         "clang_version={}\narchiver_version={}\n",
-        String::from_utf8_lossy(clang_version).lines().collect::<Vec<_>>().join(" | "),
-        String::from_utf8_lossy(archiver_version).lines().collect::<Vec<_>>().join(" | ")
+        String::from_utf8_lossy(clang_version)
+            .lines()
+            .collect::<Vec<_>>()
+            .join(" | "),
+        String::from_utf8_lossy(archiver_version)
+            .lines()
+            .collect::<Vec<_>>()
+            .join(" | ")
     ));
     for namespace in &options.namespaces {
         value.push_str(&format!("namespace={namespace}\n"));
@@ -1015,7 +1108,10 @@ fn render_cpp(header: &Path, lib: &str, surface: &Surface) -> String {
     let mut out = format!("#include <array>\n#include <cstdint>\n#include <cstdlib>\n#include <exception>\n#include <mutex>\n#include \"{}\"\nstatic thread_local int64_t jet_cpp_error;\nextern \"C\" int64_t {abi}_take_error(){{auto value=jet_cpp_error;jet_cpp_error=0;return value;}}\n", header.display());
     for class in &surface.classes {
         let name = snake(&class.name);
-        out.push_str(&format!("static std::array<{}*,64> {name}_slots{{}}; static std::mutex {name}_lock;\n", class.cpp_name));
+        out.push_str(&format!(
+            "static std::array<{}*,64> {name}_slots{{}}; static std::mutex {name}_lock;\n",
+            class.cpp_name
+        ));
         out.push_str(&format!("extern \"C\" int64_t {abi}_{name}_new("));
         cpp_params(&mut out, &class.ctor);
         out.push_str("){jet_cpp_error=0;try{auto* value=new ");
@@ -1026,25 +1122,43 @@ fn render_cpp(header: &Path, lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("static {}* {name}_get(int64_t handle){{if(handle<1||handle>64){{jet_cpp_error=2;return nullptr;}}std::lock_guard<std::mutex> guard({name}_lock);auto* value={name}_slots[handle-1];if(!value)jet_cpp_error=2;return value;}}\n", class.cpp_name));
         out.push_str(&format!("extern \"C\" void {abi}_{name}_close(int64_t handle){{jet_cpp_error=0;try{{if(handle<1||handle>64){{jet_cpp_error=2;return;}}{}* value=nullptr;{{std::lock_guard<std::mutex> guard({name}_lock);value={name}_slots[handle-1];{name}_slots[handle-1]=nullptr;}}if(!value){{jet_cpp_error=2;return;}}delete value;}}catch(...){{jet_cpp_error=1;}}}}\n", class.cpp_name));
         for method in &class.methods {
-            out.push_str(&format!("extern \"C\" {} {abi}_{name}_{}(int64_t handle", method.result.c(), method.jet_name));
+            out.push_str(&format!(
+                "extern \"C\" {} {abi}_{name}_{}(int64_t handle",
+                method.result.c(),
+                method.jet_name
+            ));
             if !method.params.is_empty() {
                 out.push_str(", ");
                 cpp_params(&mut out, &method.params);
             }
             out.push_str("){jet_cpp_error=0;auto* self=");
-            out.push_str(&format!("{name}_get(handle);if(!self)return {};try{{return self->{}(", method.result.zero(), method.cpp_name));
+            out.push_str(&format!(
+                "{name}_get(handle);if(!self)return {};try{{return self->{}(",
+                method.result.zero(),
+                method.cpp_name
+            ));
             cpp_args(&mut out, &method.params);
-            out.push_str(&format!(");}}catch(...){{jet_cpp_error=1;return {};}}}}\n", method.result.zero()));
+            out.push_str(&format!(
+                ");}}catch(...){{jet_cpp_error=1;return {};}}}}\n",
+                method.result.zero()
+            ));
         }
     }
     for function in &surface.functions {
-        out.push_str(&format!("extern \"C\" {} {abi}_{}(", function.result.c(), function.jet_name));
+        out.push_str(&format!(
+            "extern \"C\" {} {abi}_{}(",
+            function.result.c(),
+            function.jet_name
+        ));
         cpp_params(&mut out, &function.params);
         out.push_str("){jet_cpp_error=0;try{return ");
         out.push_str(&function.cpp_name);
         out.push('(');
         cpp_args(&mut out, &function.params);
-        out.push_str(&format!(");}}catch(...){{jet_cpp_error=1;return {};}}}}\n", function.result.zero()));
+        out.push_str(&format!(
+            ");}}catch(...){{jet_cpp_error=1;return {};}}}}\n",
+            function.result.zero()
+        ));
     }
     out
 }
@@ -1095,26 +1209,41 @@ fn supervised(command: &mut Command, timeout: Duration, tool: &str) -> Result<Ou
             BindError::IO(format!("could not start `{tool}`: {error}"))
         }
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::IO("could not supervise stdout".into()))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::IO("could not supervise stderr".into()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BindError::IO("could not supervise stdout".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BindError::IO("could not supervise stderr".into()))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + timeout;
     let status = loop {
-        match child.try_wait().map_err(|error| BindError::IO(format!("could not supervise `{tool}`: {error}")))? {
+        match child
+            .try_wait()
+            .map_err(|error| BindError::IO(format!("could not supervise `{tool}`: {error}")))?
+        {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(BindError::ToolFailed(format!("`{tool}` exceeded its time limit")));
+                return Err(BindError::ToolFailed(format!(
+                    "`{tool}` exceeded its time limit"
+                )));
             }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
     Ok(Output {
         status,
-        stdout: out.join().map_err(|_| BindError::IO("stdout reader failed".into()))??,
-        stderr: err.join().map_err(|_| BindError::IO("stderr reader failed".into()))??,
+        stdout: out
+            .join()
+            .map_err(|_| BindError::IO("stdout reader failed".into()))??,
+        stderr: err
+            .join()
+            .map_err(|_| BindError::IO("stderr reader failed".into()))??,
     })
 }
 
@@ -1123,7 +1252,10 @@ fn run(command: &mut Command, tool: &str) -> Result<(), BindError> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(BindError::ToolFailed(format!("{tool}: {}", launder(&output.stderr))))
+        Err(BindError::ToolFailed(format!(
+            "{tool}: {}",
+            launder(&output.stderr)
+        )))
     }
 }
 
@@ -1145,7 +1277,9 @@ fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     let mut out = Vec::new();
     let mut buffer = [0; 8192];
     loop {
-        let count = input.read(&mut buffer).map_err(|error| BindError::IO(format!("could not read foreign output: {error}")))?;
+        let count = input
+            .read(&mut buffer)
+            .map_err(|error| BindError::IO(format!("could not read foreign output: {error}")))?;
         if count == 0 {
             break;
         }
@@ -1225,11 +1359,15 @@ mod tests {
         let cache = root.join(".jet/bindings/cpp");
         let result = bind(&header, &cache, &options).unwrap();
         assert!(result.archive.is_file());
-        assert!(result.source.contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
+        assert!(result
+            .source
+            .contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
         assert!(result.source.contains("fn add(value: Int) Int ="));
         assert!(result.source.contains("Int CppError! -[FFI.Cpp]>"));
         assert!(!result.source.contains("=>"));
-        assert!(result.provenance.contains("descriptor=jet-ffi-descriptor-v1;"));
+        assert!(result
+            .provenance
+            .contains("descriptor=jet-ffi-descriptor-v1;"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

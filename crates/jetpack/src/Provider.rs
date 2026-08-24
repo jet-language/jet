@@ -14,7 +14,7 @@ use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::NixIndex::{IndexKey, NixIndexClient, NixIndexError};
-use crate::Store::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, Roots};
+use crate::Store::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, Roots, StoreError};
 use crate::SHA256;
 use crate::{ProviderFactValue, ProviderFacts};
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
@@ -1438,8 +1438,14 @@ impl Provider for NixProvider {
     }
 }
 
-fn nix_cache_error(roots: &Roots, error: impl std::fmt::Display) -> ProviderError {
-    let mut detail = error.to_string();
+fn nix_cache_error(roots: &Roots, error: StoreError) -> ProviderError {
+    let mut detail = format!(
+        "{}: {}; why: {}; fix: {}",
+        error.code(),
+        error.what(),
+        error.why(),
+        error.fix()
+    );
     if let Some(store_path) = missing_nix_store_path(roots) {
         detail.push_str(&format!("; missing Nix reference `{store_path}`"));
     }
@@ -1515,6 +1521,43 @@ fn realization_from_index(
                 .into(),
         ));
     }
+    if admitted.objects.is_empty() {
+        return Err(ProviderError::BadOutput(
+            "Nix cache admission returned an empty closure".into(),
+        ));
+    }
+    for (store_path, object) in &admitted.objects {
+        if *store_path != object.store_path {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache closure key `{store_path}` disagrees with its store path `{}`",
+                object.store_path
+            )));
+        }
+        if object.hangar_path.as_os_str().is_empty() {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache closure object `{store_path}` has no Hangar path"
+            )));
+        }
+        if object.hangar_digest.trim().is_empty() {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache closure object `{store_path}` has no Hangar digest"
+            )));
+        }
+        if object.upstream_proof_sha256.trim().is_empty() {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache closure object `{store_path}` has no upstream proof"
+            )));
+        }
+        if object
+            .direct_reference_digests
+            .iter()
+            .any(|digest| digest.is_empty())
+        {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache closure object `{store_path}` has an empty reference digest"
+            )));
+        }
+    }
 
     let mut named_outputs = BTreeMap::new();
     let mut facts = BTreeMap::from([
@@ -1560,6 +1603,21 @@ fn realization_from_index(
                 "Nix cache admission omitted indexed output `{name}`"
             ))
         })?;
+        let closure_object = admitted.objects.get(&object.store_path).ok_or_else(|| {
+            ProviderError::BadOutput(format!(
+                "Nix cache closure omitted indexed output `{name}` at `{}`",
+                object.store_path
+            ))
+        })?;
+        if closure_object.hangar_path != object.hangar_path
+            || closure_object.hangar_digest != object.hangar_digest
+            || closure_object.direct_reference_digests != object.direct_reference_digests
+            || closure_object.upstream_proof_sha256 != object.upstream_proof_sha256
+        {
+            return Err(ProviderError::BadOutput(format!(
+                "Nix cache output `{name}` disagrees with its closure object"
+            )));
+        }
         if object.store_path != *store_path {
             return Err(ProviderError::BadOutput(format!(
                 "Nix cache output `{name}` disagrees with the signed index: `{}` vs `{store_path}`",
@@ -1602,7 +1660,11 @@ fn realization_from_index(
             )));
         }
     }
-    let envelope = super::Envelope::Envelope::for_output(&primary, &spec.raw, "nix");
+    let primary_object = admitted.outputs.get(primary_name).ok_or_else(|| {
+        ProviderError::BadOutput("indexed Nix record has no admitted primary output".into())
+    })?;
+    let mut envelope = super::Envelope::Envelope::for_output(&primary, &spec.raw, "nix");
+    envelope.output_hash = primary_object.hangar_digest.clone();
     let provisional_identity = super::Store::CacheIdentity {
         source_fingerprint: envelope.output_hash.clone(),
         recipe_fingerprint: SHA256::sha256_hex(NIX_RECIPE_ID.as_bytes()),
@@ -3075,7 +3137,28 @@ mod tests {
                     },
                 ),
             ]),
-            objects: BTreeMap::new(),
+            objects: BTreeMap::from([
+                (
+                    out_store.into(),
+                    AdmittedNixObject {
+                        store_path: out_store.into(),
+                        hangar_path: root.join("objects/out"),
+                        hangar_digest: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                        direct_reference_digests: vec![leaf.into()],
+                        upstream_proof_sha256: "4".repeat(64),
+                    },
+                ),
+                (
+                    bin_store.into(),
+                    AdmittedNixObject {
+                        store_path: bin_store.into(),
+                        hangar_path: root.join("objects/bin"),
+                        hangar_digest: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                        direct_reference_digests: vec![bin_leaf.into(), leaf.into()],
+                        upstream_proof_sha256: "5".repeat(64),
+                    },
+                ),
+            ]),
             closure_receipt_sha256: "6".repeat(64),
         };
         let spec = classify("ripgrep@nixpkgs").unwrap();

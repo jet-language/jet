@@ -218,19 +218,41 @@ fn expand_callable_signature_uses_one_checked_fact_document() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
     let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
     assert!(human_text.contains("load_user [fn:"), "{human_text}");
-    assert!(human_text.contains("label: label = \"user\": String"), "{human_text}");
-    assert!(human_text.contains("policies=[trace(\"users.load\")]") , "{human_text}");
+    assert!(
+        human_text.contains("label: label = \"user\": String"),
+        "{human_text}"
+    );
+    assert!(
+        human_text.contains("policies=[trace(\"users.load\")]"),
+        "{human_text}"
+    );
 
     let json = Command::new(jet())
-        .args(["inspect", "expand", "--facts", "callable-signature", "--json"])
+        .args([
+            "inspect",
+            "expand",
+            "--facts",
+            "callable-signature",
+            "--json",
+        ])
         .arg(&fixture)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"selection\":\"callable-signature\""));
@@ -248,7 +270,12 @@ fn expand_derive_lens_projects_derived_capabilities() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
     let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
     assert!(human_text.contains("derive —"), "{human_text}");
     assert!(human_text.contains("Visible: Printable"), "{human_text}");
@@ -259,7 +286,12 @@ fn expand_derive_lens_projects_derived_capabilities() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"selection\":\"derive\""));
@@ -276,7 +308,12 @@ fn expand_templates_projects_checked_marker_impl_and_test_items() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
     let human_text = scrub_fixture(&String::from_utf8_lossy(&human.stdout), &fixture);
     for fact in [
         "marker #AddMarkerFields on Point",
@@ -296,7 +333,12 @@ fn expand_templates_projects_checked_marker_impl_and_test_items() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
     let json_text = scrub_fixture(&String::from_utf8_lossy(&json.stdout), &fixture);
     assert!(parse_json(&json_text).is_ok(), "{json_text}");
     assert!(json_text.contains("\"selection\":\"templates\""));
@@ -319,14 +361,35 @@ fn expand_json_is_canonical_and_lens_scoped() {
     let first = run();
     let second = run();
     assert_eq!(first.status.code(), Some(0));
-    assert_eq!(first.stdout, second.stdout, "expand JSON must be byte-stable");
+    assert_eq!(
+        first.stdout, second.stdout,
+        "expand JSON must be byte-stable"
+    );
     let stdout = String::from_utf8_lossy(&first.stdout);
-    assert!(stdout.starts_with('{'), "JSON mode must not print human headers: {stdout}");
-    assert!(stdout.contains("\"schema_version\":14"), "must reuse semindex schema: {stdout}");
-    assert!(stdout.contains("\"expand\":{\"selection\":\"inline\""), "missing expand projection: {stdout}");
-    assert!(stdout.contains("\"contract\":\"#Inline"), "inline facts missing: {stdout}");
-    assert!(stdout.contains("\"check\":{\"status\":\"passed\""), "check provenance missing: {stdout}");
-    assert!(!stdout.contains("inline —"), "human lens header leaked into JSON: {stdout}");
+    assert!(
+        stdout.starts_with('{'),
+        "JSON mode must not print human headers: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"schema_version\":14"),
+        "must reuse semindex schema: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"expand\":{\"selection\":\"inline\""),
+        "missing expand projection: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"contract\":\"#Inline"),
+        "inline facts missing: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"check\":{\"status\":\"passed\""),
+        "check provenance missing: {stdout}"
+    );
+    assert!(
+        !stdout.contains("inline —"),
+        "human lens header leaked into JSON: {stdout}"
+    );
 }
 
 #[test]
@@ -343,11 +406,17 @@ fn expand_layout_human_and_json_are_deterministic() {
     let first = run();
     let second = run();
     assert_eq!(first.status.code(), Some(0));
-    assert_eq!(first.stdout, second.stdout, "layout text must be byte-stable");
+    assert_eq!(
+        first.stdout, second.stdout,
+        "layout text must be byte-stable"
+    );
     let human = scrub_fixture(&String::from_utf8_lossy(&first.stdout), &fixture);
     assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
     for type_name in ["PlainPacket", "CPacket", "ColumnPacket", "PacketState"] {
-        assert!(human.contains(&format!("{type_name}.@layout")), "{type_name}: {human}");
+        assert!(
+            human.contains(&format!("{type_name}.@layout")),
+            "{type_name}: {human}"
+        );
     }
     assert!(human.contains("PlainPacket.@layout   kind=default size=unknown"));
     assert!(human.contains("CPacket.@layout   kind=c size=8 alignment=4 stride=8"));
@@ -368,7 +437,10 @@ fn expand_layout_human_and_json_are_deterministic() {
     let json_first = json_run();
     let json_second = json_run();
     assert_eq!(json_first.status.code(), Some(0));
-    assert_eq!(json_first.stdout, json_second.stdout, "layout JSON must be byte-stable");
+    assert_eq!(
+        json_first.stdout, json_second.stdout,
+        "layout JSON must be byte-stable"
+    );
     let json = scrub_fixture(&String::from_utf8_lossy(&json_first.stdout), &fixture);
     assert!(parse_json(&json).is_ok(), "layout JSON must parse: {json}");
     assert!(json.contains("\"selection\":\"layout\""));
@@ -405,8 +477,14 @@ fn expand_effects_and_layout_report_checked_facts() {
         .unwrap();
     assert_eq!(layout.status.code(), Some(0));
     let layout_human = scrub_fixture(&String::from_utf8_lossy(&layout.stdout), &fixture);
-    assert!(layout_human.contains("AuditPacket.@layout"), "{layout_human}");
-    assert!(layout_human.contains("byte_facts=unavailable"), "{layout_human}");
+    assert!(
+        layout_human.contains("AuditPacket.@layout"),
+        "{layout_human}"
+    );
+    assert!(
+        layout_human.contains("byte_facts=unavailable"),
+        "{layout_human}"
+    );
     assert!(layout_human.contains("[E0959]"), "{layout_human}");
     check_snapshot(
         "expand_effects_layout.txt",
@@ -451,7 +529,10 @@ fn expand_json_bare_projects_every_lens() {
         .unwrap();
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(parse_json(&stdout).is_ok(), "bare expand JSON must parse: {stdout}");
+    assert!(
+        parse_json(&stdout).is_ok(),
+        "bare expand JSON must parse: {stdout}"
+    );
     assert!(stdout.contains("\"selection\":\"all\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"inline\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"memory\""), "{stdout}");
@@ -460,8 +541,14 @@ fn expand_json_bare_projects_every_lens() {
     assert!(stdout.contains("\"name\":\"layout\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"derive\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"templates\""), "{stdout}");
-    assert!(stdout.contains("\"name\":\"callable-signature\""), "{stdout}");
-    assert!(!stdout.contains("inline —"), "human output leaked into JSON: {stdout}");
+    assert!(
+        stdout.contains("\"name\":\"callable-signature\""),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("inline —"),
+        "human output leaked into JSON: {stdout}"
+    );
 }
 
 #[test]
@@ -475,13 +562,22 @@ fn expand_json_selected_empty_and_positions_are_proved() {
         .unwrap();
     assert_eq!(empty.status.code(), Some(0));
     let empty_json = String::from_utf8_lossy(&empty.stdout);
-    assert!(parse_json(&empty_json).is_ok(), "selected empty JSON must parse: {empty_json}");
+    assert!(
+        parse_json(&empty_json).is_ok(),
+        "selected empty JSON must parse: {empty_json}"
+    );
     assert!(empty_json.contains("\"selection\":\"memory\""));
-    assert!(empty_json.contains("\"facts\":[]"), "selected empty lens must be explicit: {empty_json}");
+    assert!(
+        empty_json.contains("\"facts\":[]"),
+        "selected empty lens must be explicit: {empty_json}"
+    );
 
     let memory = Command::new(jet())
         .args(["inspect", "expand", "--facts", "memory", "--json"])
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/memory/effect_denials.jet"))
+        .arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("examples/features/memory/effect_denials.jet"),
+        )
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -489,7 +585,10 @@ fn expand_json_selected_empty_and_positions_are_proved() {
     let memory_json = String::from_utf8_lossy(&memory.stdout);
     assert!(parse_json(&memory_json).is_ok());
     assert!(memory_json.contains("\"fact\":\"!Mem.Alloc\""));
-    assert!(memory_json.contains("\"line\":4"), "memory fact location missing: {memory_json}");
+    assert!(
+        memory_json.contains("\"line\":4"),
+        "memory fact location missing: {memory_json}"
+    );
 
     let web = Command::new(jet())
         .args(["inspect", "expand", "--facts", "web", "--json"])
@@ -501,7 +600,10 @@ fn expand_json_selected_empty_and_positions_are_proved() {
     let web_json = String::from_utf8_lossy(&web.stdout);
     assert!(parse_json(&web_json).is_ok());
     assert!(web_json.contains("\"kind\":\"web_graph\""));
-    assert!(web_json.contains("\"span\":{"), "web fact positions missing: {web_json}");
+    assert!(
+        web_json.contains("\"span\":{"),
+        "web fact positions missing: {web_json}"
+    );
 }
 
 #[test]
@@ -516,11 +618,26 @@ fn expand_json_compile_error_uses_machine_diagnostics() {
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "JSON diagnostic must use jet.report/v1: {stdout}");
-    assert!(stdout.contains("\"code\":\"E0102\""), "missing registered diagnostic: {stdout}");
-    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON line must parse: {stdout}");
-    assert!(!stdout.contains("Error ["), "human diagnostic leaked into JSON: {stdout}");
-    assert!(stderr.is_empty(), "JSON mode should keep stderr quiet: {stderr}");
+    assert!(
+        stdout.starts_with("{\"schema\":\"jet.report/v1\""),
+        "JSON diagnostic must use jet.report/v1: {stdout}"
+    );
+    assert!(
+        stdout.contains("\"code\":\"E0102\""),
+        "missing registered diagnostic: {stdout}"
+    );
+    assert!(
+        parse_json(&stdout).is_ok(),
+        "diagnostic JSON line must parse: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Error ["),
+        "human diagnostic leaked into JSON: {stdout}"
+    );
+    assert!(
+        stderr.is_empty(),
+        "JSON mode should keep stderr quiet: {stderr}"
+    );
 }
 
 #[test]
@@ -534,9 +651,15 @@ fn expand_json_unknown_lens_uses_machine_diagnostic() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""), "{stdout}");
+    assert!(
+        stdout.starts_with("{\"schema\":\"jet.report/v1\""),
+        "{stdout}"
+    );
     assert!(stdout.contains("\"code\":\"E2941\""), "{stdout}");
-    assert!(parse_json(&stdout).is_ok(), "diagnostic JSON line must parse: {stdout}");
+    assert!(
+        parse_json(&stdout).is_ok(),
+        "diagnostic JSON line must parse: {stdout}"
+    );
     assert!(out.stderr.is_empty());
 }
 
@@ -580,7 +703,10 @@ fn expand_unknown_lens_golden() {
 
 #[test]
 fn expand_missing_file_is_user_error() {
-    let out = Command::new(jet()).args(["inspect", "expand"]).output().unwrap();
+    let out = Command::new(jet())
+        .args(["inspect", "expand"])
+        .output()
+        .unwrap();
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -619,11 +745,7 @@ fn expand_compile_error_reports_ordinary_diagnostics() {
 #[test]
 fn stale_manifest_name_pack_jet_is_e1226() {
     let dir = isolated_cwd("stale_pack_jet");
-    fs::write(
-        dir.join("pack.jet"),
-        "name: \"x\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
+    fs::write(dir.join("pack.jet"), "name: \"x\"\nversion: \"0.1.0\"\n").unwrap();
     let out = Command::new(jet())
         .arg("add")
         .arg("dep")
@@ -988,7 +1110,10 @@ fn explicit_project_directory_missing_entry_reports_run_jet() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E2105") && stderr.contains("run.jet"), "{stderr}");
+    assert!(
+        stderr.contains("E2105") && stderr.contains("run.jet"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -1015,7 +1140,10 @@ fn malformed_workspace_never_falls_back_to_an_ordinary_entry() {
     );
     assert!(!String::from_utf8_lossy(&output.stdout).contains("SHOULD-NOT-RUN"));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("E0995") || stderr.contains("E0003"), "{stderr}");
+    assert!(
+        stderr.contains("E0995") || stderr.contains("E0003"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -1027,7 +1155,11 @@ fn stale_workspace_lock_never_becomes_an_empty_member_index() {
         "version = 1\nworkspace_source_digest = \"sha256-stale\"\n",
     )
     .unwrap();
-    fs::write(dir.join("run.jet"), "fn run() { print(\"SHOULD-NOT-RUN\") }\n").unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        "fn run() { print(\"SHOULD-NOT-RUN\") }\n",
+    )
+    .unwrap();
     let output = Command::new(jet())
         .args(["run"])
         .current_dir(&dir)
@@ -1052,8 +1184,14 @@ fn stale_workspace_lock_never_becomes_an_empty_member_index() {
 #[test]
 fn service_probe_unavailable_without_dev_reports_diagnostic() {
     let dir = isolated_cwd("service_probe_no_env");
-    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
-    fs::write(dir.join("run.jet"), r#"module env.dev {
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("run.jet"),
+        r#"module env.dev {
     services: { mydb: { run: ["echo", "mydb"], ready: "true" } }
 }
 
@@ -1069,7 +1207,9 @@ module perf.package {
     }],
 }
 fn run() {}
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     // jet budget check: ServiceProbe stub should report "unavailable", not 101.
     let out = Command::new(jet())
         .args(["budget", "check"])
@@ -1077,7 +1217,11 @@ fn run() {}
         .output()
         .unwrap();
     // Exit code must not be 101 (I2 — rustc never speaks to user).
-    assert_ne!(out.status.code(), Some(101), "rustc must never speak to user (I2)");
+    assert_ne!(
+        out.status.code(),
+        Some(101),
+        "rustc must never speak to user (I2)"
+    );
     assert_ne!(out.status.code(), Some(2), "usage error unexpected");
     let combined = format!(
         "{}{}",
@@ -1085,7 +1229,9 @@ fn run() {}
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        combined.contains("ServiceProbe") || combined.contains("unavailable") || combined.contains("jet dev"),
+        combined.contains("ServiceProbe")
+            || combined.contains("unavailable")
+            || combined.contains("jet dev"),
         "expected unavailability message; got:\n{combined}"
     );
 }
@@ -1167,10 +1313,17 @@ fn run() {}
     let CanonicalJson::Object(provider) = &measurement["provider"] else {
         panic!("provider")
     };
-    assert_eq!(provider["kind"], CanonicalJson::String("ServiceProbe".into()));
+    assert_eq!(
+        provider["kind"],
+        CanonicalJson::String("ServiceProbe".into())
+    );
     assert_eq!(provider["identity"], CanonicalJson::String("mydb".into()));
     let CanonicalJson::Array(samples) = &measurement["samples"] else {
         panic!("samples")
     };
-    assert_eq!(samples.len(), 20, "ServiceProbe must produce exactly 20 samples");
+    assert_eq!(
+        samples.len(),
+        20,
+        "ServiceProbe must produce exactly 20 samples"
+    );
 }

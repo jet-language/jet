@@ -5,7 +5,9 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax::{self, OSTarget as OS};
-use crate::AST::{BinOp, Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, StrPart, SwitchArm, Type};
+use crate::AST::{
+    BinOp, Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, StrPart, SwitchArm, Type,
+};
 use std::collections::HashMap;
 
 /// D-CONF-READ1=A: fold every `@if @build.os == {
@@ -69,7 +71,9 @@ fn desugar_items(
                     desugar_items(body, active, build_facts, diags);
                 }
             }
-            Item::GenericModule(module) => desugar_items(&mut module.body, active, build_facts, diags),
+            Item::GenericModule(module) => {
+                desugar_items(&mut module.body, active, build_facts, diags)
+            }
             _ => {}
         }
     }
@@ -116,9 +120,9 @@ fn desugar_child_blocks(
     diags: &mut Vec<Diagnostic>,
 ) {
     match stmt {
-        Stmt::Expr(e)
-        | Stmt::Yield(e, _)
-        | Stmt::DeferClose { close: e, .. } => desugar_expr(e, active, build_facts, diags),
+        Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+            desugar_expr(e, active, build_facts, diags)
+        }
         Stmt::Val(b) => desugar_expr(&mut b.init, active, build_facts, diags),
         Stmt::Assign { value, .. } => desugar_expr(value, active, build_facts, diags),
         Stmt::Return(Some(e), _) => desugar_expr(e, active, build_facts, diags),
@@ -136,7 +140,9 @@ fn desugar_child_blocks(
             }
         }
         Stmt::CountedLoop { body, step, .. } => {
-            if let Some(step) = step { desugar_child_blocks(step, active, build_facts, diags); }
+            if let Some(step) = step {
+                desugar_child_blocks(step, active, build_facts, diags);
+            }
             desugar_stmts(body, active, build_facts, diags);
         }
         Stmt::Loop { body, .. }
@@ -278,7 +284,6 @@ fn fold_os_switch(
     active: OS,
     diags: &mut Vec<Diagnostic>,
 ) -> Stmt {
-
     // Each arm head must be a bare, payload-free OS variant; collect them.
     let mut arm_os: Vec<(OS, Vec<Stmt>, Span)> = Vec::new();
     let mut seen: Vec<OS> = Vec::new();
@@ -536,11 +541,7 @@ pub fn check_os_target(bundle: &ProgramBundle, freestanding: bool) -> Vec<Diagno
 /// D-APP-UNIFY1=B: one App type has target-sensitive methods, but target
 /// resolution and rejection stay in sema so AOT, JIT, interpreter, and web
 /// adapters all consume the same checked call shape.
-fn check_app_capabilities(
-    bundle: &ProgramBundle,
-    freestanding: bool,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_app_capabilities(bundle: &ProgramBundle, freestanding: bool, diags: &mut Vec<Diagnostic>) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let target = super::CheckerMarkers::resolved_app_target(bundle, module_idx, freestanding);
         check_app_items(&module.items, target, diags);
@@ -659,7 +660,11 @@ fn check_app_body(body: &[Stmt], target: &str, diags: &mut Vec<Diagnostic>) {
             }
             diags.push(Diagnostic::from_row(
                 "E-APP-TARGET-FEATURE",
-                &[("feature", method.as_str()), ("required", required), ("target", target)],
+                &[
+                    ("feature", method.as_str()),
+                    ("required", required),
+                    ("target", target),
+                ],
                 Some(*method_span),
             ));
         });

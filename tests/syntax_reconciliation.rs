@@ -41,8 +41,13 @@ fn compiler_generated_identifiers_use_the_reserved_lane() {
     let source = "fn __jet_generated() { print(\"{__jet_value}\") }";
     let (_, user_diagnostics) = jet::Lexer::lex(source);
     let (tokens, generated_diagnostics) = jet::Lexer::lex_generated(source);
-    assert!(user_diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
-    assert!(generated_diagnostics.is_empty(), "{generated_diagnostics:#?}");
+    assert!(user_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0067"));
+    assert!(
+        generated_diagnostics.is_empty(),
+        "{generated_diagnostics:#?}"
+    );
     assert!(jet::Parser::parse(&tokens).is_ok());
 }
 
@@ -224,7 +229,9 @@ fn dynamic_encoding_surface_uses_datatree_name() {
         let text = fs::read_to_string(relative).unwrap_or_else(|error| {
             panic!("cannot read DataTree inventory surface {relative}: {error}")
         });
-        let markdown = Path::new(relative).extension().is_some_and(|ext| ext == "md");
+        let markdown = Path::new(relative)
+            .extension()
+            .is_some_and(|ext| ext == "md");
         if markdown {
             for (line_no, line) in markdown_data_name_lines(&text) {
                 if !historical_data_reference(line) {
@@ -298,12 +305,7 @@ fn active_maturity_docs_use_meta_field_only() {
     for relative in ACTIVE_MATURITY_DOCS {
         let text = fs::read_to_string(relative)
             .unwrap_or_else(|error| panic!("cannot read maturity surface {relative}: {error}"));
-        for required in [
-            "#Meta(maturity:",
-            ".Experimental",
-            ".Tested",
-            ".Hardened",
-        ] {
+        for required in ["#Meta(maturity:", ".Experimental", ".Tested", ".Hardened"] {
             if !text.contains(required) {
                 failures.push(format!("{relative} does not teach `{required}`"));
             }
@@ -430,8 +432,7 @@ fn environment_reference_is_canonical_and_navigable() {
 fn documentation_consistency_sweep_stays_current() {
     let spec = fs::read_to_string("docs/spec/spec.md").expect("read language spec");
     let roadmap = fs::read_to_string("docs/spec/roadmap.md").expect("read roadmap");
-    let release =
-        fs::read_to_string("docs/spec/release-policy.md").expect("read release policy");
+    let release = fs::read_to_string("docs/spec/release-policy.md").expect("read release policy");
 
     assert!(!spec.contains("[ \"~\" | \"^\" | \"&\" ]"));
     assert!(!spec.contains("Result(String, IOError)"));
@@ -596,8 +597,8 @@ fn card_511_census_matches_current_law() {
         .expect("read package surface registry");
     let markers = fs::read_to_string("crates/jet-foundation/src/Syntax/markers.rs")
         .expect("read marker registry");
-    let decisions = fs::read_to_string("docs/spec/syntax-decisions.md")
-        .expect("read syntax decisions");
+    let decisions =
+        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
     assert!(
         !core.contains("pub const KW_VIEW"),
@@ -626,12 +627,12 @@ fn card_511_census_matches_current_law() {
 
 #[test]
 fn module_internal_is_discovery_not_access_control() {
-    let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs")
-        .expect("read syntax registry");
+    let syntax =
+        fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read syntax registry");
     let config = fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs")
         .expect("read module syntax registry");
-    let decisions = fs::read_to_string("docs/spec/syntax-decisions.md")
-        .expect("read syntax decisions");
+    let decisions =
+        fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
     assert!(syntax.contains("D-SHAPE-MODULEINTERNAL1=A"));
     assert!(config.contains("D-SHAPE-MODULEINTERNAL1=A"));
@@ -639,9 +640,11 @@ fn module_internal_is_discovery_not_access_control() {
     assert!(config.contains("pub const PROJECT_IMPORT_PREFIX: &str = \"project.\";"));
     assert!(decisions.contains("`use project._name` remains allowed"));
     assert!(decisions.contains("underscore changes discovery, not access"));
-    assert!(!fs::read_to_string("crates/jet-foundation/src/AST/items.rs")
-        .expect("read module AST")
-        .contains("pub disabled: bool"));
+    assert!(
+        !fs::read_to_string("crates/jet-foundation/src/AST/items.rs")
+            .expect("read module AST")
+            .contains("pub disabled: bool")
+    );
     assert!(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"));
 }
 
@@ -869,8 +872,11 @@ fn append_fence_data_lines<'a>(
     lines: &mut Vec<(usize, &'a str)>,
 ) {
     for offset in source_identifier_offsets(source, "Data") {
-        let line_no =
-            start_line + source[..offset].bytes().filter(|byte| *byte == b'\n').count();
+        let line_no = start_line
+            + source[..offset]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count();
         if !lines.iter().any(|(existing, _)| *existing == line_no) {
             lines.push((line_no, source_lines[line_no - 1]));
         }
@@ -904,7 +910,10 @@ fn inline_code_has_identifier(line: &str, identifier: &str) -> bool {
                 close += 1;
                 continue;
             }
-            let run = bytes[close..].iter().take_while(|byte| **byte == b'`').count();
+            let run = bytes[close..]
+                .iter()
+                .take_while(|byte| **byte == b'`')
+                .count();
             if run == delimiter {
                 if !source_identifier_offsets(&line[content_start..close], identifier).is_empty() {
                     return true;
@@ -979,28 +988,48 @@ fn scan_lines<'a>(path: &Path, text: &'a str) -> Vec<(usize, &'a str)> {
 #[test]
 fn artifact_extensions_are_one_closed_kind_specific_family() {
     use jet_foundation::Syntax::{self, ArtifactKind};
-    assert_eq!(Syntax::ARTIFACT_KINDS, &[
-        (ArtifactKind::SourceMap, ".jetmap"),
-        (ArtifactKind::Notebook, ".jetnb"),
-        (ArtifactKind::Proof, ".jetproof"),
-        (ArtifactKind::Trace, ".jettrace"),
-        (ArtifactKind::GameReplay, ".jetreplay"),
-        (ArtifactKind::ProofReplay, ".jetproof-replay"),
-    ]);
+    assert_eq!(
+        Syntax::ARTIFACT_KINDS,
+        &[
+            (ArtifactKind::SourceMap, ".jetmap"),
+            (ArtifactKind::Notebook, ".jetnb"),
+            (ArtifactKind::Proof, ".jetproof"),
+            (ArtifactKind::Trace, ".jettrace"),
+            (ArtifactKind::GameReplay, ".jetreplay"),
+            (ArtifactKind::ProofReplay, ".jetproof-replay"),
+        ]
+    );
     for (kind, suffix) in Syntax::ARTIFACT_KINDS {
-        assert_eq!(Syntax::artifact_kind(&format!("artifact{suffix}")), Some(*kind));
+        assert_eq!(
+            Syntax::artifact_kind(&format!("artifact{suffix}")),
+            Some(*kind)
+        );
     }
-    assert_eq!(Syntax::artifact_kind("run.jetproof-replay"), Some(ArtifactKind::ProofReplay));
-    assert_ne!(Syntax::artifact_kind("run.jetproof-replay"), Some(ArtifactKind::GameReplay));
+    assert_eq!(
+        Syntax::artifact_kind("run.jetproof-replay"),
+        Some(ArtifactKind::ProofReplay)
+    );
+    assert_ne!(
+        Syntax::artifact_kind("run.jetproof-replay"),
+        Some(ArtifactKind::GameReplay)
+    );
 
     for root in ["Source", "crates", "examples", "tests", "docs"] {
         for path in files(Path::new(root)) {
-            if path.ends_with("tests/syntax_reconciliation.rs") { continue; }
-            let Ok(text) = fs::read_to_string(&path) else { continue };
+            if path.ends_with("tests/syntax_reconciliation.rs") {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
             for (line_no, line) in text.lines().enumerate() {
                 for retired in [".jproof", ".jtrace", ".jreplay"] {
                     if line.contains(retired) && !line.contains("jet.jproof") {
-                        panic!("{}:{} retains retired artifact suffix `{retired}`", path.display(), line_no + 1);
+                        panic!(
+                            "{}:{} retains retired artifact suffix `{retired}`",
+                            path.display(),
+                            line_no + 1
+                        );
                     }
                 }
             }

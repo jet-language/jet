@@ -272,10 +272,7 @@ fn take_host_fault_outcome(runtime: &mut JitRuntime) -> Option<RunOutcome> {
     let stdout = runtime.stdout.clone();
     reset_run_heap(runtime);
     Some(RunOutcome::Problems(vec![
-        jet_foundation::Diagnostics::Diagnostic::runtime_host_fault(
-            stdout,
-            what,
-        ),
+        jet_foundation::Diagnostics::Diagnostic::runtime_host_fault(stdout, what),
     ]))
 }
 
@@ -365,18 +362,16 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         main_error_is_packed,
     ) = RESIDENT_MODULE
         .with(|slot| {
-            slot.borrow()
-                .as_ref()
-                .map(|r| {
-                    (
-                        r.module.get_finalized_function(r.main_id),
-                        r.main_returns_result,
-                        r.main_returns_app,
-                        r.main_returns_default_err,
-                        r.main_error_type.clone(),
-                        r.main_error_is_packed,
-                    )
-                })
+            slot.borrow().as_ref().map(|r| {
+                (
+                    r.module.get_finalized_function(r.main_id),
+                    r.main_returns_result,
+                    r.main_returns_app,
+                    r.main_returns_default_err,
+                    r.main_error_type.clone(),
+                    r.main_error_is_packed,
+                )
+            })
         })
         .ok_or_else(|| "resident module missing".to_string())?;
 
@@ -467,32 +462,32 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             });
         }
         if let Some(handle) = entry_app {
-            let result = jit_result(runtime, handle)
-                .filter(|_| main_returns_result);
+            let result = jit_result(runtime, handle).filter(|_| main_returns_result);
             if main_returns_result {
-                let result = result
-                    .ok_or_else(|| "jit fallible entry returned invalid Result handle".to_string())?;
+                let result = result.ok_or_else(|| {
+                    "jit fallible entry returned invalid Result handle".to_string()
+                })?;
                 if !result.ok {
                     let message = if main_returns_default_err {
                         let error = runtime
                             .errors
                             .get((result.bits as i64).saturating_sub(1) as usize)
-                            .ok_or_else(|| "jit fallible entry returned invalid Err handle".to_string())?;
+                            .ok_or_else(|| {
+                                "jit fallible entry returned invalid Err handle".to_string()
+                            })?;
                         jet_foundation::Outcome::jet_render_err(error)
                     } else if main_error_is_packed {
                         let Some(Type::Named(name)) = main_error_type.as_ref() else {
                             return Err("jit packed entry error lost its type".to_string());
                         };
-                        Collections::render_packed_enum(
-                            result.bits as i64,
-                            name,
-                            &runtime.heap,
-                        )
+                        Collections::render_packed_enum(result.bits as i64, name, &runtime.heap)
                     } else {
                         runtime
                             .heap
                             .clone_string(result.bits as i64)
-                            .ok_or_else(|| "jit fallible entry returned non-string error".to_string())?
+                            .ok_or_else(|| {
+                                "jit fallible entry returned non-string error".to_string()
+                            })?
                     };
                     // One report edge, shared with `jet_entry_report` in the
                     // AOT Prelude: the rendered error leads and the accumulated
@@ -527,9 +522,8 @@ pub(crate) fn resident_run_fresh(
 ) -> Result<RunOutcome, String> {
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
-    RESIDENT_RUNTIME.with(|slot| {
-        *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
-    });
+    RESIDENT_RUNTIME
+        .with(|slot| *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes)));
     super::tier_cache::begin_capture();
     let compiled = ensure_resident_module(program);
     if compiled.is_err() {
@@ -560,9 +554,8 @@ pub(crate) fn resident_run_mixed(
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
     clear_deopt_state();
-    RESIDENT_RUNTIME.with(|slot| {
-        *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
-    });
+    RESIDENT_RUNTIME
+        .with(|slot| *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes)));
 
     let mut deopt_index = HashMap::new();
     let mut deopt_names = Vec::new();

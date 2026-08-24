@@ -101,7 +101,9 @@ engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
 caret, all in Jet terms (I2). It declines unsteppable native features at the
 interpreter API boundary with E2203. Step 2's native DAP/lldb backend now
 launches those programs through the same Jet source mapping, with source
-breakpoints and run control available through the terminal and editor adapters;
+breakpoints and run control available through the terminal and the VS Code
+adapter. Zed's current extension API exposes no native adapter because it
+lacks the trust and authorization hooks required for an honest session;
 remaining platform conformance is tracked by Tower #12, which the owner moved
 to Epoch 8 on 2026-07-12.
 

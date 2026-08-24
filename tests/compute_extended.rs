@@ -14,13 +14,13 @@ fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
     let (aot_code, aot_stdout) = build_and_run(name, source);
     assert_eq!(aot_code, 0, "AOT failed for {name}: {aot_stdout}");
     for needle in required {
-        assert!(aot_stdout.contains(needle), "{name} missing `{needle}`: {aot_stdout}");
+        assert!(
+            aot_stdout.contains(needle),
+            "{name} missing `{needle}`: {aot_stdout}"
+        );
     }
-    let (jit_code, jit_stdout, stderr) = run_default_multi(
-        &format!("{name}_jit"),
-        "main.jet",
-        &[("main.jet", source)],
-    );
+    let (jit_code, jit_stdout, stderr) =
+        run_default_multi(&format!("{name}_jit"), "main.jet", &[("main.jet", source)]);
     assert_eq!(jit_code, 0, "default jet run failed for {name}: {stderr}");
     assert_eq!(jit_stdout, aot_stdout, "AOT/JIT drift for {name}");
 }
@@ -45,8 +45,14 @@ fn autodiff_sparse_simd_and_streams_use_real_paths() {
     let (code, stdout, stderr) = jit_run_traced("compute_autodiff_targeted_trace", source);
     assert_eq!(code, 0, "traced default jet run failed: {stderr}");
     assert_eq!(stdout, expected, "traced default output drifted: {stderr}");
-    assert!(stderr.contains("tier1 native"), "autodiff did not stay resident:\n{stderr}");
-    assert!(!stderr.contains("tier0 interp"), "autodiff deopted:\n{stderr}");
+    assert!(
+        stderr.contains("tier1 native"),
+        "autodiff did not stay resident:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("tier0 interp"),
+        "autodiff deopted:\n{stderr}"
+    );
 }
 
 #[test]
@@ -159,15 +165,20 @@ fn run() {
 fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
     let ml_source = include_str!("../examples/features/tooling/compute_ml.jet");
     let ml_output = include_str!("../examples/features/expected/tooling/compute_ml.out");
-    assert_tiers_agree(
-        "compute_ml_targeted",
-        ml_source,
-        ml_output,
+    assert_tiers_agree("compute_ml_targeted", ml_source, ml_output);
+    let (resident_code, resident_stdout, resident_stderr) = run_default_multi(
+        "compute_ml_resident",
+        "main.jet",
+        &[("main.jet", ml_source)],
     );
-    let (resident_code, resident_stdout, resident_stderr) =
-        run_default_multi("compute_ml_resident", "main.jet", &[("main.jet", ml_source)]);
-    assert_eq!(resident_code, 0, "resident ML `jet run` failed: {resident_stderr}");
-    assert_eq!(resident_stdout, ml_output, "resident ML output drifted: {resident_stderr}");
+    assert_eq!(
+        resident_code, 0,
+        "resident ML `jet run` failed: {resident_stderr}"
+    );
+    assert_eq!(
+        resident_stdout, ml_output,
+        "resident ML output drifted: {resident_stderr}"
+    );
     assert!(
         resident_stderr.contains("tier1 native"),
         "ML training/inference did not execute in resident JIT:\n{resident_stderr}"
@@ -222,7 +233,10 @@ fn safe_kernel_boundary_and_f32_profile_are_explicit() {
     assert_aot_and_default_parity(
         "compute_simd_targeted",
         include_str!("../examples/features/tooling/compute_simd.jet"),
-        &["profile=F32Strict+Reproducible", "tile:[19.0, 22.0, 43.0, 50.0]"],
+        &[
+            "profile=F32Strict+Reproducible",
+            "tile:[19.0, 22.0, 43.0, 50.0]",
+        ],
     );
 }
 
@@ -280,7 +294,9 @@ fn safe_kernel_rejects_effectful_bodies_before_codegen() {
     )
     .expect_err("a safe kernel must not lower an effectful body");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E1102"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E1102"),
         "missing E1102: {diagnostics:?}"
     );
 }
@@ -365,7 +381,11 @@ fn run() {
 fn portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu() {
     assert_example_cli_tiers_agree_with("tooling/compute_vulkan_webgpu", |stdout| {
         let lines: Vec<_> = stdout.lines().collect();
-        assert_eq!(lines.len(), 2, "unexpected accelerator example output: {stdout:?}");
+        assert_eq!(
+            lines.len(),
+            2,
+            "unexpected accelerator example output: {stdout:?}"
+        );
         assert!(
             matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
             "Vulkan must report its real availability: {stdout:?}"

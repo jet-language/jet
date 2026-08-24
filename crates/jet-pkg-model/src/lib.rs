@@ -25,9 +25,7 @@
 // `authority: { trust: }` and `policy: { lints: }` block names (jet-driver already depends on
 // Sema transitively through jet-codegen, so this adds nothing new to its
 // build graph — it is the compiler's checker, not Jetpack's engine).
-pub use jet_sema::{
-    Diagnostics, Lexer, Parser, Policy, Sema, Syntax, TargetMachine, AST, SHA256,
-};
+pub use jet_sema::{Diagnostics, Lexer, Parser, Policy, Sema, Syntax, TargetMachine, AST, SHA256};
 
 pub mod AdaBind;
 pub mod Authority;
@@ -36,22 +34,22 @@ pub mod CFFI;
 pub mod CobolBind;
 pub mod ComBind;
 pub mod CppBind;
+pub mod DartBind;
 pub mod DotNetBind;
 pub mod FortranBind;
 pub mod GoBind;
 pub mod JavaBind;
 pub mod JavaScriptBind;
+pub mod LuaBind;
+pub mod OctaveBind;
 pub mod PascalBind;
 pub mod PerlBind;
-pub mod RubyBind;
 pub mod PhpBind;
+pub mod PowerShellBind;
 pub mod PythonBind;
 pub mod RBind;
-pub mod OctaveBind;
-pub mod DartBind;
-pub mod PowerShellBind;
+pub mod RubyBind;
 pub mod TclBind;
-pub mod LuaBind;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: pure policy computation over the
 // manifest/effect-fixpoint data (no network/provider/shell engine code, same
 // bar as the rest of this crate) — moved here from `jetpack` so `jet`'s own
@@ -99,5 +97,5 @@ pub mod Store;
 // the full engine crate.  `jetpack` re-exports all three under their historical
 // paths so its own internal call sites are unchanged.
 pub mod Overlay;
-pub mod WorkspacePlan;
 pub mod WorkspaceLock;
+pub mod WorkspacePlan;

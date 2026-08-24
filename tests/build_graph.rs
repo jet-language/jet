@@ -1,24 +1,18 @@
 mod common;
 
 use jet::Comptime::Build::{
-    ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionOutcome, ActionSpec,
-    ActionInputSnapshot, ActionKey, ActionOutputRecord, ActionResultRecord, BuildCapability,
-    BuildContext, BuildError, BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPolicy,
-    BuildProvenance, BuildResourcePool, CacheHitReason, CacheMissReason, ContentDigest,
-    CompilerPackageSpec, FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind,
-    LegacyWrapperSpec, LinkerIdentity,
-    LocalCas, LockRecord,
-    PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest,
-    RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport,
-    RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof,
-    ReproducibilityClass, SdkIdentity,
-    SigningIdentitySpec, TargetKind, TargetSpec, ToolchainRole, ToolchainSpec,
-    WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
-    execute_build_plan_with_front_end_and_compiler,
-    execute_build_plan_with_front_end_and_remote,
-    remote_execution_identity,
-    remote_policy_digest,
-    read_packaged_file_bounded,
+    execute_build_plan_with_front_end_and_compiler, execute_build_plan_with_front_end_and_remote,
+    read_packaged_file_bounded, remote_execution_identity, remote_policy_digest, ActionCache,
+    ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome,
+    ActionOutputRecord, ActionResultRecord, ActionSpec, BuildCapability, BuildContext, BuildError,
+    BuildExecutionEvent, BuildGraphSubject, BuildPath, BuildPolicy, BuildProvenance,
+    BuildResourcePool, CacheHitReason, CacheMissReason, CompilerPackageSpec, ContentDigest,
+    FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, LinkerIdentity,
+    LocalCas, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource,
+    RemoteActionRequest, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy,
+    RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult,
+    RemoteSandboxProof, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, TargetKind,
+    TargetSpec, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION,
 };
 use std::fs;
 use std::sync::{Arc, Barrier, Mutex};
@@ -100,22 +94,33 @@ fn registers_typed_targets_and_default_plan() {
 #[test]
 fn selected_default_executes_only_its_target_dependency_closure() {
     let mut b = BuildContext::new();
-    let selected_action = b.action(
-        "selected",
-        ActionSpec::cached(["tool"]).with_outputs(["selected.out"]),
-    ).unwrap();
-    let unrelated_action = b.action(
-        "unrelated",
-        ActionSpec::cached(["tool"]).with_outputs(["unrelated.out"]),
-    ).unwrap();
-    let selected = b.add_executable(
-        "selected",
-        TargetSpec::new().with_source("main.jet").with_action(selected_action),
-    ).unwrap();
+    let selected_action = b
+        .action(
+            "selected",
+            ActionSpec::cached(["tool"]).with_outputs(["selected.out"]),
+        )
+        .unwrap();
+    let unrelated_action = b
+        .action(
+            "unrelated",
+            ActionSpec::cached(["tool"]).with_outputs(["unrelated.out"]),
+        )
+        .unwrap();
+    let selected = b
+        .add_executable(
+            "selected",
+            TargetSpec::new()
+                .with_source("main.jet")
+                .with_action(selected_action),
+        )
+        .unwrap();
     b.add_test(
         "unrelated",
-        TargetSpec::new().with_source("other.jet").with_action(unrelated_action),
-    ).unwrap();
+        TargetSpec::new()
+            .with_source("other.jet")
+            .with_action(unrelated_action),
+    )
+    .unwrap();
     let plan = b.plan_with_default(selected).unwrap();
     let model = plan.execution_model().unwrap();
     assert_eq!(model.nodes.len(), 1);
@@ -344,10 +349,7 @@ fn declared_target_toolchain_wins_over_ambient_host_tool() {
         )
         .unwrap();
     let plan = b.plan_with_default(target).unwrap();
-    let root = std::env::temp_dir().join(format!(
-        "jet-declared-toolchain-{}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("jet-declared-toolchain-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let grants = [BuildCapability::Exec]
@@ -842,7 +844,13 @@ fn local_cas_round_trips_blobs_and_restores_declared_outputs() {
 
 #[test]
 fn cas_rejects_malformed_digests_without_panicking() {
-    for malformed in ["", "sha256:", "sha256:abc", "md5:0000", &format!("sha256:{}", "g".repeat(64))] {
+    for malformed in [
+        "",
+        "sha256:",
+        "sha256:abc",
+        "md5:0000",
+        &format!("sha256:{}", "g".repeat(64)),
+    ] {
         assert!(ContentDigest::parse(malformed).is_err());
     }
 }
@@ -851,25 +859,37 @@ fn cas_rejects_malformed_digests_without_panicking() {
 #[test]
 fn cache_restore_rejects_symlinked_parent_without_outside_write() {
     use std::os::unix::fs::symlink;
-    let root = std::env::temp_dir().join(format!("jet_build_cache_{}_parent_symlink", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "jet_build_cache_{}_parent_symlink",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("work/real")).unwrap();
     fs::create_dir_all(root.join("outside")).unwrap();
     let cas = LocalCas::new(root.join("cache"));
     let mut b = BuildContext::new();
-    let action = b.action("emit", ActionSpec::cached(["jetc"]).with_outputs(["real/out.txt"])).unwrap();
+    let action = b
+        .action(
+            "emit",
+            ActionSpec::cached(["jetc"]).with_outputs(["real/out.txt"]),
+        )
+        .unwrap();
     let plan = b.plan().unwrap();
     fs::write(root.join("work/real/out.txt"), "safe").unwrap();
-    let record = cas.capture_declared_outputs(
-        &root.join("work"),
-        plan.action(action).unwrap(),
-        plan.action_key(action).unwrap(),
-        ActionOutcome::Succeeded { exit_code: 0 },
-        ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
-    ).unwrap();
+    let record = cas
+        .capture_declared_outputs(
+            &root.join("work"),
+            plan.action(action).unwrap(),
+            plan.action_key(action).unwrap(),
+            ActionOutcome::Succeeded { exit_code: 0 },
+            ActionCacheProvenance::miss(CacheMissReason::NoLocalActionRecord),
+        )
+        .unwrap();
     fs::remove_dir_all(root.join("work/real")).unwrap();
     symlink(root.join("outside"), root.join("work/real")).unwrap();
-    assert!(cas.restore_action_outputs(&root.join("work"), plan.action(action).unwrap(), &record).is_err());
+    assert!(cas
+        .restore_action_outputs(&root.join("work"), plan.action(action).unwrap(), &record)
+        .is_err());
     assert!(!root.join("outside/out.txt").exists());
     let _ = fs::remove_dir_all(&root);
 }
@@ -1025,7 +1045,10 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         .unwrap();
     let policy = RemoteCachePolicy::granted(sandbox.clone());
     let output_digest = transport.upload_blob(b"compiled", &policy).unwrap();
-    assert_eq!(transport.download_blob(&output_digest, &policy).unwrap(), b"compiled");
+    assert_eq!(
+        transport.download_blob(&output_digest, &policy).unwrap(),
+        b"compiled"
+    );
 
     let output = ActionOutputRecord {
         path: BuildPath::new("build/app").unwrap(),
@@ -1039,7 +1062,10 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         provenance: ActionCacheProvenance::hit(CacheHitReason::LocalActionRecordMatched),
     };
     transport.upload_action_record(&record, &policy).unwrap();
-    assert_eq!(transport.download_action_record(&key, &policy).unwrap(), record);
+    assert_eq!(
+        transport.download_action_record(&key, &policy).unwrap(),
+        record
+    );
     let mut wrong_length = record.clone();
     wrong_length.outputs[0].byte_len = 7;
     assert!(matches!(
@@ -1053,9 +1079,7 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         argv: vec!["jetc".to_string(), "src/main.jet".to_string()],
         inputs: vec![ActionInputSnapshot {
             path: BuildPath::new("src/main.jet").unwrap(),
-            digest: transport
-                .upload_execution_blob(b"source", &policy)
-                .unwrap(),
+            digest: transport.upload_execution_blob(b"source", &policy).unwrap(),
             byte_len: 6,
         }],
         outputs: vec![output.path.clone()],
@@ -1076,8 +1100,13 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         stderr_digest,
         provenance_signer: request.sandbox.worker_id.clone(),
     };
-    transport.publish_execution_result(&result, &policy).unwrap();
-    assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
+    transport
+        .publish_execution_result(&result, &policy)
+        .unwrap();
+    assert_eq!(
+        transport.download_execution_result(&key, &policy).unwrap(),
+        result
+    );
     let mut disagreement = result.clone();
     disagreement.outcome = ActionOutcome::Failed { exit_code: 7 };
     assert!(matches!(
@@ -1085,7 +1114,10 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
         Err(RemoteCacheError::InvalidRecord(message))
             if message.contains("disagrees with the already published result")
     ));
-    assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
+    assert_eq!(
+        transport.download_execution_result(&key, &policy).unwrap(),
+        result
+    );
 
     let wrong_policy = RemoteCachePolicy::granted(
         transport
@@ -1097,7 +1129,9 @@ fn remote_transport_round_trips_blobs_records_and_execution_provenance() {
             )
             .unwrap(),
     );
-    let error = transport.download_action_record(&key, &wrong_policy).unwrap_err();
+    let error = transport
+        .download_action_record(&key, &wrong_policy)
+        .unwrap_err();
     assert!(matches!(
         error,
         jet::Comptime::Build::RemoteCacheError::Denied(denied)
@@ -1150,12 +1184,7 @@ fn remote_worker_identity_and_cancellation_reject_late_or_mismatched_results() {
     for mutate in mutations {
         let mut wrong_proof = proof.clone();
         mutate(&mut wrong_proof);
-        let wrong_policy = RemoteCachePolicy::with_grants(
-            false,
-            false,
-            true,
-            wrong_proof.clone(),
-        );
+        let wrong_policy = RemoteCachePolicy::with_grants(false, false, true, wrong_proof.clone());
         let mut wrong_request = request.clone();
         wrong_request.sandbox = wrong_proof;
         assert!(matches!(
@@ -1270,7 +1299,9 @@ fn remote_cancelled_attempt_history_rejects_replay_after_later_submission() {
         .publish_execution_result(&result_b, &policy_b)
         .unwrap();
     assert_eq!(
-        transport.download_execution_result(&key, &policy_b).unwrap(),
+        transport
+            .download_execution_result(&key, &policy_b)
+            .unwrap(),
         result_b
     );
     let _ = fs::remove_dir_all(root);
@@ -1394,8 +1425,14 @@ fn remote_host_binding_registry_round_trips_without_storing_secret() {
         .join("registry-builder.conf");
     let record_text = fs::read_to_string(record).unwrap();
     assert!(!record_text.contains("registry-secret"));
-    assert_eq!(RemoteBuildBinding::list_host().unwrap(), vec!["registry-builder"]);
-    assert_eq!(RemoteBuildBinding::load_host("registry-builder").unwrap(), binding);
+    assert_eq!(
+        RemoteBuildBinding::list_host().unwrap(),
+        vec!["registry-builder"]
+    );
+    assert_eq!(
+        RemoteBuildBinding::load_host("registry-builder").unwrap(),
+        binding
+    );
     RemoteBuildBinding::remove_host("registry-builder").unwrap();
     assert!(RemoteBuildBinding::list_host().unwrap().is_empty());
 
@@ -1447,13 +1484,7 @@ fn remote_driver_consumes_authenticated_worker_result() {
             &[],
         )
         .unwrap();
-    let expected_policy = remote_policy_digest(
-        plan.action(action)
-            .unwrap()
-            .caps
-            .iter()
-            .cloned(),
-    );
+    let expected_policy = remote_policy_digest(plan.action(action).unwrap().caps.iter().cloned());
     let toolchain_identity = plan
         .toolchain(plan.action(action).unwrap().toolchain)
         .map(|value| format!("{value:?}"))
@@ -1471,7 +1502,11 @@ fn remote_driver_consumes_authenticated_worker_result() {
         .unwrap()
         .with_trust_domain("trusted")
         .with_worker_id("worker-a")
-        .with_platform(format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH))
+        .with_platform(format!(
+            "{}-{}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ))
         .with_abi("native")
         .with_execute(true)
         .with_timeout_ms(2_000);
@@ -1485,16 +1520,11 @@ fn remote_driver_consumes_authenticated_worker_result() {
             match transport.read_execution_request(&worker_key) {
                 Ok(request) => {
                     assert_eq!(
-                        request.sandbox.provenance_digest,
-                        expected_remote_provenance,
+                        request.sandbox.provenance_digest, expected_remote_provenance,
                         "remote worker proof must bind toolchain and declared capabilities"
                     );
-                    let policy = RemoteCachePolicy::with_grants(
-                        false,
-                        false,
-                        true,
-                        request.sandbox.clone(),
-                    );
+                    let policy =
+                        RemoteCachePolicy::with_grants(false, false, true, request.sandbox.clone());
                     assert_eq!(request.inputs.len(), 1);
                     assert_eq!(request.inputs[0].path.as_str(), "src/remote-input");
                     assert_eq!(
@@ -1833,12 +1863,8 @@ fn remote_execution_fails_over_to_registered_builder_after_worker_loss() {
         loop {
             match transport.read_execution_request(&safe_key) {
                 Ok(request) => {
-                    let policy = RemoteCachePolicy::with_grants(
-                        false,
-                        false,
-                        true,
-                        request.sandbox.clone(),
-                    );
+                    let policy =
+                        RemoteCachePolicy::with_grants(false, false, true, request.sandbox.clone());
                     let bytes = b"failover output";
                     let digest = transport.upload_execution_blob(bytes, &policy).unwrap();
                     let (stdout_digest, stderr_digest) =
@@ -1935,15 +1961,11 @@ fn remote_execution_timeout_uses_declared_local_fallback() {
     let action = b
         .action(
             "local-fallback",
-            ActionSpec::cached([
-                "sh",
-                "-c",
-                "printf fallback > build/fallback.txt",
-            ])
-            .with_outputs(["build/fallback.txt"])
-            .with_cap(BuildCapability::Exec)
-            .with_cap(BuildCapability::FS)
-            .with_cap(BuildCapability::Net),
+            ActionSpec::cached(["sh", "-c", "printf fallback > build/fallback.txt"])
+                .with_outputs(["build/fallback.txt"])
+                .with_cap(BuildCapability::Exec)
+                .with_cap(BuildCapability::FS)
+                .with_cap(BuildCapability::Net),
         )
         .unwrap();
     let target = b
@@ -2013,11 +2035,11 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
         )
         .unwrap();
     let policy = RemoteCachePolicy::with_grants(false, false, true, sandbox.clone());
-    let input_digest = transport
-        .upload_execution_blob(b"source", &policy)
-        .unwrap();
+    let input_digest = transport.upload_execution_blob(b"source", &policy).unwrap();
     assert_eq!(
-        transport.download_execution_blob(&input_digest, &policy).unwrap(),
+        transport
+            .download_execution_blob(&input_digest, &policy)
+            .unwrap(),
         b"source"
     );
     assert!(transport.upload_blob(b"cache-forbidden", &policy).is_err());
@@ -2060,8 +2082,13 @@ fn remote_execution_grant_carries_blobs_without_cache_authority() {
         stderr_digest,
         provenance_signer: sandbox.worker_id.clone(),
     };
-    transport.publish_execution_result(&result, &policy).unwrap();
-    assert_eq!(transport.download_execution_result(&key, &policy).unwrap(), result);
+    transport
+        .publish_execution_result(&result, &policy)
+        .unwrap();
+    assert_eq!(
+        transport.download_execution_result(&key, &policy).unwrap(),
+        result
+    );
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2217,7 +2244,10 @@ fn remote_transport_authenticates_workers_and_rejects_tampered_or_stale_records(
         provenance_signer: sandbox.worker_id.clone(),
     };
     worker.publish_execution_result(&result, &policy).unwrap();
-    assert_eq!(client.download_execution_result(&key, &policy).unwrap(), result);
+    assert_eq!(
+        client.download_execution_result(&key, &policy).unwrap(),
+        result
+    );
 
     let result_digest = ContentDigest::from_bytes(key.as_str().as_bytes());
     let result_hex = result_digest.as_str().strip_prefix("sha256:").unwrap();
@@ -2585,7 +2615,10 @@ fn legacy_project_import_reads_one_canonical_file_and_ci_denies_the_wrapper() {
 
     let imported = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Cargo).unwrap();
     assert_eq!(
-        imported.labels.get("legacy.project-file").map(String::as_str),
+        imported
+            .labels
+            .get("legacy.project-file")
+            .map(String::as_str),
         Some("Cargo.toml")
     );
     assert_eq!(imported.inputs[0].as_str(), "Cargo.toml");
@@ -2690,8 +2723,14 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
     )
     .unwrap();
     let cmake = LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::CMake).unwrap();
-    assert!(cmake.inputs.iter().any(|path| path.as_str() == "src/main.c"));
-    assert!(cmake.inputs.iter().any(|path| path.as_str() == "include/app.h"));
+    assert!(cmake
+        .inputs
+        .iter()
+        .any(|path| path.as_str() == "src/main.c"));
+    assert!(cmake
+        .inputs
+        .iter()
+        .any(|path| path.as_str() == "include/app.h"));
     assert!(cmake
         .labels
         .get("legacy.source-closure")
@@ -2708,7 +2747,11 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
             if message.contains("exact build output")
     ));
 
-    fs::write(root.join("Makefile"), "app: src/main.c\n\tcc -o app src/main.c\n").unwrap();
+    fs::write(
+        root.join("Makefile"),
+        "app: src/main.c\n\tcc -o app src/main.c\n",
+    )
+    .unwrap();
     assert!(matches!(
         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Make),
         Err(BuildError::LegacyProjectFileInvalid(message))
@@ -2726,8 +2769,11 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
         .iter()
         .any(|path| path.as_str() == "build/libs/app.jar"));
 
-    fs::write(root.join("build.gradle"), "tasks.register(\"build\") { dependsOn \"x\" }\n")
-        .unwrap();
+    fs::write(
+        root.join("build.gradle"),
+        "tasks.register(\"build\") { dependsOn \"x\" }\n",
+    )
+    .unwrap();
     assert!(matches!(
         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Gradle),
         Err(BuildError::LegacyProjectFileInvalid(message))
@@ -2745,11 +2791,7 @@ fn legacy_project_import_captures_source_closure_and_rejects_unmodeled_recipes()
             if message.contains("Cargo.lock")
     ));
 
-    fs::write(
-        root.join("package.json"),
-        r#"{"scripts":{"build":"tool"}}"#,
-    )
-    .unwrap();
+    fs::write(root.join("package.json"), r#"{"scripts":{"build":"tool"}}"#).unwrap();
     assert!(matches!(
         LegacyWrapperSpec::from_project_file(&root, LegacyWrapperKind::Npm),
         Err(BuildError::LegacyProjectFileInvalid(message))
@@ -2803,7 +2845,11 @@ fn legacy_project_import_rejects_a_symlinked_canonical_file() {
     let _ = fs::remove_dir_all(&outside);
     fs::create_dir_all(&root).unwrap();
     fs::create_dir_all(&outside).unwrap();
-    fs::write(outside.join("Cargo.toml"), b"[package]\nname = \"outside\"\n").unwrap();
+    fs::write(
+        outside.join("Cargo.toml"),
+        b"[package]\nname = \"outside\"\n",
+    )
+    .unwrap();
     symlink(outside.join("Cargo.toml"), root.join("Cargo.toml")).unwrap();
 
     assert!(matches!(
@@ -2818,9 +2864,13 @@ fn legacy_project_import_rejects_a_symlinked_canonical_file() {
 #[test]
 fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
     let mut b = BuildContext::new();
-    let plugin = WasmComponentPluginSpec::new("shader-tools", "1.2.0", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-        .with_capability(BuildCapability::FS)
-        .with_capability(BuildCapability::Exec);
+    let plugin = WasmComponentPluginSpec::new(
+        "shader-tools",
+        "1.2.0",
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .with_capability(BuildCapability::FS)
+    .with_capability(BuildCapability::Exec);
     let policy = BuildPolicy::allow_all()
         .with_plugin_grant("shader-tools", BuildCapability::FS)
         .with_plugin_grant("shader-tools", BuildCapability::Exec);
@@ -2864,13 +2914,23 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
         .as_str()
         .starts_with("sha256:"));
     let generated = plan.explain_file(".jet/generated/shaders.jet");
-    assert!(generated.provenance.iter().any(|fact| fact == "generated=shaders"));
-    assert!(generated.provenance.iter().any(|fact| fact.starts_with("digest=sha256:")));
+    assert!(generated
+        .provenance
+        .iter()
+        .any(|fact| fact == "generated=shaders"));
+    assert!(generated
+        .provenance
+        .iter()
+        .any(|fact| fact.starts_with("digest=sha256:")));
 
     let denied = BuildContext::new()
         .apply_wasm_component_plugin(
-            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-                .with_capability(BuildCapability::Net),
+            WasmComponentPluginSpec::new(
+                "net-plugin",
+                "1.0.0",
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            )
+            .with_capability(BuildCapability::Net),
             PluginContribution::new(),
             &BuildPolicy::allow_all(),
         )
@@ -2879,8 +2939,12 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
 
     let version_err = BuildContext::new()
         .apply_wasm_component_plugin(
-            WasmComponentPluginSpec::new("old-plugin", "0.1.0", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-                .with_api_version("jet.build.plugin.v0"),
+            WasmComponentPluginSpec::new(
+                "old-plugin",
+                "0.1.0",
+                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            )
+            .with_api_version("jet.build.plugin.v0"),
             PluginContribution::new(),
             &BuildPolicy::allow_all(),
         )
@@ -2892,8 +2956,12 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
 
     let contributed_cap_denied = BuildContext::new()
         .apply_wasm_component_plugin(
-            WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-                .with_capability(BuildCapability::FS),
+            WasmComponentPluginSpec::new(
+                "net-plugin",
+                "1.0.0",
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            )
+            .with_capability(BuildCapability::FS),
             PluginContribution::new().with_action(
                 "probe-network",
                 ActionSpec::cached(["curl", "https://example.invalid"])
@@ -2947,8 +3015,9 @@ fn packaged_build_plugins_verify_bytes_and_roll_back_rejected_contributions() {
     )
     .unwrap();
     fs::write(&invalid_component_path, invalid_component).unwrap();
-    let invalid = WasmComponentPluginSpec::load_packaged(&invalid_manifest, &invalid_component_path)
-        .expect_err("digest-matching arbitrary bytes must not be a component");
+    let invalid =
+        WasmComponentPluginSpec::load_packaged(&invalid_manifest, &invalid_component_path)
+            .expect_err("digest-matching arbitrary bytes must not be a component");
     assert!(invalid.contains("Component Model binary"), "{invalid}");
 
     let policy = BuildPolicy::allow_all().with_plugin_grant("packaged", BuildCapability::FS);
@@ -3058,7 +3127,10 @@ fn plugin_action_and_generated_module_cannot_share_one_path() {
             )),
         &BuildPolicy::allow_all().with_plugin_grant("collision-plugin", BuildCapability::Exec),
     );
-    assert!(matches!(result, Err(BuildError::GeneratedModuleCycle { .. })));
+    assert!(matches!(
+        result,
+        Err(BuildError::GeneratedModuleCycle { .. })
+    ));
 }
 
 #[test]
@@ -3402,36 +3474,36 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
         b"beta",
     );
 
-    let compiler =
-        |action: &jet::Comptime::Build::BuildAction, snapshots: &[ActionInputSnapshot]| {
-            let label = |name: &str| {
-                action
-                    .labels
-                    .get(name)
-                    .map(String::as_str)
-                    .unwrap_or_default()
-            };
-            let dependencies = snapshots
-                .iter()
-                .map(|snapshot| format!("{}={}", snapshot.path.as_str(), snapshot.digest.as_str()))
-                .collect::<Vec<_>>()
-                .join(",");
-            Ok(action
-                .outputs
-                .iter()
-                .map(|_| {
-                    format!(
-                        "sealed:{}:{}:{}:{}:{}:{dependencies}",
-                        action.name.as_str(),
-                        label("compiler.source-digest"),
-                        label("compiler.identity"),
-                        label("compiler.target"),
-                        label("compiler.profile"),
-                    )
-                    .into_bytes()
-                })
-                .collect::<Vec<_>>())
+    let compiler = |action: &jet::Comptime::Build::BuildAction,
+                    snapshots: &[ActionInputSnapshot]| {
+        let label = |name: &str| {
+            action
+                .labels
+                .get(name)
+                .map(String::as_str)
+                .unwrap_or_default()
         };
+        let dependencies = snapshots
+            .iter()
+            .map(|snapshot| format!("{}={}", snapshot.path.as_str(), snapshot.digest.as_str()))
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(action
+            .outputs
+            .iter()
+            .map(|_| {
+                format!(
+                    "sealed:{}:{}:{}:{}:{}:{dependencies}",
+                    action.name.as_str(),
+                    label("compiler.source-digest"),
+                    label("compiler.identity"),
+                    label("compiler.target"),
+                    label("compiler.profile"),
+                )
+                .into_bytes()
+            })
+            .collect::<Vec<_>>())
+    };
 
     let first = execute_build_plan_with_front_end_and_compiler(
         &plan,
@@ -3502,20 +3574,12 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
 
     let rebuild_with = |field: &str, value: &str| {
         let changed_plan = match field {
-            "compiler.identity" => make_plan(
-                value,
-                "native-test-target",
-                "debug",
-                b"alpha",
-                b"beta",
-            ),
-            "compiler.target" => make_plan(
-                "jet-test-compiler@clean",
-                value,
-                "debug",
-                b"alpha",
-                b"beta",
-            ),
+            "compiler.identity" => {
+                make_plan(value, "native-test-target", "debug", b"alpha", b"beta")
+            }
+            "compiler.target" => {
+                make_plan("jet-test-compiler@clean", value, "debug", b"alpha", b"beta")
+            }
             "compiler.profile" => make_plan(
                 "jet-test-compiler@clean",
                 "native-test-target",
@@ -3638,8 +3702,10 @@ fn per_package_dependency_artifacts_restore_and_invalidate() {
     };
     let consumer_handle = plan.action_handle(consumer.id).unwrap();
     assert_ne!(
-        plan.action_key_with_inputs(consumer_handle, &[original]).unwrap(),
-        plan.action_key_with_inputs(consumer_handle, &[changed]).unwrap()
+        plan.action_key_with_inputs(consumer_handle, &[original])
+            .unwrap(),
+        plan.action_key_with_inputs(consumer_handle, &[changed])
+            .unwrap()
     );
 
     fs::remove_dir_all(root).unwrap();

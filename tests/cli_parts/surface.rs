@@ -62,12 +62,40 @@ fn target_equals_and_space_forms_match_for_build_run_and_dev() {
         ("run", "fn run() { print(\"target\") }\n"),
         ("dev", "fn dev() { print(\"target\") }\n"),
     ] {
-        let equals = invoke(&format!("target_{command}_equals"), command, source, Some(target), false);
-        let space = invoke(&format!("target_{command}_space"), command, source, Some(target), true);
-        assert_eq!(equals.status.code(), Some(0), "{command} equals failed: {}", String::from_utf8_lossy(&equals.stderr));
-        assert_eq!(space.status.code(), Some(0), "{command} space failed: {}", String::from_utf8_lossy(&space.stderr));
-        assert_eq!(equals.stdout, space.stdout, "{command} target forms changed stdout");
-        assert_eq!(equals.stderr, space.stderr, "{command} target forms changed stderr");
+        let equals = invoke(
+            &format!("target_{command}_equals"),
+            command,
+            source,
+            Some(target),
+            false,
+        );
+        let space = invoke(
+            &format!("target_{command}_space"),
+            command,
+            source,
+            Some(target),
+            true,
+        );
+        assert_eq!(
+            equals.status.code(),
+            Some(0),
+            "{command} equals failed: {}",
+            String::from_utf8_lossy(&equals.stderr)
+        );
+        assert_eq!(
+            space.status.code(),
+            Some(0),
+            "{command} space failed: {}",
+            String::from_utf8_lossy(&space.stderr)
+        );
+        assert_eq!(
+            equals.stdout, space.stdout,
+            "{command} target forms changed stdout"
+        );
+        assert_eq!(
+            equals.stderr, space.stderr,
+            "{command} target forms changed stderr"
+        );
     }
 
     let unknown = "definitely-not-a-rust-target";
@@ -76,13 +104,41 @@ fn target_equals_and_space_forms_match_for_build_run_and_dev() {
         ("run", "fn run() {}\n"),
         ("dev", "fn run() {}\n"),
     ] {
-        let equals = invoke(&format!("target_{command}_unknown_equals"), command, source, Some(unknown), false);
-        let space = invoke(&format!("target_{command}_unknown_space"), command, source, Some(unknown), true);
-        assert_eq!(equals.status.code(), Some(1), "{command} equals did not reject target: {}", String::from_utf8_lossy(&equals.stderr));
-        assert_eq!(space.status.code(), Some(1), "{command} space did not reject target: {}", String::from_utf8_lossy(&space.stderr));
-        assert_eq!(equals.stderr, space.stderr, "{command} target forms changed normalized E3302 output");
+        let equals = invoke(
+            &format!("target_{command}_unknown_equals"),
+            command,
+            source,
+            Some(unknown),
+            false,
+        );
+        let space = invoke(
+            &format!("target_{command}_unknown_space"),
+            command,
+            source,
+            Some(unknown),
+            true,
+        );
+        assert_eq!(
+            equals.status.code(),
+            Some(1),
+            "{command} equals did not reject target: {}",
+            String::from_utf8_lossy(&equals.stderr)
+        );
+        assert_eq!(
+            space.status.code(),
+            Some(1),
+            "{command} space did not reject target: {}",
+            String::from_utf8_lossy(&space.stderr)
+        );
+        assert_eq!(
+            equals.stderr, space.stderr,
+            "{command} target forms changed normalized E3302 output"
+        );
         let stderr = String::from_utf8_lossy(&equals.stderr);
-        assert!(stderr.contains("Error [E3302]:"), "{command} missing E3302: {stderr}");
+        assert!(
+            stderr.contains("Error [E3302]:"),
+            "{command} missing E3302: {stderr}"
+        );
         check_snapshot("unknown_target_e3302.txt", &stderr);
     }
 
@@ -93,11 +149,28 @@ fn target_equals_and_space_forms_match_for_build_run_and_dev() {
     ] {
         for (suffix, spaced) in [("space", true), ("equals", false)] {
             let value = if spaced { None } else { Some("") };
-            let out = invoke(&format!("target_{command}_missing_{suffix}"), command, source, value, spaced);
-            assert_eq!(out.status.code(), Some(2), "{command} missing target value was not rejected: {}", String::from_utf8_lossy(&out.stderr));
+            let out = invoke(
+                &format!("target_{command}_missing_{suffix}"),
+                command,
+                source,
+                value,
+                spaced,
+            );
+            assert_eq!(
+                out.status.code(),
+                Some(2),
+                "{command} missing target value was not rejected: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
             let stderr = String::from_utf8_lossy(&out.stderr);
-            assert!(stderr.contains("Error [E2104]:"), "{command} missing target value lost E2104: {stderr}");
-            assert!(stderr.contains("`--target` needs a value"), "{command} missing target value was not truthful: {stderr}");
+            assert!(
+                stderr.contains("Error [E2104]:"),
+                "{command} missing target value lost E2104: {stderr}"
+            );
+            assert!(
+                stderr.contains("`--target` needs a value"),
+                "{command} missing target value was not truthful: {stderr}"
+            );
         }
     }
 }
@@ -112,29 +185,62 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
     };
 
     for flag in ["--help", "help"] {
-        let out = Command::new(jet()).arg(flag).env("NO_COLOR", "1").output().unwrap();
+        let out = Command::new(jet())
+            .arg(flag)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(out.status.success(), "{flag}: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
-        for command in jet::CLI::COMMANDS.iter().filter(|command| jet::CLI::is_canonical_top_level(command.name)) {
-            assert!(has_route(&stdout, command.name), "help omitted {}: {stdout}", command.name);
+        for command in jet::CLI::COMMANDS
+            .iter()
+            .filter(|command| jet::CLI::is_canonical_top_level(command.name))
+        {
+            assert!(
+                has_route(&stdout, command.name),
+                "help omitted {}: {stdout}",
+                command.name
+            );
         }
         for retired in jet::CLI::RETIRED_COMMANDS {
-            assert!(!has_route(&stdout, retired.spelling), "help advertised retired {}: {stdout}", retired.spelling);
+            assert!(
+                !has_route(&stdout, retired.spelling),
+                "help advertised retired {}: {stdout}",
+                retired.spelling
+            );
         }
     }
 
-    let env_help = Command::new(jet()).args(["env", "--help"]).output().unwrap();
+    let env_help = Command::new(jet())
+        .args(["env", "--help"])
+        .output()
+        .unwrap();
     assert!(env_help.status.success(), "env help failed: {:?}", env_help);
     let env_help = String::from_utf8_lossy(&env_help.stdout);
     for action in ["hook", "test", "sync", "info"] {
-        assert!(env_help.contains(&format!("jet env {action}")), "env help omitted {action}: {env_help}");
+        assert!(
+            env_help.contains(&format!("jet env {action}")),
+            "env help omitted {action}: {env_help}"
+        );
     }
 
     let completions = [
-        Command::new(jet()).args(["self", "completions", "bash"]).output().unwrap(),
-        Command::new(jet()).args(["self", "completions", "zsh"]).output().unwrap(),
-        Command::new(jet()).args(["self", "completions", "fish"]).output().unwrap(),
-        Command::new(jet()).args(["self", "completions", "powershell"]).output().unwrap(),
+        Command::new(jet())
+            .args(["self", "completions", "bash"])
+            .output()
+            .unwrap(),
+        Command::new(jet())
+            .args(["self", "completions", "zsh"])
+            .output()
+            .unwrap(),
+        Command::new(jet())
+            .args(["self", "completions", "fish"])
+            .output()
+            .unwrap(),
+        Command::new(jet())
+            .args(["self", "completions", "powershell"])
+            .output()
+            .unwrap(),
     ];
     for output in completions {
         assert!(output.status.success(), "completion failed: {:?}", output);
@@ -144,7 +250,12 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
 
     let man = jet::CLI::man_page("0.0.0");
     for retired in jet::CLI::RETIRED_COMMANDS {
-        assert!(!man.lines().any(|line| line.trim() == format!(".B {}", retired.spelling)), "man advertised retired {}: {man}", retired.spelling);
+        assert!(
+            !man.lines()
+                .any(|line| line.trim() == format!(".B {}", retired.spelling)),
+            "man advertised retired {}: {man}",
+            retired.spelling
+        );
     }
 }
 
@@ -171,25 +282,48 @@ fn run_help_teaches_the_project_default_and_keeps_explicit_targets() {
 #[test]
 fn external_completion_preserves_checked_program_commands() {
     let dir = isolated_cwd("shape_cli_program_commands");
-    fs::write(dir.join("commands.jet"), r#"#CLI(Standard)
+    fs::write(
+        dir.join("commands.jet"),
+        r#"#CLI(Standard)
 struct Commands {
     #[Doc("shared config"), Short("c"), Env("JET_CONFIG")] config: String{"default"}
     #Doc("start the service") fn serve(self, port: Int{3000}) {}
     #Doc("import one file") fn import(self, file: String) {}
 }
 fn run(args: Commands) {}
-"#).unwrap();
-    let build = Command::new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap();
-    assert!(build.status.success(), "program build failed: {}", String::from_utf8_lossy(&build.stderr));
+"#,
+    )
+    .unwrap();
+    let build = Command::new(jet())
+        .args(["build", "commands.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "program build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
     let help = Command::new(dir.join("build/commands"))
         .arg("--help")
         .current_dir(&dir)
         .output()
         .unwrap();
-    assert!(help.status.success(), "program root help failed: {}", String::from_utf8_lossy(&help.stderr));
+    assert!(
+        help.status.success(),
+        "program root help failed: {}",
+        String::from_utf8_lossy(&help.stderr)
+    );
     let help = String::from_utf8(help.stdout).unwrap();
-    assert!(help.contains("--config CONFIG"), "root help omitted shared config: {help}");
-    assert_eq!(help.matches("--config").count(), 1, "root help repeated shared config: {help}");
+    assert!(
+        help.contains("--config CONFIG"),
+        "root help omitted shared config: {help}"
+    );
+    assert_eq!(
+        help.matches("--config").count(),
+        1,
+        "root help repeated shared config: {help}"
+    );
     assert!(!help.contains("Serve") && !help.contains("Import"));
 
     for shell in ["bash", "zsh", "fish", "powershell"] {
@@ -198,21 +332,55 @@ fn run(args: Commands) {}
             .current_dir(&dir)
             .output()
             .unwrap();
-        assert!(completion.status.success(), "{shell} subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
+        assert!(
+            completion.status.success(),
+            "{shell} subcommand completion failed: {}",
+            String::from_utf8_lossy(&completion.stderr)
+        );
         let script = String::from_utf8(completion.stdout).unwrap();
         let expected = match shell {
             "bash" => ["serve", "import", "--port", "file --file", "--config"],
-            "zsh" => ["serve", "import", "--port", ":file:value for --file", "--config"],
+            "zsh" => [
+                "serve",
+                "import",
+                "--port",
+                ":file:value for --file",
+                "--config",
+            ],
             "fish" => ["serve", "import", "-l port", "-l file", "-l config"],
-            "powershell" => ["serve", "import", "'--port'", "'file','--file'", "'--config'"],
+            "powershell" => [
+                "serve",
+                "import",
+                "'--port'",
+                "'file','--file'",
+                "'--config'",
+            ],
             _ => unreachable!(),
         };
         for fragment in expected {
-            assert!(script.contains(fragment), "{shell} external completion omitted {fragment}: {script}");
+            assert!(
+                script.contains(fragment),
+                "{shell} external completion omitted {fragment}: {script}"
+            );
         }
-        assert!(script.contains("--verbose") || script.contains("-l verbose") || script.contains("'--verbose'"), "{shell} omitted the Standard root flags: {script}");
-        assert!(script.contains("--quiet") || script.contains("-l quiet") || script.contains("'--quiet'"), "{shell} omitted the Standard root flags: {script}");
-        assert!(script.contains("--color") || script.contains("-l color") || script.contains("'--color'"), "{shell} omitted the Standard root flags: {script}");
+        assert!(
+            script.contains("--verbose")
+                || script.contains("-l verbose")
+                || script.contains("'--verbose'"),
+            "{shell} omitted the Standard root flags: {script}"
+        );
+        assert!(
+            script.contains("--quiet")
+                || script.contains("-l quiet")
+                || script.contains("'--quiet'"),
+            "{shell} omitted the Standard root flags: {script}"
+        );
+        assert!(
+            script.contains("--color")
+                || script.contains("-l color")
+                || script.contains("'--color'"),
+            "{shell} omitted the Standard root flags: {script}"
+        );
         check_snapshot(&format!("shape_cli_program_{shell}.txt"), &script);
     }
     let dossier = Command::new(jet())
@@ -223,7 +391,13 @@ fn run(args: Commands) {}
     assert!(dossier.status.success());
     let dossier = String::from_utf8(dossier.stdout).unwrap();
     assert!(dossier.contains("\"completion_words\":[\"--help\",\"--verbose\",\"-v\",\"--quiet\",\"-q\",\"--color\",\"--version\",\"--config\",\"-c\",\"serve\",\"import\"]"), "dossier flattened program flags: {dossier}");
-    for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
+    for fact in [
+        "\"commands\":[",
+        "\"name\":\"serve\"",
+        "\"name\":\"import\"",
+        "\"flag\":\"--port\"",
+        "\"flag\":\"--file\"",
+    ] {
         assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
     }
     let dossier = Command::new(jet())
@@ -241,7 +415,10 @@ fn run(args: Commands) {}
         "command import",
         "--file: String (required) — value for --file",
     ] {
-        assert!(dossier.contains(fact), "text dossier omitted {fact}: {dossier}");
+        assert!(
+            dossier.contains(fact),
+            "text dossier omitted {fact}: {dossier}"
+        );
     }
 }
 
@@ -275,7 +452,10 @@ fn run(args: Commands) {}
         "\"name\":\"import\",\"description\":\"Import one data file\"",
         "\"completion_words\":[\"--help\",\"serve\",\"import\"]",
     ] {
-        assert!(json.contains(fact), "documented dossier omitted {fact}: {json}");
+        assert!(
+            json.contains(fact),
+            "documented dossier omitted {fact}: {json}"
+        );
     }
 }
 
@@ -417,14 +597,21 @@ fn moved_bare_commands_are_teaching_errors_not_aliases() {
         ("lsp", "jet self lsp"),
         ("push", "jet os push"),
     ] {
-        let out = Command::new(jet()).arg(verb).arg("sentinel").output().unwrap();
+        let out = Command::new(jet())
+            .arg(verb)
+            .arg("sentinel")
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(2), "{verb} must be rejected");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.contains("E2101"), "{verb}: {stderr}");
         assert!(stderr.contains(replacement), "{verb}: {stderr}");
     }
 
-    let out = Command::new(jet()).args(["lsp", "--json"]).output().unwrap();
+    let out = Command::new(jet())
+        .args(["lsp", "--json"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(out.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -446,7 +633,11 @@ fn retired_cli_routes_are_absent_but_teach_real_spelling() {
         jet::CLI::completions_powershell(),
     ];
     let top_help = Command::new(jet()).arg("--help").output().unwrap();
-    assert!(top_help.status.success(), "jet --help failed: {:?}", top_help);
+    assert!(
+        top_help.status.success(),
+        "jet --help failed: {:?}",
+        top_help
+    );
     let top_help = String::from_utf8_lossy(&top_help.stdout);
     for retired in jet::CLI::RETIRED_COMMANDS {
         let needle = format!("jet {}", retired.spelling);
@@ -454,7 +645,10 @@ fn retired_cli_routes_are_absent_but_teach_real_spelling() {
             surfaces.iter().all(|surface| !surface.contains(&needle)),
             "retired route leaked into generated surface: {needle}"
         );
-        assert!(!top_help.contains(&needle), "retired route leaked into `jet --help`: {needle}");
+        assert!(
+            !top_help.contains(&needle),
+            "retired route leaked into `jet --help`: {needle}"
+        );
     }
     for (argv, replacement) in [
         (vec!["gc"], "jet clean"),
@@ -465,7 +659,10 @@ fn retired_cli_routes_are_absent_but_teach_real_spelling() {
         (vec!["store", "generations"], "jet hangar generations"),
         (vec!["store", "rollback", "2"], "jet hangar rollback 2"),
         (vec!["store", "gc"], "jet clean"),
-        (vec!["store", "lock", "stats.jet"], "jet fetch --lock stats.jet"),
+        (
+            vec!["store", "lock", "stats.jet"],
+            "jet fetch --lock stats.jet",
+        ),
         (vec!["serve", "main.jet"], "jet dev main.jet --swap"),
         (vec!["lock", "stats.jet"], "jet fetch --lock stats.jet"),
     ] {
@@ -482,14 +679,12 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
     let mut declared = Vec::new();
     for group in jet::CLI::command_groups() {
         for action in group.actions {
-            let dispatch_exempts = jet::CLI::moved_command(action.name).is_none()
-                && action.name != "install";
+            let dispatch_exempts =
+                jet::CLI::moved_command(action.name).is_none() && action.name != "install";
             assert_eq!(
-                action.also_canonical_top_level,
-                dispatch_exempts,
+                action.also_canonical_top_level, dispatch_exempts,
                 "registry and moved_command disagree for {} {}",
-                group.name,
-                action.name
+                group.name, action.name
             );
             if action.also_canonical_top_level {
                 declared.push(format!("{} {}", group.name, action.name));
@@ -511,16 +706,43 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
 
 #[test]
 fn test_help_exposes_measurement_and_retired_command_teaches_it() {
-    let test_help = Command::new(jet()).args(["test", "--help"]).env("NO_COLOR", "1").output().unwrap();
-    assert!(test_help.status.success(), "jet test --help failed: {}", String::from_utf8_lossy(&test_help.stderr));
+    let test_help = Command::new(jet())
+        .args(["test", "--help"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        test_help.status.success(),
+        "jet test --help failed: {}",
+        String::from_utf8_lossy(&test_help.stderr)
+    );
     let test_help = String::from_utf8_lossy(&test_help.stdout);
-    assert!(test_help.contains("--filter"), "test help lost shared filter flag: {test_help}");
-    assert!(test_help.contains("--measure"), "test help omitted measurement mode: {test_help}");
-    assert!(test_help.contains("--show-default"), "test help missing command override escape hatch: {test_help}");
-    let retired = Command::new(jet()).args(["bench", "--help"]).env("NO_COLOR", "1").output().unwrap();
-    assert!(!retired.status.success(), "retired measurement command unexpectedly succeeded");
+    assert!(
+        test_help.contains("--filter"),
+        "test help lost shared filter flag: {test_help}"
+    );
+    assert!(
+        test_help.contains("--measure"),
+        "test help omitted measurement mode: {test_help}"
+    );
+    assert!(
+        test_help.contains("--show-default"),
+        "test help missing command override escape hatch: {test_help}"
+    );
+    let retired = Command::new(jet())
+        .args(["bench", "--help"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !retired.status.success(),
+        "retired measurement command unexpectedly succeeded"
+    );
     let retired = String::from_utf8_lossy(&retired.stderr);
-    assert!(retired.contains("jet test --measure"), "retired command did not teach measurement: {retired}");
+    assert!(
+        retired.contains("jet test --measure"),
+        "retired command did not teach measurement: {retired}"
+    );
 }
 
 /// I8: this test owns exactly ONE fact — that every user-visible surface names
@@ -544,7 +766,10 @@ fn coverage_help_matches_instrumentation() {
         String::from_utf8_lossy(&help.stderr)
     );
     let help = String::from_utf8_lossy(&help.stdout);
-    assert!(help.contains("--coverage") && help.contains(COVERAGE_HELP), "{help}");
+    assert!(
+        help.contains("--coverage") && help.contains(COVERAGE_HELP),
+        "{help}"
+    );
     assert!(!help.contains("function and line coverage"), "{help}");
 
     for shell in ["bash", "fish", "zsh", "powershell"] {
@@ -563,15 +788,25 @@ fn coverage_help_matches_instrumentation() {
         } else {
             "--coverage"
         };
-        assert!(script.contains(coverage_flag), "{shell} omitted {coverage_flag}");
+        assert!(
+            script.contains(coverage_flag),
+            "{shell} omitted {coverage_flag}"
+        );
         if matches!(shell, "fish" | "zsh") {
             assert!(script.contains(COVERAGE_HELP), "{shell}: {script}");
         }
-        assert!(!script.contains("function and line coverage"), "{shell}: {script}");
+        assert!(
+            !script.contains("function and line coverage"),
+            "{shell}: {script}"
+        );
     }
 
     let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
-    assert!(man.status.success(), "man page failed: {}", String::from_utf8_lossy(&man.stderr));
+    assert!(
+        man.status.success(),
+        "man page failed: {}",
+        String::from_utf8_lossy(&man.stderr)
+    );
     let man = String::from_utf8_lossy(&man.stdout);
     assert!(man.contains(COVERAGE_HELP), "{man}");
     assert!(!man.contains("function and line coverage"), "{man}");
@@ -579,10 +814,16 @@ fn coverage_help_matches_instrumentation() {
 
 #[test]
 fn bare_dev_uses_file_scoped_run() {
-    let out = Command::new(jet()).args(["dev", "--no-color"]).output().unwrap();
+    let out = Command::new(jet())
+        .args(["dev", "--no-color"])
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("`jet dev` needs a file to watch"), "{stderr}");
+    assert!(
+        stderr.contains("`jet dev` needs a file to watch"),
+        "{stderr}"
+    );
     assert!(stderr.contains("jet dev <file.jet>"), "{stderr}");
 }
 
@@ -594,17 +835,39 @@ fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
                 continue;
             };
             let replacement = format!("jet {} {}", owner, action.name);
-            let out = Command::new(jet()).arg(action.name).arg("sentinel").output().unwrap();
+            let out = Command::new(jet())
+                .arg(action.name)
+                .arg("sentinel")
+                .output()
+                .unwrap();
             assert_eq!(out.status.code(), Some(2), "bare {}", action.name);
             let stderr = String::from_utf8_lossy(&out.stderr);
-            assert!(stderr.contains("E2101") && stderr.contains(&replacement), "{}: {stderr}", action.name);
+            assert!(
+                stderr.contains("E2101") && stderr.contains(&replacement),
+                "{}: {stderr}",
+                action.name
+            );
 
-            let out = Command::new(jet()).args([action.name, "sentinel\\\"quoted", "--json"]).output().unwrap();
+            let out = Command::new(jet())
+                .args([action.name, "sentinel\\\"quoted", "--json"])
+                .output()
+                .unwrap();
             assert_eq!(out.status.code(), Some(2), "bare {} --json", action.name);
-            assert!(out.stderr.is_empty(), "JSON diagnostic leaked stderr for {}", action.name);
+            assert!(
+                out.stderr.is_empty(),
+                "JSON diagnostic leaked stderr for {}",
+                action.name
+            );
             let stdout = String::from_utf8_lossy(&out.stdout);
-            assert!(stdout.contains("\"code\":\"E2101\"") && stdout.contains(&replacement), "{}: {stdout}", action.name);
-            assert!(stdout.contains("sentinel\\\\\\\"quoted"), "replacement was not JSON escaped: {stdout}");
+            assert!(
+                stdout.contains("\"code\":\"E2101\"") && stdout.contains(&replacement),
+                "{}: {stdout}",
+                action.name
+            );
+            assert!(
+                stdout.contains("sentinel\\\\\\\"quoted"),
+                "replacement was not JSON escaped: {stdout}"
+            );
         }
     }
 }
@@ -617,41 +880,77 @@ fn invalid_nested_action_is_e2101_and_json_escaped() {
     // which teaches its own (non-E2101) "not a jetos verb" error, not this
     // registry's generic invalid-action path.
     for group in jet::CLI::command_groups().filter(|g| g.exhaustive) {
-        let out = Command::new(jet()).args([group.name, bad]).output().unwrap();
+        let out = Command::new(jet())
+            .args([group.name, bad])
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(stderr.contains("E2101") && stderr.contains(bad), "{stderr}");
 
-        let out = Command::new(jet()).args([group.name, bad, "--json"]).output().unwrap();
+        let out = Command::new(jet())
+            .args([group.name, bad, "--json"])
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(2));
         assert!(out.stderr.is_empty());
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("bad\\\\\\\"action"), "invalid JSON escaping: {stdout}");
-        assert!(!stdout.contains("`bad\\\"action`"), "raw quote leaked into JSON: {stdout}");
+        assert!(
+            stdout.contains("bad\\\\\\\"action"),
+            "invalid JSON escaping: {stdout}"
+        );
+        assert!(
+            !stdout.contains("`bad\\\"action`"),
+            "raw quote leaked into JSON: {stdout}"
+        );
     }
 }
 
 #[test]
 fn grouped_e2101_human_and_json_goldens() {
-    let moved = Command::new(jet()).args(["publish", "sentinel"]).output().unwrap();
+    let moved = Command::new(jet())
+        .args(["publish", "sentinel"])
+        .output()
+        .unwrap();
     assert_eq!(moved.status.code(), Some(2));
     assert!(moved.stdout.is_empty());
-    check_snapshot("moved_bare_e2101_human.txt", &String::from_utf8_lossy(&moved.stderr));
+    check_snapshot(
+        "moved_bare_e2101_human.txt",
+        &String::from_utf8_lossy(&moved.stderr),
+    );
 
-    let moved_json = Command::new(jet()).args(["publish", "sentinel\\\"quoted", "--json"]).output().unwrap();
+    let moved_json = Command::new(jet())
+        .args(["publish", "sentinel\\\"quoted", "--json"])
+        .output()
+        .unwrap();
     assert_eq!(moved_json.status.code(), Some(2));
     assert!(moved_json.stderr.is_empty());
-    check_snapshot("moved_bare_e2101_json.txt", &String::from_utf8_lossy(&moved_json.stdout));
+    check_snapshot(
+        "moved_bare_e2101_json.txt",
+        &String::from_utf8_lossy(&moved_json.stdout),
+    );
 
-    let invalid = Command::new(jet()).args(["inspect", "bad\\\"action"]).output().unwrap();
+    let invalid = Command::new(jet())
+        .args(["inspect", "bad\\\"action"])
+        .output()
+        .unwrap();
     assert_eq!(invalid.status.code(), Some(2));
     assert!(invalid.stdout.is_empty());
-    check_snapshot("invalid_nested_e2101_human.txt", &String::from_utf8_lossy(&invalid.stderr));
+    check_snapshot(
+        "invalid_nested_e2101_human.txt",
+        &String::from_utf8_lossy(&invalid.stderr),
+    );
 
-    let invalid_json = Command::new(jet()).args(["inspect", "bad\\\"action", "--json"]).output().unwrap();
+    let invalid_json = Command::new(jet())
+        .args(["inspect", "bad\\\"action", "--json"])
+        .output()
+        .unwrap();
     assert_eq!(invalid_json.status.code(), Some(2));
     assert!(invalid_json.stderr.is_empty());
-    check_snapshot("invalid_nested_e2101_json.txt", &String::from_utf8_lossy(&invalid_json.stdout));
+    check_snapshot(
+        "invalid_nested_e2101_json.txt",
+        &String::from_utf8_lossy(&invalid_json.stdout),
+    );
 }
 
 #[test]
@@ -666,17 +965,39 @@ fn group_help_and_man_inventory_every_nested_description() {
         // inventory is checked for it. An exhaustive group's `help` is
         // CLI-owned and must list every action.
         if group.exhaustive {
-            let out = Command::new(jet()).args([group.name, "help"]).output().unwrap();
+            let out = Command::new(jet())
+                .args([group.name, "help"])
+                .output()
+                .unwrap();
             assert_eq!(out.status.code(), Some(0));
             let help = String::from_utf8_lossy(&out.stdout);
-            assert!(help.contains(group.summary), "{} help missing summary", group.name);
+            assert!(
+                help.contains(group.summary),
+                "{} help missing summary",
+                group.name
+            );
             for action in group.actions {
-                assert!(help.contains(action.name) && help.contains(action.summary), "{} help missing {}", group.name, action.name);
+                assert!(
+                    help.contains(action.name) && help.contains(action.summary),
+                    "{} help missing {}",
+                    group.name,
+                    action.name
+                );
             }
         }
         for action in group.actions {
-            assert!(man.contains(&format!(".B {} {}", group.name, action.name)), "man missing {} {}", group.name, action.name);
-            assert!(man.contains(action.summary), "man missing summary for {} {}", group.name, action.name);
+            assert!(
+                man.contains(&format!(".B {} {}", group.name, action.name)),
+                "man missing {} {}",
+                group.name,
+                action.name
+            );
+            assert!(
+                man.contains(action.summary),
+                "man missing summary for {} {}",
+                group.name,
+                action.name
+            );
         }
     }
 }
@@ -690,7 +1011,11 @@ fn palette_uses_canonical_nested_routes() {
             assert_eq!(out.status.code(), Some(0));
             let stdout = String::from_utf8_lossy(&out.stdout);
             assert!(stdout.contains(&route), "palette missing {route}: {stdout}");
-            assert!(!stdout.contains(&format!("jet {}   ", action.name)), "palette advertised bare moved action {}", action.name);
+            assert!(
+                !stdout.contains(&format!("jet {}   ", action.name)),
+                "palette advertised bare moved action {}",
+                action.name
+            );
         }
     }
 }
@@ -750,11 +1075,7 @@ fn check_json_golden() {
 fn name_suggestion_json_golden() {
     let dir = isolated_cwd("name_suggestion_json");
     let p = dir.join("name.jet");
-    fs::write(
-        &p,
-        "fn run() {\n    score :: 90\n    print(scor)\n}\n",
-    )
-    .unwrap();
+    fs::write(&p, "fn run() {\n    score :: 90\n    print(scor)\n}\n").unwrap();
     let out = Command::new(jet())
         .args(["check", p.to_str().unwrap(), "--json"])
         .env("NO_COLOR", "1")
@@ -779,24 +1100,30 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(output.stdout.is_empty());
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert_eq!(stderr.lines().count(), 1, "{stderr}");
         parse_json(stderr.trim()).unwrap_or_else(|_| panic!("invalid diagnostic JSON: {stderr}"))
     };
     let report_file = |value: &jet_foundation::JSON::JSONValue| {
-        jet_foundation::JSON::json_str(
-            jet_foundation::JSON::json_get(value, "file").unwrap(),
-        )
-        .unwrap()
-        .to_string()
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(value, "file").unwrap())
+            .unwrap()
+            .to_string()
     };
 
     let outside = dir.join("outside/bad.jet");
     fs::create_dir_all(outside.parent().unwrap()).unwrap();
     fs::write(&outside, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
-    assert_eq!(report_file(&report(&outside)), outside.display().to_string());
+    assert_eq!(
+        report_file(&report(&outside)),
+        outside.display().to_string()
+    );
     assert_eq!(
         report_file(&report(Path::new("../outside/bad.jet"))),
         outside.display().to_string()
@@ -840,32 +1167,25 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         jet_foundation::JSON::JSONValue::Object(_) => &edits[0],
         _ => panic!("fix edit is not an object"),
     };
-    let edit_file = jet_foundation::JSON::json_str(
-        jet_foundation::JSON::json_get(&edits[0], "file").unwrap(),
-    )
-    .unwrap();
+    let edit_file =
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(&edits[0], "file").unwrap())
+            .unwrap();
     assert_eq!(fix_file, edit_file);
     let span = match jet_foundation::JSON::json_get(edit, "span").unwrap() {
         span @ jet_foundation::JSON::JSONValue::Object(_) => span,
         _ => panic!("fix span is not an object"),
     };
-    let start = jet_foundation::JSON::json_int(
-        jet_foundation::JSON::json_get(span, "start").unwrap(),
-    )
-    .unwrap() as usize;
-    let end = jet_foundation::JSON::json_int(
-        jet_foundation::JSON::json_get(span, "end").unwrap(),
-    )
-    .unwrap() as usize;
-    let new_text = jet_foundation::JSON::json_str(
-        jet_foundation::JSON::json_get(edit, "new_text").unwrap(),
-    )
-    .unwrap();
+    let start =
+        jet_foundation::JSON::json_int(jet_foundation::JSON::json_get(span, "start").unwrap())
+            .unwrap() as usize;
+    let end = jet_foundation::JSON::json_int(jet_foundation::JSON::json_get(span, "end").unwrap())
+        .unwrap() as usize;
+    let new_text =
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(edit, "new_text").unwrap())
+            .unwrap();
     assert_eq!(
-        jet_foundation::JSON::json_str(
-            jet_foundation::JSON::json_get(edit, "safety").unwrap(),
-        )
-        .unwrap(),
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(edit, "safety").unwrap(),)
+            .unwrap(),
         "behavior-preserving"
     );
     let mut fixed = fs::read_to_string(edit_file).unwrap();
@@ -886,13 +1206,21 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(2), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let reports = String::from_utf8(output.stderr).unwrap();
     let files = reports
         .lines()
         .map(|line| report_file(&parse_json(line).unwrap()))
         .collect::<Vec<_>>();
-    assert_eq!(files, vec![left.display().to_string(), right.display().to_string()]);
+    assert_eq!(
+        files,
+        vec![left.display().to_string(), right.display().to_string()]
+    );
 }
 
 #[test]
@@ -935,11 +1263,7 @@ fn e0102_and_e0111_typed_fix_edits_apply() {
 fn name_suggestion_json_edit_applies_and_rechecks_clean() {
     let dir = isolated_cwd("name_suggestion_fix_edit");
     let file = dir.join("name.jet");
-    fs::write(
-        &file,
-        "fn run() {\n    score :: 90\n    print(scor)\n}\n",
-    )
-    .unwrap();
+    fs::write(&file, "fn run() {\n    score :: 90\n    print(scor)\n}\n").unwrap();
 
     let check = || {
         Command::new(jet())
@@ -964,24 +1288,19 @@ fn name_suggestion_json_edit_applies_and_rechecks_clean() {
     };
     assert_eq!(edits.len(), 1);
     let edit = &edits[0];
-    let edit_file = jet_foundation::JSON::json_str(
-        jet_foundation::JSON::json_get(edit, "file").unwrap(),
-    )
-    .unwrap();
+    let edit_file =
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(edit, "file").unwrap())
+            .unwrap();
     assert_eq!(edit_file, file.to_str().unwrap());
     let span = jet_foundation::JSON::json_get(edit, "span").unwrap();
-    let start = jet_foundation::JSON::json_int(
-        jet_foundation::JSON::json_get(span, "start").unwrap(),
-    )
-    .unwrap() as usize;
-    let end = jet_foundation::JSON::json_int(
-        jet_foundation::JSON::json_get(span, "end").unwrap(),
-    )
-    .unwrap() as usize;
-    let new_text = jet_foundation::JSON::json_str(
-        jet_foundation::JSON::json_get(edit, "new_text").unwrap(),
-    )
-    .unwrap();
+    let start =
+        jet_foundation::JSON::json_int(jet_foundation::JSON::json_get(span, "start").unwrap())
+            .unwrap() as usize;
+    let end = jet_foundation::JSON::json_int(jet_foundation::JSON::json_get(span, "end").unwrap())
+        .unwrap() as usize;
+    let new_text =
+        jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(edit, "new_text").unwrap())
+            .unwrap();
     let source = fs::read_to_string(&file).unwrap();
     assert_eq!(&source[start..end], "scor");
     assert_eq!(new_text, "score");
@@ -992,13 +1311,23 @@ fn name_suggestion_json_edit_applies_and_rechecks_clean() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(applied.status.code(), Some(0), "{}", String::from_utf8_lossy(&applied.stderr));
+    assert_eq!(
+        applied.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
     let mut expected = source;
     expected.replace_range(start..end, new_text);
     assert_eq!(fs::read_to_string(&file).unwrap(), expected);
 
     let fixed = check();
-    assert_eq!(fixed.status.code(), Some(0), "{}", String::from_utf8_lossy(&fixed.stderr));
+    assert_eq!(
+        fixed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
     assert!(fixed.stdout.is_empty());
     assert!(fixed.stderr.is_empty());
 }
@@ -1100,7 +1429,11 @@ fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
             .unwrap();
 
         if output.status.success() {
-            assert!(output.stderr.is_empty(), "clean check wrote stderr: {:?}", output.stderr);
+            assert!(
+                output.stderr.is_empty(),
+                "clean check wrote stderr: {:?}",
+                output.stderr
+            );
             let clean = parse_json(String::from_utf8(output.stdout).unwrap().trim())
                 .expect("clean check must emit one JSON object");
             assert_eq!(repair_json_string(&clean, "schema"), "jet.report/v1");
@@ -1117,7 +1450,11 @@ fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
         }
 
         assert_eq!(output.status.code(), Some(1), "check failed: {:?}", output);
-        assert!(output.stdout.is_empty(), "error check wrote stdout: {:?}", output.stdout);
+        assert!(
+            output.stdout.is_empty(),
+            "error check wrote stdout: {:?}",
+            output.stdout
+        );
         reports.extend(
             String::from_utf8(output.stderr)
                 .unwrap()
@@ -1129,7 +1466,10 @@ fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
     reports
 }
 
-fn apply_repair_edits(state: &RepairState, reports: &[RepairReport]) -> Result<RepairState, String> {
+fn apply_repair_edits(
+    state: &RepairState,
+    reports: &[RepairReport],
+) -> Result<RepairState, String> {
     let mut by_file: BTreeMap<PathBuf, Vec<RepairEdit>> = BTreeMap::new();
     for report in reports {
         if report.edits.is_empty() {
@@ -1147,14 +1487,12 @@ fn apply_repair_edits(state: &RepairState, reports: &[RepairReport]) -> Result<R
     for (file, mut edits) in by_file {
         let Some(source) = state.get(&file) else {
             let code = edits.first().map_or("unknown", |edit| edit.code.as_str());
-            return Err(format!("fix_edit for {code} names untracked file {}", file.display()));
+            return Err(format!(
+                "fix_edit for {code} names untracked file {}",
+                file.display()
+            ));
         };
-        edits.sort_by(|left, right| {
-            right
-                .start
-                .cmp(&left.start)
-                .then(right.end.cmp(&left.end))
-        });
+        edits.sort_by(|left, right| right.start.cmp(&left.start).then(right.end.cmp(&left.end)));
         for pair in edits.windows(2) {
             if pair[0].start < pair[1].end {
                 return Err(format!(
@@ -1249,7 +1587,9 @@ fn agent_fix_loop_corpus_converges_without_report_regression() {
 
     let initial_reports = check(&initial);
     assert!(
-        initial_reports.iter().all(|report| !report.edits.is_empty()),
+        initial_reports
+            .iter()
+            .all(|report| !report.edits.is_empty()),
         "every fixture report must carry fix_edits: {initial_reports:?}"
     );
     let mut edits_per_file = BTreeMap::new();
@@ -1261,7 +1601,10 @@ fn agent_fix_loop_corpus_converges_without_report_regression() {
         initial.keys().cloned().collect::<BTreeSet<_>>(),
         "one repair-loop round must report edits for every fixture file"
     );
-    assert!(edits_per_file[&run_file] >= 3, "run.jet needs several errors");
+    assert!(
+        edits_per_file[&run_file] >= 3,
+        "run.jet needs several errors"
+    );
     assert!(
         edits_per_file[&helper_file] >= 3,
         "helper.jet needs several errors"
@@ -1276,7 +1619,10 @@ fn agent_fix_loop_corpus_converges_without_report_regression() {
     let (final_state, rounds) =
         run_repair_loop(initial, AGENT_FIX_LOOP_MAX_ROUNDS, &mut check).unwrap();
     assert!(rounds <= AGENT_FIX_LOOP_MAX_ROUNDS);
-    assert!(check(&final_state).is_empty(), "final recheck was not clean");
+    assert!(
+        check(&final_state).is_empty(),
+        "final recheck was not clean"
+    );
     assert_eq!(
         final_state[&run_file],
         r#"fn run() {
@@ -1399,7 +1745,12 @@ fn fix_safety_tiers_are_reported_and_applied() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let report = parse_json(String::from_utf8(output.stderr).unwrap().trim()).unwrap();
         let applicability = jet_foundation::JSON::json_str(
             jet_foundation::JSON::json_get(&report, "applicability").unwrap(),
@@ -1452,7 +1803,9 @@ fn fix_safety_tiers_are_reported_and_applied() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    assert!(fs::read_to_string(&formatting).unwrap().contains("loop item in"));
+    assert!(fs::read_to_string(&formatting)
+        .unwrap()
+        .contains("loop item in"));
 
     let output = Command::new(jet())
         .args(["fix", immutable.to_str().unwrap()])
@@ -1484,10 +1837,17 @@ fn clean_check_json_golden() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(0));
-    assert!(out.stderr.is_empty(), "clean JSON check wrote stderr: {:?}", out.stderr);
+    assert!(
+        out.stderr.is_empty(),
+        "clean JSON check wrote stderr: {:?}",
+        out.stderr
+    );
     check_snapshot(
         "check_json_clean.txt",
-        &scrub(&String::from_utf8_lossy(&out.stdout), &dir.join("clean.jet")),
+        &scrub(
+            &String::from_utf8_lossy(&out.stdout),
+            &dir.join("clean.jet"),
+        ),
     );
 }
 
@@ -1633,8 +1993,8 @@ fn explain_build_fact_golden() {
 
 #[test]
 fn explain_typed_build_setting_golden() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/features/packages/typed_settings");
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/typed_settings");
     let out = Command::new(jet())
         .args([
             "explain",
@@ -1662,7 +2022,11 @@ fn explain_runtime_stop_golden() {
     for code in [
         "E3001", "E3002", "E3003", "E3004", "E3005", "E3010", "E3011", "E3012",
     ] {
-        let out = Command::new(jet()).arg("explain").arg(code).output().unwrap();
+        let out = Command::new(jet())
+            .arg("explain")
+            .arg(code)
+            .output()
+            .unwrap();
         assert!(out.status.success(), "jet explain {code} should succeed");
         let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
         check_snapshot(&format!("explain_{code}.txt"), &stdout);
@@ -1732,7 +2096,11 @@ fn default_jet_run_deopts_jit_gap_silently() {
 #[test]
 fn malformed_advisory_database_is_e2607_snapshot() {
     let dir = isolated_cwd("audit_e2607");
-    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
     fs::create_dir(dir.join(".jet")).unwrap();
     fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
     let advisory_db = dir.join("advisories.txt");
@@ -1756,7 +2124,11 @@ fn malformed_advisory_database_is_e2607_snapshot() {
 #[test]
 fn audit_missing_advisory_database_fails_closed() {
     let dir = isolated_cwd("audit_missing_e2611");
-    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
     fs::create_dir(dir.join(".jet")).unwrap();
     fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
 
@@ -1803,7 +2175,11 @@ fn jetpack_missing_package_explain_golden() {
         .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2), "missing package is an explain error");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "missing package is an explain error"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     check_snapshot("e1274_missing_package_explain.txt", &stderr);
 }
@@ -1838,7 +2214,11 @@ fn question_mark_query_prints_matches_non_interactively() {
         .unwrap();
     assert_eq!(out.status.code(), Some(0), "`jet ? run` should exit 0");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(stdout.contains("jet run"), "expected a `run` match, got:\n{}", stdout);
+    assert!(
+        stdout.contains("jet run"),
+        "expected a `run` match, got:\n{}",
+        stdout
+    );
 }
 
 #[test]
@@ -1850,10 +2230,19 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
         .expect("run jet ! List.filter");
     assert!(output.status.success(), "status: {:?}", output.status);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("List.filter(f: fn(T) Bool) -> List<T>"), "signature missing: {stdout}");
-    assert!(stdout.contains("Keeps items where f(item) is true."), "summary missing: {stdout}");
+    assert!(
+        stdout.contains("List.filter(f: fn(T) Bool) -> List<T>"),
+        "signature missing: {stdout}"
+    );
+    assert!(
+        stdout.contains("Keeps items where f(item) is true."),
+        "summary missing: {stdout}"
+    );
     assert!(stdout.contains("Example:"), "example missing: {stdout}");
-    assert!(stdout.contains("core.collections"), "provenance missing: {stdout}");
+    assert!(
+        stdout.contains("core.collections"),
+        "provenance missing: {stdout}"
+    );
 }
 
 // ── #2072: the jet binary's own per-command help ─────────────────────────
@@ -1903,14 +2292,26 @@ fn help_command_and_command_help_flag_render_identically() {
 /// exit 2 — not the whole command inventory.
 #[test]
 fn bare_target_requiring_verbs_print_targeted_usage() {
-    let out = Command::new(jet()).arg("fix").env("NO_COLOR", "1").output().unwrap();
+    let out = Command::new(jet())
+        .arg("fix")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2), "bare `jet fix` should exit 2");
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     check_snapshot("fix_bare_usage.txt", &stderr);
 
     for verb in ["fix", "lint", "fuzz"] {
-        let out = Command::new(jet()).arg(verb).env("NO_COLOR", "1").output().unwrap();
-        assert_eq!(out.status.code(), Some(2), "bare `jet {verb}` should exit 2");
+        let out = Command::new(jet())
+            .arg(verb)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "bare `jet {verb}` should exit 2"
+        );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
             !stderr.contains("Welcome to"),
@@ -1963,7 +2364,10 @@ fn eval_accepts_an_expression_argument() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&json.stderr);
     assert_eq!(json.status.code(), Some(0), "stderr: {stderr}");
-    assert!(!stderr.contains("E2105"), "expression was read as a path: {stderr}");
+    assert!(
+        !stderr.contains("E2105"),
+        "expression was read as a path: {stderr}"
+    );
     assert_eq!(String::from_utf8_lossy(&json.stdout).trim(), "3");
 
     let pretty = Command::new(jet())
@@ -1986,7 +2390,10 @@ fn eval_missing_jet_file_still_reports_not_found() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("E2105"), "expected a read failure, got: {stderr}");
+    assert!(
+        stderr.contains("E2105"),
+        "expected a read failure, got: {stderr}"
+    );
 }
 
 /// `jet eval <file>` no longer swallows what the program printed. Human mode
@@ -2004,9 +2411,20 @@ fn eval_file_forwards_print_output_alongside_the_value() {
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&human.stdout);
-    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
-    assert!(stdout.contains("hi"), "print output was swallowed: {stdout:?}");
-    assert!(stdout.contains("()"), "the run value should still render: {stdout:?}");
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    assert!(
+        stdout.contains("hi"),
+        "print output was swallowed: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("()"),
+        "the run value should still render: {stdout:?}"
+    );
 
     let json = Command::new(jet())
         .args(["eval", &file.to_string_lossy(), "--json"])

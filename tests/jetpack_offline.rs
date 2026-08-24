@@ -180,10 +180,15 @@ fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(1), "{output:?}");
-    assert!(!sentinel.exists(), "requested command ran after compose failure");
+    assert!(
+        !sentinel.exists(),
+        "requested command ran after compose failure"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(
-        stderr.matches("couldn't compose package environment").count(),
+        stderr
+            .matches("couldn't compose package environment")
+            .count(),
         1,
         "stderr: {stderr}"
     );
@@ -228,10 +233,7 @@ fn offline_reuse_refuses_a_tampered_closure() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(
-            seeded_out.join("bin"),
-            fs::Permissions::from_mode(0o755),
-        );
+        let _ = fs::set_permissions(seeded_out.join("bin"), fs::Permissions::from_mode(0o755));
     }
     fs::remove_file(&greet).unwrap();
 

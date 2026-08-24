@@ -50,163 +50,166 @@ impl<'a> Parser<'a> {
         ))
     }
 
-        #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn func_after_fn(
-            &mut self,
-            is_pub: bool,
-            is_package_pub: bool,
-            is_unsafe: bool,
-            unsafe_reason: Option<String>,
-            unsafe_span: Option<Span>,
-            is_pure: bool,
-            is_sanitizer: bool,
-            meta: Option<MetaAttr>,
-            state_requires: Option<(String, Span)>,
-            state_transition: Option<crate::AST::StateTransition>,
-            is_reactive: bool,
-            web_marker: Option<crate::Syntax::WebPartitionMarker>,
-            is_must_use: bool,
-            must_use_span: Option<Span>,
-            maturity: Option<crate::AST::MaturityTag>,
-            maturity_span: Option<Span>,
-            is_inline: bool,
-            is_inline_always: bool,
-            inline_span: Option<Span>,
-            is_replayable: bool,
-            replayable_span: Option<Span>,
-        ) -> Result<Func, Diagnostic> {
-            let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
-            let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
-            let external_type = if (matches!(self.peek().kind, TokKind::Dot)
-                || matches!(self.peek().kind, TokKind::TildeTilde))
-                && matches!(self.peek2().kind, TokKind::Ident(_))
-                && matches!(self.peek3().kind, TokKind::LParen)
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+        is_unsafe: bool,
+        unsafe_reason: Option<String>,
+        unsafe_span: Option<Span>,
+        is_pure: bool,
+        is_sanitizer: bool,
+        meta: Option<MetaAttr>,
+        state_requires: Option<(String, Span)>,
+        state_transition: Option<crate::AST::StateTransition>,
+        is_reactive: bool,
+        web_marker: Option<crate::Syntax::WebPartitionMarker>,
+        is_must_use: bool,
+        must_use_span: Option<Span>,
+        maturity: Option<crate::AST::MaturityTag>,
+        maturity_span: Option<Span>,
+        is_inline: bool,
+        is_inline_always: bool,
+        inline_span: Option<Span>,
+        is_replayable: bool,
+        replayable_span: Option<Span>,
+    ) -> Result<Func, Diagnostic> {
+        let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
+        let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
+        let external_type = if (matches!(self.peek().kind, TokKind::Dot)
+            || matches!(self.peek().kind, TokKind::TildeTilde))
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+            && matches!(self.peek3().kind, TokKind::LParen)
+        {
+            let type_name = name;
+            let type_span = name_span;
+            if matches!(self.peek().kind, TokKind::TildeTilde) {
+                let sep_span = self.peek().span;
+                self.diags.push(Diagnostic::error(
+                    "E0325",
+                    format!(
+                        "external methods attach with `{}`, not `{}`",
+                        Syntax::EXTERNAL_METHOD_CONNECTOR,
+                        Syntax::EXTERNAL_METHOD_CONNECTOR_RETIRED
+                    ),
+                    "the dot connector matches trait impls and ordinary member access".to_string(),
+                    format!("write `fn {}.method(...)`", type_name),
+                    Some(sep_span),
+                ));
+            }
+            self.bump(); // `.` or retired `~~`
+            let (method_name, method_span) =
+                self.expect_ident("after the connector in an external method definition")?;
+            name = method_name;
+            name_span = method_span;
+            Some((type_name, type_span))
+        } else {
+            None
+        };
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::LParen, "after the function name")?;
+        let (params, head_pattern) = self.parse_func_params()?;
+        self.validate_variadic_params(&params);
+        self.validate_param_labels(&params);
+        if external_type.is_some() {
+            self.reject_root_method_params(&params);
+        }
+
+        let (
+            mut return_type,
+            mut return_type_span,
+            mut declared_effects,
+            mut effect_via,
+            prefix_effect_span,
+        ) = self.parse_callable_result_and_prefix_effects()?;
+        let declared_return_view_provenance = self.parse_opt_declared_view_from(&params);
+        let post_effect_span = (!declared_effects.is_some()
+            && !effect_via.is_some()
+            && self.func_effect_starts_here())
+        .then(|| self.peek().span);
+        if post_effect_span.is_some() {
+            let (effects, via) = self.parse_opt_func_effects()?;
+            declared_effects = effects;
+            effect_via = via;
+        }
+        let effect_body_span = post_effect_span.or_else(|| {
+            (return_type.is_none() && (declared_effects.is_some() || effect_via.is_some()))
+                .then(|| prefix_effect_span)
+                .flatten()
+        });
+        let is_pure = is_pure
+            || declared_effects
+                .as_ref()
+                .is_some_and(|effects| effects.is_empty());
+
+        /*
+         * D-SIG-SHAPE1=B: the colon before a bare result is not a valid
+         * signature form. Keep the old branch below as ordinary recovery
+         * while the corpus still contains it.
+         */
+        if matches!(self.peek().kind, TokKind::Colon) {
+            let colon = self.bump();
+            self.diags.push(
+                Diagnostic::error(
+                    "E0003",
+                    "a function return type uses `:`".to_string(),
+                    "Jet uses `:` for parameter and field types; callable bodies use `->`"
+                        .to_string(),
+                    "replace `:` with `->` before the return type".to_string(),
+                    Some(colon.span),
+                )
+                .with_edit(crate::Diagnostics::TextEdit {
+                    span: colon.span,
+                    new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
+                }),
+            );
+            if self.type_starts_here() {
+                let (ty, span) = self.return_type()?;
+                return_type = Some(ty);
+                return_type_span = Some(span);
+            }
+        }
+
+        // D-SIG-SHAPE1=B: `->` (or the effect ceiling) starts a one-line
+        // body. Keep retired `::`/`=` input readable for the migration.
+        let effect_body_marker = effect_body_span.is_some();
+        let body_marker_span = match effect_body_span {
+            Some(span)
+                if !matches!(
+                    self.peek().kind,
+                    TokKind::UnifiedArrow
+                        | TokKind::Arrow
+                        | TokKind::LambdaArrow
+                        | TokKind::ColonColon
+                        | TokKind::Eq
+                ) =>
             {
-                let type_name = name;
-                let type_span = name_span;
-                if matches!(self.peek().kind, TokKind::TildeTilde) {
-                    let sep_span = self.peek().span;
-                    self.diags.push(Diagnostic::error(
-                        "E0325",
-                        format!(
-                            "external methods attach with `{}`, not `{}`",
-                            Syntax::EXTERNAL_METHOD_CONNECTOR,
-                            Syntax::EXTERNAL_METHOD_CONNECTOR_RETIRED
-                        ),
-                        "the dot connector matches trait impls and ordinary member access".to_string(),
-                        format!("write `fn {}.method(...)`", type_name),
-                        Some(sep_span),
-                    ));
-                }
-                self.bump(); // `.` or retired `~~`
-                let (method_name, method_span) =
-                    self.expect_ident("after the connector in an external method definition")?;
-                name = method_name;
-                name_span = method_span;
-                Some((type_name, type_span))
-            } else {
-                None
-            };
-            let type_params = self.parse_opt_type_params()?;
-            self.expect(TokKind::LParen, "after the function name")?;
-            let (params, head_pattern) = self.parse_func_params()?;
-            self.validate_variadic_params(&params);
-            self.validate_param_labels(&params);
-            if external_type.is_some() {
-                self.reject_root_method_params(&params);
-            }
-    
-            let (
-                mut return_type,
-                mut return_type_span,
-                mut declared_effects,
-                mut effect_via,
-                prefix_effect_span,
-            ) = self.parse_callable_result_and_prefix_effects()?;
-            let declared_return_view_provenance =
-                self.parse_opt_declared_view_from(&params);
-            let post_effect_span = (!declared_effects.is_some()
-                && !effect_via.is_some()
-                && self.func_effect_starts_here())
-                .then(|| self.peek().span);
-            if post_effect_span.is_some() {
-                let (effects, via) = self.parse_opt_func_effects()?;
-                declared_effects = effects;
-                effect_via = via;
-            }
-            let effect_body_span = post_effect_span.or_else(|| {
-                (return_type.is_none()
-                    && (declared_effects.is_some() || effect_via.is_some()))
-                    .then(|| prefix_effect_span)
-                    .flatten()
-            });
-            let is_pure = is_pure
-                || declared_effects.as_ref().is_some_and(|effects| effects.is_empty());
-
-            /*
-             * D-SIG-SHAPE1=B: the colon before a bare result is not a valid
-             * signature form. Keep the old branch below as ordinary recovery
-             * while the corpus still contains it.
-             */
-            if matches!(self.peek().kind, TokKind::Colon) {
-                let colon = self.bump();
-                self.diags.push(
-                    Diagnostic::error(
-                        "E0003",
-                        "a function return type uses `:`".to_string(),
-                        "Jet uses `:` for parameter and field types; callable bodies use `->`"
-                            .to_string(),
-                        "replace `:` with `->` before the return type".to_string(),
-                        Some(colon.span),
-                    )
-                    .with_edit(crate::Diagnostics::TextEdit {
-                        span: colon.span,
-                        new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
-                    }),
-                );
-                if self.type_starts_here() {
-                    let (ty, span) = self.return_type()?;
-                    return_type = Some(ty);
-                    return_type_span = Some(span);
-                }
-            }
-
-            // D-SIG-SHAPE1=B: `->` (or the effect ceiling) starts a one-line
-            // body. Keep retired `::`/`=` input readable for the migration.
-            let effect_body_marker = effect_body_span.is_some();
-            let body_marker_span = match effect_body_span {
                 Some(span)
-                    if !matches!(
-                        self.peek().kind,
-                        TokKind::UnifiedArrow
-                            | TokKind::Arrow
-                            | TokKind::LambdaArrow
-                            | TokKind::ColonColon
-                            | TokKind::Eq
-                    ) => Some(span),
-                _ => self.parse_optional_function_body_marker(),
-            };
-            if let Some(marker_span) = body_marker_span {
-                let value_body = !matches!(self.peek().kind, TokKind::LBrace)
-                    || (!effect_body_marker
-                        && self.brace_starts_record()
-                        && !matches!(self.peek2().kind, TokKind::RBrace));
-                if value_body {
-                    let start = marker_span.start;
-                    // A one-expression marker accepts a field-led brace as an
-                    // inferred record literal. Statement-shaped braces are
-                    // callable blocks, including `return` bodies.
-                    let expr = self.expr()?;
-                    let expr_end = expr.span().end;
-                    self.finish_stmt()?;
-                    let end = if self.pos > 0 {
-                        self.toks[self.pos - 1].span.end
-                    } else {
-                        expr_end
-                    };
-                    let ret_span = Span::new(start, end);
-                    let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
-                    return Ok(Func {
+            }
+            _ => self.parse_optional_function_body_marker(),
+        };
+        if let Some(marker_span) = body_marker_span {
+            let value_body = !matches!(self.peek().kind, TokKind::LBrace)
+                || (!effect_body_marker
+                    && self.brace_starts_record()
+                    && !matches!(self.peek2().kind, TokKind::RBrace));
+            if value_body {
+                let start = marker_span.start;
+                // A one-expression marker accepts a field-led brace as an
+                // inferred record literal. Statement-shaped braces are
+                // callable blocks, including `return` bodies.
+                let expr = self.expr()?;
+                let expr_end = expr.span().end;
+                self.finish_stmt()?;
+                let end = if self.pos > 0 {
+                    self.toks[self.pos - 1].span.end
+                } else {
+                    expr_end
+                };
+                let ret_span = Span::new(start, end);
+                let body = vec![crate::AST::Stmt::Return(Some(expr), ret_span)];
+                return Ok(Func {
                     span: Span::new(declaration_start, end),
                     is_pub,
                     is_package_pub,
@@ -221,8 +224,8 @@ impl<'a> Parser<'a> {
                     return_type_span,
                     return_view_provenance: None,
                     declared_return_view_provenance,
-            gc_return: false,
-            gc_scope: false,
+                    gc_return: false,
+                    gc_scope: false,
                     is_unsafe,
                     unsafe_reason,
                     unsafe_span,
@@ -257,474 +260,454 @@ impl<'a> Parser<'a> {
                     markers: Vec::new(),
                     compiler_generated: false,
                     body,
-                    });
-                }
+                });
             }
-            if body_marker_span.is_none()
-                && return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::return_type_has_value(ty))
-                && matches!(self.peek().kind, TokKind::LBrace)
-            {
-                self.diags
-                    .push(Self::missing_callable_body_arrow(self.peek().span));
-            }
-            self.expect(TokKind::LBrace, "to open the function body")?;
-            let previous_tail_depth = self.callable_tail_block_depth;
-            if return_type
+        }
+        if body_marker_span.is_none()
+            && return_type
                 .as_ref()
                 .is_some_and(|ty| Self::return_type_has_value(ty))
-            {
-                self.callable_tail_block_depth = Some(self.block_depth + 1);
-            }
-            let body = self.block_stmts();
-            self.callable_tail_block_depth = previous_tail_depth;
-            let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
-            Ok(Func {
-                span: Span::new(declaration_start, declaration_end),
-                is_pub,
-                is_package_pub,
-                external_type,
-                name,
-                name_span,
-                meta,
-                type_params,
-                head_pattern,
-                params,
-                return_type,
-                return_type_span,
-                return_view_provenance: None,
-                declared_return_view_provenance,
+            && matches!(self.peek().kind, TokKind::LBrace)
+        {
+            self.diags
+                .push(Self::missing_callable_body_arrow(self.peek().span));
+        }
+        self.expect(TokKind::LBrace, "to open the function body")?;
+        let previous_tail_depth = self.callable_tail_block_depth;
+        if return_type
+            .as_ref()
+            .is_some_and(|ty| Self::return_type_has_value(ty))
+        {
+            self.callable_tail_block_depth = Some(self.block_depth + 1);
+        }
+        let body = self.block_stmts();
+        self.callable_tail_block_depth = previous_tail_depth;
+        let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok(Func {
+            span: Span::new(declaration_start, declaration_end),
+            is_pub,
+            is_package_pub,
+            external_type,
+            name,
+            name_span,
+            meta,
+            type_params,
+            head_pattern,
+            params,
+            return_type,
+            return_type_span,
+            return_view_provenance: None,
+            declared_return_view_provenance,
             gc_return: false,
             gc_scope: false,
-                is_unsafe,
-                unsafe_reason,
-                unsafe_span,
-                is_pure,
-                is_sanitizer,
-                scrub_tag: None,
-                is_reactive,
-                reactive_upgrades: Vec::new(),
-                is_replayable,
-                replayable_span,
-                is_job: false,
-                job_span: None,
-                every: None,
-                job_metadata: None,
-                declared_effects,
-                effect_via,
-                state_requires,
-                state_transition,
-                web_marker,
-                is_must_use,
-                must_use_span,
-                maturity,
-                maturity_span,
-                kernel: None,
-                is_inline,
-                is_inline_always,
-                inline_span,
-                pre: Vec::new(),
-                post: Vec::new(),
-                inline_foreign: None,
-                undo: None,
-                markers: Vec::new(),
-                compiler_generated: false,
-                body,
-            })
-        }
+            is_unsafe,
+            unsafe_reason,
+            unsafe_span,
+            is_pure,
+            is_sanitizer,
+            scrub_tag: None,
+            is_reactive,
+            reactive_upgrades: Vec::new(),
+            is_replayable,
+            replayable_span,
+            is_job: false,
+            job_span: None,
+            every: None,
+            job_metadata: None,
+            declared_effects,
+            effect_via,
+            state_requires,
+            state_transition,
+            web_marker,
+            is_must_use,
+            must_use_span,
+            maturity,
+            maturity_span,
+            kernel: None,
+            is_inline,
+            is_inline_always,
+            inline_span,
+            pre: Vec::new(),
+            post: Vec::new(),
+            inline_foreign: None,
+            undo: None,
+            markers: Vec::new(),
+            compiler_generated: false,
+            body,
+        })
+    }
 
-        pub(in crate::Parser) fn foreign_function(&mut self) -> Result<Func, Diagnostic> {
-            self.func_after_fn(
-                false,
-                false,
-                false,
-                None,
-                None,
-                false,
-                false,
-                None,
-                None,
-                None,
-                false,
-                None,
-                false,
-                None,
-                None,
-                None,
-                false,
-                false,
-                None,
-                false,
-                None,
-            )
-        }
-    
-        #[allow(clippy::too_many_arguments)]
-        pub(super) fn bump_then_func_after_fn(
-            &mut self,
-            is_pub: bool,
-            is_package_pub: bool,
-            is_unsafe: bool,
-            is_pure: bool,
-            is_sanitizer: bool,
-            meta: Option<MetaAttr>,
-            state_requires: Option<(String, Span)>,
-            state_transition: Option<crate::AST::StateTransition>,
-            web_marker: Option<crate::Syntax::WebPartitionMarker>,
-            is_must_use: bool,
-            must_use_span: Option<Span>,
-            maturity: Option<crate::AST::MaturityTag>,
-            maturity_span: Option<Span>,
-        ) -> Result<Func, Diagnostic> {
-            self.expect_kw(TokKind::KwFn, "to start a function definition")?;
-            self.func_after_fn(
-                is_pub,
-                is_package_pub,
-                is_unsafe,
-                None,
-                None,
-                is_pure,
-                is_sanitizer,
-                meta,
-                state_requires,
-                state_transition,
-                false,
-                web_marker,
-                is_must_use,
-                must_use_span,
-                maturity,
-                maturity_span,
-                false,
-                false,
-                None,
-                false,
-                None,
-            )
-        }
-    
-        /// D-SIG-SHAPE1=B: read the result and any legacy prefix effect row.
-        /// The current result form is bare after `)`. The old `-> T` and
-        /// `-[E]> T` forms stay readable until the corpus migration.
-        pub(super) fn parse_callable_result_and_prefix_effects(
-            &mut self,
-        ) -> Result<(
+    pub(in crate::Parser) fn foreign_function(&mut self) -> Result<Func, Diagnostic> {
+        self.func_after_fn(
+            false, false, false, None, None, false, false, None, None, None, false, None, false,
+            None, None, None, false, false, None, false, None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn bump_then_func_after_fn(
+        &mut self,
+        is_pub: bool,
+        is_package_pub: bool,
+        is_unsafe: bool,
+        is_pure: bool,
+        is_sanitizer: bool,
+        meta: Option<MetaAttr>,
+        state_requires: Option<(String, Span)>,
+        state_transition: Option<crate::AST::StateTransition>,
+        web_marker: Option<crate::Syntax::WebPartitionMarker>,
+        is_must_use: bool,
+        must_use_span: Option<Span>,
+        maturity: Option<crate::AST::MaturityTag>,
+        maturity_span: Option<Span>,
+    ) -> Result<Func, Diagnostic> {
+        self.expect_kw(TokKind::KwFn, "to start a function definition")?;
+        self.func_after_fn(
+            is_pub,
+            is_package_pub,
+            is_unsafe,
+            None,
+            None,
+            is_pure,
+            is_sanitizer,
+            meta,
+            state_requires,
+            state_transition,
+            false,
+            web_marker,
+            is_must_use,
+            must_use_span,
+            maturity,
+            maturity_span,
+            false,
+            false,
+            None,
+            false,
+            None,
+        )
+    }
+
+    /// D-SIG-SHAPE1=B: read the result and any legacy prefix effect row.
+    /// The current result form is bare after `)`. The old `-> T` and
+    /// `-[E]> T` forms stay readable until the corpus migration.
+    pub(super) fn parse_callable_result_and_prefix_effects(
+        &mut self,
+    ) -> Result<
+        (
             Option<Type>,
             Option<Span>,
             Option<Vec<(String, Span)>>,
             Option<(String, Span)>,
             Option<Span>,
-        ), Diagnostic> {
-            let prefix_effect_span = self
-                .func_effect_starts_here()
-                .then(|| self.peek().span);
-            let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
-            let has_prefix_effect = declared_effects.is_some() || effect_via.is_some();
-            let mut arrow_return = false;
-            let (return_type, return_type_span) = if has_prefix_effect {
-                arrow_return = true;
-                if self.legacy_result_type_starts_here() {
-                    let (ty, span) = self.return_type()?;
-                    self.diags.push(Self::retired_signature_shape(
-                        prefix_effect_span.unwrap_or(span),
-                    ));
-                    (Some(ty), Some(span))
-                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                    self.diags.push(Self::retired_signature_shape(
-                        prefix_effect_span.unwrap_or(span),
-                    ));
-                    (Some(ty), Some(span))
-                } else {
-                    (None, None)
-                }
-            } else if self.at_unified_arrow() {
-                arrow_return = true;
-                let arrow = self.bump();
-                if self.legacy_result_type_starts_here() {
-                    let (ty, span) = self.return_type()?;
-                    self.diags.push(Self::retired_signature_shape(arrow.span));
-                    (Some(ty), Some(span))
-                } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                    self.diags.push(Self::retired_signature_shape(arrow.span));
-                    (Some(ty), Some(span))
-                } else {
-                    // `->` is the body marker when no result type follows.
-                    // Leave it for the body parser below.
-                    self.pos = self.pos.saturating_sub(1);
-                    (None, None)
-                }
-            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
-                (Some(ty), Some(span))
-            } else if self.type_starts_here() {
+        ),
+        Diagnostic,
+    > {
+        let prefix_effect_span = self.func_effect_starts_here().then(|| self.peek().span);
+        let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
+        let has_prefix_effect = declared_effects.is_some() || effect_via.is_some();
+        let mut arrow_return = false;
+        let (return_type, return_type_span) = if has_prefix_effect {
+            arrow_return = true;
+            if self.legacy_result_type_starts_here() {
                 let (ty, span) = self.return_type()?;
+                self.diags.push(Self::retired_signature_shape(
+                    prefix_effect_span.unwrap_or(span),
+                ));
+                (Some(ty), Some(span))
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                self.diags.push(Self::retired_signature_shape(
+                    prefix_effect_span.unwrap_or(span),
+                ));
                 (Some(ty), Some(span))
             } else {
                 (None, None)
-            };
-            if arrow_return
-                && return_type
-                    .as_ref()
-                    .is_some_and(|ty| Self::is_unit_fallible_type(ty))
-            {
-                self.diags.push(Self::retired_unit_fallible_signature(
-                    return_type_span.unwrap_or(self.peek().span),
-                ));
             }
-            Ok((
-                return_type,
-                return_type_span,
-                declared_effects,
-                effect_via,
-                prefix_effect_span,
-            ))
-        }
-
-        /// D-SIG-SHAPE1=B: a result after an arrow is the retired signature
-        /// shape. Probe the type and require a declaration-body boundary, so
-        /// a list or parenthesized one-expression body stays an expression.
-        fn legacy_result_type_starts_here(&mut self) -> bool {
-            let saved_pos = self.pos;
-            let saved_diags = self.diags.len();
-            let saved_pending_type_gt = self.pending_type_gt;
-            let saved_type_generic_depth = self.type_generic_depth;
-            let saved_type_generic_chain_len = self.type_generic_chain.len();
-            let saved_type_generic_truncated = self.type_generic_truncated;
-            let parsed_span = self.return_type().ok().map(|(_, span)| span);
-            let parsed_end = parsed_span.map(|span| span.end);
-            let legacy_boundary = parsed_end.is_some_and(|end| {
-                matches!(
-                    self.peek().kind,
-                    TokKind::ColonColon
-                        | TokKind::Eq
-                        | TokKind::UnifiedArrow
-                        | TokKind::Arrow
-                        | TokKind::LambdaArrow
-                ) || (matches!(self.peek().kind, TokKind::LBrace)
-                    && end < self.peek().span.start)
-                    || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
-            });
-            self.pos = saved_pos;
-            self.diags.truncate(saved_diags);
-            self.pending_type_gt = saved_pending_type_gt;
-            self.type_generic_depth = saved_type_generic_depth;
-            self.type_generic_chain.truncate(saved_type_generic_chain_len);
-            self.type_generic_truncated = saved_type_generic_truncated;
-            legacy_boundary
-        }
-
-        /// Lookahead shared by signature parsing. `parse_opt_func_effects`
-        /// accepts these old spellings too, so the migration stays readable.
-        pub(in crate::Parser) fn func_effect_starts_here(&self) -> bool {
-            (matches!(self.peek().kind, TokKind::Colon)
-                && matches!(self.peek2().kind, TokKind::LBracket))
-                || (matches!(self.peek().kind, TokKind::Eq)
-                    && matches!(self.peek2().kind, TokKind::LBracket))
-                || (matches!(self.peek().kind, TokKind::Hash)
-                    && matches!(self.peek2().kind, TokKind::LParen))
-                || (matches!(self.peek().kind, TokKind::Minus)
-                    && matches!(self.peek2().kind, TokKind::LBracket))
-                || matches!(self.peek().kind, TokKind::MinusMinus)
-        }
-
-        fn parse_optional_function_body_marker(&mut self) -> Option<Span> {
-            match self.peek().kind {
-                TokKind::UnifiedArrow => Some(self.bump().span),
-                TokKind::Arrow | TokKind::LambdaArrow => {
-                    let span = self.bump().span;
-                    self.diags.push(Self::retired_unified_arrow(span));
-                    Some(span)
-                }
-                TokKind::ColonColon => {
-                    let span = self.bump().span;
-                    self.diags.push(Self::retired_function_body(span, "::"));
-                    Some(span)
-                }
-                TokKind::Eq => {
-                    let span = self.bump().span;
-                    self.diags.push(Self::retired_function_body(span, "="));
-                    Some(span)
-                }
-                _ => None,
-            }
-        }
-
-        /// D-EFF1 / D-SHAPE8 / D-ARROW-RESPELL1: parse an optional
-        /// `-[Net, DB]>` effect bound.
-        /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
-        /// dotted effect path (`FS.Read`); sema validates the root against the
-        /// known effect vocabulary.
-        pub(super) fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
-            // Trait methods (and any caller that can't host a `#(via f)` pass-through)
-            // route through here: a `via` clause is parsed and discarded as a list,
-            // so it surfaces as an unknown-effect E0119 in sema rather than silently
-            // working. The two `Func` sites use `parse_opt_func_effects` instead.
-            Ok(self.parse_opt_func_effects()?.0)
-        }
-    
-        /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-RESPELL1: parse the effect
-        /// arrow, either a declared bound (`-[Net, DB]>`) or a
-        /// `-[via f]>` pass-through. Returns
-        /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
-        /// the cursor is not at `-[` or one of the retired effect forms.
-        pub(in crate::Parser) fn parse_opt_func_effects(
-            &mut self,
-        ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
-            let canonical = matches!(self.peek().kind, TokKind::Minus)
-                && matches!(self.peek2().kind, TokKind::LBracket);
-            let retired_colon = matches!(self.peek().kind, TokKind::Colon)
-                && matches!(self.peek2().kind, TokKind::LBracket);
-            let retired_eq = matches!(self.peek().kind, TokKind::Eq)
-                && matches!(self.peek2().kind, TokKind::LBracket);
-            let retired_hash = matches!(self.peek().kind, TokKind::Hash)
-                && matches!(self.peek2().kind, TokKind::LParen);
-            let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
-            if !canonical
-                && !retired_colon
-                && !retired_eq
-                && !retired_double
-                && !retired_hash
-            {
-                return Ok((None, None));
-            }
-            let start = self.peek().span;
-            let (open, close, close_arrow) = if canonical || retired_colon {
-                self.bump(); // `-[` or retired `:[`
-                if retired_colon {
-                    self.diags.push(Self::retired_effect_syntax(start));
-                }
-                (TokKind::LBracket, TokKind::RBracket, TokKind::Gt)
-            } else if retired_eq {
-                self.bump(); // `=`
-                self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LBracket, TokKind::RBracket, TokKind::LambdaArrow)
-            } else if retired_hash {
-                self.bump();
-                self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LParen, TokKind::RParen, TokKind::UnifiedArrow)
+        } else if self.at_unified_arrow() {
+            arrow_return = true;
+            let arrow = self.bump();
+            if self.legacy_result_type_starts_here() {
+                let (ty, span) = self.return_type()?;
+                self.diags.push(Self::retired_signature_shape(arrow.span));
+                (Some(ty), Some(span))
+            } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+                self.diags.push(Self::retired_signature_shape(arrow.span));
+                (Some(ty), Some(span))
             } else {
-                self.bump(); // `--`
-                self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LBracket, TokKind::RBracket, TokKind::UnifiedArrow)
-            };
-            self.expect(open, "to start an effect row")?;
-            // D-EFF2 `-[via f]>`: tight pass-through publishing param `f`'s effects.
-            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
-                self.bump(); // `via`
-                let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
-                self.expect(close.clone(), "to close the effect row")?;
-                self.finish_effect_arrow(close_arrow.clone(), retired_hash, canonical, start)?;
-                return Ok((None, Some((param, span))));
+                // `->` is the body marker when no result type follows.
+                // Leave it for the body parser below.
+                self.pos = self.pos.saturating_sub(1);
+                (None, None)
             }
-            let mut effects = Vec::new();
-            if self.peek().kind != close {
-                loop {
-                    if matches!(self.peek().kind, TokKind::DotDot) {
-                        self.bump();
-                        let (name, span) = self.expect_ident("for an open effect-row name")?;
-                        effects.push((format!("..{name}"), span));
-                        if self.peek().kind == close {
-                            break;
-                        }
-                        self.expect(TokKind::Comma, "between effects in the row")?;
-                        continue;
+        } else if let Some((ty, span)) = self.parse_unit_fallible_return()? {
+            (Some(ty), Some(span))
+        } else if self.type_starts_here() {
+            let (ty, span) = self.return_type()?;
+            (Some(ty), Some(span))
+        } else {
+            (None, None)
+        };
+        if arrow_return
+            && return_type
+                .as_ref()
+                .is_some_and(|ty| Self::is_unit_fallible_type(ty))
+        {
+            self.diags.push(Self::retired_unit_fallible_signature(
+                return_type_span.unwrap_or(self.peek().span),
+            ));
+        }
+        Ok((
+            return_type,
+            return_type_span,
+            declared_effects,
+            effect_via,
+            prefix_effect_span,
+        ))
+    }
+
+    /// D-SIG-SHAPE1=B: a result after an arrow is the retired signature
+    /// shape. Probe the type and require a declaration-body boundary, so
+    /// a list or parenthesized one-expression body stays an expression.
+    fn legacy_result_type_starts_here(&mut self) -> bool {
+        let saved_pos = self.pos;
+        let saved_diags = self.diags.len();
+        let saved_pending_type_gt = self.pending_type_gt;
+        let saved_type_generic_depth = self.type_generic_depth;
+        let saved_type_generic_chain_len = self.type_generic_chain.len();
+        let saved_type_generic_truncated = self.type_generic_truncated;
+        let parsed_span = self.return_type().ok().map(|(_, span)| span);
+        let parsed_end = parsed_span.map(|span| span.end);
+        let legacy_boundary = parsed_end.is_some_and(|end| {
+            matches!(
+                self.peek().kind,
+                TokKind::ColonColon
+                    | TokKind::Eq
+                    | TokKind::UnifiedArrow
+                    | TokKind::Arrow
+                    | TokKind::LambdaArrow
+            ) || (matches!(self.peek().kind, TokKind::LBrace) && end < self.peek().span.start)
+                || matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::VIEW_FROM)
+        });
+        self.pos = saved_pos;
+        self.diags.truncate(saved_diags);
+        self.pending_type_gt = saved_pending_type_gt;
+        self.type_generic_depth = saved_type_generic_depth;
+        self.type_generic_chain
+            .truncate(saved_type_generic_chain_len);
+        self.type_generic_truncated = saved_type_generic_truncated;
+        legacy_boundary
+    }
+
+    /// Lookahead shared by signature parsing. `parse_opt_func_effects`
+    /// accepts these old spellings too, so the migration stays readable.
+    pub(in crate::Parser) fn func_effect_starts_here(&self) -> bool {
+        (matches!(self.peek().kind, TokKind::Colon)
+            && matches!(self.peek2().kind, TokKind::LBracket))
+            || (matches!(self.peek().kind, TokKind::Eq)
+                && matches!(self.peek2().kind, TokKind::LBracket))
+            || (matches!(self.peek().kind, TokKind::Hash)
+                && matches!(self.peek2().kind, TokKind::LParen))
+            || (matches!(self.peek().kind, TokKind::Minus)
+                && matches!(self.peek2().kind, TokKind::LBracket))
+            || matches!(self.peek().kind, TokKind::MinusMinus)
+    }
+
+    fn parse_optional_function_body_marker(&mut self) -> Option<Span> {
+        match self.peek().kind {
+            TokKind::UnifiedArrow => Some(self.bump().span),
+            TokKind::Arrow | TokKind::LambdaArrow => {
+                let span = self.bump().span;
+                self.diags.push(Self::retired_unified_arrow(span));
+                Some(span)
+            }
+            TokKind::ColonColon => {
+                let span = self.bump().span;
+                self.diags.push(Self::retired_function_body(span, "::"));
+                Some(span)
+            }
+            TokKind::Eq => {
+                let span = self.bump().span;
+                self.diags.push(Self::retired_function_body(span, "="));
+                Some(span)
+            }
+            _ => None,
+        }
+    }
+
+    /// D-EFF1 / D-SHAPE8 / D-ARROW-RESPELL1: parse an optional
+    /// `-[Net, DB]>` effect bound.
+    /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
+    /// dotted effect path (`FS.Read`); sema validates the root against the
+    /// known effect vocabulary.
+    pub(super) fn parse_opt_effect_annotation(
+        &mut self,
+    ) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
+        // Trait methods (and any caller that can't host a `#(via f)` pass-through)
+        // route through here: a `via` clause is parsed and discarded as a list,
+        // so it surfaces as an unknown-effect E0119 in sema rather than silently
+        // working. The two `Func` sites use `parse_opt_func_effects` instead.
+        Ok(self.parse_opt_func_effects()?.0)
+    }
+
+    /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-RESPELL1: parse the effect
+    /// arrow, either a declared bound (`-[Net, DB]>`) or a
+    /// `-[via f]>` pass-through. Returns
+    /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
+    /// the cursor is not at `-[` or one of the retired effect forms.
+    pub(in crate::Parser) fn parse_opt_func_effects(
+        &mut self,
+    ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
+        let canonical = matches!(self.peek().kind, TokKind::Minus)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let retired_colon = matches!(self.peek().kind, TokKind::Colon)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let retired_eq = matches!(self.peek().kind, TokKind::Eq)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let retired_hash = matches!(self.peek().kind, TokKind::Hash)
+            && matches!(self.peek2().kind, TokKind::LParen);
+        let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
+        if !canonical && !retired_colon && !retired_eq && !retired_double && !retired_hash {
+            return Ok((None, None));
+        }
+        let start = self.peek().span;
+        let (open, close, close_arrow) = if canonical || retired_colon {
+            self.bump(); // `-[` or retired `:[`
+            if retired_colon {
+                self.diags.push(Self::retired_effect_syntax(start));
+            }
+            (TokKind::LBracket, TokKind::RBracket, TokKind::Gt)
+        } else if retired_eq {
+            self.bump(); // `=`
+            self.diags.push(Self::retired_effect_syntax(start));
+            (TokKind::LBracket, TokKind::RBracket, TokKind::LambdaArrow)
+        } else if retired_hash {
+            self.bump();
+            self.diags.push(Self::retired_effect_syntax(start));
+            (TokKind::LParen, TokKind::RParen, TokKind::UnifiedArrow)
+        } else {
+            self.bump(); // `--`
+            self.diags.push(Self::retired_effect_syntax(start));
+            (TokKind::LBracket, TokKind::RBracket, TokKind::UnifiedArrow)
+        };
+        self.expect(open, "to start an effect row")?;
+        // D-EFF2 `-[via f]>`: tight pass-through publishing param `f`'s effects.
+        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
+            self.bump(); // `via`
+            let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
+            self.expect(close.clone(), "to close the effect row")?;
+            self.finish_effect_arrow(close_arrow.clone(), retired_hash, canonical, start)?;
+            return Ok((None, Some((param, span))));
+        }
+        let mut effects = Vec::new();
+        if self.peek().kind != close {
+            loop {
+                if matches!(self.peek().kind, TokKind::DotDot) {
+                    self.bump();
+                    let (name, span) = self.expect_ident("for an open effect-row name")?;
+                    effects.push((format!("..{name}"), span));
+                    if self.peek().kind == close {
+                        break;
                     }
-                    // D-PROP2=A: `!Effect` is a prohibition — the function (and its
-                    // whole reachable call graph) must not use that effect.
-                    let prohibited = matches!(self.peek().kind, TokKind::Bang);
-                    if prohibited {
-                        self.bump(); // consume `!`
-                    }
-                    let (name, span) = self.expect_effect_path_name("for an effect name")?;
-                    if !prohibited && name.contains('(') {
-                        return Err(Diagnostic::error(
+                    self.expect(TokKind::Comma, "between effects in the row")?;
+                    continue;
+                }
+                // D-PROP2=A: `!Effect` is a prohibition — the function (and its
+                // whole reachable call graph) must not use that effect.
+                let prohibited = matches!(self.peek().kind, TokKind::Bang);
+                if prohibited {
+                    self.bump(); // consume `!`
+                }
+                let (name, span) = self.expect_effect_path_name("for an effect name")?;
+                if !prohibited && name.contains('(') {
+                    return Err(Diagnostic::error(
                             "E0119",
                             format!("`{name}` is only valid as a memory denial"),
                             "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound".to_string(),
                             format!("write `-[!{name}]>`"),
                             Some(span),
                         ));
-                    }
-                    let entry = if prohibited {
-                        format!("!{}", name)
-                    } else {
-                        name
-                    };
-                    effects.push((entry, span));
-                    if self.peek().kind == close {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between effects in the list")?;
                 }
-            }
-            self.expect(close, "to close the effect row")?;
-            self.finish_effect_arrow(close_arrow, retired_hash, canonical, start)?;
-            Ok((Some(effects), None))
-        }
-
-        fn finish_effect_arrow(
-            &mut self,
-            close_arrow: TokKind,
-            retired_hash: bool,
-            canonical: bool,
-            start: Span,
-        ) -> Result<(), Diagnostic> {
-            if retired_hash {
-                if Self::at_unified_arrow_token(&self.peek().kind) {
-                    self.bump();
+                let entry = if prohibited {
+                    format!("!{}", name)
+                } else {
+                    name
+                };
+                effects.push((entry, span));
+                if self.peek().kind == close {
+                    break;
                 }
-                return Ok(());
+                self.expect(TokKind::Comma, "between effects in the list")?;
             }
-            if matches!(self.peek().kind, TokKind::Gt) {
-                self.bump();
-                return Ok(());
-            }
-            if canonical && Self::at_unified_arrow_token(&self.peek().kind) {
-                self.bump();
-                self.diags.push(Self::retired_effect_syntax(start));
-                return Ok(());
-            }
-            self.expect(close_arrow, "after the effect row")?;
-            Ok(())
         }
+        self.expect(close, "to close the effect row")?;
+        self.finish_effect_arrow(close_arrow, retired_hash, canonical, start)?;
+        Ok((Some(effects), None))
+    }
 
-        pub(in crate::Parser) fn retired_effect_syntax(span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0066",
-                "this function uses the retired effect-arrow spelling".to_string(),
-                "callable results use `->`, and an explicit effect ceiling uses the same arrow".to_string(),
-                "write `-[Effects]>`; use `-[]>` for an explicit purity bound".to_string(),
-                Some(span),
-            )
+    fn finish_effect_arrow(
+        &mut self,
+        close_arrow: TokKind,
+        retired_hash: bool,
+        canonical: bool,
+        start: Span,
+    ) -> Result<(), Diagnostic> {
+        if retired_hash {
+            if Self::at_unified_arrow_token(&self.peek().kind) {
+                self.bump();
+            }
+            return Ok(());
         }
+        if matches!(self.peek().kind, TokKind::Gt) {
+            self.bump();
+            return Ok(());
+        }
+        if canonical && Self::at_unified_arrow_token(&self.peek().kind) {
+            self.bump();
+            self.diags.push(Self::retired_effect_syntax(start));
+            return Ok(());
+        }
+        self.expect(close_arrow, "after the effect row")?;
+        Ok(())
+    }
 
-        pub(in crate::Parser) fn retired_signature_shape(span: Span) -> Diagnostic {
-            Diagnostic::error(
+    pub(in crate::Parser) fn retired_effect_syntax(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0066",
+            "this function uses the retired effect-arrow spelling".to_string(),
+            "callable results use `->`, and an explicit effect ceiling uses the same arrow"
+                .to_string(),
+            "write `-[Effects]>`; use `-[]>` for an explicit purity bound".to_string(),
+            Some(span),
+        )
+    }
+
+    pub(in crate::Parser) fn retired_signature_shape(span: Span) -> Diagnostic {
+        Diagnostic::error(
                 "E0068",
                 "This callable uses the retired result-arrow shape.".to_string(),
                 "a return type sits after the parameter list, and `->` introduces the body; an effect ceiling follows the return type".to_string(),
                 "write `fn name(...) Type -> body`, or `fn name(...) Type -[Effects]> { … }`".to_string(),
                 Some(span),
             )
-        }
+    }
 
-        // D-ARROW-RESPELL1=A: retired callable/control arrows teach the
-        // canonical spelling instead of being accepted silently.
-        pub(in crate::Parser) fn retired_unified_arrow(span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0070",
-                "this uses a retired arrow spelling".to_string(),
-                "callables, arms, and lambdas use one arrow: `->`".to_string(),
-                "replace `:>` or `=>` with `->`".to_string(),
-                Some(span),
-            )
-            .with_edit(crate::Diagnostics::TextEdit {
-                span,
-                new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
-            })
-        }
+    // D-ARROW-RESPELL1=A: retired callable/control arrows teach the
+    // canonical spelling instead of being accepted silently.
+    pub(in crate::Parser) fn retired_unified_arrow(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0070",
+            "this uses a retired arrow spelling".to_string(),
+            "callables, arms, and lambdas use one arrow: `->`".to_string(),
+            "replace `:>` or `=>` with `->`".to_string(),
+            Some(span),
+        )
+        .with_edit(crate::Diagnostics::TextEdit {
+            span,
+            new_text: Syntax::OP_UNIFIED_ARROW.to_string(),
+        })
+    }
 
-        pub(in crate::Parser) fn retired_function_body(span: Span, marker: &str) -> Diagnostic {
-            Diagnostic::error(
+    pub(in crate::Parser) fn retired_function_body(span: Span, marker: &str) -> Diagnostic {
+        Diagnostic::error(
                 "E0065",
                 format!("This function uses the retired `{marker}` body marker."),
                 "A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition."
@@ -732,162 +715,164 @@ impl<'a> Parser<'a> {
                 format!("Replace `{marker}` with `->`; `jet fmt` applies this fix."),
                 Some(span),
             )
-        }
+    }
 
-        pub(in crate::Parser) fn missing_callable_body_arrow(span: Span) -> Diagnostic {
-            Diagnostic::from_row("E0080", &[], Some(span)).with_edit(
-                crate::Diagnostics::TextEdit {
-                    span: Span::new(span.start, span.start),
-                    new_text: format!("{} ", Syntax::OP_UNIFIED_ARROW),
-                },
-            )
-        }
-    
-        /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone
-        /// separators. `/` closes the positional-only zone — every parameter
-        /// written before it forbids a label. `*` opens the label-only zone —
-        /// every parameter after it requires one. Unmarked parameters between
-        /// them accept either call form.
-        ///
-        /// The caller has already consumed the `(`; this consumes through `)`.
-        pub(super) fn parse_param_list(&mut self) -> Result<Vec<Param>, Diagnostic> {
-            let mut params: Vec<Param> = Vec::new();
-            let mut zone = ParamZone::Either;
-            let mut slash: Option<Span> = None;
-            let mut star: Option<Span> = None;
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                loop {
-                    match self.peek().kind {
-                        TokKind::Slash => {
-                            let span = self.bump().span;
-                            if let Some(first) = slash {
-                                self.diags.push(Self::repeated_param_zone(Syntax::PARAM_ZONE_POSITIONAL_ONLY, span, first));
-                            } else if let Some(star_span) = star {
-                                self.diags.push(Self::zone_out_of_order(span, star_span));
-                            } else if params.is_empty() {
-                                self.diags.push(Self::empty_param_zone(
+    pub(in crate::Parser) fn missing_callable_body_arrow(span: Span) -> Diagnostic {
+        Diagnostic::from_row("E0080", &[], Some(span)).with_edit(crate::Diagnostics::TextEdit {
+            span: Span::new(span.start, span.start),
+            new_text: format!("{} ", Syntax::OP_UNIFIED_ARROW),
+        })
+    }
+
+    /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone
+    /// separators. `/` closes the positional-only zone — every parameter
+    /// written before it forbids a label. `*` opens the label-only zone —
+    /// every parameter after it requires one. Unmarked parameters between
+    /// them accept either call form.
+    ///
+    /// The caller has already consumed the `(`; this consumes through `)`.
+    pub(super) fn parse_param_list(&mut self) -> Result<Vec<Param>, Diagnostic> {
+        let mut params: Vec<Param> = Vec::new();
+        let mut zone = ParamZone::Either;
+        let mut slash: Option<Span> = None;
+        let mut star: Option<Span> = None;
+        if !matches!(self.peek().kind, TokKind::RParen) {
+            loop {
+                match self.peek().kind {
+                    TokKind::Slash => {
+                        let span = self.bump().span;
+                        if let Some(first) = slash {
+                            self.diags.push(Self::repeated_param_zone(
+                                Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                                span,
+                                first,
+                            ));
+                        } else if let Some(star_span) = star {
+                            self.diags.push(Self::zone_out_of_order(span, star_span));
+                        } else if params.is_empty() {
+                            self.diags.push(Self::empty_param_zone(
                                     Syntax::PARAM_ZONE_POSITIONAL_ONLY,
                                     "a positional-only zone needs at least one parameter before the `/`",
                                     "write the positional-only parameters before `/`, or remove the `/`",
                                     span,
                                 ));
-                            } else {
-                                slash = Some(span);
-                                for param in params.iter_mut() {
-                                    param.zone = ParamZone::PositionalOnly;
-                                }
+                        } else {
+                            slash = Some(span);
+                            for param in params.iter_mut() {
+                                param.zone = ParamZone::PositionalOnly;
                             }
                         }
-                        TokKind::Star => {
-                            let span = self.bump().span;
-                            if let Some(first) = star {
-                                self.diags.push(Self::repeated_param_zone(Syntax::PARAM_ZONE_LABEL_ONLY, span, first));
-                            } else {
-                                star = Some(span);
-                                zone = ParamZone::LabelOnly;
-                            }
-                        }
-                        _ => {
-                            let mut param = self.param()?;
-                            param.zone = zone;
-                            params.push(param);
+                    }
+                    TokKind::Star => {
+                        let span = self.bump().span;
+                        if let Some(first) = star {
+                            self.diags.push(Self::repeated_param_zone(
+                                Syntax::PARAM_ZONE_LABEL_ONLY,
+                                span,
+                                first,
+                            ));
+                        } else {
+                            star = Some(span);
+                            zone = ParamZone::LabelOnly;
                         }
                     }
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
+                    _ => {
+                        let mut param = self.param()?;
+                        param.zone = zone;
+                        params.push(param);
                     }
-                    // No trailing comma: a parameter (or a zone separator) has
-                    // to follow. D-APILABEL1 changed nothing here, and lambda
-                    // and call-argument lists reject one too.
-                    self.expect(TokKind::Comma, "between parameters")?;
                 }
-            }
-            self.expect(TokKind::RParen, "to close the parameter list")?;
-            if let Some(span) = star {
-                if !params.iter().any(|p| p.zone == ParamZone::LabelOnly) {
-                    self.diags.push(Self::empty_param_zone(
-                        Syntax::PARAM_ZONE_LABEL_ONLY,
-                        "a label-only zone needs at least one parameter after the `*`",
-                        "write the label-only parameters after `*`, or remove the `*`",
-                        span,
-                    ));
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
                 }
+                // No trailing comma: a parameter (or a zone separator) has
+                // to follow. D-APILABEL1 changed nothing here, and lambda
+                // and call-argument lists reject one too.
+                self.expect(TokKind::Comma, "between parameters")?;
             }
-            Ok(params)
         }
-
-        fn repeated_param_zone(sigil: &str, span: Span, first: Span) -> Diagnostic {
-            let _ = first;
-            Diagnostic::error(
-                "E0763",
-                format!("`{sigil}` appears twice in this parameter list"),
-                format!(
-                    "each parameter list has at most one positional-only `{}` and one label-only `{}`",
-                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
-                ),
-                format!("remove the extra `{sigil}`"),
-                Some(span),
-            )
+        self.expect(TokKind::RParen, "to close the parameter list")?;
+        if let Some(span) = star {
+            if !params.iter().any(|p| p.zone == ParamZone::LabelOnly) {
+                self.diags.push(Self::empty_param_zone(
+                    Syntax::PARAM_ZONE_LABEL_ONLY,
+                    "a label-only zone needs at least one parameter after the `*`",
+                    "write the label-only parameters after `*`, or remove the `*`",
+                    span,
+                ));
+            }
         }
+        Ok(params)
+    }
 
-        fn zone_out_of_order(slash: Span, star: Span) -> Diagnostic {
-            let _ = star;
-            Diagnostic::error(
-                "E0763",
-                format!(
-                    "`{}` comes after `{}` in this parameter list",
-                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
-                ),
-                "the zones read left to right: positional-only, then either, then label-only"
-                    .to_string(),
-                format!(
-                    "move `{}` before `{}`",
-                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
-                ),
-                Some(slash),
-            )
-        }
+    fn repeated_param_zone(sigil: &str, span: Span, first: Span) -> Diagnostic {
+        let _ = first;
+        Diagnostic::error(
+            "E0763",
+            format!("`{sigil}` appears twice in this parameter list"),
+            format!(
+                "each parameter list has at most one positional-only `{}` and one label-only `{}`",
+                Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                Syntax::PARAM_ZONE_LABEL_ONLY
+            ),
+            format!("remove the extra `{sigil}`"),
+            Some(span),
+        )
+    }
 
-        fn empty_param_zone(
-            sigil: &str,
-            why: &str,
-            fix: &str,
-            span: Span,
-        ) -> Diagnostic {
-            Diagnostic::error(
-                "E0763",
-                format!("`{sigil}` marks an empty parameter zone"),
-                why.to_string(),
-                fix.to_string(),
-                Some(span),
-            )
-        }
+    fn zone_out_of_order(slash: Span, star: Span) -> Diagnostic {
+        let _ = star;
+        Diagnostic::error(
+            "E0763",
+            format!(
+                "`{}` comes after `{}` in this parameter list",
+                Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                Syntax::PARAM_ZONE_LABEL_ONLY
+            ),
+            "the zones read left to right: positional-only, then either, then label-only"
+                .to_string(),
+            format!(
+                "move `{}` before `{}`",
+                Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                Syntax::PARAM_ZONE_LABEL_ONLY
+            ),
+            Some(slash),
+        )
+    }
 
-        pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
-            let root_marker_span = if matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(_))
-            {
-                let marker = self.parse_registered_marker_at_site(
-                    crate::Policy::RuleSite::Parameter,
-                )?;
-                (marker.name == Syntax::MARKER_ROOT).then_some(marker.name_span)
-            } else {
-                None
-            };
-            let root = root_marker_span.is_some();
-            let mut convention = self.parse_access_prefix();
-            let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
-                let span = self.bump().span;
-                (Syntax::KW_SELF.to_string(), span)
-            } else {
-                self.expect_ident("for a parameter name")?
-            };
-            // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
-            // split the public call label from the local parameter name. The
-            // first one parsed is the label; the second is what the body reads.
-            let public_label = if name != Syntax::KW_SELF
-                && matches!(self.peek().kind, TokKind::Ident(_))
-            {
+    fn empty_param_zone(sigil: &str, why: &str, fix: &str, span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0763",
+            format!("`{sigil}` marks an empty parameter zone"),
+            why.to_string(),
+            fix.to_string(),
+            Some(span),
+        )
+    }
+
+    pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
+        let root_marker_span = if matches!(self.peek().kind, TokKind::Hash)
+            && matches!(&self.peek2().kind, TokKind::Ident(_))
+        {
+            let marker =
+                self.parse_registered_marker_at_site(crate::Policy::RuleSite::Parameter)?;
+            (marker.name == Syntax::MARKER_ROOT).then_some(marker.name_span)
+        } else {
+            None
+        };
+        let root = root_marker_span.is_some();
+        let mut convention = self.parse_access_prefix();
+        let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
+            let span = self.bump().span;
+            (Syntax::KW_SELF.to_string(), span)
+        } else {
+            self.expect_ident("for a parameter name")?
+        };
+        // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
+        // split the public call label from the local parameter name. The
+        // first one parsed is the label; the second is what the body reads.
+        let public_label =
+            if name != Syntax::KW_SELF && matches!(self.peek().kind, TokKind::Ident(_)) {
                 let (local, local_span) = self.expect_ident("for the local parameter name")?;
                 let label = (name, name_span);
                 name = local;
@@ -896,16 +881,18 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            let (ty, ty_span, variadic, variadic_bound_list) =
-                if matches!(self.peek().kind, TokKind::Colon) {
-                    self.bump();
-                    // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
-                    // (Receivers carry it on `self` instead: `&self`, parsed above.)
-                    if let Some(type_cap) = self.parse_capability_sigil() {
-                        // A real pre-name marker (not the unmarked `Read` default) plus a
-                        // type-side sigil is two markers (E0029).
-                        if convention != AccessConvention::Read {
-                            self.diags.push(Diagnostic::error(
+        let (ty, ty_span, variadic, variadic_bound_list) = if matches!(
+            self.peek().kind,
+            TokKind::Colon
+        ) {
+            self.bump();
+            // D-MEM1: the capability sigil rides the type side — `name: &T`/`^T`.
+            // (Receivers carry it on `self` instead: `&self`, parsed above.)
+            if let Some(type_cap) = self.parse_capability_sigil() {
+                // A real pre-name marker (not the unmarked `Read` default) plus a
+                // type-side sigil is two markers (E0029).
+                if convention != AccessConvention::Read {
+                    self.diags.push(Diagnostic::error(
                                 "E0029",
                                 format!("`{}` has two access markers", name),
                                 format!(
@@ -916,116 +903,116 @@ impl<'a> Parser<'a> {
                                 "keep one access marker on the type or receiver and remove the other".to_string(),
                                 Some(name_span),
                             ));
-                        }
-                        convention = type_cap;
-                    }
-                    // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
-                    if matches!(self.peek().kind, TokKind::DotDotDot) {
-                        self.bump();
-                        // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
-                        // trait-bound list. `[` never starts a legal *concrete* variadic
-                        // element type here (list `[T]` and map `[K:V]` types don't make
-                        // sense as a rest-parameter's own element type spelled this way),
-                        // so this position always means a bound list. Bare `...Trait` /
-                        // `...T` both go through `type_()` unchanged — sema tells a
-                        // trait name from a concrete type the same way `resolve_type_name`
-                        // already does elsewhere.
-                        if matches!(self.peek().kind, TokKind::LBracket) {
-                            let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
-                            (Type::Named(String::new()), bracket_span, true, Some(bounds))
-                        } else {
-                            let (t, ts) = self.type_()?;
-                            (t, ts, true, None)
-                        }
-                    } else {
-                        let (t, ts) = self.type_()?;
-                        (t, ts, false, None)
-                    }
-                } else if name == Syntax::KW_SELF {
-                    // S27: receiver type is the owning struct/enum; sema fills it in.
-                    (Type::Named(String::new()), name_span, false, None)
-                } else {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!("expected `:` after the parameter `{}`", name),
-                        "every parameter except `self` needs a type after its name".to_string(),
-                        format!("write `{}: Type`", name),
-                        Some(name_span),
-                    ));
-                };
-            // D-MEMPROVENANCE3=A: optional `from src (| src)*` after the parameter type.
-            let declared_view_from_names = self.parse_opt_param_view_from_names();
-            // D-DEFAULT-SHAPE1=B: declaration defaults ride the type as
-            // `name: Type{expr}`. Keep the retired `= expr` parse for one
-            // recovery diagnostic so a bad declaration teaches its replacement
-            // without cascading into unrelated errors.
-            let default = if matches!(self.peek().kind, TokKind::LBrace) {
-                self.bump();
-                let default = Box::new(self.expr()?);
-                self.expect(TokKind::RBrace, "after a parameter default")?;
-                Some(default)
-            } else if matches!(self.peek().kind, TokKind::Eq) {
-                let eq = self.bump().span;
-                self.diags
-                    .push(Diagnostic::from_row("E0385", &[], Some(eq)));
-                Some(Box::new(self.expr()?))
-            } else {
-                None
-            };
-            if variadic && default.is_some() {
-                self.diags.push(Diagnostic::error(
-                    "E1310",
-                    format!("variadic parameter `{}` can't have a default value", name),
-                    "a `...` rest parameter collects trailing arguments — it can't also be optional"
-                        .to_string(),
-                    "remove the `{…}` default from the variadic parameter".to_string(),
-                    Some(name_span),
-                ));
-            }
-            let param = Param {
-                convention,
-                root,
-                name,
-                name_span,
-                public_label,
-                // `parse_param_list` assigns the real zone; a parameter parsed
-                // outside a zoned list keeps the unmarked default.
-                zone: ParamZone::default(),
-                ty,
-                ty_span,
-                default,
-                variadic,
-                variadic_bound_list,
-                declared_view_from_names,
-            };
-            if let Some(marker_span) = root_marker_span {
-                self.bind_rule_fact(
-                    marker_span,
-                    Some(param.name_span),
-                    crate::Policy::RuleSite::Parameter,
-                );
-            }
-            Ok(param)
-        }
-    
-        /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
-        /// D-APILABEL1=A: two parameters may not publish the same call label.
-        /// A label binds by name, so a repeat makes the second parameter
-        /// unreachable and turns every call into nonsense — the binder would
-        /// report the first one twice and the second one missing.
-        pub(super) fn validate_param_labels(&mut self, params: &[Param]) {
-            for (index, param) in params.iter().enumerate() {
-                if param.name == Syntax::KW_SELF {
-                    continue;
                 }
-                let label = param.call_label();
-                let clash = params
-                    .iter()
-                    .take(index)
-                    .find(|earlier| earlier.name != Syntax::KW_SELF && earlier.call_label() == label);
-                if let Some(earlier) = clash {
-                    let _ = earlier;
-                    self.diags.push(Diagnostic::error(
+                convention = type_cap;
+            }
+            // D-VARIADIC1: `name: ...T` — variadic rest parameter (last position only).
+            if matches!(self.peek().kind, TokKind::DotDotDot) {
+                self.bump();
+                // D-ANY-JAI1/D-VARARGBOUND1: `...[TraitA, TraitB]` — an explicit
+                // trait-bound list. `[` never starts a legal *concrete* variadic
+                // element type here (list `[T]` and map `[K:V]` types don't make
+                // sense as a rest-parameter's own element type spelled this way),
+                // so this position always means a bound list. Bare `...Trait` /
+                // `...T` both go through `type_()` unchanged — sema tells a
+                // trait name from a concrete type the same way `resolve_type_name`
+                // already does elsewhere.
+                if matches!(self.peek().kind, TokKind::LBracket) {
+                    let (bounds, bracket_span) = self.parse_bracket_trait_bound_list()?;
+                    (Type::Named(String::new()), bracket_span, true, Some(bounds))
+                } else {
+                    let (t, ts) = self.type_()?;
+                    (t, ts, true, None)
+                }
+            } else {
+                let (t, ts) = self.type_()?;
+                (t, ts, false, None)
+            }
+        } else if name == Syntax::KW_SELF {
+            // S27: receiver type is the owning struct/enum; sema fills it in.
+            (Type::Named(String::new()), name_span, false, None)
+        } else {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("expected `:` after the parameter `{}`", name),
+                "every parameter except `self` needs a type after its name".to_string(),
+                format!("write `{}: Type`", name),
+                Some(name_span),
+            ));
+        };
+        // D-MEMPROVENANCE3=A: optional `from src (| src)*` after the parameter type.
+        let declared_view_from_names = self.parse_opt_param_view_from_names();
+        // D-DEFAULT-SHAPE1=B: declaration defaults ride the type as
+        // `name: Type{expr}`. Keep the retired `= expr` parse for one
+        // recovery diagnostic so a bad declaration teaches its replacement
+        // without cascading into unrelated errors.
+        let default = if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            let default = Box::new(self.expr()?);
+            self.expect(TokKind::RBrace, "after a parameter default")?;
+            Some(default)
+        } else if matches!(self.peek().kind, TokKind::Eq) {
+            let eq = self.bump().span;
+            self.diags
+                .push(Diagnostic::from_row("E0385", &[], Some(eq)));
+            Some(Box::new(self.expr()?))
+        } else {
+            None
+        };
+        if variadic && default.is_some() {
+            self.diags.push(Diagnostic::error(
+                "E1310",
+                format!("variadic parameter `{}` can't have a default value", name),
+                "a `...` rest parameter collects trailing arguments — it can't also be optional"
+                    .to_string(),
+                "remove the `{…}` default from the variadic parameter".to_string(),
+                Some(name_span),
+            ));
+        }
+        let param = Param {
+            convention,
+            root,
+            name,
+            name_span,
+            public_label,
+            // `parse_param_list` assigns the real zone; a parameter parsed
+            // outside a zoned list keeps the unmarked default.
+            zone: ParamZone::default(),
+            ty,
+            ty_span,
+            default,
+            variadic,
+            variadic_bound_list,
+            declared_view_from_names,
+        };
+        if let Some(marker_span) = root_marker_span {
+            self.bind_rule_fact(
+                marker_span,
+                Some(param.name_span),
+                crate::Policy::RuleSite::Parameter,
+            );
+        }
+        Ok(param)
+    }
+
+    /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
+    /// D-APILABEL1=A: two parameters may not publish the same call label.
+    /// A label binds by name, so a repeat makes the second parameter
+    /// unreachable and turns every call into nonsense — the binder would
+    /// report the first one twice and the second one missing.
+    pub(super) fn validate_param_labels(&mut self, params: &[Param]) {
+        for (index, param) in params.iter().enumerate() {
+            if param.name == Syntax::KW_SELF {
+                continue;
+            }
+            let label = param.call_label();
+            let clash = params
+                .iter()
+                .take(index)
+                .find(|earlier| earlier.name != Syntax::KW_SELF && earlier.call_label() == label);
+            if let Some(earlier) = clash {
+                let _ = earlier;
+                self.diags.push(Diagnostic::error(
                         "E0770",
                         format!("two parameters both publish the label `{label}`"),
                         "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called"
@@ -1033,23 +1020,23 @@ impl<'a> Parser<'a> {
                         format!("give one of them a different label, as in `{label}_2 {}: …`", param.name),
                         Some(param.call_label_span()),
                     ));
-                }
             }
         }
+    }
 
-        pub(super) fn validate_variadic_params(&mut self, params: &[Param]) {
-            for (i, p) in params.iter().enumerate() {
-                if p.variadic && i + 1 != params.len() {
-                    self.diags.push(Diagnostic::error(
+    pub(super) fn validate_variadic_params(&mut self, params: &[Param]) {
+        for (i, p) in params.iter().enumerate() {
+            if p.variadic && i + 1 != params.len() {
+                self.diags.push(Diagnostic::error(
                         "E1310",
                         format!("variadic parameter `{}` must be last", p.name),
                         "a `name: ...T` rest parameter collects every trailing argument, so nothing may follow it".to_string(),
                         "move `{}` to the end of the parameter list, or remove the `...`".to_string(),
                         Some(p.name_span),
                     ));
-                }
-                if p.root && i != 0 {
-                    self.diags.push(Diagnostic::error(
+            }
+            if p.root && i != 0 {
+                self.diags.push(Diagnostic::error(
                         "E0103",
                         format!("`#{}` must mark the first parameter", Syntax::MARKER_ROOT),
                         "a reversible dot call has one receiver, and it is always the first value parameter"
@@ -1057,28 +1044,28 @@ impl<'a> Parser<'a> {
                         format!("move `#{}` to the first parameter", Syntax::MARKER_ROOT),
                         Some(p.name_span),
                     ));
-                }
-                if p.root && p.convention != AccessConvention::Read {
-                    self.diags.push(Diagnostic::error(
-                        "E0103",
-                        format!("`#{}` must mark a bare-read parameter", Syntax::MARKER_ROOT),
-                        "dot-call syntax never hides write access or a move behind the receiver"
-                            .to_string(),
-                        format!(
-                            "remove {} or {} from the `#{}` parameter",
-                            Syntax::WRITE_ACCESS_LABEL,
-                            Syntax::MOVE_MARKER_LABEL,
-                            Syntax::MARKER_ROOT
-                        ),
-                        Some(p.name_span),
-                    ));
-                }
+            }
+            if p.root && p.convention != AccessConvention::Read {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`#{}` must mark a bare-read parameter", Syntax::MARKER_ROOT),
+                    "dot-call syntax never hides write access or a move behind the receiver"
+                        .to_string(),
+                    format!(
+                        "remove {} or {} from the `#{}` parameter",
+                        Syntax::WRITE_ACCESS_LABEL,
+                        Syntax::MOVE_MARKER_LABEL,
+                        Syntax::MARKER_ROOT
+                    ),
+                    Some(p.name_span),
+                ));
             }
         }
+    }
 
-        pub(super) fn reject_root_method_params(&mut self, params: &[Param]) {
-            for param in params.iter().filter(|param| param.root) {
-                self.diags.push(Diagnostic::error(
+    pub(super) fn reject_root_method_params(&mut self, params: &[Param]) {
+        for param in params.iter().filter(|param| param.root) {
+            self.diags.push(Diagnostic::error(
                     "E0103",
                     format!("`#{}` is only valid on a top-level function", Syntax::MARKER_ROOT),
                     "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous".to_string(),
@@ -1088,130 +1075,128 @@ impl<'a> Parser<'a> {
                     ),
                     Some(param.name_span),
                 ));
-            }
         }
-    
-        pub(in crate::Parser) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
-            let (is_pub, is_package_pub) = if nested {
-                (false, false)
-            } else {
-                self.parse_item_visibility()
-            };
-            let item_start = self.peek().span.start;
-            self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
-            let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
-            let type_params = self.parse_opt_type_params()?;
-            self.expect(TokKind::LBrace, "to open the struct body")?;
-            let mut fields = Vec::new();
-            let mut methods = Vec::new();
-            let mut cli_bindings = Vec::new();
-            let mut trait_impls = Vec::new();
-            let derives = Vec::new();
-            let mut validate_block = Vec::new();
-            let mut validate_span = None;
-            while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
-                if matches!(self.peek().kind, TokKind::Semi) {
+    }
+
+    pub(in crate::Parser) fn struct_def(&mut self, nested: bool) -> Result<StructDef, Diagnostic> {
+        let (is_pub, is_package_pub) = if nested {
+            (false, false)
+        } else {
+            self.parse_item_visibility()
+        };
+        let item_start = self.peek().span.start;
+        self.expect_kw(TokKind::KwStruct, "to start a struct definition")?;
+        let (name, name_span) = self.parse_dotted_type_name("after `struct`")?;
+        let type_params = self.parse_opt_type_params()?;
+        self.expect(TokKind::LBrace, "to open the struct body")?;
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut cli_bindings = Vec::new();
+        let mut trait_impls = Vec::new();
+        let derives = Vec::new();
+        let mut validate_block = Vec::new();
+        let mut validate_span = None;
+        while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+                continue;
+            }
+            if self.method_starts_here() {
+                methods.push(self.method_in_type()?);
+                continue;
+            }
+            if self.cli_binding_starts_here() {
+                cli_bindings.push(self.cli_binding(Vec::new())?);
+                if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
                     self.bump();
-                    continue;
                 }
-                if self.method_starts_here() {
-                    methods.push(self.method_in_type()?);
-                    continue;
-                }
+                continue;
+            }
+            // D-MARK-STACK1: one field rule is bare; two or more share `#[…]`.
+            if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
+                let field_markers = self.parse_field_markers(crate::Policy::RuleSite::Field)?;
                 if self.cli_binding_starts_here() {
-                    cli_bindings.push(self.cli_binding(Vec::new())?);
+                    cli_bindings.push(self.cli_binding(field_markers)?);
                     if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
                         self.bump();
                     }
                     continue;
                 }
-                // D-MARK-STACK1: one field rule is bare; two or more share `#[…]`.
-                if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
-                    let field_markers =
-                        self.parse_field_markers(crate::Policy::RuleSite::Field)?;
-                    if self.cli_binding_starts_here() {
-                        cli_bindings.push(self.cli_binding(field_markers)?);
-                        if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-                            self.bump();
-                        }
-                        continue;
-                    }
-                    let mut f = self.field()?;
-                    for marker in &field_markers {
-                        self.bind_rule_fact(
-                            marker.name_span,
-                            Some(f.name_span),
-                            crate::Policy::RuleSite::Field,
-                        );
-                    }
-                    let mut redact = false;
-                    let mut serde_markers = Vec::new();
-                    for m in field_markers {
-                        if m.name == crate::Syntax::MARKER_REDACT {
-                            redact = true;
-                        } else {
-                            serde_markers.push(m);
-                        }
-                    }
-                    f.serde_markers = serde_markers;
-                    f.redact = redact;
-                    fields.push(f);
-                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-                        self.bump();
-                    }
-                    continue;
+                let mut f = self.field()?;
+                for marker in &field_markers {
+                    self.bind_rule_fact(
+                        marker.name_span,
+                        Some(f.name_span),
+                        crate::Policy::RuleSite::Field,
+                    );
                 }
-                if matches!(self.peek().kind, TokKind::KwDerive) {
-                    return Err(self.retired_derive_line());
-                } else if matches!(self.peek().kind, TokKind::KwImpl) {
-                    trait_impls.push(self.trait_impl_block()?);
-                } else if self.at_validate_block() {
-                    let (stmts, span) = self.validate_block()?;
-                    validate_block = stmts;
-                    validate_span = Some(span);
-                } else {
-                    fields.push(self.field()?);
-                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-                        self.bump();
+                let mut redact = false;
+                let mut serde_markers = Vec::new();
+                for m in field_markers {
+                    if m.name == crate::Syntax::MARKER_REDACT {
+                        redact = true;
+                    } else {
+                        serde_markers.push(m);
                     }
+                }
+                f.serde_markers = serde_markers;
+                f.redact = redact;
+                fields.push(f);
+                if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                    self.bump();
+                }
+                continue;
+            }
+            if matches!(self.peek().kind, TokKind::KwDerive) {
+                return Err(self.retired_derive_line());
+            } else if matches!(self.peek().kind, TokKind::KwImpl) {
+                trait_impls.push(self.trait_impl_block()?);
+            } else if self.at_validate_block() {
+                let (stmts, span) = self.validate_block()?;
+                validate_block = stmts;
+                validate_span = Some(span);
+            } else {
+                fields.push(self.field()?);
+                if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                    self.bump();
                 }
             }
-            let item_end = self.bump().span.end; // }
-            Ok(StructDef {
-                span: Span::new(item_start, item_end),
-                is_pub,
-                is_package_pub,
-                name,
-                name_span,
-                type_params,
-                fields,
-                methods,
-                cli_bindings,
-                trait_impls,
-                derives,
-                auto_derive_default: true,
-                is_published_schema: false,
-                published_schema_span: None,
-                is_single_use: false,
-                single_use_span: None,
-                is_must_use: false,
-                must_use_span: None,
-                layout: None,
-                layout_span: None,
-                serde_markers: Vec::new(),
-                type_markers: Vec::new(),
-                validate_block,
-                validate_span,
-            })
         }
-    
-        pub(in crate::Parser) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
-            let (is_pub, is_package_pub) = if nested {
-                (false, false)
-            } else {
-                self.parse_item_visibility()
-            };
-            self.enum_def_after_pub(is_pub, is_package_pub)
-        }
-    
+        let item_end = self.bump().span.end; // }
+        Ok(StructDef {
+            span: Span::new(item_start, item_end),
+            is_pub,
+            is_package_pub,
+            name,
+            name_span,
+            type_params,
+            fields,
+            methods,
+            cli_bindings,
+            trait_impls,
+            derives,
+            auto_derive_default: true,
+            is_published_schema: false,
+            published_schema_span: None,
+            is_single_use: false,
+            single_use_span: None,
+            is_must_use: false,
+            must_use_span: None,
+            layout: None,
+            layout_span: None,
+            serde_markers: Vec::new(),
+            type_markers: Vec::new(),
+            validate_block,
+            validate_span,
+        })
+    }
+
+    pub(in crate::Parser) fn enum_def(&mut self, nested: bool) -> Result<EnumDef, Diagnostic> {
+        let (is_pub, is_package_pub) = if nested {
+            (false, false)
+        } else {
+            self.parse_item_visibility()
+        };
+        self.enum_def_after_pub(is_pub, is_package_pub)
+    }
 }

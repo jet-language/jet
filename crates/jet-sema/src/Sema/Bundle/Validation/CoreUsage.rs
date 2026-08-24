@@ -10,8 +10,7 @@ pub(crate) const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
 pub(crate) const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
 
 fn is_core_closure_marker(usage: &str) -> bool {
-    usage.starts_with(CORE_SOURCE_MARKER_PREFIX)
-        || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
+    usage.starts_with(CORE_SOURCE_MARKER_PREFIX) || usage.starts_with(CORE_INTRINSIC_MARKER_PREFIX)
 }
 
 /// `__core_source` is reserved for a package whose source tree is actually
@@ -245,30 +244,33 @@ fn collect_core_type_usage(
         Type::Named(name)
             if matches!(
                 name.rsplit('.').next(),
-                Some(
-                    "Secret"
-                        | "SigningKey"
-                        | "X25519SecretKey"
-                        | "SharedSecret"
-                )
-            ) => {
-                note_core_usage(used, spans, "core.crypto::__nominal__", span);
-            }
+                Some("Secret" | "SigningKey" | "X25519SecretKey" | "SharedSecret")
+            ) =>
+        {
+            note_core_usage(used, spans, "core.crypto::__nominal__", span);
+        }
         Type::Tagged { marker, inner }
             if matches!(
                 marker,
                 crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)
-            ) => {
-                note_core_usage(used, spans, "core.crypto::__nominal__", span);
-                collect_core_type_usage(inner, used, spans, span);
-            }
+            ) =>
+        {
+            note_core_usage(used, spans, "core.crypto::__nominal__", span);
+            collect_core_type_usage(inner, used, spans, span);
+        }
         Type::Tagged { inner, .. }
         | Type::List(inner)
         | Type::Option(inner)
         | Type::Shared(inner)
         | Type::FixedList { elem: inner, .. }
-        | Type::InlineRange { base: inner, .. } => collect_core_type_usage(inner, used, spans, span),
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+        | Type::InlineRange { base: inner, .. } => {
+            collect_core_type_usage(inner, used, spans, span)
+        }
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => {
             collect_core_type_usage(key, used, spans, span);
             collect_core_type_usage(value, used, spans, span);
         }
@@ -397,9 +399,9 @@ pub(crate) fn collect_core_stmts(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e)
-            | Stmt::Yield(e, _)
-            | Stmt::DeferClose { close: e, .. } => collect_core_expr(e, imports, used, spans, ffi_cb),
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+                collect_core_expr(e, imports, used, spans, ffi_cb)
+            }
             Stmt::Val(b) => collect_core_expr(&b.init, imports, used, spans, ffi_cb),
             Stmt::Assign { target, value, .. } => {
                 collect_core_lvalue(target, imports, used, spans, ffi_cb);
@@ -416,7 +418,12 @@ pub(crate) fn collect_core_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step, exclusive: _ } => {
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive: _,
+                    } => {
                         collect_core_expr(start, imports, used, spans, ffi_cb);
                         collect_core_expr(end, imports, used, spans, ffi_cb);
                         if let Some(step) = step {
@@ -473,7 +480,13 @@ pub(crate) fn collect_core_stmts(
                 collect_core_expr(cond, imports, used, spans, ffi_cb);
                 collect_core_stmts(body, imports, used, spans, ffi_cb);
                 if let Some(step) = step {
-                    collect_core_stmts(std::slice::from_ref(step.as_ref()), imports, used, spans, ffi_cb);
+                    collect_core_stmts(
+                        std::slice::from_ref(step.as_ref()),
+                        imports,
+                        used,
+                        spans,
+                        ffi_cb,
+                    );
                 }
             }
             Stmt::TaskGroup { body, span, .. } => {
@@ -489,11 +502,13 @@ pub(crate) fn collect_core_stmts(
             | Stmt::Impure { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Transact { body, .. }
-            | Stmt::AssumeDet { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
+            | Stmt::AssumeDet { body, .. } => {
+                collect_core_stmts(body, imports, used, spans, ffi_cb)
+            }
             // D-SHIELDNAME1=A: parsed syntax, not raw source text, owns the
             // scheduler-prelude capability. This recognizes legal whitespace
             // such as `# Shield` and cannot be fooled by comments or strings.
@@ -509,7 +524,9 @@ pub(crate) fn collect_core_stmts(
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
             // D-META-STAGE1=B (formerly D-CTMARKER1): collect Core usage from comptime block body.
-            Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
+            Stmt::ComptimeBlock { body, .. } => {
+                collect_core_stmts(body, imports, used, spans, ffi_cb)
+            }
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).
             Stmt::ComptimeIf {

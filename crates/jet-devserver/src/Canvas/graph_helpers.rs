@@ -182,7 +182,9 @@ pub(super) fn expr_type(g: &GraphBuilder, index: &SemIndex, expr: &Expr) -> Stri
                         .join(", ");
                     Some(format!(
                         "fn({params}){}",
-                        ret.as_deref().map(|ty| format!(" {ty}")).unwrap_or_default()
+                        ret.as_deref()
+                            .map(|ty| format!(" {ty}"))
+                            .unwrap_or_default()
                     ))
                 })
             })

@@ -5,10 +5,7 @@ impl<'a> Parser<'a> {
     /// statement binding. Keep the source subject in `Binding::init`; the
     /// refutable pattern and fallback stay together in the binding target so
     /// sema and every execution tier consume one canonical operation.
-    pub(crate) fn try_refutable_test_binding(
-        &self,
-        expr: Expr,
-    ) -> Result<Binding, Expr> {
+    pub(crate) fn try_refutable_test_binding(&self, expr: Expr) -> Result<Binding, Expr> {
         let names = match &expr {
             Expr::OrFallback { value, .. } => match value.as_ref() {
                 Expr::PatternTest { pattern, .. } => pattern.binding_names(),
@@ -148,7 +145,7 @@ impl<'a> Parser<'a> {
                 return Ok(Binding {
                     mutable: true,
                     markers: Vec::new(),
-                reactive_upgrade: false,
+                    reactive_upgrade: false,
                     meta: None,
                     name,
                     name_span,
@@ -170,7 +167,7 @@ impl<'a> Parser<'a> {
         Ok(Binding {
             mutable,
             markers: Vec::new(),
-                reactive_upgrade: false,
+            reactive_upgrade: false,
             meta: None,
             // D-META-STAGE1=B: the mark rides the name. The lexer hands `@x` as
             // one Ident token, so the ordinary path must read stage from it.
@@ -440,7 +437,9 @@ impl<'a> Parser<'a> {
     /// `field` (bind same name), `field: name` (rename), and an optional
     /// trailing `..` (rest marker, `OP_RANGE`). Shared by the binding-position
     /// `Type{ … }` pattern and its E0320-recovery dotted spelling.
-    pub(super) fn struct_pattern_fields(&mut self) -> Result<(Vec<BindName>, Option<Span>), Diagnostic> {
+    pub(super) fn struct_pattern_fields(
+        &mut self,
+    ) -> Result<(Vec<BindName>, Option<Span>), Diagnostic> {
         let mut fields = Vec::new();
         let mut rest = None;
         if !matches!(self.peek().kind, TokKind::RBrace) {
@@ -557,10 +556,8 @@ impl<'a> Parser<'a> {
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
             // Allow `else if` chained with another `@if`.
-            if (matches!(
-                self.peek().kind,
-                TokKind::At | TokKind::KwComptime
-            ) && matches!(self.peek2().kind, TokKind::KwIf))
+            if (matches!(self.peek().kind, TokKind::At | TokKind::KwComptime)
+                && matches!(self.peek2().kind, TokKind::KwIf))
                 || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
             {
                 let chain = self.comptime_if_stmt()?;
@@ -603,7 +600,7 @@ impl<'a> Parser<'a> {
         Ok(Binding {
             mutable: false,
             markers: Vec::new(),
-                reactive_upgrade: false,
+            reactive_upgrade: false,
             meta: None,
             name,
             name_span,

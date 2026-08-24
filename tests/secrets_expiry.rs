@@ -44,8 +44,7 @@ fn run() {
     handle.join() ?? panic("task failed")
 }
 "#;
-    let (code, stdout, stderr) =
-        common::build_and_run("jet_secrets_expiry", "expiry", src);
+    let (code, stdout, stderr) = common::build_and_run("jet_secrets_expiry", "expiry", src);
     assert_eq!(code, 0, "expiring secret failed: {stderr}");
     assert_eq!(stdout, "available\nforked\nexpired\nsticky\nthreaded\n");
 }
@@ -191,7 +190,9 @@ fn run() {
     let diagnostics = jet::compile_with_path(hostile, &hostile_main.to_string_lossy())
         .expect_err("a user type with the same leaf name must not accept the loan");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0112"),
         "{diagnostics:#?}"
     );
     std::fs::remove_dir_all(dir).unwrap();
@@ -216,8 +217,8 @@ fn bad(value: ExpiringSecret<crypto.SharedSecret>) {
 }
 fn run() {}
 "#;
-    let diags = jet::compile(shared)
-        .expect_err("SharedSecret is not in the closed ExpiringSecret family");
+    let diags =
+        jet::compile(shared).expect_err("SharedSecret is not in the closed ExpiringSecret family");
     assert!(diags.iter().any(|diag| diag.code == "E0112"), "{diags:?}");
 }
 
@@ -233,12 +234,12 @@ fn run() {
     _ := vault.ExpiringSecret.new(^key, ttl, 42)
 }
 "#;
-    let diags = jet::compile(src)
-        .expect_err("a non-Clock observer must fail before code generation");
+    let diags =
+        jet::compile(src).expect_err("a non-Clock observer must fail before code generation");
     assert!(
-        diags.iter().any(|diag| {
-            diag.code == "E0112" && diag.what.contains("argument 3")
-        }),
+        diags
+            .iter()
+            .any(|diag| { diag.code == "E0112" && diag.what.contains("argument 3") }),
         "{diags:?}"
     );
 }
@@ -259,8 +260,7 @@ fn run() {
     print(inspect(&secret))
 }
 "#;
-    let diags =
-        jet::compile(src).expect_err("a hidden system clock must remain effectful");
+    let diags = jet::compile(src).expect_err("a hidden system clock must remain effectful");
     assert!(diags.iter().any(|diag| diag.code == "E3403"), "{diags:?}");
 }
 
@@ -298,9 +298,9 @@ fn run() {
 }
 "#;
     let diags = jet::compile(escape).expect_err("callback loan must not escape");
-    assert!(diags.iter().any(|diag| {
-        diag.code == "E0201" && diag.what.contains("loan cannot escape")
-    }));
+    assert!(diags
+        .iter()
+        .any(|diag| { diag.code == "E0201" && diag.what.contains("loan cannot escape") }));
 
     let closure_escape = r#"
 use core.crypto as crypto
@@ -338,8 +338,7 @@ fn run() {
     })
 }
 "#;
-    let diags =
-        jet::compile(storage_escape).expect_err("callback loan must not enter storage");
+    let diags = jet::compile(storage_escape).expect_err("callback loan must not enter storage");
     assert!(
         diags.iter().any(|diag| diag.code == "E0201"),
         "storage escape needs an ownership diagnostic: {diags:?}"
@@ -403,7 +402,9 @@ fn run() {
     for (name, src) in cases {
         let diagnostics = jet::compile(src).expect_err(name);
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0201"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0201"),
             "{name} did not reject the loan: {diagnostics:#?}"
         );
     }

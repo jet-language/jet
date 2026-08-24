@@ -227,7 +227,8 @@ fn run() {
     print(got.get())
 }
 "#;
-    let out = jet::compile(channel_source).expect("Signal must cross channels via lock-ordered Arc");
+    let out =
+        jet::compile(channel_source).expect("Signal must cross channels via lock-ordered Arc");
     assert!(
         out.rust.contains("JetSignal"),
         "Signal channel crossing must lower through JetSignal"

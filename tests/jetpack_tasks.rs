@@ -42,10 +42,7 @@ fn run() { print("run-entry") }
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.contains("hello-job"),
-        "stdout: {stdout}"
-    );
+    assert!(stdout.contains("hello-job"), "stdout: {stdout}");
     assert!(
         !stdout.contains("run-entry"),
         "must not run fn run when a job subcommand is set: {stdout}"
@@ -74,7 +71,14 @@ fn run() {}
     let ok = jetpack()
         .args(["run", "greet", "--no-color"])
         .current_dir(&scratch.path)
-        .env("PATH", format!("{}:{}", env!("CARGO_BIN_EXE_jet").rsplit_once('/').unwrap().0, std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                env!("CARGO_BIN_EXE_jet").rsplit_once('/').unwrap().0,
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .output()
         .unwrap();
     assert!(
@@ -91,7 +95,14 @@ fn run() {}
     let bad = jetpack()
         .args(["run", "deploy", "--no-color"])
         .current_dir(&scratch.path)
-        .env("PATH", format!("{}:{}", env!("CARGO_BIN_EXE_jet").rsplit_once('/').unwrap().0, std::env::var("PATH").unwrap_or_default()))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                env!("CARGO_BIN_EXE_jet").rsplit_once('/').unwrap().0,
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
         .output()
         .unwrap();
     assert_eq!(bad.status.code(), Some(2));
@@ -99,7 +110,9 @@ fn run() {}
     assert!(stderr.contains("E1294"), "stderr: {stderr}");
     assert!(stderr.contains("no job named `deploy`"), "stderr: {stderr}");
     assert!(
-        stderr.contains("declared jobs:") && stderr.contains("greet") && stderr.contains("seed_data"),
+        stderr.contains("declared jobs:")
+            && stderr.contains("greet")
+            && stderr.contains("seed_data"),
         "stderr: {stderr}"
     );
 }
@@ -128,20 +141,14 @@ fn run() { print("run-entry") }
     let entry = scratch.path.join("main.jet");
     let path = entry.to_str().unwrap();
 
-    let greet = jet()
-        .args(["run", path, "--", "greet"])
-        .output()
-        .unwrap();
+    let greet = jet().args(["run", path, "--", "greet"]).output().unwrap();
     assert!(
         greet.status.success(),
         "leaf job subcommand must not E0102; stderr: {}",
         String::from_utf8_lossy(&greet.stderr)
     );
     let greet_out = String::from_utf8_lossy(&greet.stdout);
-    assert!(
-        greet_out.contains("leaf-ok"),
-        "stdout: {greet_out}"
-    );
+    assert!(greet_out.contains("leaf-ok"), "stdout: {greet_out}");
     assert!(
         !String::from_utf8_lossy(&greet.stderr).contains("E0102"),
         "stderr: {}",

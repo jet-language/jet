@@ -44,11 +44,7 @@ fn write_program(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     dir.join("main.jet")
 }
 
-fn run_in_process(
-    name: &str,
-    files: &[(&str, &str)],
-    force_interpreter: bool,
-) -> RunOutcome {
+fn run_in_process(name: &str, files: &[(&str, &str)], force_interpreter: bool) -> RunOutcome {
     let path = write_program(name, files);
     dev_iteration(path.to_str().unwrap(), false, force_interpreter)
 }
@@ -87,8 +83,7 @@ fn run_resident(name: &str, files: &[(&str, &str)]) -> RunOutcome {
 
 fn assert_all_tiers(name: &str, source: &str, expected_code: i32, expected_stdout: &str) {
     if have_rustc() {
-        let (code, stdout, stderr) =
-            build_and_run_full("jet_numeric_widen_aot", name, source);
+        let (code, stdout, stderr) = build_and_run_full("jet_numeric_widen_aot", name, source);
         assert_eq!(code, expected_code, "AOT stderr:\n{stderr}");
         assert_eq!(stdout, expected_stdout, "AOT stderr:\n{stderr}");
     }
@@ -157,8 +152,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
     const MESSAGE: &str = "whole number cannot cross into the decimal without losing precision";
 
     if have_rustc() {
-        let (code, stdout, stderr) =
-            build_and_run_full("jet_numeric_widen_aot", name, source);
+        let (code, stdout, stderr) = build_and_run_full("jet_numeric_widen_aot", name, source);
         assert_eq!(code, 70, "AOT stderr:\n{stderr}");
         assert!(stdout.is_empty(), "AOT stdout:\n{stdout}");
         assert!(stderr.contains(MESSAGE), "AOT stderr:\n{stderr}");
@@ -177,8 +171,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
         RunOutcome::Problems(diagnostics) => assert!(
             diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "E0953"
-                    && diagnostic.why.contains(MESSAGE)),
+                .any(|diagnostic| diagnostic.code == "E0953" && diagnostic.why.contains(MESSAGE)),
             "resident-JIT diagnostics: {diagnostics:#?}"
         ),
     }
@@ -206,8 +199,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
         RunOutcome::Problems(diagnostics) => assert!(
             diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "E0953"
-                    && diagnostic.why.contains(MESSAGE)),
+                .any(|diagnostic| diagnostic.code == "E0953" && diagnostic.why.contains(MESSAGE)),
             "interpreter diagnostics: {diagnostics:#?}"
         ),
     }
@@ -273,7 +265,12 @@ fn run() {
     print((approx(lossy) + 0.0) == 9007199254740992.0)
 }
 "#;
-    assert_all_tiers("numeric_widen_success", success, 0, "true\ntrue\ntrue\ntrue\ntrue\n");
+    assert_all_tiers(
+        "numeric_widen_success",
+        success,
+        0,
+        "true\ntrue\ntrue\ntrue\ntrue\n",
+    );
 
     for (name, target, value) in [
         ("numeric_widen_float_trap", "Float", "9007199254740993"),
@@ -469,8 +466,7 @@ fn run() {
 "#,
     );
     assert!(
-        no_join.contains("[E0109]")
-            && no_join.contains("neither U8 contains every value of I8"),
+        no_join.contains("[E0109]") && no_join.contains("neither U8 contains every value of I8"),
         "{no_join}"
     );
 
@@ -494,8 +490,7 @@ fn run() {
 "#,
     );
     assert!(
-        spread_widening.contains("[E0504]")
-            && spread_widening.contains("list resolves to `U16`"),
+        spread_widening.contains("[E0504]") && spread_widening.contains("list resolves to `U16`"),
         "{spread_widening}"
     );
 }
@@ -564,12 +559,7 @@ fn run() {
     print(a.checked_rem(b) ?? fb)
 }
 "#;
-    assert_all_tiers(
-        "numeric_overflow_methods",
-        source,
-        0,
-        "44\n255\n0\n0\n",
-    );
+    assert_all_tiers("numeric_overflow_methods", source, 0, "44\n255\n0\n0\n");
 }
 
 #[test]

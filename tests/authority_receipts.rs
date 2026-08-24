@@ -45,7 +45,11 @@ fn run() {
     } else {
         "unsupported\n"
     };
-    tir_support::assert_tiers_agree("authority_process_receipt_success_redaction", source, expected);
+    tir_support::assert_tiers_agree(
+        "authority_process_receipt_success_redaction",
+        source,
+        expected,
+    );
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -79,7 +83,11 @@ fn run() {
     } else {
         "unsupported\n"
     };
-    tir_support::assert_tiers_agree("authority_process_receipt_failure_redaction", source, expected);
+    tir_support::assert_tiers_agree(
+        "authority_process_receipt_failure_redaction",
+        source,
+        expected,
+    );
 }
 
 #[cfg(unix)]

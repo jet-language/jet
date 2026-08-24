@@ -73,13 +73,32 @@ authority: .{ holds: { deny: [FFI] } }
 #[test]
 fn retired_flat_ffi_spellings_are_rejected_by_the_compiler() {
     for root in [
-        "Go", "Java", "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal",
-        "Dart", "PowerShell", "Perl", "Ruby", "Php", "R", "Com", "Cpp", "Py", "Octave",
+        "Go",
+        "Java",
+        "DotNet",
+        "Fortran",
+        "Cobol",
+        "Tcl",
+        "Lua",
+        "Ada",
+        "Pascal",
+        "Dart",
+        "PowerShell",
+        "Perl",
+        "Ruby",
+        "Php",
+        "R",
+        "Com",
+        "Cpp",
+        "Py",
+        "Octave",
     ] {
         let source = format!("fn run() :[{root}]> {{}}\n");
         let diagnostics = jet::compile(&source).expect_err("retired flat effect must not parse");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0119"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0119"),
             "expected E0119 for retired effect {root}, got {diagnostics:#?}"
         );
     }

@@ -116,7 +116,11 @@ module dev {
         .env("PATH", "")
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2), "bare `jet outdated` must be rejected");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "bare `jet outdated` must be rejected"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2101"), "stderr: {stderr}");
     assert!(stderr.contains("jet inspect outdated"), "stderr: {stderr}");
@@ -168,7 +172,6 @@ module dev {
     assert!(stderr.contains("v1.2.0"), "stderr: {stderr}");
     assert!(stderr.contains("v1.3.0"), "stderr: {stderr}");
 }
-
 
 #[test]
 fn jet_env_delegates_to_jetpack_enter() {
@@ -381,7 +384,15 @@ module env.full {
     );
 
     let full = jet()
-        .args(["env", "info", "--json", "--offline", "--no-color", "--env", "full"])
+        .args([
+            "env",
+            "info",
+            "--json",
+            "--offline",
+            "--no-color",
+            "--env",
+            "full",
+        ])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", "/test/home")

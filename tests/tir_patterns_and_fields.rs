@@ -65,8 +65,8 @@ fn assert_no_hard_coded_generated_literals(path: &std::path::Path) {
 
 #[test]
 fn generated_literals_use_the_canonical_allocator() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/jet-codegen/src/Codegen");
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/jet-codegen/src/Codegen");
     assert_no_hard_coded_generated_literals(&root);
 }
 
@@ -98,8 +98,14 @@ fn run() {
     for stem in ["v", "i", "item"] {
         let user = jet::AST::mangle(stem);
         let generated = jet::AST::mangle_generated(stem);
-        assert_ne!(user, generated, "allocator lanes must stay distinct for {stem}");
-        assert!(rust.contains(&generated), "generated binding {generated} missing");
+        assert_ne!(
+            user, generated,
+            "allocator lanes must stay distinct for {stem}"
+        );
+        assert!(
+            rust.contains(&generated),
+            "generated binding {generated} missing"
+        );
     }
     assert!(rust.contains(&format!("let {}", jet::AST::mangle("value"))));
     assert!(rust.contains(&format!("let {}", jet::AST::mangle_generated("v"))));
@@ -649,8 +655,9 @@ fn run() {
     // own `Clone` impl is a cheap handle clone, so plain `.clone()` replaces the
     // old `Arc::clone(&…)` text.)
     assert!(
-        out.rust
-            .contains("let __jet___arg91_0 = &(((*__jet_h)).clone());\n    __jet_noop(__jet___arg91_0)"),
+        out.rust.contains(
+            "let __jet___arg91_0 = &(((*__jet_h)).clone());\n    __jet_noop(__jet___arg91_0)"
+        ),
         "shared auto-clone free-call arg not byte-exact:\n{}",
         out.rust
     );

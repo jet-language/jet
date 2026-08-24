@@ -15,7 +15,10 @@ const TIER_PARITY_STEMS: [&str; 7] = [
 ];
 
 fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String {
-    let file_name = stem.rsplit('/').next().expect("comptime stem has a file name");
+    let file_name = stem
+        .rsplit('/')
+        .next()
+        .expect("comptime stem has a file name");
     fs::copy(
         root.join("examples/features").join(format!("{stem}.jet")),
         destination.join(format!("{file_name}.jet")),
@@ -37,8 +40,11 @@ fn copy_comptime_fixture(root: &Path, destination: &Path, stem: &str) -> String 
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).expect("create comptime fixture asset directory");
         }
-        fs::copy(root.join("examples/features/comptime").join(relative), &target)
-            .unwrap_or_else(|error| panic!("copy `{relative}` for `{stem}`: {error}"));
+        fs::copy(
+            root.join("examples/features/comptime").join(relative),
+            &target,
+        )
+        .unwrap_or_else(|error| panic!("copy `{relative}` for `{stem}`: {error}"));
     }
     format!("{file_name}.jet")
 }
@@ -93,7 +99,9 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
         String::from_utf8_lossy(&build.stdout),
         String::from_utf8_lossy(&build.stderr)
     );
-    let binary_name = file_name.strip_suffix(".jet").expect("Jet fixture extension");
+    let binary_name = file_name
+        .strip_suffix(".jet")
+        .expect("Jet fixture extension");
     let aot = Command::new(case_dir.join("build").join(binary_name))
         .current_dir(&case_dir)
         .output()
@@ -146,7 +154,9 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
         .env("JET_CACHE_DIR", interpreted_cache.join("build"))
         .env("NO_COLOR", "1")
         .output()
-        .unwrap_or_else(|error| panic!("failed to spawn interpreted `jet run` for `{stem}`: {error}"));
+        .unwrap_or_else(|error| {
+            panic!("failed to spawn interpreted `jet run` for `{stem}`: {error}")
+        });
     let interpreted_trace = String::from_utf8_lossy(&interpreted.stderr);
 
     assert!(
@@ -207,10 +217,9 @@ fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
         fs::copy(source.join(relative), destination)
             .unwrap_or_else(|error| panic!("copy build-entry fixture `{relative}`: {error}"));
     }
-    let expected = fs::read(
-        root.join("examples/features/expected/tooling/build_entry_discovery.out"),
-    )
-    .expect("read build-entry golden");
+    let expected =
+        fs::read(root.join("examples/features/expected/tooling/build_entry_discovery.out"))
+            .expect("read build-entry golden");
 
     let named = run_jet(
         &["build", "foundation"],
@@ -229,11 +238,7 @@ fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
         "the named depth-one member build did not run"
     );
 
-    let workspace = run_jet(
-        &["build"],
-        &scratch.path,
-        &scratch.join("cache/workspace"),
-    );
+    let workspace = run_jet(&["build"], &scratch.path, &scratch.join("cache/workspace"));
     assert!(
         workspace.status.success(),
         "workspace build failed:\n{}",
@@ -290,10 +295,9 @@ fn build_fact_precedence_example_matches_release_default_and_dev() {
         scratch.path.join("build_fact_precedence.jet"),
     )
     .expect("copy build fact precedence example");
-    let expected = fs::read(
-        root.join("examples/features/expected/comptime/build_fact_precedence.out"),
-    )
-    .expect("read build fact precedence golden");
+    let expected =
+        fs::read(root.join("examples/features/expected/comptime/build_fact_precedence.out"))
+            .expect("read build fact precedence golden");
 
     let release = run_jet(
         &["run", "--release", "build_fact_precedence.jet"],
@@ -306,7 +310,12 @@ fn build_fact_precedence_example_matches_release_default_and_dev() {
         &scratch.join("cache/default"),
     );
     let dev = run_jet(
-        &["dev", "build_fact_precedence.jet", "--interpret", "--watch=off"],
+        &[
+            "dev",
+            "build_fact_precedence.jet",
+            "--interpret",
+            "--watch=off",
+        ],
         &scratch.path,
         &scratch.join("cache/dev"),
     );
@@ -342,8 +351,9 @@ fn computed_constants_match_aot_default_and_interpreter() {
         "computed enum discriminant did not reach generated Rust:\n{}",
         compiled.rust
     );
-    let expected = fs::read(root.join("examples/features/expected/comptime/computed_constants.out"))
-        .expect("read computed constants golden");
+    let expected =
+        fs::read(root.join("examples/features/expected/comptime/computed_constants.out"))
+            .expect("read computed constants golden");
     let cache = scratch.join("cache");
 
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -398,7 +408,10 @@ fn computed_constants_match_aot_default_and_interpreter() {
     );
 
     assert_eq!(aot.stdout, expected, "AOT output differs from the golden");
-    assert_eq!(default.stdout, expected, "default `jet run` output differs from the golden");
+    assert_eq!(
+        default.stdout, expected,
+        "default `jet run` output differs from the golden"
+    );
     assert_eq!(
         interpreted.stdout, expected,
         "interpreter output differs from the golden"
@@ -420,10 +433,8 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         &source,
     )
     .expect("copy job runner example");
-    let help_expected = fs::read(
-        root.join("examples/features/expected/devloop/job_runner.out"),
-    )
-    .expect("read job runner help golden");
+    let help_expected = fs::read(root.join("examples/features/expected/devloop/job_runner.out"))
+        .expect("read job runner help golden");
     let cache = scratch.join("cache");
 
     let default_help = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -490,7 +501,8 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         ("seed_data", "job_runner.seed_data.out"),
     ] {
         let expected = fs::read(
-            root.join("examples/features/expected/devloop").join(golden_name),
+            root.join("examples/features/expected/devloop")
+                .join(golden_name),
         )
         .unwrap_or_else(|error| panic!("read named job golden `{golden_name}`: {error}"));
         let default_job = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -506,7 +518,10 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
             "default named job `{job}` failed:\n{}",
             String::from_utf8_lossy(&default_job.stderr)
         );
-        assert_eq!(default_job.stdout, expected, "default job `{job}` differs from golden");
+        assert_eq!(
+            default_job.stdout, expected,
+            "default job `{job}` differs from golden"
+        );
 
         let aot_job = Command::new(scratch.join("build/job_runner"))
             .arg(job)
@@ -518,7 +533,10 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
             "AOT named job `{job}` failed:\n{}",
             String::from_utf8_lossy(&aot_job.stderr)
         );
-        assert_eq!(aot_job.stdout, expected, "AOT job `{job}` differs from golden");
+        assert_eq!(
+            aot_job.stdout, expected,
+            "AOT job `{job}` differs from golden"
+        );
         assert_eq!(default_job.stdout, aot_job.stdout);
     }
 }
@@ -528,11 +546,8 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let scratch = common::Scratch::new("cli_docs_parity");
     let source = scratch.join("subcommands.jet");
-    fs::copy(
-        root.join("examples/features/cli/subcommands.jet"),
-        &source,
-    )
-    .expect("copy CLI example");
+    fs::copy(root.join("examples/features/cli/subcommands.jet"), &source)
+        .expect("copy CLI example");
     let cache = scratch.join("cache");
 
     let build = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -560,9 +575,20 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
             .current_dir(&scratch.path)
             .output()
             .expect("run default CLI help");
-        assert!(aot.status.success(), "AOT help failed: {}", String::from_utf8_lossy(&aot.stderr));
-        assert!(jit.status.success(), "default `jet run` help failed: {}", String::from_utf8_lossy(&jit.stderr));
-        assert_eq!(aot.stdout, jit.stdout, "AOT and default `jet run` help differ for {args:?}");
+        assert!(
+            aot.status.success(),
+            "AOT help failed: {}",
+            String::from_utf8_lossy(&aot.stderr)
+        );
+        assert!(
+            jit.status.success(),
+            "default `jet run` help failed: {}",
+            String::from_utf8_lossy(&jit.stderr)
+        );
+        assert_eq!(
+            aot.stdout, jit.stdout,
+            "AOT and default `jet run` help differ for {args:?}"
+        );
         let help = String::from_utf8_lossy(&aot.stdout);
         if args == ["--help"] {
             for fact in [
@@ -574,19 +600,38 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
             ] {
                 assert!(help.contains(fact), "root help omitted {fact}: {help}");
             }
-            assert_eq!(help.matches("--config").count(), 1, "root help repeated shared config: {help}");
+            assert_eq!(
+                help.matches("--config").count(),
+                1,
+                "root help repeated shared config: {help}"
+            );
         } else {
-            assert!(help.contains("Start the service and listen for requests"), "{help}");
-            assert!(!help.contains("--config"), "command help repeated the shared config: {help}");
+            assert!(
+                help.contains("Start the service and listen for requests"),
+                "{help}"
+            );
+            assert!(
+                !help.contains("--config"),
+                "command help repeated the shared config: {help}"
+            );
         }
     }
 
     for (args, golden_name) in [
-        (["--config", "prod", "serve", "--port", "8080"].as_slice(), "subcommands.serve.out"),
-        (["plan", "--config", "prod"].as_slice(), "subcommands.plan.out"),
+        (
+            ["--config", "prod", "serve", "--port", "8080"].as_slice(),
+            "subcommands.serve.out",
+        ),
+        (
+            ["plan", "--config", "prod"].as_slice(),
+            "subcommands.plan.out",
+        ),
     ] {
-        let expected = fs::read(root.join("examples/features/expected/cli").join(golden_name))
-            .unwrap_or_else(|error| panic!("read CLI command golden `{golden_name}`: {error}"));
+        let expected = fs::read(
+            root.join("examples/features/expected/cli")
+                .join(golden_name),
+        )
+        .unwrap_or_else(|error| panic!("read CLI command golden `{golden_name}`: {error}"));
         let aot = Command::new(&binary)
             .args(args)
             .current_dir(&scratch.path)
@@ -597,7 +642,10 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
         let default = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(&run_args)
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", cache.join(format!("{golden_name}-run")))
+            .env(
+                "JET_RUN_CACHE_DIR",
+                cache.join(format!("{golden_name}-run")),
+            )
             .env("JET_CACHE_DIR", cache.join(format!("{golden_name}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -607,8 +655,14 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
         let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(&interpret_args)
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", cache.join(format!("{golden_name}-interpret-run")))
-            .env("JET_CACHE_DIR", cache.join(format!("{golden_name}-interpret-build")))
+            .env(
+                "JET_RUN_CACHE_DIR",
+                cache.join(format!("{golden_name}-interpret-run")),
+            )
+            .env(
+                "JET_CACHE_DIR",
+                cache.join(format!("{golden_name}-interpret-build")),
+            )
             .env("NO_COLOR", "1")
             .output()
             .expect("run interpreted CLI command");
@@ -622,10 +676,19 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
                 "{label} CLI command {args:?} failed:\n{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            assert_eq!(output.stdout, expected, "{label} CLI command {args:?} differs from golden");
+            assert_eq!(
+                output.stdout, expected,
+                "{label} CLI command {args:?} differs from golden"
+            );
         }
-        assert_eq!(aot.stdout, default.stdout, "AOT and default CLI command {args:?} differ");
-        assert_eq!(aot.stdout, interpreted.stdout, "AOT and interpreter CLI command {args:?} differ");
+        assert_eq!(
+            aot.stdout, default.stdout,
+            "AOT and default CLI command {args:?} differ"
+        );
+        assert_eq!(
+            aot.stdout, interpreted.stdout,
+            "AOT and interpreter CLI command {args:?} differ"
+        );
     }
 
     let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -669,20 +732,35 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
         .env("NO_COLOR", "1")
         .output()
         .expect("build measured test target");
-    assert!(build.status.success(), "AOT measured test target build failed: {}", String::from_utf8_lossy(&build.stderr));
+    assert!(
+        build.status.success(),
+        "AOT measured test target build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
     let aot = Command::new(scratch.join("build/main"))
         .current_dir(&scratch.path)
         .output()
         .expect("run AOT measured test target");
-    assert!(aot.status.success(), "AOT measured test target failed: {}", String::from_utf8_lossy(&aot.stderr));
-    assert_eq!(aot.stdout, golden, "AOT measured test target changed its named golden");
+    assert!(
+        aot.status.success(),
+        "AOT measured test target failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        aot.stdout, golden,
+        "AOT measured test target changed its named golden"
+    );
 
     let help = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["test", "--help"])
         .env("NO_COLOR", "1")
         .output()
         .expect("show test help");
-    assert!(help.status.success(), "test help failed: {}", String::from_utf8_lossy(&help.stderr));
+    assert!(
+        help.status.success(),
+        "test help failed: {}",
+        String::from_utf8_lossy(&help.stderr)
+    );
     let help = String::from_utf8_lossy(&help.stdout);
     assert!(help.contains("--filter"));
     assert!(help.contains("--measure"));
@@ -693,10 +771,20 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
         .env("NO_COLOR", "1")
         .output()
         .expect("run selected measured claim");
-    assert!(measured.status.success(), "selected measured claim failed: {}", String::from_utf8_lossy(&measured.stderr));
+    assert!(
+        measured.status.success(),
+        "selected measured claim failed: {}",
+        String::from_utf8_lossy(&measured.stderr)
+    );
     let selected = String::from_utf8_lossy(&measured.stdout);
-    assert!(selected.contains("sum_to(1000)"), "selected measurement lost claim name: {selected}");
-    assert!(selected.contains("ns"), "selected measurement lost timing: {selected}");
+    assert!(
+        selected.contains("sum_to(1000)"),
+        "selected measurement lost claim name: {selected}"
+    );
+    assert!(
+        selected.contains("ns"),
+        "selected measurement lost timing: {selected}"
+    );
 
     let bench = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args([
@@ -761,7 +849,8 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
         )
         .unwrap_or_else(|error| panic!("copy command override `{file_name}`: {error}"));
         let expected = fs::read(
-            root.join("examples/features/expected/devloop").join(format!("{stem}.out")),
+            root.join("examples/features/expected/devloop")
+                .join(format!("{stem}.out")),
         )
         .unwrap_or_else(|error| panic!("read command override golden `{stem}`: {error}"));
 
@@ -771,8 +860,15 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("run release command override `{stem}`: {error}"));
-        assert!(release.status.success(), "release `{stem}` failed: {}", String::from_utf8_lossy(&release.stderr));
-        assert_eq!(release.stdout, expected, "release `{stem}` differs from golden");
+        assert!(
+            release.status.success(),
+            "release `{stem}` failed: {}",
+            String::from_utf8_lossy(&release.stderr)
+        );
+        assert_eq!(
+            release.stdout, expected,
+            "release `{stem}` differs from golden"
+        );
 
         let default_run = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(["run", file_name])
@@ -780,8 +876,15 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("run default command override `{stem}`: {error}"));
-        assert!(default_run.status.success(), "default run `{stem}` failed: {}", String::from_utf8_lossy(&default_run.stderr));
-        assert_eq!(default_run.stdout, expected, "default run `{stem}` differs from golden");
+        assert!(
+            default_run.status.success(),
+            "default run `{stem}` failed: {}",
+            String::from_utf8_lossy(&default_run.stderr)
+        );
+        assert_eq!(
+            default_run.stdout, expected,
+            "default run `{stem}` differs from golden"
+        );
 
         let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(["dev", file_name, "--interpret", "--watch=off"])
@@ -789,8 +892,15 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("run interpreted command override `{stem}`: {error}"));
-        assert!(interpreted.status.success(), "interpreted `{stem}` failed: {}", String::from_utf8_lossy(&interpreted.stderr));
-        assert_eq!(interpreted.stdout, expected, "interpreted `{stem}` differs from golden");
+        assert!(
+            interpreted.status.success(),
+            "interpreted `{stem}` failed: {}",
+            String::from_utf8_lossy(&interpreted.stderr)
+        );
+        assert_eq!(
+            interpreted.stdout, expected,
+            "interpreted `{stem}` differs from golden"
+        );
     }
 
     let override_run = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -799,8 +909,14 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
         .env("NO_COLOR", "1")
         .output()
         .expect("run test command override");
-    assert!(override_run.status.success(), "test override failed: {}", String::from_utf8_lossy(&override_run.stderr));
-    assert!(String::from_utf8_lossy(&override_run.stdout).contains("jet test: using fn test override"));
+    assert!(
+        override_run.status.success(),
+        "test override failed: {}",
+        String::from_utf8_lossy(&override_run.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&override_run.stdout).contains("jet test: using fn test override")
+    );
 
     for command in ["test"] {
         let help = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -808,8 +924,15 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
             .env("NO_COLOR", "1")
             .output()
             .unwrap_or_else(|error| panic!("show `{command}` help: {error}"));
-        assert!(help.status.success(), "{command} help failed: {}", String::from_utf8_lossy(&help.stderr));
-        assert!(String::from_utf8_lossy(&help.stdout).contains("--show-default"), "{command} help omitted --show-default");
+        assert!(
+            help.status.success(),
+            "{command} help failed: {}",
+            String::from_utf8_lossy(&help.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&help.stdout).contains("--show-default"),
+            "{command} help omitted --show-default"
+        );
     }
 }
 
@@ -818,14 +941,17 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let example = root.join("examples/features/tooling/build_entry_discovery");
     let entry = example.join("run.jet");
-    let expected = fs::read(
-        root.join("examples/features/expected/tooling/build_entry_discovery.out"),
-    )
-    .expect("read build-entry discovery golden");
+    let expected =
+        fs::read(root.join("examples/features/expected/tooling/build_entry_discovery.out"))
+            .expect("read build-entry discovery golden");
     let scratch = common::Scratch::new("package_build_entry_discovery_parity");
 
     let release = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--release", entry.to_str().expect("entry path is utf8")])
+        .args([
+            "run",
+            "--release",
+            entry.to_str().expect("entry path is utf8"),
+        ])
         .current_dir(&example)
         .env("JET_RUN_CACHE_DIR", scratch.join("cache/release-run"))
         .env("JET_CACHE_DIR", scratch.join("cache/release-build"))

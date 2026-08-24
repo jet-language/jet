@@ -1,7 +1,7 @@
 //! The single reader for Jet's JSON machine-output door.
 
-use crate::JSON::JSONValue;
 use crate::Report::REPORT_SCHEMA;
+use crate::JSON::JSONValue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MachineRecord {
@@ -79,18 +79,22 @@ pub fn read_machine_output(text: &str) -> Result<Vec<MachineRecord>, String> {
 #[cfg(test)]
 mod tests {
     use super::{read_machine_line, read_machine_output, MachineRecord};
-    use crate::Report::{ReportEnvelope, render_status_json};
+    use crate::Report::{render_status_json, ReportEnvelope};
 
     #[test]
     fn reader_accepts_status_and_report_json_lines() {
         let status = ReportEnvelope::status_record("tool", "ok", true, "facts")
             .with_fields(",\"facts\":[]")
             .json();
-        let report = ReportEnvelope::new("compile", "error", "E0001", "what", "why", "fix")
-            .json();
+        let report = ReportEnvelope::new("compile", "error", "E0001", "what", "why", "fix").json();
         assert_eq!(read_machine_line(&status), Ok(MachineRecord::Status));
         assert_eq!(read_machine_line(&report), Ok(MachineRecord::Report));
-        assert_eq!(read_machine_output(&format!("{status}\n{report}\n")).unwrap().len(), 2);
+        assert_eq!(
+            read_machine_output(&format!("{status}\n{report}\n"))
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]

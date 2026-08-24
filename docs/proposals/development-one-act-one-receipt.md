@@ -43,6 +43,36 @@ The lying price — what the project says about itself versus what is true:
 
 Both tables have one root. The act that knew the truth — the compile, the test run, the parity check, the UI drive — kept no record bound to its inputs. So the next verb recomputes (price one), and the next claim hand-writes (price two).
 
+### Card #2111 criterion 3: warm-cost measurement
+
+The following run measures one unchanged invocation with receipts disabled, then
+one unchanged invocation after a receipt was written. Each verb used a fresh
+copy of `examples/features/tooling/test_target`. The four cases used one pinned
+copy of the Jet binary and one `jet-env` shell. This kept the tool and shell
+identity fixed between samples.
+
+| Verb | Before: bypass, warm | After: receipt hit | Status | Receipt evidence |
+|---|---:|---:|---:|---|
+| `build` | 731 ms | 40,093 ms | 0 | `ok: build current (receipt 0cf4d3498d49)` |
+| `test` | 740 ms | 39,926 ms | 0 | `ok: test current (receipt 66adb04bd912)` |
+| `prove` | 48,684 ms | 37,101 ms | 0 | `ok: prove current (receipt 42df9f084fb1)` |
+| `budget check` | 75,720 ms | 38,930 ms | 0 | `ok: budget check current (receipt e3a6324e9ff4)` |
+
+Command shape for each row:
+
+```text
+JET_RECEIPT_BYPASS=1 <jet> <verb> # warm producer path
+JET_RECEIPT_BYPASS=1 <jet> <verb> # before: measured no-receipt run
+<jet> <verb>                      # prime the receipt
+<jet> <verb>                      # after: measured receipt-hit run
+```
+
+The after rows prove that the producer did not run. They do not yet show a
+cheap warm command. Receipt lookup hashes the large compiler tool identity on
+each process start, so lookup cost remains about 37–40 seconds on this
+checkout. The report records the before and after price; it leaves that lookup
+cost visible for the next performance fix.
+
 Jet already builds receipts. It builds them seven different ways, one per corner, none shared. Each row below is the same underlying thing — evidence of an act, keyed by inputs — wearing a different coat:
 
 | # | The act | Its record today | Home | Defect |

@@ -119,7 +119,8 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("nested read should compile");
     assert!(
-        !out.rust.contains("__jet_branch.__jet_leaf.__jet_text).clone()"),
+        !out.rust
+            .contains("__jet_branch.__jet_leaf.__jet_text).clone()"),
         "nested read must stay borrowed: {}",
         out.rust
     );
@@ -361,7 +362,9 @@ fn run() {
 "#;
     let diagnostics = jet::compile(src).expect_err("a lock token must have one owner");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0211"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0211"),
         "expected the noncloneable-value diagnostic: {diagnostics:?}"
     );
 }
@@ -376,10 +379,11 @@ fn run() {
     _ :: guard.wait(changed, value -> value == 1)
 }
 "#;
-    let diagnostics =
-        jet::compile(read_src).expect_err("waiting must require an exclusive guard");
+    let diagnostics = jet::compile(read_src).expect_err("waiting must require an exclusive guard");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0205"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0205"),
         "expected the read-guard wait diagnostic: {diagnostics:?}"
     );
 
@@ -391,8 +395,7 @@ fn run() {
     _ :: guard.wait(changed, value -> value)
 }
 "#;
-    let diagnostics =
-        jet::compile(predicate_src).expect_err("a wait predicate must return Bool");
+    let diagnostics = jet::compile(predicate_src).expect_err("a wait predicate must return Bool");
     assert!(
         diagnostics
             .iter()
@@ -450,7 +453,11 @@ fn run() {
         "{}",
         output.rust
     );
-    assert!(output.rust.contains("|__jet_pair: &__jet_Pair|"), "{}", output.rust);
+    assert!(
+        output.rust.contains("|__jet_pair: &__jet_Pair|"),
+        "{}",
+        output.rust
+    );
     assert!(
         output.rust.contains("|__jet_pair: &mut __jet_Pair|"),
         "{}",
@@ -643,8 +650,7 @@ fn run() {}
         jet::compile(source).expect_err("map must preserve the original dynamic loan");
     assert!(
         diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0112"
-                && diagnostic.what.contains("needs a field projection")
+            diagnostic.code == "E0112" && diagnostic.what.contains("needs a field projection")
         }),
         "{diagnostics:?}"
     );
@@ -662,8 +668,7 @@ fn run() {}
         jet::compile(source).expect_err("Cell.get must not defer a missing Clone bound to rustc");
     assert!(
         diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0112"
-                && diagnostic.what.contains("cannot copy its value")
+            diagnostic.code == "E0112" && diagnostic.what.contains("cannot copy its value")
         }),
         "{diagnostics:?}"
     );
@@ -685,8 +690,7 @@ fn run() {}
         jet::compile(source).expect_err("split must prove projections disjoint in sema");
     assert!(
         diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0112"
-                && diagnostic.what.contains("projections overlap")
+            diagnostic.code == "E0112" && diagnostic.what.contains("projections overlap")
         }),
         "{diagnostics:?}"
     );
@@ -897,8 +901,8 @@ fn run() {
     both(&values, Work{ callback: () -> values.len() })
 }
 "#;
-    let diags =
-        jet::compile(composite).expect_err("a lambda inside an aggregate must see the active write");
+    let diags = jet::compile(composite)
+        .expect_err("a lambda inside an aggregate must see the active write");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let immediate_callee = r#"
@@ -1053,8 +1057,7 @@ fn run() {
     print(pair.right.len())
 }
 "#;
-    jet::compile(field_before_index)
-        .expect("Rust may capture the field prefix before an index");
+    jet::compile(field_before_index).expect("Rust may capture the field prefix before an index");
 }
 
 #[test]
@@ -1159,7 +1162,8 @@ fn run() {
     both(&value, () -> see(value))
 }
 "#;
-    let diags = jet::compile(src).expect_err("the deferred capture conflicts with the active write");
+    let diags =
+        jet::compile(src).expect_err("the deferred capture conflicts with the active write");
     assert_eq!(
         diags.iter().filter(|diag| diag.code == "E0204").count(),
         1,
@@ -1187,7 +1191,8 @@ fn run() {
     both(&value, (value: Int) -> value)
 }
 "#;
-    jet::compile(shadow).expect("a lambda-local shadow must not capture the outer write-borrowed place");
+    jet::compile(shadow)
+        .expect("a lambda-local shadow must not capture the outer write-borrowed place");
 }
 
 #[test]
@@ -1300,8 +1305,7 @@ fn run() {
 }
 "#,
     ] {
-        let diags =
-            jet::compile(eager).expect_err("explicit-helper receiver borrows are eager");
+        let diags = jet::compile(eager).expect_err("explicit-helper receiver borrows are eager");
         assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
     }
 }
@@ -1383,8 +1387,8 @@ fn run() {
     })
 }
 "#;
-    let diags = jet::compile(reactive_root)
-        .expect_err("reactive lowering clones the whole captured root");
+    let diags =
+        jet::compile(reactive_root).expect_err("reactive lowering clones the whole captured root");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 }
 
@@ -1476,23 +1480,29 @@ fn run() {
 #[test]
 fn move_lambda_construction_consumes_owned_nonscalar_captures() {
     for (source, expected) in [
-        (r#"
+        (
+            r#"
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
     values := [1, 2]
     both(() -> values.len(), values)
 }
-"#, "E0121"),
-        (r#"
+"#,
+            "E0121",
+        ),
+        (
+            r#"
 fn both(values: [Int], callback: fn()) { print(values.len()); callback() }
 fn run() {
     values := [1, 2]
     both(values, () -> values.len())
 }
-"#, "E0204"),
+"#,
+            "E0204",
+        ),
     ] {
-        let diags = jet::compile(source)
-            .expect_err("a move closure consumes its owned non-scalar capture");
+        let diags =
+            jet::compile(source).expect_err("a move closure consumes its owned non-scalar capture");
         assert!(
             diags.iter().any(|diag| diag.code == expected),
             "{expected}: {diags:?}"
@@ -1522,8 +1532,7 @@ fn run() {
     })
 }
 "#;
-    let diags =
-        jet::compile(fallback).expect_err("panic fallback arguments are closure captures");
+    let diags = jet::compile(fallback).expect_err("panic fallback arguments are closure captures");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let scope_member = r#"
@@ -1559,7 +1568,10 @@ fn run() {{
         );
         let diags =
             jet::compile(&src).expect_err("wrapped returned views retain their source loan");
-        assert!(diags.iter().any(|diag| diag.code == "E0204"), "{view}: {diags:?}");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0204"),
+            "{view}: {diags:?}"
+        );
     }
 }
 
@@ -1580,8 +1592,7 @@ fn run() {
     print(chosen[0])
 }
 "#;
-    jet::compile(source)
-        .expect("a return fallback exits before the enclosing call can run");
+    jet::compile(source).expect("a return fallback exits before the enclosing call can run");
 }
 
 #[test]
@@ -2571,8 +2582,7 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("bare range window must compile");
     assert!(
-        out.rust
-            .contains("let __jet_window = jet_view_range_new"),
+        out.rust.contains("let __jet_window = jet_view_range_new"),
         "range acquisition must lower to a view: {}",
         out.rust
     );
@@ -2588,7 +2598,11 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("whole place window must compile");
-    assert!(out.rust.contains("let __jet_all = &(__jet_xs)"), "{}", out.rust);
+    assert!(
+        out.rust.contains("let __jet_all = &(__jet_xs)"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -2616,11 +2630,7 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("write range window must compile");
-    assert!(
-        out.rust.contains("jet_view_mut_range_new"),
-        "{}",
-        out.rust
-    );
+    assert!(out.rust.contains("jet_view_mut_range_new"), "{}", out.rust);
 }
 
 #[test]
@@ -2643,9 +2653,21 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("write windows must write through to each owner place");
-    assert!(out.rust.contains("(*__jet_whole_edit) = 2i64"), "{}", out.rust);
-    assert!(out.rust.contains("(*__jet_field_edit) = 4i64"), "{}", out.rust);
-    assert!(out.rust.contains("(*__jet_index_edit) = 7i64"), "{}", out.rust);
+    assert!(
+        out.rust.contains("(*__jet_whole_edit) = 2i64"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("(*__jet_field_edit) = 4i64"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("(*__jet_index_edit) = 7i64"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -2734,7 +2756,11 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("disjoint write windows must compile");
-    assert!(out.rust.matches("split_at_mut").count() >= 2, "{}", out.rust);
+    assert!(
+        out.rust.matches("split_at_mut").count() >= 2,
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -2755,8 +2781,11 @@ fn run() {
         out.rust
     );
     assert!(
-        out.rust.contains("let __jet_left = &mut __jet___place_plan_")
-            && out.rust.contains("let __jet_right = &mut __jet___place_plan_"),
+        out.rust
+            .contains("let __jet_left = &mut __jet___place_plan_")
+            && out
+                .rust
+                .contains("let __jet_right = &mut __jet___place_plan_"),
         "{}",
         out.rust
     );
@@ -2826,8 +2855,8 @@ fn run() {
     update_pair(&particles, 0, 1)
 }
 "#;
-    let diags = jet::compile(src)
-        .expect_err("runtime indexes stay conservatively overlapping until #1198");
+    let diags =
+        jet::compile(src).expect_err("runtime indexes stay conservatively overlapping until #1198");
     let diag = diags
         .iter()
         .find(|diag| diag.code == "E0212")
@@ -3026,7 +3055,9 @@ fn run() {
     let e2307: Vec<_> = diags.iter().filter(|d| d.code == "E2307").collect();
     assert_eq!(e2307.len(), 1, "expected one E2307, got {diags:?}");
     assert!(
-        e2307[0].what.contains("owned `String` cannot fill a `View<str>`"),
+        e2307[0]
+            .what
+            .contains("owned `String` cannot fill a `View<str>`"),
         "teaching must name the owned-String ceiling, got {:?}",
         e2307[0]
     );
@@ -3054,11 +3085,7 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("local-owned view return must fail");
     let e2305: Vec<_> = diags.iter().filter(|d| d.code == "E2305").collect();
-    assert_eq!(
-        e2305.len(),
-        1,
-        "expected exactly one E2305, got {diags:?}"
-    );
+    assert_eq!(e2305.len(), 1, "expected exactly one E2305, got {diags:?}");
     assert!(
         e2305[0].what.contains("this function owns"),
         "expected owns-return teaching, got {:?}",
@@ -3082,7 +3109,11 @@ fn run() {
 }
 "#;
     let compiled = jet::compile(src).expect("string view as String must materialize");
-    assert!(compiled.rust.contains("jet_string_view_copy"), "{}", compiled.rust);
+    assert!(
+        compiled.rust.contains("jet_string_view_copy"),
+        "{}",
+        compiled.rust
+    );
 }
 
 /// #1163: the memory example runs the owner-backed library through the
@@ -3153,8 +3184,16 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("different fields are structurally disjoint");
-    assert!(out.rust.contains("&mut ((__jet_pair).__jet_left)"), "{}", out.rust);
-    assert!(out.rust.contains("&mut ((__jet_pair).__jet_right)"), "{}", out.rust);
+    assert!(
+        out.rust.contains("&mut ((__jet_pair).__jet_left)"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("&mut ((__jet_pair).__jet_right)"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -3218,7 +3257,10 @@ fn run() {
         .rust
         .find("fn jet_view_range_new")
         .expect("view helper definition");
-    assert!(helper < check, "bounds-checking helper must exist before use");
+    assert!(
+        helper < check,
+        "bounds-checking helper must exist before use"
+    );
     // The window policy is one shared rule (`jet_checked_view_window` ->
     // `jet_checked_view_bounds` -> `jet_range_bounds`) for AOT, the resident
     // JIT, and the interpreter, so the check lives inside the helper and runs
@@ -3587,8 +3629,8 @@ fn run() {
     print("wrapped: {expected}")
 }
 "#;
-    let out = jet::compile(src)
-        .expect("a parser token and remainder may borrow one caller-owned source");
+    let out =
+        jet::compile(src).expect("a parser token and remainder may borrow one caller-owned source");
     assert!(
         out.rust.contains("pub struct __jet_Token<'__jet___view>")
             && out.rust.contains("pub __jet_text: &'__jet___view str")
@@ -3739,8 +3781,16 @@ fn domain(email: String) Domain -[]> {
 fn run() { print(domain("user@example.com").value) }
 "#;
     let out = jet::compile(src).expect("parameter-rooted string view field must compile");
-    assert!(out.rust.contains("pub struct __jet_Domain<'__jet___view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub __jet_value: &'__jet___view str"), "{}", out.rust);
+    assert!(
+        out.rust.contains("pub struct __jet_Domain<'__jet___view>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("pub __jet_value: &'__jet___view str"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -3766,7 +3816,8 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("constant returned-view aggregate must compile");
     assert!(
-        out.rust.contains("let __jet_token: __jet_Token = __jet_scan(&(__jet_source));"),
+        out.rust
+            .contains("let __jet_token: __jet_Token = __jet_scan(&(__jet_source));"),
         "view-bearing constants must lower through the borrow-preserving call path:\n{}",
         out.rust
     );
@@ -4002,8 +4053,7 @@ impl Last.Select {
 "#;
     for implementations in [format!("{first}{last}"), format!("{last}{first}")] {
         let src = template.replace("$IMPLS", &implementations);
-        jet::compile(&src)
-            .expect("aggregate trait implementations union compatible slot sources");
+        jet::compile(&src).expect("aggregate trait implementations union compatible slot sources");
     }
 }
 
@@ -4068,11 +4118,29 @@ fn run() {
     print(result.inner.values[0])
 }
 "#;
-    let out = jet::compile(src).expect("nested returned aggregate must carry transitive view provenance");
-    assert!(out.rust.contains("pub struct __jet_Inner<'__jet___view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub struct __jet_Outer<'__jet___view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub __jet_inner: __jet_Inner<'__jet___view>"), "{}", out.rust);
-    assert!(out.rust.contains("-> __jet_Outer<'__jet___view>"), "{}", out.rust);
+    let out =
+        jet::compile(src).expect("nested returned aggregate must carry transitive view provenance");
+    assert!(
+        out.rust.contains("pub struct __jet_Inner<'__jet___view>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("pub struct __jet_Outer<'__jet___view>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust
+            .contains("pub __jet_inner: __jet_Inner<'__jet___view>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("-> __jet_Outer<'__jet___view>"),
+        "{}",
+        out.rust
+    );
 }
 
 /// The property: a wrapper around a view-bearing value renders the view
@@ -4126,15 +4194,29 @@ fn run() { print(0) }
         "{}",
         out.rust
     );
-    assert!(out.rust.contains("pub __jet_window: __jet_Window<'__jet___view>"), "{}", out.rust);
-    assert!(out.rust.contains("pub struct __jet_GenericHolder<'__jet___view, T"), "{}", out.rust);
+    assert!(
+        out.rust
+            .contains("pub __jet_window: __jet_Window<'__jet___view>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust
+            .contains("pub struct __jet_GenericHolder<'__jet___view, T"),
+        "{}",
+        out.rust
+    );
     assert!(
         out.rust
             .contains("pub __jet_maybe: JetOutcome<__jet_Window<'__jet___view>, JetAbsent>"),
         "{}",
         out.rust
     );
-    assert!(!out.rust.contains("JetOutcome<'__jet___view"), "{}", out.rust);
+    assert!(
+        !out.rust.contains("JetOutcome<'__jet___view"),
+        "{}",
+        out.rust
+    );
     assert!(!out.rust.contains("Option<'__jet___view"), "{}", out.rust);
     assert!(!out.rust.contains("Result<'__jet___view"), "{}", out.rust);
 }
@@ -4190,12 +4272,8 @@ fn run() {
             && out
                 .rust
                 .contains("__jet_Pair(__jet_PairViews<'__jet___view>)")
-            && out
-                .rust
-                .contains("pub __jet_left: &'__jet___view [i64],")
-            && out
-                .rust
-                .contains("pub __jet_right: &'__jet___view [i64],"),
+            && out.rust.contains("pub __jet_left: &'__jet___view [i64],")
+            && out.rust.contains("pub __jet_right: &'__jet___view [i64],"),
         "{}",
         out.rust
     );
@@ -4316,7 +4394,10 @@ fn run() {
         let (code, _stdout, stderr) =
             common::build_and_run("jet_view_mut_bounds_aot", "view_mut_bounds_aot", src);
         assert_ne!(code, 0, "AOT accepted an invalid mutable view");
-        assert!(stderr.contains(stop), "AOT reported the wrong runtime failure: {stderr}");
+        assert!(
+            stderr.contains(stop),
+            "AOT reported the wrong runtime failure: {stderr}"
+        );
     }
 
     let root = common::unique_tmp("jet_view_mut_bounds_tiers");
@@ -4350,9 +4431,9 @@ fn run() {
                 );
                 jit_report = Some(stderr);
             }
-            RunOutcome::Problems(diags) => panic!(
-                "resident JIT returned diagnostics instead of running: {diags:?}"
-            ),
+            RunOutcome::Problems(diags) => {
+                panic!("resident JIT returned diagnostics instead of running: {diags:?}")
+            }
         }
     }
 
@@ -4379,9 +4460,9 @@ fn run() {
                 );
             }
         }
-        RunOutcome::Problems(diags) => panic!(
-            "forced interpreter returned diagnostics instead of running: {diags:?}"
-        ),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter returned diagnostics instead of running: {diags:?}")
+        }
     }
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -4389,7 +4470,10 @@ fn run() {
         .current_dir(&root)
         .output()
         .expect("run invalid mutable view through the default tier");
-    assert!(!output.status.success(), "default tier accepted an invalid mutable view");
+    assert!(
+        !output.status.success(),
+        "default tier accepted an invalid mutable view"
+    );
 }
 
 #[test]
@@ -4521,7 +4605,10 @@ fn run() {
             RunOutcome::Problems(diags) => panic!("{tier} failed: {diags:?}"),
         }
         if !force_interpreter {
-            assert!(jet_jit::jit_executed_for_test(), "resident JIT did not execute");
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "resident JIT did not execute"
+            );
             assert!(
                 !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
                 "resident JIT used an interpreter fallback"
@@ -4635,7 +4722,9 @@ fn run() {
         let diagnostics = jet::compile(src)
             .expect_err("a lending mutable view must not cross a retaining boundary");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0212"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0212"),
             "{boundary}: {diagnostics:?}"
         );
     }
@@ -4698,7 +4787,9 @@ fn run() {
         let diagnostics = jet::compile(src)
             .expect_err("an edit_disjoint callback view must not cross a retaining boundary");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0212"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0212"),
             "{boundary}: {diagnostics:?}"
         );
     }
@@ -4814,8 +4905,8 @@ fn run() {
     }
 }
 "#;
-    let diags =
-        jet::compile(option_src).expect_err("extracting an exclusive option payload must retire its subject");
+    let diags = jet::compile(option_src)
+        .expect_err("extracting an exclusive option payload must retire its subject");
     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
 }
 
@@ -4942,8 +5033,16 @@ fn node(values: [Int]) Node -[]> {
 fn run() { print(0) }
 "#;
     let out = jet::compile(src).expect("recursive view graph must terminate in sema and codegen");
-    assert!(out.rust.contains("pub struct __jet_Node<'__jet___view>"), "{}", out.rust);
-    assert!(out.rust.contains("__jet_Node<'__jet___view>"), "{}", out.rust);
+    assert!(
+        out.rust.contains("pub struct __jet_Node<'__jet___view>"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("__jet_Node<'__jet___view>"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -4990,8 +5089,8 @@ fn run() {
 "#
         .replace("$OWNER", owner)
         .replace("$FIELD", field);
-        let diags = jet::compile(&src)
-            .expect_err("each returned output slot must keep its own owner live");
+        let diags =
+            jet::compile(&src).expect_err("each returned output slot must keep its own owner live");
         assert!(
             diags.iter().any(|diag| diag.code == "E0212"),
             "{owner}/{field}: {diags:?}"
@@ -5023,8 +5122,8 @@ fn run() {
     print(selected[0])
 }
 "#;
-    let diags = jet::compile(src)
-        .expect_err("the projected left slot must retain its original owner");
+    let diags =
+        jet::compile(src).expect_err("the projected left slot must retain its original owner");
     assert!(diags.iter().any(|diag| diag.code == "E0212"), "{diags:?}");
 }
 
@@ -5103,12 +5202,16 @@ fn run() {
     bind_again("hello")
 }
 "#;
-    let diags = jet::compile(src).expect_err("borrowed parameter binding must need explicit ownership");
+    let diags =
+        jet::compile(src).expect_err("borrowed parameter binding must need explicit ownership");
     let escape = diags
         .iter()
         .find(|diag| diag.code == "E0120")
         .expect("borrowed binding must report E0120 instead of cloning");
-    assert!(escape.fix.contains("~text"), "fix must name explicit copy: {escape:?}");
+    assert!(
+        escape.fix.contains("~text"),
+        "fix must name explicit copy: {escape:?}"
+    );
 }
 
 /// D-MEM-COPYSEM1=A: a cloneable read value entering an owning destination is
@@ -5137,7 +5240,8 @@ fn run() {
     print(0)
 }
 "#;
-    let out = jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
+    let out =
+        jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
     assert!(
         out.rust
             .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> T {"),
@@ -5214,23 +5318,36 @@ fn run() {
     let out = jet::compile(src).expect("all plain parameters are read borrows");
     assert!(out.rust.contains("__jet_text: &String"), "{}", out.rust);
     assert!(out.rust.contains("__jet_values: &Vec<i64>"), "{}", out.rust);
-    assert!(out.rust.contains("__jet_parcel: &__jet_Parcel"), "{}", out.rust);
+    assert!(
+        out.rust.contains("__jet_parcel: &__jet_Parcel"),
+        "{}",
+        out.rust
+    );
     assert!(out.rust.contains("__jet_value: &T"), "{}", out.rust);
     // A function value is stored as `Rc` since f003de290 (2026-07-31) so
     // collections can clone it. The property under test is the leading `&`:
     // every unmarked non-scalar parameter, callbacks included, arrives borrowed
     // (spec.md:338-341 — "allocation-free for every non-scalar shape,
     // including strings, collections, structs, generic values, and callbacks").
-    assert!(out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn"), "{}", out.rust);
+    assert!(
+        out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn"),
+        "{}",
+        out.rust
+    );
     // The read-only generic takes no `Clone`: a borrow that never escapes must
     // not levy a copy obligation on callers (`generic_clone_bound_is_usage_
     // sensitive` states the other direction).
     assert!(
-        out.rust.contains("pub fn __jet_read_generic<T>(__jet_value: &T)"),
+        out.rust
+            .contains("pub fn __jet_read_generic<T>(__jet_value: &T)"),
         "a read-only generic parameter must stay bound-free: {}",
         out.rust
     );
-    assert!(!out.rust.contains("((*__jet_text)).clone()"), "{}", out.rust);
+    assert!(
+        !out.rust.contains("((*__jet_text)).clone()"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -5254,14 +5371,21 @@ fn run() {
     // parameter's own borrow AND the callback's read-borrowed `&String`
     // argument — so neither half can drift into an owned slot unnoticed.
     assert!(
-        out.rust
-            .contains("__jet_f: &std::rc::Rc<dyn Fn(&String)"),
+        out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn(&String)"),
         "the function value must arrive as a read borrow: {}",
         out.rust
     );
     assert!(out.rust.contains("__jet_value: &String"), "{}", out.rust);
-    assert!(out.rust.contains("((*__jet_f))(&((*__jet_value)))"), "{}", out.rust);
-    assert!(!out.rust.contains("((*__jet_value)).clone()"), "{}", out.rust);
+    assert!(
+        out.rust.contains("((*__jet_f))(&((*__jet_value)))"),
+        "{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("((*__jet_value)).clone()"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -5327,8 +5451,7 @@ fn run() {
     // The E0496 half of the same shape: the callback's binder is not the
     // enclosing function's lifetime, so the two windows are never conflated.
     assert!(
-        !out.rust
-            .contains("dyn for<'__jet___view>"),
+        !out.rust.contains("dyn for<'__jet___view>"),
         "the callback binder must not shadow the enclosing view lifetime: {}",
         out.rust
     );
@@ -5353,8 +5476,11 @@ fn run() {
 "#;
     jet::compile(src).expect("unrelated callback arguments must not borrow the returned view");
     if common::have_rustc() {
-        let (code, stdout, stderr) =
-            common::build_and_run("jet_exact_callback_view_owner", "exact_callback_view_owner", src);
+        let (code, stdout, stderr) = common::build_and_run(
+            "jet_exact_callback_view_owner",
+            "exact_callback_view_owner",
+            src,
+        );
         assert_eq!(code, 0, "{stderr}");
         assert_eq!(stdout, "7\n10\n");
     }
@@ -5375,8 +5501,11 @@ fn run() {
 "#;
     jet::compile(src).expect("unrelated lambda arguments must not borrow the returned view");
     if common::have_rustc() {
-        let (code, stdout, stderr) =
-            common::build_and_run("jet_exact_lambda_view_owner", "exact_lambda_view_owner", src);
+        let (code, stdout, stderr) = common::build_and_run(
+            "jet_exact_lambda_view_owner",
+            "exact_lambda_view_owner",
+            src,
+        );
         assert_eq!(code, 0, "{stderr}");
         assert_eq!(stdout, "7\n10\n");
     }
@@ -5638,7 +5767,11 @@ fn apply_to(parcel: Parcel, callback: fn(String, Int)) {
 fn run() { apply_to(Parcel{ label: "hello" }, inspect) }
 "#;
     let out = jet::compile(src).expect("bare parameter subplace is a read window");
-    assert!(out.rust.contains("__jet_parcel: &__jet_Parcel"), "{}", out.rust);
+    assert!(
+        out.rust.contains("__jet_parcel: &__jet_Parcel"),
+        "{}",
+        out.rust
+    );
     // The borrow position: the subplace is reborrowed out of the parameter's
     // own storage, not materialized.
     assert!(
@@ -5726,13 +5859,14 @@ fn run() {
 }
 "#;
     let compiled = jet::compile(src).expect("stored read-view capture must become owning");
-    assert!(compiled.rust.contains("jet_string_view_copy"), "{}", compiled.rust);
+    assert!(
+        compiled.rust.contains("jet_string_view_copy"),
+        "{}",
+        compiled.rust
+    );
     if common::have_rustc() {
-        let (code, stdout, stderr) = common::build_and_run(
-            "jet_stored_view_capture",
-            "whole_root",
-            src,
-        );
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_stored_view_capture", "whole_root", src);
         assert_eq!(code, 0, "{stderr}");
         assert_eq!(stdout, "jet.dev\n");
     }
@@ -5751,7 +5885,11 @@ fn run() {
 }
 "#;
     let compiled = jet::compile(src).expect("an owning collection element must materialize");
-    assert!(compiled.rust.contains("jet_string_view_copy"), "{}", compiled.rust);
+    assert!(
+        compiled.rust.contains("jet_string_view_copy"),
+        "{}",
+        compiled.rust
+    );
 }
 
 #[test]
@@ -5977,9 +6115,8 @@ fn run() {
         ),
     ];
     for (name, source, expected) in cases {
-        let out = jet::compile(source).unwrap_or_else(|diags| {
-            panic!("{name} must compile for AOT emit: {diags:?}")
-        });
+        let out = jet::compile(source)
+            .unwrap_or_else(|diags| panic!("{name} must compile for AOT emit: {diags:?}"));
         if name == "nested_index" {
             assert!(
                 out.rust.contains("jet_index_vec_mut"),
@@ -6004,9 +6141,9 @@ fn run() {
                 cmd.arg("--release");
             }
             cmd.arg(path.to_str().unwrap()).current_dir(&root);
-            let output = cmd.output().unwrap_or_else(|err| {
-                panic!("jet run failed to spawn for {name}: {err}")
-            });
+            let output = cmd
+                .output()
+                .unwrap_or_else(|err| panic!("jet run failed to spawn for {name}: {err}"));
             assert!(
                 output.status.success(),
                 "{name} release={release} failed:\n{}",
@@ -6021,13 +6158,9 @@ fn run() {
     }
 }
 
-
 #[test]
 fn declared_trait_from_allows_dyn_view_return_on_jit() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_view_from_trait_dyn_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_view_from_trait_dyn_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");

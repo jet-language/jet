@@ -83,7 +83,13 @@ fn native_and_component_exports_share_one_typed_surface() {
     let library_rows: Vec<_> = library
         .exports
         .iter()
-        .map(|export| (export.name.clone(), export.scalar, export.conventions.clone()))
+        .map(|export| {
+            (
+                export.name.clone(),
+                export.scalar,
+                export.conventions.clone(),
+            )
+        })
         .collect();
     let plugin_rows: Vec<_> = plugin
         .exports
@@ -93,7 +99,11 @@ fn native_and_component_exports_share_one_typed_surface() {
     assert_eq!(library_rows, plugin_rows);
     assert_eq!(
         plugin.exported_fns,
-        library.exports.iter().map(|export| export.name.clone()).collect::<Vec<_>>()
+        library
+            .exports
+            .iter()
+            .map(|export| export.name.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -115,7 +125,11 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     let expected = expected_output();
 
     let build = run_jet(&scratch.path, &["build", "--lib", "library.jet"]);
-    assert!(build.status.success(), "Library build failed:\n{}", compiler_text(&build));
+    assert!(
+        build.status.success(),
+        "Library build failed:\n{}",
+        compiler_text(&build)
+    );
 
     let target = scratch.path.join("target");
     let shared = if cfg!(target_os = "macos") {
@@ -164,15 +178,26 @@ fn library_build_load_and_foreign_call_are_one_surface() {
         compiler_text(&c_result)
     );
     let foreign = Command::new(&c_binary).output().unwrap();
-    assert!(foreign.status.success(), "foreign C caller failed at runtime");
+    assert!(
+        foreign.status.success(),
+        "foreign C caller failed at runtime"
+    );
     assert_eq!(String::from_utf8_lossy(&foreign.stdout), expected.as_str());
 
     let jit = run_jet(&scratch.path, &["run", "host.jet"]);
-    assert!(jit.status.success(), "default jet run failed:\n{}", compiler_text(&jit));
+    assert!(
+        jit.status.success(),
+        "default jet run failed:\n{}",
+        compiler_text(&jit)
+    );
     assert_eq!(String::from_utf8_lossy(&jit.stdout), expected.as_str());
 
     let aot = run_jet(&scratch.path, &["run", "--release", "host.jet"]);
-    assert!(aot.status.success(), "AOT jet run failed:\n{}", compiler_text(&aot));
+    assert!(
+        aot.status.success(),
+        "AOT jet run failed:\n{}",
+        compiler_text(&aot)
+    );
     assert_eq!(String::from_utf8_lossy(&aot.stdout), expected.as_str());
 
     let jetlib = target.join("loadable.jetlib");
@@ -183,9 +208,15 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     artifact.payload = b"not a shared object".to_vec();
     fs::write(&jetlib, artifact.encode()).unwrap();
     let mismatched = run_jet(&scratch.path, &["run", "host.jet"]);
-    assert!(!mismatched.status.success(), "mismatched .jetlib unexpectedly loaded");
+    assert!(
+        !mismatched.status.success(),
+        "mismatched .jetlib unexpectedly loaded"
+    );
     let mismatched_text = compiler_text(&mismatched);
-    assert!(mismatched_text.contains("E1338"), "missing identity refusal:\n{mismatched_text}");
+    assert!(
+        mismatched_text.contains("E1338"),
+        "missing identity refusal:\n{mismatched_text}"
+    );
     assert!(
         !mismatched_text.contains("cannot map library payload"),
         "identity refusal happened after mapping:\n{mismatched_text}"
@@ -194,9 +225,15 @@ fn library_build_load_and_foreign_call_are_one_surface() {
     artifact.stamp.compiler_version = jet::Manifest::COMPILER_VERSION.to_string();
     fs::write(&jetlib, artifact.encode()).unwrap();
     let over_granted = run_jet(&scratch.path, &["run", "host.jet"]);
-    assert!(!over_granted.status.success(), "ungranted .jetlib unexpectedly loaded");
+    assert!(
+        !over_granted.status.success(),
+        "ungranted .jetlib unexpectedly loaded"
+    );
     let over_granted_text = compiler_text(&over_granted);
-    assert!(over_granted_text.contains("E1339"), "missing effect refusal:\n{over_granted_text}");
+    assert!(
+        over_granted_text.contains("E1339"),
+        "missing effect refusal:\n{over_granted_text}"
+    );
     assert!(
         !over_granted_text.contains("cannot map library payload"),
         "effect refusal happened after mapping:\n{over_granted_text}"

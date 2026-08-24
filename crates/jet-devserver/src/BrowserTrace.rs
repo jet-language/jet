@@ -64,7 +64,8 @@ impl Relay {
             .map_err(|error| format!("cannot create browser trace relay: {error}"))?;
         let nonce = nonce();
         let pid = std::process::id();
-        let started = process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
+        let started =
+            process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
         let mut header = format!(
             "{SCHEMA}\t{nonce}\t{pid}\t{started}\t{}",
             hex(encode_sources(&sources).as_bytes())
@@ -121,11 +122,7 @@ impl Relay {
         if start > clock || duration > clock - start {
             return Err(RecordError::Malformed);
         }
-        let host_now = self
-            .started
-            .elapsed()
-            .as_nanos()
-            .min(u128::from(u64::MAX)) as u64;
+        let host_now = self.started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
         let mapped_start = host_now.saturating_sub(clock - start);
         let mut rows = self.rows.lock().map_err(|_| RecordError::Unavailable)?;
         let mut file = self.file.lock().map_err(|_| RecordError::Unavailable)?;
@@ -224,8 +221,14 @@ fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, S
         .next()
         .and_then(|value| value.parse::<u32>().ok())
         .ok_or("browser trace relay process id is missing")?;
-    let started = parts.next().ok_or("browser trace relay process identity is missing")?;
-    let sources = decode_sources(&unhex(parts.next().ok_or("browser trace relay source map is missing")?)?)?;
+    let started = parts
+        .next()
+        .ok_or("browser trace relay process identity is missing")?;
+    let sources = decode_sources(&unhex(
+        parts
+            .next()
+            .ok_or("browser trace relay source map is missing")?,
+    )?)?;
     let source_map = match parts.next() {
         Some(value) => Some(unhex(value)?),
         None => None,
@@ -286,61 +289,112 @@ pub fn relay_path(pid: u32) -> PathBuf {
     std::env::temp_dir().join(format!("jet-browser-trace-{pid}.relay"))
 }
 
-pub fn request_path(pid: u32) -> PathBuf { std::env::temp_dir().join(format!("jet-browser-trace-{pid}.request")) }
+pub fn request_path(pid: u32) -> PathBuf {
+    std::env::temp_dir().join(format!("jet-browser-trace-{pid}.request"))
+}
 
 pub fn request(pid: u32) -> Result<(), String> {
     supported()?;
-    let ProcessState::Alive(started) = process_state(pid) else { return Err(format!("process {pid} identity cannot be verified")) };
+    let ProcessState::Alive(started) = process_state(pid) else {
+        return Err(format!("process {pid} identity cannot be verified"));
+    };
     let path = request_path(pid);
     let _ = fs::remove_file(&path);
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
-    let mut file = options.open(&path).map_err(|error| format!("cannot request browser trace collection: {error}"))?;
-    writeln!(file, "{REQUEST_SCHEMA}\t{pid}\t{started}").map_err(|error| format!("cannot write browser trace request: {error}"))?;
-    file.flush().map_err(|error| format!("cannot flush browser trace request: {error}"))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .map_err(|error| format!("cannot request browser trace collection: {error}"))?;
+    writeln!(file, "{REQUEST_SCHEMA}\t{pid}\t{started}")
+        .map_err(|error| format!("cannot write browser trace request: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("cannot flush browser trace request: {error}"))
 }
 
 pub fn take_request() -> Result<bool, String> {
     supported()?;
     let pid = std::process::id();
     let path = request_path(pid);
-    if !path.exists() { return Ok(false) }
+    if !path.exists() {
+        return Ok(false);
+    }
     let raw = secure_read(&path, 256, "browser trace request")?;
     let mut parts = raw.trim_end().split('\t');
-    let current = process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
+    let current =
+        process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
     let pid_text = pid.to_string();
-    let valid = parts.next() == Some(REQUEST_SCHEMA) && parts.next() == Some(pid_text.as_str()) && parts.next() == Some(current.as_str()) && parts.next().is_none();
+    let valid = parts.next() == Some(REQUEST_SCHEMA)
+        && parts.next() == Some(pid_text.as_str())
+        && parts.next() == Some(current.as_str())
+        && parts.next().is_none();
     let _ = fs::remove_file(&path);
-    if !valid { return Err("browser trace request belongs to a stale process session".into()) }
+    if !valid {
+        return Err("browser trace request belongs to a stale process session".into());
+    }
     Ok(true)
 }
 
-pub fn cancel_request(pid: u32) { let _ = fs::remove_file(request_path(pid)); }
+pub fn cancel_request(pid: u32) {
+    let _ = fs::remove_file(request_path(pid));
+}
 
 fn supported() -> Result<(), String> {
-    #[cfg(any(target_os = "linux", target_os = "android"))] { Ok(()) }
-    #[cfg(not(any(target_os = "linux", target_os = "android")))] { Err("browser trace relay requires verified process and file ownership".into()) }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        Err("browser trace relay requires verified process and file ownership".into())
+    }
 }
 
 fn secure_read(path: &PathBuf, limit: u64, label: &str) -> Result<String, String> {
     let link = fs::symlink_metadata(path).map_err(|_| format!("{label} is unavailable"))?;
-    if !link.file_type().is_file() { return Err(format!("{label} is not a regular file")) }
+    if !link.file_type().is_file() {
+        return Err(format!("{label} is not a regular file"));
+    }
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(any(target_os = "linux", target_os = "android"))] { use std::os::unix::fs::OpenOptionsExt; options.custom_flags(0o400000); }
-    let file = options.open(path).map_err(|_| format!("cannot securely open {label}"))?;
-    let metadata = file.metadata().map_err(|_| format!("cannot inspect {label}"))?;
-    #[cfg(unix)] {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        if metadata.permissions().mode() & 0o077 != 0 { return Err(format!("{label} permissions expose session data")) }
-        let self_uid = fs::metadata("/proc/self").map_err(|_| "cannot verify browser trace owner".to_string())?.uid();
-        if metadata.uid() != self_uid { return Err(format!("{label} belongs to another user")) }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(0o400000);
     }
-    if !metadata.is_file() || metadata.len() > limit { return Err(format!("{label} is not bounded")) }
+    let file = options
+        .open(path)
+        .map_err(|_| format!("cannot securely open {label}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| format!("cannot inspect {label}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(format!("{label} permissions expose session data"));
+        }
+        let self_uid = fs::metadata("/proc/self")
+            .map_err(|_| "cannot verify browser trace owner".to_string())?
+            .uid();
+        if metadata.uid() != self_uid {
+            return Err(format!("{label} belongs to another user"));
+        }
+    }
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err(format!("{label} is not bounded"));
+    }
     let mut raw = String::new();
-    file.take(limit + 1).read_to_string(&mut raw).map_err(|_| format!("cannot read {label}"))?;
-    if raw.len() as u64 > limit { return Err(format!("{label} exceeds its limit")) }
+    file.take(limit + 1)
+        .read_to_string(&mut raw)
+        .map_err(|_| format!("cannot read {label}"))?;
+    if raw.len() as u64 > limit {
+        return Err(format!("{label} exceeds its limit"));
+    }
     Ok(raw)
 }
 
@@ -377,10 +431,21 @@ fn identity_from_manifest(manifest: &str) -> Result<(Vec<Source>, Option<String>
 fn encode_sources(sources: &[Source]) -> String {
     let mut lines = Vec::new();
     for source in sources {
-        lines.push(format!("source\t{}\t{}", hex(source.path.as_bytes()), source.sha256));
-        for (name, kind) in &source.symbols { lines.push(format!("symbol\t{}\t{}\t{kind}", hex(source.path.as_bytes()), hex(name.as_bytes()))); }
+        lines.push(format!(
+            "source\t{}\t{}",
+            hex(source.path.as_bytes()),
+            source.sha256
+        ));
+        for (name, kind) in &source.symbols {
+            lines.push(format!(
+                "symbol\t{}\t{}\t{kind}",
+                hex(source.path.as_bytes()),
+                hex(name.as_bytes())
+            ));
+        }
     }
-    lines.sort(); lines.join("\n")
+    lines.sort();
+    lines.join("\n")
 }
 
 fn decode_sources(text: &str) -> Result<Vec<Source>, String> {
@@ -391,24 +456,56 @@ fn decode_sources(text: &str) -> Result<Vec<Source>, String> {
         match parts.next() {
             Some("source") => {
                 let path = unhex(parts.next().ok_or("trace source path is missing")?)?;
-                let sha256 = parts.next().ok_or("trace source hash is missing")?.to_string();
-                if parts.next().is_some() || sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) { return Err("compiler trace source identity is malformed".into()) }
-                sources.push(Source { path, sha256, symbols: Vec::new() });
+                let sha256 = parts
+                    .next()
+                    .ok_or("trace source hash is missing")?
+                    .to_string();
+                if parts.next().is_some()
+                    || sha256.len() != 64
+                    || !sha256
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                {
+                    return Err("compiler trace source identity is malformed".into());
+                }
+                sources.push(Source {
+                    path,
+                    sha256,
+                    symbols: Vec::new(),
+                });
             }
             Some("symbol") => {
                 let path = unhex(parts.next().ok_or("trace symbol path is missing")?)?;
                 let name = unhex(parts.next().ok_or("trace symbol name is missing")?)?;
-                let kind = parts.next().ok_or("trace symbol kind is missing")?.to_string();
-                if parts.next().is_some() || name.is_empty() || !matches!(kind.as_str(), "fn" | "handler") { return Err("compiler trace symbol identity is malformed".into()) }
+                let kind = parts
+                    .next()
+                    .ok_or("trace symbol kind is missing")?
+                    .to_string();
+                if parts.next().is_some()
+                    || name.is_empty()
+                    || !matches!(kind.as_str(), "fn" | "handler")
+                {
+                    return Err("compiler trace symbol identity is malformed".into());
+                }
                 symbols.push((path, name, kind));
             }
             _ => return Err("compiler trace map row is malformed".into()),
         }
     }
-    if sources.is_empty() { return Err("compiler trace map has no sources".into()) }
+    if sources.is_empty() {
+        return Err("compiler trace map has no sources".into());
+    }
     for (path, name, kind) in symbols {
-        if sources.iter().any(|source| source.symbols.iter().any(|(existing, _)| existing == &name)) { return Err(format!("compiler trace symbol `{name}` is ambiguous")) }
-        let source = sources.iter_mut().find(|source| source.path == path).ok_or("compiler trace symbol names an unknown source")?;
+        if sources
+            .iter()
+            .any(|source| source.symbols.iter().any(|(existing, _)| existing == &name))
+        {
+            return Err(format!("compiler trace symbol `{name}` is ambiguous"));
+        }
+        let source = sources
+            .iter_mut()
+            .find(|source| source.path == path)
+            .ok_or("compiler trace symbol names an unknown source")?;
         source.symbols.push((name, kind));
     }
     Ok(sources)
@@ -442,7 +539,11 @@ fn process_start_marker(pid: u32) -> Option<String> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-        let fields = stat.rsplit_once(") ")?.1.split_whitespace().collect::<Vec<_>>();
+        let fields = stat
+            .rsplit_once(") ")?
+            .1
+            .split_whitespace()
+            .collect::<Vec<_>>();
         fields.get(19).map(|value| (*value).to_string())
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -511,7 +612,10 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         let relay = Relay::new(&manifest()).unwrap();
         let header = fs::read_to_string(relay_path(std::process::id())).unwrap();
-        assert!(header.starts_with(&format!("{REPORT_SCHEMA}\t")), "{header}");
+        assert!(
+            header.starts_with(&format!("{REPORT_SCHEMA}\t")),
+            "{header}"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -526,9 +630,7 @@ mod tests {
             .record(b"class=event&symbol=load_report&start_ns=10&duration_ns=5&clock_ns=15")
             .unwrap();
         assert_eq!(
-            relay.record(
-                b"class=event&symbol=run&start_ns=1&duration_ns=1&clock_ns=2&url=secret"
-            ),
+            relay.record(b"class=event&symbol=run&start_ns=1&duration_ns=1&clock_ns=2&url=secret"),
             Err(RecordError::Malformed)
         );
         let capture = read(std::process::id()).unwrap();
@@ -557,7 +659,10 @@ mod tests {
         let path = relay_path(std::process::id());
         let error = read_with_process_state(std::process::id(), ProcessState::Unknown).unwrap_err();
         assert!(error.contains("cannot be verified"), "{error}");
-        assert!(path.exists(), "unknown identity must not mutate relay ownership");
+        assert!(
+            path.exists(),
+            "unknown identity must not mutate relay ownership"
+        );
         drop(relay);
     }
 

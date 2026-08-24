@@ -1,7 +1,7 @@
-use crate::AST::{AccessConvention, Type};
-use crate::Syntax;
 use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
 use super::core_types::{encoding_error_ty, json_error_ty, json_ty, u8_ty, unit_ty};
+use crate::Syntax;
+use crate::AST::{AccessConvention, Type};
 
 /// c109 Phase 20: the polymorphic core specials whose return type is resolved by
 /// `infer_core_call`'s bespoke arg-type logic (NOT the fixed `core_fixed_sig`
@@ -220,23 +220,21 @@ pub fn core_call_surface_signature(
         ("core.math", "abs") => Some((vec![(read, int.clone())], Some(int))),
         (
             "core.math",
-            "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
-            | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10"
-            | "trunc" | "fract" | "sign" | "degrees" | "radians",
+            "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
+            | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "fract" | "sign"
+            | "degrees" | "radians",
         ) => Some((vec![(read, float.clone())], Some(float))),
         ("core.math", "round") => Some((vec![(read, float)], Some(int))),
-        ("core.math", "int_pow" | "gcd" | "lcm") => Some((
-            vec![(read, int.clone()), (read, int.clone())],
-            Some(int),
-        )),
+        ("core.math", "int_pow" | "gcd" | "lcm") => {
+            Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
+        }
         ("core.math", "pow" | "atan2" | "hypot") => Some((
             vec![(read, float.clone()), (read, float)],
             Some(Type::Float),
         )),
-        ("core.math", "min" | "max") => Some((
-            vec![(read, int.clone()), (read, int.clone())],
-            Some(int),
-        )),
+        ("core.math", "min" | "max") => {
+            Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
+        }
         ("core.math", "clamp") => Some((
             vec![(read, int.clone()), (read, int.clone()), (read, int)],
             Some(Type::Int),
@@ -261,10 +259,9 @@ pub fn core_call_surface_signature(
         ("core.encoding.xml" | "core.encoding.cbor", "parse" | "decode" | "decode_bytes") => {
             result(Type::String)
         }
-        ("core.event", "policy_sync") => Some((
-            vec![],
-            Some(Type::Named("EventPolicy".to_string())),
-        )),
+        ("core.event", "policy_sync") => {
+            Some((vec![], Some(Type::Named("EventPolicy".to_string()))))
+        }
         ("core.event", "scope") => Some((vec![], Some(Type::Named("EventScope".to_string())))),
         _ => None,
     }
@@ -309,7 +306,10 @@ fn core_fixed_sig_impl(
     match (module, name) {
         ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io)))),
         ("core.files", "read_bytes") => Some((
-            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
+            vec![(
+                read,
+                Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+            )],
             Some(result_ty(list_u8, io_error_ty())),
         )),
         // D-FILES-WRITE1 (merge) + D-FILES-APPEND1=A: `write`/`append_all` are the
@@ -317,14 +317,12 @@ fn core_fixed_sig_impl(
         // handle constructors below. `append_all` (not `append`) so it doesn't
         // collide with the streaming handle's `.append(text)` method in the same
         // `core.files` namespace.
-        ("core.files", "write" | "append_all") => Some((
-            vec![(read, path), (read, Type::String)],
-            Some(io_unit),
-        )),
-        ("core.files", "write_bytes") => Some((
-            vec![(read, path), (read, list_u8.clone())],
-            Some(io_unit),
-        )),
+        ("core.files", "write" | "append_all") => {
+            Some((vec![(read, path), (read, Type::String)], Some(io_unit)))
+        }
+        ("core.files", "write_bytes") => {
+            Some((vec![(read, path), (read, list_u8.clone())], Some(io_unit)))
+        }
         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
         (
             "core.files",
@@ -410,14 +408,20 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.files", "lock") => Some((
-            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
+            vec![(
+                read,
+                Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+            )],
             Some(result_ty(
                 Type::Named("FileLock".to_string()),
                 io_error_ty(),
             )),
         )),
         ("core.watcher", "files") => Some((
-            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
+            vec![(
+                read,
+                Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+            )],
             Some(result_ty(
                 Type::Named("WatchHandle".to_string()),
                 io_error_ty(),
@@ -449,9 +453,7 @@ fn core_fixed_sig_impl(
             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
         }
         // #1480: remaining core.term ledger gaps — thin wrappers over existing IO.
-        ("core.term", "readline") => {
-            Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
-        }
+        ("core.term", "readline") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.term", "read_until") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::String, io_error_ty())),
@@ -462,11 +464,20 @@ fn core_fixed_sig_impl(
         )),
         ("core.term", "buffered") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
         ("core.term", "binread") => Some((
-            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())]))],
+            vec![(
+                read,
+                Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+            )],
             Some(result_ty(list_u8.clone(), io_error_ty())),
         )),
         ("core.term", "binwrite") => Some((
-            vec![(read, Type::Union(vec![Type::String, Type::Named("Path".to_string())])), (read, list_u8.clone())],
+            vec![
+                (
+                    read,
+                    Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
+                ),
+                (read, list_u8.clone()),
+            ],
             Some(result_ty(unit.clone(), io_error_ty())),
         )),
         // D-STDIN1=A: streaming line-by-line stdin.
@@ -500,13 +511,17 @@ fn core_fixed_sig_impl(
         )),
         ("core.sys", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.sys", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
-        ("core.sys", "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username"
-            | "release" | "version") => {
-            Some((vec![], Some(Type::String)))
-        }
+        (
+            "core.sys",
+            "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username"
+            | "release" | "version",
+        ) => Some((vec![], Some(Type::String))),
         ("core.sys", "expand") => Some((vec![(read, Type::String)], Some(Type::String))),
-        ("core.sys", "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
-            | "getegid" | "getpgrp") => Some((vec![], Some(Type::Int))),
+        (
+            "core.sys",
+            "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
+            | "getegid" | "getpgrp",
+        ) => Some((vec![], Some(Type::Int))),
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),
@@ -514,12 +529,14 @@ fn core_fixed_sig_impl(
         ("core.sys", "loadavg" | "times") => {
             Some((vec![], Some(Type::List(Box::new(Type::Float)))))
         }
-        ("core.sys", "getpgid" | "getsid") => {
-            Some((vec![(read, Type::Int)], Some(result_ty(Type::Int, io_error_ty()))))
-        }
-        ("core.sys", "getpriority") => {
-            Some((vec![(read, Type::Int)], Some(result_ty(Type::Int, io_error_ty()))))
-        }
+        ("core.sys", "getpgid" | "getsid") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Int, io_error_ty())),
+        )),
+        ("core.sys", "getpriority") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Int, io_error_ty())),
+        )),
         ("core.sys", "setpriority") => Some((
             vec![(read, Type::Int), (read, Type::Int)],
             Some(result_ty(unit_ty(), io_error_ty())),
@@ -530,16 +547,18 @@ fn core_fixed_sig_impl(
         )),
         ("core.sys", "sync") => Some((vec![], None)),
         ("core.sys", "stop") => Some((vec![(read, Type::Int)], None)),
-        ("core.sys", "set_current_dir") => {
-            Some((vec![(read, path)], Some(result_ty(unit_ty(), io_error_ty()))))
-        }
+        ("core.sys", "set_current_dir") => Some((
+            vec![(read, path)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
         ("core.sys", "on_interrupt") => Some((
             vec![(
                 read,
                 Type::Fn {
                     params: vec![],
                     ret: None,
-                    effect_bound: None, return_view_provenance: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
                     param_contract: None,
                     call_metadata: None,
                 },
@@ -552,9 +571,10 @@ fn core_fixed_sig_impl(
                 Type::Fn {
                     params: vec![],
                     ret: None,
-                    effect_bound: None, return_view_provenance: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
                     param_contract: None,
-                call_metadata: None,
+                    call_metadata: None,
                 },
             )],
             None,
@@ -630,12 +650,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("Session".into()), Type::String)),
         )),
-        ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => {
-            Some((
-                vec![(read, Type::Named("Session".into()))],
-                Some(Type::String),
-            ))
-        }
+        ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => Some((
+            vec![(read, Type::Named("Session".into()))],
+            Some(Type::String),
+        )),
         ("core.auth", "magic_link_issue") => Some((
             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(Type::String, Type::String)),
@@ -753,10 +771,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.sync", "policy_new") => Some((
             vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(
-                Type::Named("RowPolicy".into()),
-                Type::String,
-            )),
+            Some(result_ty(Type::Named("RowPolicy".into()), Type::String)),
         )),
         ("core.sync", "policy_allows") => Some((
             vec![
@@ -813,9 +828,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(Type::Named("Clock".to_string())),
         )),
-        ("core.testing", "fake_rng") => {
-            Some((vec![(read, Type::Int)], Some(Type::Named("Rng".to_string()))))
-        }
+        ("core.testing", "fake_rng") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Named("Rng".to_string())),
+        )),
         ("core.testing", "fake_data") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("Fake".to_string())),
@@ -914,14 +930,10 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
             Some(Type::Named("LocalTime".to_string())),
         )),
-        ("core.time", "days_in_month") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::Int),
-        )),
-        ("core.time", "is_leap_year") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::Bool),
-        )),
+        ("core.time", "days_in_month") => {
+            Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int)))
+        }
+        ("core.time", "is_leap_year") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.time", "parse_time") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
@@ -993,15 +1005,16 @@ fn core_fixed_sig_impl(
                 Some((vec![(read, json.clone())], Some(Type::String)))
             }
         }
-        ("core.encoding.json", "events") => {
-            Some((vec![(read, json.clone())], Some(Type::String)))
-        }
+        ("core.encoding.json", "events") => Some((vec![(read, json.clone())], Some(Type::String))),
         ("core.encoding.json", "reader") => Some((
             vec![
                 (moved, Type::Named("FileReader".to_string())),
                 (read, Type::Named("EncodingLimits".to_string())),
             ],
-            Some(result_ty(Type::Named("JSONReader".to_string()), encoding_error_ty())),
+            Some(result_ty(
+                Type::Named("JSONReader".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         ("core.encoding.json", "writer") => Some((
             vec![
@@ -1009,11 +1022,17 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("EncodingLimits".to_string())),
                 (read, Type::Bool),
             ],
-            Some(result_ty(Type::Named("JSONWriter".to_string()), encoding_error_ty())),
+            Some(result_ty(
+                Type::Named("JSONWriter".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         ("core.encoding.jsonl", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::List(Box::new(json.clone())), json_error_ty())),
+            Some(result_ty(
+                Type::List(Box::new(json.clone())),
+                json_error_ty(),
+            )),
         )),
         ("core.encoding.jsonl", "to_string") => Some((
             vec![(read, Type::List(Box::new(json.clone())))],
@@ -1024,14 +1043,20 @@ fn core_fixed_sig_impl(
                 (moved, Type::Named("FileReader".to_string())),
                 (read, Type::Named("EncodingLimits".to_string())),
             ],
-            Some(result_ty(Type::Named("JSONLReader".to_string()), encoding_error_ty())),
+            Some(result_ty(
+                Type::Named("JSONLReader".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         ("core.encoding.jsonl", "writer") => Some((
             vec![
                 (moved, Type::Named("FileWriter".to_string())),
                 (read, Type::Named("EncodingLimits".to_string())),
             ],
-            Some(result_ty(Type::Named("JSONLWriter".to_string()), encoding_error_ty())),
+            Some(result_ty(
+                Type::Named("JSONLWriter".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         // jet.csv → core.encoding.csv: parse text into a list of rows (list of fields).
         ("core.encoding.csv", "parse") => Some((
@@ -1049,12 +1074,24 @@ fn core_fixed_sig_impl(
             Some(Type::String),
         )),
         ("core.encoding.csv", "reader") => Some((
-            vec![(moved, Type::Named("FileReader".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
-            Some(result_ty(Type::Named("CSVReader".to_string()), encoding_error_ty())),
+            vec![
+                (moved, Type::Named("FileReader".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("CSVReader".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         ("core.encoding.csv", "writer") => Some((
-            vec![(moved, Type::Named("FileWriter".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
-            Some(result_ty(Type::Named("CSVWriter".to_string()), encoding_error_ty())),
+            vec![
+                (moved, Type::Named("FileWriter".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("CSVWriter".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
         // facade fixed-shape calls. Generic typed table calls are handled in
@@ -1062,7 +1099,10 @@ fn core_fixed_sig_impl(
         ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
             let args = vec![(read, Type::List(Box::new(Type::Float)))];
             if super::super::Edition::edition_at_least("2027") {
-                Some((args, Some(result_ty(Type::Float, Type::Named("DataError".to_string())))))
+                Some((
+                    args,
+                    Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
+                ))
             } else {
                 Some((args, Some(Type::Float)))
             }
@@ -1128,7 +1168,10 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("Tensor".to_string())),
                 (read, Type::List(Box::new(Type::Int))),
             ],
-            Some(result_ty(Type::Float, Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::Float,
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
         ("core.compute", "set") => Some((
             vec![
@@ -1136,7 +1179,10 @@ fn core_fixed_sig_impl(
                 (read, Type::List(Box::new(Type::Int))),
                 (read, Type::Float),
             ],
-            Some(result_ty(Type::Named("Unit".into()), Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
         ("core.compute", "shape") => Some((
             vec![(read, Type::Named("Tensor".to_string()))],
@@ -1154,10 +1200,11 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("Tensor".to_string()))],
             Some(Type::String),
         )),
-        ("core.compute", "device_cpu" | "device_auto" | "device_metal" | "device_cuda" | "device_vulkan" | "device_webgpu") => Some((
-            vec![],
-            Some(Type::Named("ComputeDevice".to_string())),
-        )),
+        (
+            "core.compute",
+            "device_cpu" | "device_auto" | "device_metal" | "device_cuda" | "device_vulkan"
+            | "device_webgpu",
+        ) => Some((vec![], Some(Type::Named("ComputeDevice".to_string())))),
         ("core.compute", "on_device") => Some((
             vec![
                 (read, Type::Named("Tensor".to_string())),
@@ -1187,10 +1234,7 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.compute", "sum_axis") => Some((
-            vec![
-                (read, Type::Named("Tensor".to_string())),
-                (read, Type::Int),
-            ],
+            vec![(read, Type::Named("Tensor".to_string())), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("Tensor".to_string()),
                 Type::Named("ComputeError".to_string()),
@@ -1215,7 +1259,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.compute", "det") => Some((
             vec![(read, Type::Named("Tensor".to_string()))],
-            Some(result_ty(Type::Float, Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::Float,
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
         ("core.compute", "inv" | "fft") => Some((
             vec![(read, Type::Named("Tensor".to_string()))],
@@ -1234,7 +1281,9 @@ fn core_fixed_sig_impl(
                 Type::Named("ComputeError".to_string()),
             )),
         )),
-        ("core.compute", "stream_new") => Some((vec![], Some(Type::Named("ComputeStream".to_string())))),
+        ("core.compute", "stream_new") => {
+            Some((vec![], Some(Type::Named("ComputeStream".to_string()))))
+        }
         ("core.compute", "stream_new_on") => Some((
             vec![(read, Type::Named("ComputeDevice".to_string()))],
             Some(result_ty(
@@ -1272,7 +1321,10 @@ fn core_fixed_sig_impl(
                 (read, Type::List(Box::new(Type::Int))),
                 (read, Type::List(Box::new(Type::Int))),
             ],
-            Some(result_ty(Type::Bool, Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::Bool,
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
         ("core.compute", "sparse_show") => Some((
             vec![(read, Type::Named("SparseTensor".to_string()))],
@@ -1280,7 +1332,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.compute", "serialize") => Some((
             vec![(read, Type::Named("Tensor".to_string()))],
-            Some(result_ty(Type::String, Type::Named("ComputeError".to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named("ComputeError".to_string()),
+            )),
         )),
         ("core.compute", "mse_loss") => Some((
             vec![
@@ -1343,7 +1398,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.compute", "profile_f32_strict" | "profile_show") => {
             Some((vec![], Some(Type::String)))
-        },
+        }
         // D-SERVICE1=D (#444): the typed tree value is the public topology
         // surface; worker declarations are methods on that value.
         ("core.service", "tree") => Some((
@@ -1358,7 +1413,10 @@ fn core_fixed_sig_impl(
         // typed builder migrates the rest of the service tree. They are not in
         // `core_module_items`, so no old string-keyed surface is user-visible.
         ("core.service", "runtime") => Some((
-            vec![(read, Type::String), (read, Type::Named("Duration".to_string()))],
+            vec![
+                (read, Type::String),
+                (read, Type::Named("Duration".to_string())),
+            ],
             Some(Type::Named("ServiceRuntime".to_string())),
         )),
         ("core.service", "state_store") => Some((
@@ -1368,9 +1426,10 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.service", "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one") => {
-            Some((vec![], Some(Type::Named("ServiceRestart".to_string()))))
-        }
+        (
+            "core.service",
+            "restart_one_for_one" | "restart_one_for_all" | "restart_rest_for_one",
+        ) => Some((vec![], Some(Type::Named("ServiceRestart".to_string())))),
         ("core.service", "delivery_at_most_once" | "delivery_durable") => {
             Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))
         }
@@ -1379,7 +1438,10 @@ fn core_fixed_sig_impl(
         }
         ("core.services", "set_restart") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceRestart".to_string())),
             ],
             Some(result_ty(
@@ -1389,7 +1451,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "set_delivery") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceDelivery".to_string())),
             ],
             Some(result_ty(
@@ -1399,7 +1464,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "worker") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::String),
                 (read, Type::Int),
             ],
@@ -1410,7 +1478,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "group") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::String),
                 (read, Type::List(Box::new(Type::String))),
             ],
@@ -1420,7 +1491,10 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.services", "start" | "stop") => Some((
-            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+            vec![(
+                AccessConvention::Write,
+                Type::Named("ServiceTree".to_string()),
+            )],
             Some(result_ty(
                 Type::Named("Unit".into()),
                 Type::Named("ServiceError".to_string()),
@@ -1428,7 +1502,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "send") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceEndpoint".to_string())),
                 (read, Type::String),
             ],
@@ -1439,7 +1516,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "send_durable") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceEndpoint".to_string())),
                 (read, Type::String),
                 (read, Type::String),
@@ -1451,24 +1531,36 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "receive") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceEndpoint".to_string())),
             ],
-            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "mailbox_depth" | "restarts") => Some((
             vec![
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::Named("ServiceEndpoint".to_string())),
             ],
-            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+            Some(result_ty(
+                Type::Int,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         (
             "core.services",
             "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker",
         ) => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceEndpoint".to_string())),
             ],
             Some(result_ty(
@@ -1481,11 +1573,20 @@ fn core_fixed_sig_impl(
             Some(Type::Int),
         )),
         ("core.services", "drain_dead_letters") => Some((
-            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
-            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+            vec![(
+                AccessConvention::Write,
+                Type::Named("ServiceTree".to_string()),
+            )],
+            Some(result_ty(
+                Type::Int,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "set_state_empty") => Some((
-            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
+            vec![(
+                AccessConvention::Write,
+                Type::Named("ServiceTree".to_string()),
+            )],
             Some(result_ty(
                 Type::Named("Unit".into()),
                 Type::Named("ServiceError".to_string()),
@@ -1493,7 +1594,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "set_state_snapshot" | "set_state_event_log") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Named("ServiceStateStore".to_string())),
                 (read, Type::String),
                 (read, Type::Int),
@@ -1509,7 +1613,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "commit_snapshot" | "append_event") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::String),
             ],
             Some(result_ty(
@@ -1519,7 +1626,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "restore_snapshot") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
-            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "replay_events" | "observe") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
@@ -1527,7 +1637,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "workflow_start") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::String),
                 (read, Type::Int),
             ],
@@ -1552,7 +1665,10 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
                 (read, Type::String),
             ],
-            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "workflow_all") => Some((
             vec![
@@ -1566,7 +1682,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "workflow_step") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Int),
                 (read, Type::String),
             ],
@@ -1577,7 +1696,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "workflow_activity") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Int),
                 (read, Type::String),
                 (read, Type::String),
@@ -1590,7 +1712,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "workflow_activity_retry") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Int),
                 (read, Type::String),
                 (read, Type::Named("TaskOutcome".to_string())),
@@ -1602,7 +1727,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "workflow_activity_complete") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::Int),
                 (read, Type::String),
                 (read, Type::Named("TaskOutcome".to_string())),
@@ -1617,7 +1745,10 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::String, Type::Named("ServiceError".to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "workflow_outcome") => Some((
             vec![
@@ -1631,7 +1762,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.services", "directory_register") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("ServiceTree".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("ServiceTree".to_string()),
+                ),
                 (read, Type::String),
                 (read, Type::Named("ServiceEndpoint".to_string())),
             ],
@@ -1651,8 +1785,14 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.services", "handoff_generation" | "rollback_generation" | "chaos_fail") => Some((
-            vec![(AccessConvention::Write, Type::Named("ServiceTree".to_string()))],
-            Some(result_ty(Type::Int, Type::Named("ServiceError".to_string()))),
+            vec![(
+                AccessConvention::Write,
+                Type::Named("ServiceTree".to_string()),
+            )],
+            Some(result_ty(
+                Type::Int,
+                Type::Named("ServiceError".to_string()),
+            )),
         )),
         ("core.services", "upgrade_receipt") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
@@ -1670,9 +1810,15 @@ fn core_fixed_sig_impl(
             Some(Type::String),
         )),
         ("core.data", "quantile") => {
-            let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)];
+            let args = vec![
+                (read, Type::List(Box::new(Type::Float))),
+                (read, Type::Float),
+            ];
             if super::super::Edition::edition_at_least("2027") {
-                Some((args, Some(result_ty(Type::Float, Type::Named("DataError".to_string())))))
+                Some((
+                    args,
+                    Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
+                ))
             } else {
                 Some((args, Some(Type::Float)))
             }
@@ -1719,18 +1865,33 @@ fn core_fixed_sig_impl(
                 Type::List(Box::new(Type::Named("DataGroup".to_string()))),
             )];
             if super::super::Edition::edition_at_least("2027") {
-                Some((args, Some(result_ty(Type::String, Type::Named("DataError".to_string())))))
+                Some((
+                    args,
+                    Some(result_ty(
+                        Type::String,
+                        Type::Named("DataError".to_string()),
+                    )),
+                ))
             } else {
                 Some((args, Some(Type::String)))
             }
         }
         ("core.data", "line_text" | "line_svg") => {
             let args = vec![
-                (read, Type::List(Box::new(Type::Named("DataGroup".to_string())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                ),
                 (read, Type::Named("DataLineOptions".to_string())),
             ];
             if super::super::Edition::edition_at_least("2027") {
-                Some((args, Some(result_ty(Type::String, Type::Named("DataError".to_string())))))
+                Some((
+                    args,
+                    Some(result_ty(
+                        Type::String,
+                        Type::Named("DataError".to_string()),
+                    )),
+                ))
             } else {
                 Some((args, Some(Type::String)))
             }
@@ -1743,11 +1904,19 @@ fn core_fixed_sig_impl(
             Some(Type::String),
         )),
         ("core.text.fmt", "plural") => Some((
-            vec![(read, Type::Int), (read, Type::String), (read, Type::String)],
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::String),
+            ],
             Some(Type::String),
         )),
         ("core.text.fmt", "pad_left" | "pad_right" | "pad_center") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::String)],
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
             Some(Type::String),
         )),
         // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
@@ -1772,20 +1941,34 @@ fn core_fixed_sig_impl(
             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
         )),
         ("core.encoding.xml", "parse_with") => Some((
-            vec![(read, Type::String), (read, Type::Named("XMLParseOptions".to_string()))],
+            vec![
+                (read, Type::String),
+                (read, Type::Named("XMLParseOptions".to_string())),
+            ],
             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
         )),
         ("core.encoding.xml", "parse_bytes") => Some((
-            vec![(read, list_u8.clone()), (read, Type::Named("XMLParseOptions".to_string()))],
+            vec![
+                (read, list_u8.clone()),
+                (read, Type::Named("XMLParseOptions".to_string())),
+            ],
             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
         )),
-        ("core.encoding.xml", "to_string") => Some((vec![(read, json.clone())], Some(Type::String))),
+        ("core.encoding.xml", "to_string") => {
+            Some((vec![(read, json.clone())], Some(Type::String)))
+        }
         ("core.encoding.xml", "to_bytes") => Some((
-            vec![(read, json.clone()), (read, Type::Named("XMLRenderOptions".to_string()))],
+            vec![
+                (read, json.clone()),
+                (read, Type::Named("XMLRenderOptions".to_string())),
+            ],
             Some(result_ty(list_u8, Type::Named("XMLError".to_string()))),
         )),
         ("core.encoding.xml", "canonical") => Some((
-            vec![(read, json.clone()), (read, Type::Named("XMLCanonical".to_string()))],
+            vec![
+                (read, json.clone()),
+                (read, Type::Named("XMLCanonical".to_string())),
+            ],
             Some(result_ty(Type::String, Type::Named("XMLError".to_string()))),
         )),
         // D-ENCXML-PROJECTION1=A: focused helpers. `decode`/`decode_bytes`/`expanded_name`
@@ -1831,12 +2014,24 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.encoding.cbor", "reader") => Some((
-            vec![(moved, Type::Named("FileReader".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
-            Some(result_ty(Type::Named("CBORReader".to_string()), encoding_error_ty())),
+            vec![
+                (moved, Type::Named("FileReader".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("CBORReader".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         ("core.encoding.cbor", "writer") => Some((
-            vec![(moved, Type::Named("FileWriter".to_string())), (read, Type::Named("EncodingLimits".to_string()))],
-            Some(result_ty(Type::Named("CBORWriter".to_string()), encoding_error_ty())),
+            vec![
+                (moved, Type::Named("FileWriter".to_string())),
+                (read, Type::Named("EncodingLimits".to_string())),
+            ],
+            Some(result_ty(
+                Type::Named("CBORWriter".to_string()),
+                encoding_error_ty(),
+            )),
         )),
         // E2-M7: streaming file handles (D-IO2, files.open / files.create).
         ("core.files", "open" | "append") => Some((
@@ -1883,7 +2078,9 @@ fn core_fixed_sig_impl(
             )],
             Some(Type::String),
         )),
-        ("core.net.url", "percent_encode") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.net.url", "percent_encode") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
         ("core.net.url", "percent_decode") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::String, Type::String)),
@@ -1899,49 +2096,86 @@ fn core_fixed_sig_impl(
         // D-EMAIL1=A: one bounded native message/MIME construction path.
         ("core.email", "address") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("Address".to_string()), Type::Named("EmailError".to_string()))),
+            Some(result_ty(
+                Type::Named("Address".to_string()),
+                Type::Named("EmailError".to_string()),
+            )),
         )),
         ("core.email", "attachment") => Some((
-            vec![(read, Type::String), (read, Type::String), (read, list_u8.clone())],
-            Some(result_ty(Type::Named("Attachment".to_string()), Type::Named("EmailError".to_string()))),
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, list_u8.clone()),
+            ],
+            Some(result_ty(
+                Type::Named("Attachment".to_string()),
+                Type::Named("EmailError".to_string()),
+            )),
         )),
         ("core.email", "message") => Some((
             vec![
                 (read, Type::Named("Address".to_string())),
-                (read, Type::List(Box::new(Type::Named("Address".to_string())))),
-                (read, Type::List(Box::new(Type::Named("Address".to_string())))),
-                (read, Type::String), (read, Type::String), (read, Type::String),
-                (read, Type::List(Box::new(Type::Named("Attachment".to_string())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("Address".to_string()))),
+                ),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("Address".to_string()))),
+                ),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("Attachment".to_string()))),
+                ),
             ],
-            Some(result_ty(Type::Named("Message".to_string()), Type::Named("EmailError".to_string()))),
+            Some(result_ty(
+                Type::Named("Message".to_string()),
+                Type::Named("EmailError".to_string()),
+            )),
         )),
         ("core.email", "envelope") => Some((
             vec![
                 (read, Type::Named("Address".to_string())),
-                (read, Type::List(Box::new(Type::Named("Address".to_string())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("Address".to_string()))),
+                ),
             ],
-            Some(result_ty(Type::Named("Envelope".to_string()), Type::Named("EmailError".to_string()))),
+            Some(result_ty(
+                Type::Named("Envelope".to_string()),
+                Type::Named("EmailError".to_string()),
+            )),
         )),
         ("core.email", "serialize") => Some((
             vec![(read, Type::Named("Message".to_string()))],
             Some(result_ty(list_u8, Type::Named("EmailError".to_string()))),
         )),
         ("core.email", "smtp") => Some((
-            vec![(AccessConvention::Read, Type::Named("SMTPConfig".to_string()))],
-            Some(result_ty(Type::Named("Mailer".to_string()), Type::Named("EmailError".to_string()))),
+            vec![(
+                AccessConvention::Read,
+                Type::Named("SMTPConfig".to_string()),
+            )],
+            Some(result_ty(
+                Type::Named("Mailer".to_string()),
+                Type::Named("EmailError".to_string()),
+            )),
         )),
         ("core.email", "smtp_from_env") => Some((
             vec![],
-            Some(result_ty(Type::Named("Mailer".to_string()), Type::Named("EmailError".to_string()))),
+            Some(result_ty(
+                Type::Named("Mailer".to_string()),
+                Type::Named("EmailError".to_string()),
+            )),
         )),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
         ("core.text", "scalar_count" | "byte_count") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))
         }
         ("core.text", "is_ascii") => Some((vec![(read, Type::String)], Some(Type::Bool))),
-        ("core.text", "lower" | "upper") => {
-            Some((vec![(read, Type::String)], Some(Type::String)))
-        }
+        ("core.text", "lower" | "upper") => Some((vec![(read, Type::String)], Some(Type::String))),
         ("core.text", "scalars") => Some((
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
@@ -1961,18 +2195,29 @@ fn core_fixed_sig_impl(
             Some((vec![(read, Type::String)], Some(Type::Bool)))
         }
         ("core.text", "splitn" | "rsplitn") => Some((
-            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
             Some(Type::List(Box::new(Type::String))),
         )),
         ("core.text", "trim" | "trim_start" | "trim_end") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
         ("core.text", "pad_start" | "pad_end" | "center") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::String)],
+            vec![
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+            ],
             Some(Type::String),
         )),
         ("core.text", "starts_any" | "ends_any") => Some((
-            vec![(read, Type::String), (read, Type::List(Box::new(Type::String)))],
+            vec![
+                (read, Type::String),
+                (read, Type::List(Box::new(Type::String))),
+            ],
             Some(Type::Bool),
         )),
         ("core.text", "char_indices") => Some((
@@ -2006,7 +2251,10 @@ fn core_fixed_sig_impl(
         ("core.log", "info_fields" | "warn_fields" | "error_fields" | "debug_fields") => Some((
             vec![
                 (read, string.clone()),
-                (read, Type::List(Box::new(Type::Named("LogField".to_string())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("LogField".to_string()))),
+                ),
             ],
             None,
         )),
@@ -2034,12 +2282,18 @@ fn core_fixed_sig_impl(
         // D-LOGFMT1=A: override log output format ("json" | "text").
         ("core.log", "setup") => Some((vec![(read, Type::String)], None)),
         // core.crypto: vetted hash functions (D-LR3).
-        ("core.crypto", "sha256") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
+        ("core.crypto", "sha256") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::Named("Digest256".into())),
+        )),
         ("core.crypto", "sha256_bytes") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        ("core.crypto", "sha1" | "sha224" | "sha384" | "sha3_224" | "sha3_256" | "sha3_384" | "sha3_512") => Some((
+        (
+            "core.crypto",
+            "sha1" | "sha224" | "sha384" | "sha3_224" | "sha3_256" | "sha3_384" | "sha3_512",
+        ) => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
@@ -2070,7 +2324,10 @@ fn core_fixed_sig_impl(
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+            Some(result_ty(
+                Type::Named("Secret".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "x25519_public") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
@@ -2085,24 +2342,36 @@ fn core_fixed_sig_impl(
         )),
         ("core.crypto", "password_hash") => Some((
             vec![(read, Type::Named("Secret".into()))],
-            Some(result_ty(Type::Named("PasswordHash".into()), Type::Named("CryptoError".into()))),
+            Some(result_ty(
+                Type::Named("PasswordHash".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "password_hash_with_salt") => Some((
             vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::String, Type::String)),
         )),
         ("core.crypto", "password_verify") => Some((
-            vec![(read, Type::Named("Secret".into())), (read, Type::Named("PasswordHash".into()))],
+            vec![
+                (read, Type::Named("Secret".into())),
+                (read, Type::Named("PasswordHash".into())),
+            ],
             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
         )),
         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
         ("core.crypto", "seal") => Some((
             vec![
-                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("X25519PublicKey".into()))),
+                ),
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::Named("Sealed".into()), Type::Named("CryptoError".into()))),
+            Some(result_ty(
+                Type::Named("Sealed".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "open") => Some((
             vec![
@@ -2110,15 +2379,24 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("Sealed".into())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
+            Some(result_ty(
+                Type::List(Box::new(u8_ty())),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "file_seal") => Some((
             vec![
-                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("X25519PublicKey".into()))),
+                ),
                 (read, Type::Named("Path".into())),
                 (read, Type::Named("Path".into())),
             ],
-            Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("FileCryptoError".into()),
+            )),
         )),
         ("core.crypto", "file_open") => Some((
             vec![
@@ -2126,14 +2404,20 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("Path".into())),
                 (read, Type::Named("Path".into())),
             ],
-            Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("FileCryptoError".into()),
+            )),
         )),
         ("core.crypto", "sign") => Some((
             vec![
                 (read, Type::Named("SigningKey".into())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::Named("Signature".into()), Type::Named("CryptoError".into()))),
+            Some(result_ty(
+                Type::Named("Signature".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "verify") => Some((
             vec![
@@ -2146,96 +2430,240 @@ fn core_fixed_sig_impl(
         // D-CRYPTO-API1=A typed safe surface. Existing edition-2026 raw calls
         // are diagnosed/migrated separately; these signatures are nominal.
         ("core.crypto", "wrap") => Some((
-            vec![(read, Type::Named("Secret".into())), (read, Type::Named("X25519PublicKey".into()))],
-            Some(result_ty(Type::Named("WrappedKey".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::Named("Secret".into())),
+                (read, Type::Named("X25519PublicKey".into())),
+            ],
+            Some(result_ty(
+                Type::Named("WrappedKey".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "unwrap") => Some((
-            vec![(read, Type::Named("X25519SecretKey".into())), (read, Type::Named("WrappedKey".into()))],
-            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::Named("X25519SecretKey".into())),
+                (read, Type::Named("WrappedKey".into())),
+            ],
+            Some(result_ty(
+                Type::Named("Secret".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "x25519") => Some((
-            vec![(read, Type::Named("X25519SecretKey".into())), (read, Type::Named("X25519PublicKey".into()))],
-            Some(result_ty(Type::Named("SharedSecret".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::Named("X25519SecretKey".into())),
+                (read, Type::Named("X25519PublicKey".into())),
+            ],
+            Some(result_ty(
+                Type::Named("SharedSecret".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto", "constant_time_equal") => Some((
-            vec![(read, Type::Named("Secret".into())), (read, Type::Named("Secret".into()))], Some(Type::Bool),
+            vec![
+                (read, Type::Named("Secret".into())),
+                (read, Type::Named("Secret".into())),
+            ],
+            Some(Type::Bool),
         )),
-        ("core.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
-        ("core.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
+        ("core.crypto", "blake3") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::Named("Digest256".into())),
+        )),
+        ("core.crypto", "sha512") => Some((
+            vec![(read, Type::List(Box::new(u8_ty())))],
+            Some(Type::Named("Digest512".into())),
+        )),
         // D-CRYPTO-API1=A: exact #Unsafe expert API. Bounds remain runtime
         // checked; lexical gating never waives memory safety or cleanup.
         ("core.crypto.expert", "xchacha20poly1305_seal" | "aes256gcm_seal") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(u8_ty())),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "xchacha20poly1305_open" | "aes256gcm_open") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(u8_ty())),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "open_v1") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(
+                Type::List(Box::new(u8_ty())),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "migrate_v1") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::Named("Path".into())),
-                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
+                (
+                    read,
+                    Type::List(Box::new(Type::Named("X25519PublicKey".into()))),
+                ),
                 (read, Type::Named("Path".into())),
             ],
-            Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
+            Some(result_ty(
+                Type::Named("Unit".into()),
+                Type::Named("FileCryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "ed25519_sign") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::Named("Signature".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(
+                Type::Named("Signature".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "ed25519_verify_strict") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
         )),
         ("core.crypto.expert", "x25519_raw") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
-            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(
+                Type::Named("Secret".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "hkdf_sha256_raw") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int)],
-            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("Secret".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
         ("core.crypto.expert", "argon2id") => Some((
-            vec![(read, Type::Named("Secret".into())), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int), (read, Type::Int), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
+            vec![
+                (read, Type::Named("Secret".into())),
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(result_ty(
+                Type::Named("Secret".into()),
+                Type::Named("CryptoError".into()),
+            )),
         )),
-        ("core.crypto.expert", "secret_bytes") => Some((vec![(read, Type::Named("Secret".into()))], Some(Type::List(Box::new(u8_ty()))))),
-        ("core.crypto.expert", "signing_key_bytes") => Some((vec![(read, Type::Named("SigningKey".into()))], Some(Type::List(Box::new(u8_ty()))))),
-        ("core.crypto.expert", "x25519_secret_bytes") => Some((vec![(read, Type::Named("X25519SecretKey".into()))], Some(Type::List(Box::new(u8_ty()))))),
-        ("core.crypto.expert", "shared_secret_bytes") => Some((vec![(read, Type::Named("SharedSecret".into()))], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.crypto.expert", "secret_bytes") => Some((
+            vec![(read, Type::Named("Secret".into()))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.crypto.expert", "signing_key_bytes") => Some((
+            vec![(read, Type::Named("SigningKey".into()))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.crypto.expert", "x25519_secret_bytes") => Some((
+            vec![(read, Type::Named("X25519SecretKey".into()))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.crypto.expert", "shared_secret_bytes") => Some((
+            vec![(read, Type::Named("SharedSecret".into()))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
         ("core.crypto.vault", "prepare_import_signing") => Some((
             vec![(read, Type::String), (moved, Type::List(Box::new(u8_ty())))],
             Some(result_ty(
-                Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("SigningKey".into())] },
+                Type::Apply {
+                    name: "MutationPlan".into(),
+                    args: vec![Type::Named("SigningKey".into())],
+                },
                 Type::Named("VaultError".into()),
             )),
         )),
         ("core.crypto.vault", "prepare_import_x25519") => Some((
             vec![(read, Type::String), (moved, Type::List(Box::new(u8_ty())))],
             Some(result_ty(
-                Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("X25519SecretKey".into())] },
+                Type::Apply {
+                    name: "MutationPlan".into(),
+                    args: vec![Type::Named("X25519SecretKey".into())],
+                },
                 Type::Named("VaultError".into()),
             )),
         )),
         ("core.crypto.vault", "commit_import_signing") => Some((
             vec![
-                (moved, Type::Apply { name: "VaultWrite".into(), args: vec![Type::Named("SigningKey".into())] }),
-                (moved, Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("SigningKey".into())] }),
+                (
+                    moved,
+                    Type::Apply {
+                        name: "VaultWrite".into(),
+                        args: vec![Type::Named("SigningKey".into())],
+                    },
+                ),
+                (
+                    moved,
+                    Type::Apply {
+                        name: "MutationPlan".into(),
+                        args: vec![Type::Named("SigningKey".into())],
+                    },
+                ),
             ],
-            Some(result_ty(Type::Apply { name: "KeyRef".into(), args: vec![Type::Named("SigningKey".into())] }, Type::Named("VaultError".into()))),
+            Some(result_ty(
+                Type::Apply {
+                    name: "KeyRef".into(),
+                    args: vec![Type::Named("SigningKey".into())],
+                },
+                Type::Named("VaultError".into()),
+            )),
         )),
         ("core.crypto.vault", "commit_import_x25519") => Some((
             vec![
-                (moved, Type::Apply { name: "VaultWrite".into(), args: vec![Type::Named("X25519SecretKey".into())] }),
-                (moved, Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("X25519SecretKey".into())] }),
+                (
+                    moved,
+                    Type::Apply {
+                        name: "VaultWrite".into(),
+                        args: vec![Type::Named("X25519SecretKey".into())],
+                    },
+                ),
+                (
+                    moved,
+                    Type::Apply {
+                        name: "MutationPlan".into(),
+                        args: vec![Type::Named("X25519SecretKey".into())],
+                    },
+                ),
             ],
-            Some(result_ty(Type::Apply { name: "KeyRef".into(), args: vec![Type::Named("X25519SecretKey".into())] }, Type::Named("VaultError".into()))),
+            Some(result_ty(
+                Type::Apply {
+                    name: "KeyRef".into(),
+                    args: vec![Type::Named("X25519SecretKey".into())],
+                },
+                Type::Named("VaultError".into()),
+            )),
         )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
         ("core.net", "tcp_listen") => Some((
@@ -2247,7 +2675,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "ip_addr") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("IPAddr".to_string()), Type::Named("NetError".to_string()))),
+            Some(result_ty(
+                Type::Named("IPAddr".to_string()),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "ip_to_string") => Some((
             vec![(read, Type::Named("IPAddr".to_string()))],
@@ -2346,7 +2777,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "tcp_read_bytes") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::Int),
             ],
             Some(result_ty(
@@ -2356,46 +2790,67 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "tcp_read_text") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::Int),
             ],
             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_write_bytes") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_write_all_bytes") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_write_text") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::String),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_shutdown") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::Named("NetShutdown".to_string())),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_close") => Some((
-            vec![(AccessConvention::Write, Type::Named("TcpStream".to_string()))],
+            vec![(
+                AccessConvention::Write,
+                Type::Named("TcpStream".to_string()),
+            )],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "tcp_ready") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TcpStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
                 (read, Type::Named("NetReadyInterest".to_string())),
                 (read, Type::Int),
             ],
@@ -2633,7 +3088,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "unix_read_bytes") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("UnixStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("UnixStream".to_string()),
+                ),
                 (read, Type::Int),
             ],
             Some(result_ty(
@@ -2643,20 +3101,29 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "unix_write_all_bytes") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("UnixStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("UnixStream".to_string()),
+                ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "unix_shutdown") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("UnixStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("UnixStream".to_string()),
+                ),
                 (read, Type::Named("NetShutdown".to_string())),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "unix_close") => Some((
-            vec![(AccessConvention::Write, Type::Named("UnixStream".to_string()))],
+            vec![(
+                AccessConvention::Write,
+                Type::Named("UnixStream".to_string()),
+            )],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "dns_a" | "dns_aaaa") => Some((
@@ -2679,7 +3146,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.net", "dns_txt") => Some((
             vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(Type::List(Box::new(Type::String)), Type::Named("NetError".to_string()))),
+            Some(result_ty(
+                Type::List(Box::new(Type::String)),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "dns_txt_at") => Some((
             vec![
@@ -2687,11 +3157,17 @@ fn core_fixed_sig_impl(
                 (read, Type::String),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::List(Box::new(Type::String)), Type::Named("NetError".to_string()))),
+            Some(result_ty(
+                Type::List(Box::new(Type::String)),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "dns_ptr") => Some((
             vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(Type::List(Box::new(Type::String)), Type::Named("NetError".to_string()))),
+            Some(result_ty(
+                Type::List(Box::new(Type::String)),
+                Type::Named("NetError".to_string()),
+            )),
         )),
         ("core.net", "getservbyname") => Some((
             vec![(read, Type::String)],
@@ -2742,7 +3218,10 @@ fn core_fixed_sig_impl(
                 AccessConvention::Write,
                 Type::Named("TLSStream".to_string()),
             )],
-            Some(result_ty(Type::String, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net", "tls_write") => Some((
             vec![
@@ -2752,11 +3231,17 @@ fn core_fixed_sig_impl(
                 ),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                unit_ty(),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net", "tls_close") => Some((
             vec![(AccessConvention::Move, Type::Named("TLSStream".to_string()))],
-            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                unit_ty(),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net.tls", "client") => Some((
             vec![
@@ -2770,7 +3255,10 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.tls", "read") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TLSStream".to_string()),
+                ),
                 (read, Type::Int),
             ],
             Some(result_ty(
@@ -2780,35 +3268,65 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.tls", "read_text") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TLSStream".to_string()),
+                ),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::String, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                Type::String,
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net.tls", "write") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TLSStream".to_string()),
+                ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(Type::Int, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                Type::Int,
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net.tls", "write_all") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TLSStream".to_string()),
+                ),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
-            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                unit_ty(),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net.tls", "write_text") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
+                (
+                    AccessConvention::Write,
+                    Type::Named("TLSStream".to_string()),
+                ),
                 (read, Type::String),
             ],
-            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            Some(result_ty(
+                unit_ty(),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         ("core.net.tls", "close") => Some((
-            vec![(AccessConvention::Write, Type::Named("TLSStream".to_string()))],
-            Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
+            vec![(
+                AccessConvention::Write,
+                Type::Named("TLSStream".to_string()),
+            )],
+            Some(result_ty(
+                unit_ty(),
+                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
+            )),
         )),
         // E2-M10: core.http — HTTP client/server over blocking I/O.
         // GET / HEAD / DELETE requests (no body sent).
@@ -2922,10 +3440,9 @@ fn core_fixed_sig_impl(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
-        ("core.archive", "crc32" | "adler32") => Some((
-            vec![(read, Type::List(Box::new(u8_ty())))],
-            Some(Type::Int),
-        )),
+        ("core.archive", "crc32" | "adler32") => {
+            Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Int)))
+        }
         ("core.archive", "deflate" | "inflate" | "zip_open" | "zip_close") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::List(Box::new(u8_ty()))),
@@ -3020,9 +3537,7 @@ fn core_fixed_sig_impl(
         ("core.game.raylib", "close_window") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.game.raylib", "key_down") => {
-            Some((vec![(read, Type::String)], Some(Type::Bool)))
-        }
+        ("core.game.raylib", "key_down") => Some((vec![(read, Type::String)], Some(Type::Bool))),
         ("core.game.raylib", "set_target_fps") => Some((vec![(read, Type::Int)], None)),
         ("core.game.raylib", "color") => Some((
             vec![
@@ -3070,7 +3585,10 @@ fn core_fixed_sig_impl(
         ("core.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
         ("core.db", "policy") => Some((
             vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Named("RowPolicy".to_string()), Type::String)),
+            Some(result_ty(
+                Type::Named("RowPolicy".to_string()),
+                Type::String,
+            )),
         )),
         // D-DBPOLICY1: audit is scoped to the active DBScope, so it cannot
         // inspect or manufacture authority for another connection.
@@ -3080,7 +3598,9 @@ fn core_fixed_sig_impl(
         )),
         ("core.db", "params") => Some((
             vec![(read, Type::Named("SQL".to_string()))],
-            Some(Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))),
+            Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_DB_VALUE.to_string(),
+            )))),
         )),
         ("core.db", "row_value") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
@@ -3316,9 +3836,10 @@ fn core_fixed_sig_impl(
                     Type::Fn {
                         params: vec![Type::Named("WebEvent".to_string())],
                         ret: None,
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     },
                 ),
             ],
@@ -3339,10 +3860,9 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Named("LiveQuery".to_string())),
         )),
-        ("app" | "core.web", "invalidate" | "transact_invalidate") => Some((
-            vec![(read, Type::String)],
-            Some(Type::Int),
-        )),
+        ("app" | "core.web", "invalidate" | "transact_invalidate") => {
+            Some((vec![(read, Type::String)], Some(Type::Int)))
+        }
         ("app" | "core.web", "signal_push") => Some((
             vec![
                 (read, Type::Named("LiveQuery".to_string())),
@@ -3398,9 +3918,7 @@ fn core_fixed_sig_impl(
         // (passed to the running program via JET_DEV_FILE). The common case:
         // the file defining `fn dev()` is the file to watch, so no path is
         // spelled out at all.
-        ("core.web.devserver", "app") => {
-            Some((vec![], Some(Type::Named("DevServer".to_string()))))
-        }
+        ("core.web.devserver", "app") => Some((vec![], Some(Type::Named("DevServer".to_string())))),
         _ => None,
     }
 }
@@ -3451,17 +3969,19 @@ pub enum CoreDefault {
     Absent,
     /// A no-argument static call on a Core type, such as `EncodingLimits.safe()`.
     /// The type name resolves without the caller importing its module.
-    StaticCall { type_name: &'static str, method: &'static str },
+    StaticCall {
+        type_name: &'static str,
+        method: &'static str,
+    },
 }
 
 impl CoreDefault {
     pub fn build(self, span: crate::Diagnostics::Span) -> crate::AST::Expr {
         match self {
             CoreDefault::Bool(value) => crate::AST::Expr::Bool(value, span),
-            CoreDefault::String(value) => crate::AST::Expr::Str(
-                vec![crate::AST::StrPart::Lit(value.to_string())],
-                span,
-            ),
+            CoreDefault::String(value) => {
+                crate::AST::Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
+            }
             CoreDefault::EmptyList => crate::AST::Expr::ListLit(Vec::new(), span),
             CoreDefault::Absent => crate::AST::Expr::Absent(span),
             CoreDefault::StaticCall { type_name, method } => crate::AST::Expr::MethodCall {
@@ -3480,18 +4000,28 @@ impl CoreDefault {
 }
 
 const fn required(label: &'static str) -> CoreParam {
-    CoreParam { label, zone: crate::AST::ParamZone::PositionalOnly, default: None }
+    CoreParam {
+        label,
+        zone: crate::AST::ParamZone::PositionalOnly,
+        default: None,
+    }
 }
 
 const fn optional(label: &'static str, default: CoreDefault) -> CoreParam {
-    CoreParam { label, zone: crate::AST::ParamZone::Either, default: Some(default) }
+    CoreParam {
+        label,
+        zone: crate::AST::ParamZone::Either,
+        default: Some(default),
+    }
 }
 
 /// The bounded-encoding reader/writer family (D-ENCSTREAM-SURFACE1=A). The file
 /// handle is required and positional; the policy arguments are labelled so a
 /// call can name only the policy it changes.
-const ENCODING_LIMITS_DEFAULT: CoreDefault =
-    CoreDefault::StaticCall { type_name: "EncodingLimits", method: "safe" };
+const ENCODING_LIMITS_DEFAULT: CoreDefault = CoreDefault::StaticCall {
+    type_name: "EncodingLimits",
+    method: "safe",
+};
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
     match (module, name) {
@@ -3525,7 +4055,9 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             },
         ]),
         (
-            "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv"
+            "core.encoding.json"
+            | "core.encoding.jsonl"
+            | "core.encoding.csv"
             | "core.encoding.cbor",
             "reader",
         ) => Some(vec![
@@ -3537,9 +4069,7 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             optional("limits", ENCODING_LIMITS_DEFAULT),
             optional("canonical", CoreDefault::Bool(false)),
         ]),
-        ("core.encoding.json", "canonical")
-            if super::super::Edition::edition_at_least("2027") =>
-        {
+        ("core.encoding.json", "canonical") if super::super::Edition::edition_at_least("2027") => {
             Some(vec![
                 required("data"),
                 optional("limits", ENCODING_LIMITS_DEFAULT),

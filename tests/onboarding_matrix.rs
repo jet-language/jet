@@ -127,7 +127,10 @@ fn terminal_editor_state_matrix() {
         stderr(&search)
     );
     assert!(stdout(&search).contains("jet run"));
-    assert!(!stdout(&search).contains('\u{1b}'), "NO_COLOR leaked into search");
+    assert!(
+        !stdout(&search).contains('\u{1b}'),
+        "NO_COLOR leaked into search"
+    );
 
     let first_run = jet(&["run"], &project);
     assert!(

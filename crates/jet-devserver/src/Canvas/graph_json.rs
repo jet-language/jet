@@ -156,7 +156,13 @@ fn add_control_wire(
     });
 }
 
-pub(super) fn add_region(g: &mut GraphBuilder, ordinal: usize, kind: &str, title: &str, span: Span) {
+pub(super) fn add_region(
+    g: &mut GraphBuilder,
+    ordinal: usize,
+    kind: &str,
+    title: &str,
+    span: Span,
+) {
     g.regions.push(format!(
         "{{\"region_id\":{},\"kind\":{},\"title\":{},\"source_span\":{}}}",
         json_str(&format!("{}:region:{ordinal}:{kind}", g.graph_id)),
@@ -218,7 +224,12 @@ pub(super) fn add_source_comment_regions(g: &mut GraphBuilder, src: &str, f: &AS
     }
 }
 
-fn hint_belongs_to_function(src: &str, anchor: SourceSpan, hint_span: SourceSpan, func_span: SourceSpan) -> bool {
+fn hint_belongs_to_function(
+    src: &str,
+    anchor: SourceSpan,
+    hint_span: SourceSpan,
+    func_span: SourceSpan,
+) -> bool {
     if span_overlaps(anchor, func_span) || span_overlaps(hint_span, func_span) {
         return true;
     }
@@ -269,8 +280,7 @@ pub(super) fn add_execution_overlay(g: &mut GraphBuilder, src: &str, body: &[AST
                 node.span,
                 Some("early_return"),
             );
-        } else if node.kind == "branch"
-            || (node.kind == "function" && node.archetype == "control")
+        } else if node.kind == "branch" || (node.kind == "function" && node.archetype == "control")
         {
             ensure_exec_pin(g, &node.id, "then", "output", node.span, None);
             ensure_exec_pin(g, &node.id, "else", "output", node.span, Some("else"));
@@ -298,9 +308,7 @@ pub(super) fn add_execution_overlay(g: &mut GraphBuilder, src: &str, body: &[AST
 
 fn node_has_arm_pins(g: &GraphBuilder, node_id: &str) -> bool {
     g.pins.iter().any(|pin| {
-        pin.node_id == node_id
-            && pin.direction == "output"
-            && pin.role.as_deref() == Some("arm")
+        pin.node_id == node_id && pin.direction == "output" && pin.role.as_deref() == Some("arm")
     })
 }
 
@@ -350,14 +358,10 @@ fn execution_block(g: &mut GraphBuilder, src: &str, stmts: &[AST::Stmt]) -> Exec
 fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> ExecutionFlow {
     match stmt {
         AST::Stmt::Switch {
-            arms,
-            else_body,
-            ..
+            arms, else_body, ..
         }
         | AST::Stmt::ComptimeSwitch {
-            arms,
-            else_body,
-            ..
+            arms, else_body, ..
         } => {
             let Some(node) = direct_execution_node(g, stmt) else {
                 return ExecutionFlow::default();
@@ -400,24 +404,10 @@ fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> Executio
             };
             let mut exits = Vec::new();
             let then_output = exec_output(g, &node.id, "then");
-            append_branch_path(
-                g,
-                src,
-                then_output,
-                then_body,
-                node.span,
-                &mut exits,
-            );
+            append_branch_path(g, src, then_output, then_body, node.span, &mut exits);
             if let Some(body) = else_body.as_deref() {
                 let else_output = exec_output(g, &node.id, "else");
-                append_branch_path(
-                    g,
-                    src,
-                    else_output,
-                    body,
-                    node.span,
-                    &mut exits,
-                );
+                append_branch_path(g, src, else_output, body, node.span, &mut exits);
             } else if let Some(output) = exec_output(g, &node.id, "else") {
                 exits.push(ExecutionEndpoint {
                     pin: output,
@@ -449,7 +439,13 @@ fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> Executio
                     );
                 }
                 for exit in body_flow.exits {
-                    add_control_wire_once(g, &exit.pin, &format!("{}:input:exec", node.id), exit.span, node.span);
+                    add_control_wire_once(
+                        g,
+                        &exit.pin,
+                        &format!("{}:input:exec", node.id),
+                        exit.span,
+                        node.span,
+                    );
                 }
             }
             ExecutionFlow {
@@ -463,9 +459,7 @@ fn execution_stmt(g: &mut GraphBuilder, src: &str, stmt: &AST::Stmt) -> Executio
                     .collect(),
             }
         }
-        AST::Stmt::Switched { marker, .. } if AST::switched_off(marker) => {
-            ExecutionFlow::default()
-        }
+        AST::Stmt::Switched { marker, .. } if AST::switched_off(marker) => ExecutionFlow::default(),
         AST::Stmt::Switched { body, .. } => execution_block(g, src, body),
         AST::Stmt::Unsafe { body, .. }
         | AST::Stmt::Impure { body, .. }
@@ -627,16 +621,20 @@ fn add_control_wire_once(
     from_span: SourceSpan,
     to_span: SourceSpan,
 ) {
-    if g.wires.iter().any(|wire| {
-        wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin
-    }) {
+    if g.wires
+        .iter()
+        .any(|wire| wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin)
+    {
         return;
     }
     add_control_wire(g, from_pin, to_pin, from_span, to_span);
 }
 
 fn node_wants_exec(node: &NodeRec) -> bool {
-    matches!(node.archetype.as_str(), "entry" | "function_exec" | "control")
+    matches!(
+        node.archetype.as_str(),
+        "entry" | "function_exec" | "control"
+    )
 }
 
 fn ensure_exec_pin(
@@ -862,7 +860,10 @@ pub(super) fn ledger_function_visibility(
     module_idx: usize,
     name: &str,
 ) -> &'static str {
-    match ledger.declaration(module_idx, name).map(|declaration| declaration.visibility) {
+    match ledger
+        .declaration(module_idx, name)
+        .map(|declaration| declaration.visibility)
+    {
         Some(NameVisibility::Package) => "package",
         Some(NameVisibility::Public) => "public",
         Some(NameVisibility::Private) => "private",
@@ -906,7 +907,13 @@ fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -
         out.push_str("]>");
     } else if let Some(effects) = &f.declared_effects {
         out.push_str(" -[");
-        out.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
+        out.push_str(
+            &effects
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
         out.push_str("]>");
     } else if f.is_pure {
         out.push_str(" -[]>");

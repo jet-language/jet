@@ -135,9 +135,7 @@ pub fn guarantee_report(
                 .to_string(),
         );
     } else if harden && freestanding {
-        notes.push(
-            "harden: true requested, but freestanding has no runtime fence".to_string(),
-        );
+        notes.push("harden: true requested, but freestanding has no runtime fence".to_string());
     } else if harden {
         notes.push("harden: true; every foreign dependency is fenced".to_string());
     } else if package.is_some_and(|package| !package.policy.contain.is_empty()) {
@@ -164,9 +162,7 @@ pub fn guarantee_report(
     }
 }
 
-fn package_lints_deny(
-    bundle: &crate::AST::ProgramBundle,
-) -> Result<Vec<String>, Diagnostic> {
+fn package_lints_deny(bundle: &crate::AST::ProgramBundle) -> Result<Vec<String>, Diagnostic> {
     let Some(entry) = bundle.modules.get(bundle.entry) else {
         return Ok(Vec::new());
     };
@@ -187,28 +183,32 @@ fn package_lints_deny(
         Err(error) if error.is_missing() => return Ok(Vec::new()),
         Err(error) => return Err(error.diagnostic()),
     };
-    resolver.revalidate_file(&entry_file).map_err(|error| error.diagnostic())?;
+    resolver
+        .revalidate_file(&entry_file)
+        .map_err(|error| error.diagnostic())?;
     let manifest = match resolver.checked_manifest(std::path::Path::new(".")) {
         Ok(manifest) => manifest,
         Err(error) if error.is_missing() => return Ok(Vec::new()),
         Err(error) => return Err(error.diagnostic()),
     };
     let source = manifest.file.text().map_err(|error| error.diagnostic())?;
-    let deny = jet_foundation::LintPolicy::parse_package_source(&source).map_err(|error| {
-        let jet_foundation::LintPolicy::LintPolicyError { detail, code, name } = error;
-        match (code.as_deref(), name.as_deref()) {
-            (Some(code), Some(name)) => {
-                Diagnostic::from_row("E1206", &[("code", code), ("name", name)], None)
+    let deny = jet_foundation::LintPolicy::parse_package_source(&source)
+        .map_err(|error| {
+            let jet_foundation::LintPolicy::LintPolicyError { detail, code, name } = error;
+            match (code.as_deref(), name.as_deref()) {
+                (Some(code), Some(name)) => {
+                    Diagnostic::from_row("E1206", &[("code", code), ("name", name)], None)
+                }
+                _ => Diagnostic::error(
+                    "E1206",
+                    "invalid package manifest".to_string(),
+                    detail,
+                    "fix `package.jet` before compiling the package".to_string(),
+                    None,
+                ),
             }
-            _ => Diagnostic::error(
-                "E1206",
-                "invalid package manifest".to_string(),
-                detail,
-                "fix `package.jet` before compiling the package".to_string(),
-                None,
-            ),
-        }
-    })?.unwrap_or_default();
+        })?
+        .unwrap_or_default();
     resolver
         .revalidate_file(&manifest.file)
         .map_err(|error| error.diagnostic())?;
@@ -244,11 +244,8 @@ fn apply_package_effect_budget(
             )])
         }
     };
-    let entries = crate::EffectBudget::compute_package_effects(
-        bundle,
-        &facts.solved,
-        &facts.summaries,
-    );
+    let entries =
+        crate::EffectBudget::compute_package_effects(bundle, &facts.solved, &facts.summaries);
     Ok(diagnostics
         .into_iter()
         .chain(crate::EffectBudget::enforce(&entries, &manifest))
@@ -556,9 +553,7 @@ pub fn build_target_machine_firmware(
         ]));
     }
 
-    let artifact_bytes = fs::metadata(&elf_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let artifact_bytes = fs::metadata(&elf_path).map(|m| m.len()).unwrap_or(0);
     let size_budget = machine.size_budget(usage, artifact_bytes);
     if !size_budget.ok() {
         return Err(TargetMachineCompileError::Machine(vec![
@@ -666,7 +661,8 @@ fn sanitize_name(name: &str) -> String {
         .collect()
 }
 
-fn resolve_target_clang() -> Result<std::path::PathBuf, Vec<crate::TargetMachine::TargetMachineError>> {
+fn resolve_target_clang(
+) -> Result<std::path::PathBuf, Vec<crate::TargetMachine::TargetMachineError>> {
     if let Ok(path) = std::env::var("JET_TARGET_CLANG") {
         let p = std::path::PathBuf::from(path);
         if p.is_file() {
@@ -695,9 +691,11 @@ fn resolve_tool(
     if let Ok(path) = which_tool(name) {
         return Ok(path);
     }
-    Err(vec![crate::TargetMachine::TargetMachineError::FirmwareToolchainMissing {
-        tool: name.to_string(),
-    }])
+    Err(vec![
+        crate::TargetMachine::TargetMachineError::FirmwareToolchainMissing {
+            tool: name.to_string(),
+        },
+    ])
 }
 
 fn which_tool(name: &str) -> Result<std::path::PathBuf, ()> {
@@ -724,7 +722,12 @@ pub fn compile_bundle_path_opts_plugin(
     mode: crate::Sema::CompileMode,
     cross_target: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_plugin_with_gates(file, mode, crate::Policy::GateSet::default(), cross_target)
+    compile_bundle_path_opts_plugin_with_gates(
+        file,
+        mode,
+        crate::Policy::GateSet::default(),
+        cross_target,
+    )
 }
 
 pub fn compile_bundle_path_opts_plugin_with_gates(
@@ -749,7 +752,20 @@ pub fn compile_bundle_path_opts_plugin_with_gates_and_settings(
     cross_target: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_full(file, mode, false, gates, false, true, false, false, cross_target, None, "dev", setting_overrides)
+    compile_bundle_path_opts_full(
+        file,
+        mode,
+        false,
+        gates,
+        false,
+        true,
+        false,
+        false,
+        cross_target,
+        None,
+        "dev",
+        setting_overrides,
+    )
 }
 
 /// Like `compile_bundle_path_opts_plugin`, but for a checked `Library` output
@@ -761,7 +777,12 @@ pub fn compile_bundle_path_opts_library(
     mode: crate::Sema::CompileMode,
     explicit_output: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_opts_library_with_gates(file, mode, crate::Policy::GateSet::default(), explicit_output)
+    compile_bundle_path_opts_library_with_gates(
+        file,
+        mode,
+        crate::Policy::GateSet::default(),
+        explicit_output,
+    )
 }
 
 pub fn compile_bundle_path_opts_library_with_gates(
@@ -904,12 +925,7 @@ fn target_machine_usage_for_file(
     seed_build_facts(&mut bundle, "dev", false, &BTreeMap::new())?;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let _lints = gate_diagnostics(
-        &bundle,
-        parse_teaching,
-        diags,
-        Vec::new(),
-    )?;
+    let _lints = gate_diagnostics(&bundle, parse_teaching, diags, Vec::new())?;
     let mmio = collect_mmio_usage(&bundle);
     let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
     core_apis.sort();
@@ -1098,7 +1114,12 @@ fn collect_mmio_for_kind(
     out: &mut Vec<crate::TargetMachine::MmioAccess>,
 ) {
     match kind {
-        crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
+        crate::AST::ForKind::Range {
+            start,
+            end,
+            step,
+            exclusive: _,
+        } => {
             collect_mmio_expr(start, core_aliases, ptrs, unsafe_reason, out);
             collect_mmio_expr(end, core_aliases, ptrs, unsafe_reason, out);
             if let Some(step) = step {
@@ -1328,13 +1349,7 @@ pub fn seed_build_facts(
     locked: bool,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(), Vec<Diagnostic>> {
-    seed_build_facts_with_contributions(
-        bundle,
-        profile,
-        locked,
-        setting_overrides,
-        &[],
-    )
+    seed_build_facts_with_contributions(bundle, profile, locked, setting_overrides, &[])
 }
 
 /// Seed the build snapshot after a selected `fn build` has produced computed
@@ -1451,7 +1466,11 @@ fn seed_build_facts_from_stamp(
     // D-CONF-READ1=A / D-CONF-STAMP1=B: fixed build leaves are facts too.
     // They enter the same resolver and retain one writer chain, so explain
     // does not grow a special provenance path for package, OS, or stamp data.
-    let package_source = if manifest.is_some() { "package.jet" } else { "<source>" };
+    let package_source = if manifest.is_some() {
+        "package.jet"
+    } else {
+        "<source>"
+    };
     let fixed_facts = [
         (
             "Build.Package.Name",
@@ -1497,32 +1516,28 @@ fn seed_build_facts_from_stamp(
             jet_foundation::Policy::ContributionLayer::Declaration,
             source,
         );
-        let fact = resolve_build_fact(
-            jet_foundation::Policy::FactKey::new(name),
-            [contribution],
-        )?;
+        let fact = resolve_build_fact(jet_foundation::Policy::FactKey::new(name), [contribution])?;
         contributions.insert(fact.key.name.clone(), fact);
     }
     let enum_types = fieldless_setting_enums(bundle);
     let mut settings = BTreeMap::new();
     let mut setting_provenance = BTreeMap::new();
     if let Some(facts) = manifest.as_ref() {
-        let mut setting_contributions = BTreeMap::<
-            String,
-            Vec<jet_foundation::Policy::FactContribution>,
-        >::new();
-        let mut setting_defaults = BTreeMap::<
-            String,
-            jet_foundation::Policy::FactValue,
-        >::new();
+        let mut setting_contributions =
+            BTreeMap::<String, Vec<jet_foundation::Policy::FactContribution>>::new();
+        let mut setting_defaults = BTreeMap::<String, jet_foundation::Policy::FactValue>::new();
         for (key, declaration) in &facts.settings {
-            let value = parse_setting_value(&declaration.ty, &declaration.default, &enum_types).map_err(|detail| {
-                vec![setting_value_diagnostic(key, &declaration.ty, &declaration.default, detail)]
-            })?;
+            let value = parse_setting_value(&declaration.ty, &declaration.default, &enum_types)
+                .map_err(|detail| {
+                    vec![setting_value_diagnostic(
+                        key,
+                        &declaration.ty,
+                        &declaration.default,
+                        detail,
+                    )]
+                })?;
             setting_defaults.insert(key.clone(), policy_fact_value(&value));
-            setting_contributions
-                .entry(key.clone())
-                .or_default();
+            setting_contributions.entry(key.clone()).or_default();
         }
         // Validate every profile before selecting one. An inactive profile is
         // still package input and must not hide an undeclared or ill-typed key.
@@ -1540,27 +1555,29 @@ fn seed_build_facts_from_stamp(
                 })?;
             }
         }
-        if let Some(profile_def) = facts.build_profiles.iter().find(|candidate| candidate.name == profile) {
+        if let Some(profile_def) = facts
+            .build_profiles
+            .iter()
+            .find(|candidate| candidate.name == profile)
+        {
             for (key, raw) in &profile_def.settings {
                 let declaration = facts
                     .settings
                     .get(key)
                     .expect("profile settings were validated before contribution");
-                let value = parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
-                    vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
-                })?;
-                setting_contributions
-                    .entry(key.clone())
-                    .or_default()
-                    .push(
-                        jet_foundation::Policy::FactContribution::new(
-                            build_setting_fact_key(key),
-                            policy_fact_value(&value),
-                            jet_foundation::Policy::SourceScope::Package,
-                            jet_foundation::Policy::ContributionLayer::OptimizationBundle,
-                            format!("package.jet:build.{profile}.settings.{key}"),
-                        ),
-                    );
+                let value =
+                    parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
+                        vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
+                    })?;
+                setting_contributions.entry(key.clone()).or_default().push(
+                    jet_foundation::Policy::FactContribution::new(
+                        build_setting_fact_key(key),
+                        policy_fact_value(&value),
+                        jet_foundation::Policy::SourceScope::Package,
+                        jet_foundation::Policy::ContributionLayer::OptimizationBundle,
+                        format!("package.jet:build.{profile}.settings.{key}"),
+                    ),
+                );
             }
         }
         for (key, raw) in setting_overrides {
@@ -1571,27 +1588,22 @@ fn seed_build_facts_from_stamp(
                     &facts.origin,
                 )]);
             };
-            let value = parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
-                vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
-            })?;
-            setting_contributions
-                .entry(key.clone())
-                .or_default()
-                .push(
-                    jet_foundation::Policy::FactContribution::new(
-                        build_setting_fact_key(key),
-                        policy_fact_value(&value),
-                        jet_foundation::Policy::SourceScope::Package,
-                        jet_foundation::Policy::ContributionLayer::CommandLine,
-                        format!("command line:--set {key}={raw}"),
-                    ),
-                );
+            let value =
+                parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
+                    vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
+                })?;
+            setting_contributions.entry(key.clone()).or_default().push(
+                jet_foundation::Policy::FactContribution::new(
+                    build_setting_fact_key(key),
+                    policy_fact_value(&value),
+                    jet_foundation::Policy::SourceScope::Package,
+                    jet_foundation::Policy::ContributionLayer::CommandLine,
+                    format!("command line:--set {key}={raw}"),
+                ),
+            );
         }
         for contribution in computed_contributions {
-            let Some(key) = contribution
-                .key
-                .strip_prefix("Build.Settings.")
-            else {
+            let Some(key) = contribution.key.strip_prefix("Build.Settings.") else {
                 return Err(vec![undeclared_setting_diagnostic(
                     &contribution.key,
                     "`fn build` can contribute only to a declared setting",
@@ -1685,7 +1697,9 @@ fn build_setting_fact_key(key: &str) -> String {
     format!("Build.Settings.{key}")
 }
 
-fn policy_fact_value(value: &jet_foundation::Facts::BuildFactValue) -> jet_foundation::Policy::FactValue {
+fn policy_fact_value(
+    value: &jet_foundation::Facts::BuildFactValue,
+) -> jet_foundation::Policy::FactValue {
     match value {
         jet_foundation::Facts::BuildFactValue::Text(value) => {
             jet_foundation::Policy::FactValue::Text(value.clone())
@@ -1781,7 +1795,8 @@ fn resolve_build_fact(
                 "E3521",
                 "build fact has no contribution".to_string(),
                 "the selected build fact must have at least one registered writer".to_string(),
-                "restore the declaration or choose a source with a complete build fact plane".to_string(),
+                "restore the declaration or choose a source with a complete build fact plane"
+                    .to_string(),
                 None,
             )]
         })
@@ -1826,10 +1841,14 @@ fn parse_setting_value(
             .map(jet_foundation::Facts::BuildFactValue::Int)
             .map_err(|_| "Int settings use a signed 64-bit whole number".to_string()),
         "Char" => parse_setting_char(raw).map(jet_foundation::Facts::BuildFactValue::Char),
-        "String" => Ok(jet_foundation::Facts::BuildFactValue::Text(unquote_setting(raw))),
+        "String" => Ok(jet_foundation::Facts::BuildFactValue::Text(
+            unquote_setting(raw),
+        )),
         type_name => {
             if !valid_setting_type_name(type_name) {
-                return Err("settings use Bool, Int, Char, String, or a fieldless enum type".to_string());
+                return Err(
+                    "settings use Bool, Int, Char, String, or a fieldless enum type".to_string(),
+                );
             }
             let variant = raw.strip_prefix('.').unwrap_or(raw).trim();
             if variant.is_empty() || !valid_setting_variant(variant) {
@@ -1839,7 +1858,9 @@ fn parse_setting_value(
                 return Err(format!("`{type_name}` is not a declared fieldless enum"));
             };
             if !variants.contains(variant) {
-                return Err(format!("`{type_name}` has no fieldless variant `{variant}`"));
+                return Err(format!(
+                    "`{type_name}` has no fieldless variant `{variant}`"
+                ));
             }
             Ok(jet_foundation::Facts::BuildFactValue::Enum {
                 type_name: type_name.to_string(),
@@ -1994,7 +2015,10 @@ impl BuildFilesystemTransaction {
             if path_has_symlinked_component(&path) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
-                    format!("build transaction path `{}` contains a symlink", path.display()),
+                    format!(
+                        "build transaction path `{}` contains a symlink",
+                        path.display()
+                    ),
                 ));
             }
             let before = match std::fs::read(&path) {
@@ -2081,7 +2105,10 @@ fn ensure_real_parent(path: &std::path::Path) -> std::io::Result<()> {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::PermissionDenied,
-                    format!("build directory `{}` is not a real directory", current.display()),
+                    format!(
+                        "build directory `{}` is not a real directory",
+                        current.display()
+                    ),
                 ));
             }
             Ok(_) => {}
@@ -2102,9 +2129,7 @@ fn safe_atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
         ));
     }
     ensure_real_parent(path)?;
-    if std::fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             format!("build output `{}` is a symlink", path.display()),
@@ -2112,11 +2137,7 @@ fn safe_atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
     }
     let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     for attempt in 0..100u32 {
-        let temporary = parent.join(format!(
-            ".jet-atomic-{}-{}",
-            std::process::id(),
-            attempt
-        ));
+        let temporary = parent.join(format!(".jet-atomic-{}-{}", std::process::id(), attempt));
         let mut file = match std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -2140,18 +2161,17 @@ fn safe_atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()
     ))
 }
 
-fn read_build_file(
-    root: &std::path::Path,
-    path: &std::path::Path,
-) -> std::io::Result<Vec<u8>> {
+fn read_build_file(root: &std::path::Path, path: &std::path::Path) -> std::io::Result<Vec<u8>> {
     if path.strip_prefix(root).is_err()
         || path_has_symlinked_component(path)
-        || std::fs::symlink_metadata(path)
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        || std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            format!("build file `{}` contains a symlink or is outside the project", path.display()),
+            format!(
+                "build file `{}` contains a symlink or is outside the project",
+                path.display()
+            ),
         ));
     }
     std::fs::read(path)
@@ -2184,7 +2204,9 @@ fn build_query_options() -> BuildRunOptions {
     BuildRunOptions {
         // Inspection verifies source declarations and #Impure gates, but it
         // must not require execution grants merely to display the graph.
-        grants: crate::Comptime::Build::BuildCapability::ALL.into_iter().collect(),
+        grants: crate::Comptime::Build::BuildCapability::ALL
+            .into_iter()
+            .collect(),
         policy: crate::Comptime::Build::BuildPolicy::local_default(),
         execute: false,
         // Graph inspection may describe effectful actions, but it has no
@@ -2371,7 +2393,10 @@ impl PreparedBuildFrontEnd {
     /// instead of `runtime_program`, which only has to name the same program
     /// the content-cache key has always named.
     pub fn emitted_program(&self) -> Option<&crate::AST::ProgramBundle> {
-        self.build_index.is_none().then(|| self.runtime_program()).flatten()
+        self.build_index
+            .is_none()
+            .then(|| self.runtime_program())
+            .flatten()
     }
 
     /// The effect facts this front end solved. The build effect summary is a
@@ -2534,9 +2559,7 @@ fn prepare_build_front_end_on_compiler_stack(
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(inputs.cross_target.as_deref());
     let entry_path = std::path::Path::new(file);
-    let entry_dir = entry_path
-        .parent()
-        .unwrap_or(std::path::Path::new("."));
+    let entry_dir = entry_path.parent().unwrap_or(std::path::Path::new("."));
     let is_workspace_entry = match AuthorityResolver::open(entry_dir) {
         Ok(resolver) => match resolver.resolve_workspace_source() {
             Ok(Some(source)) => {
@@ -2560,9 +2583,7 @@ fn prepare_build_front_end_on_compiler_stack(
                     .map_err(|error| vec![error.diagnostic()])?;
                 if source.checked.path != checked_entry.path {
                     false
-                } else if source.role
-                    != jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index
-                {
+                } else if source.role != jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index {
                     return Err(vec![Diagnostic::error(
                         "E1334",
                         "workspace build entry is selected by an authority source".to_string(),
@@ -2621,12 +2642,12 @@ fn prepare_build_front_end_on_compiler_stack(
             && normalize_project_path(&bundle.project_root, package_path)
                 != normalize_project_path(&bundle.project_root, &entry_module_path)
         {
-            let source_span = local_build_indices
-                .first()
-                .and_then(|index| match &bundle.modules[bundle.entry].items[*index] {
+            let source_span = local_build_indices.first().and_then(|index| {
+                match &bundle.modules[bundle.entry].items[*index] {
                     crate::AST::Item::Func(func) => Some(func.name_span),
                     _ => None,
-                });
+                }
+            });
             let local_location = local_build_indices
                 .first()
                 .map(|index| build_function_location(&bundle.modules[bundle.entry], *index))
@@ -2683,12 +2704,11 @@ fn prepare_build_front_end_on_compiler_stack(
         return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
     }
     let build_index = local_build_indices.into_iter().next();
-    let build_span = build_index.and_then(|index| {
-        match &bundle.modules[bundle.entry].items[index] {
+    let build_span =
+        build_index.and_then(|index| match &bundle.modules[bundle.entry].items[index] {
             crate::AST::Item::Func(build) => Some(build.span),
             _ => None,
-        }
-    });
+        });
     if let Some(index) = build_index {
         let crate::AST::Item::Func(build) = &bundle.modules[bundle.entry].items[index] else {
             unreachable!()
@@ -2707,11 +2727,8 @@ fn prepare_build_front_end_on_compiler_stack(
     let (diags, effect_facts) =
         crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode);
     let diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
-    let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
-        &bundle,
-        Some(&effect_facts),
-        &diags,
-    );
+    let extension_diags =
+        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = classify_diagnostics(
         &bundle,
@@ -2834,10 +2851,8 @@ fn compile_build_from_front_end(
                     let owner = format!("{}::{}", module.alias, def.name);
                     for field in &def.fields {
                         if let Some(expression) = &field.computed {
-                            computed_fields.insert(
-                                (owner.clone(), field.name.clone()),
-                                expression.as_ref(),
-                            );
+                            computed_fields
+                                .insert((owner.clone(), field.name.clone()), expression.as_ref());
                             if type_name_counts.get(&def.name) == Some(&1) {
                                 computed_fields.insert(
                                     (def.name.clone(), field.name.clone()),
@@ -2898,18 +2913,14 @@ fn compile_build_from_front_end(
                         migrations.entry(m.type_name.clone()).or_default().push(m);
                     }
                     crate::AST::Item::Distinct(def) => {
-                        distinct_ranges.insert(
-                            def.name.clone(),
-                            def.range.map(|(lo, hi, _)| (lo, hi)),
-                        );
+                        distinct_ranges
+                            .insert(def.name.clone(), def.range.map(|(lo, hi, _)| (lo, hi)));
                         distinct_bases.insert(def.name.clone(), def.base.clone());
                     }
                     crate::AST::Item::UnitFamily(family) => {
                         for def in family.distinct_defs() {
-                            distinct_ranges.insert(
-                                def.name.clone(),
-                                def.range.map(|(lo, hi, _)| (lo, hi)),
-                            );
+                            distinct_ranges
+                                .insert(def.name.clone(), def.range.map(|(lo, hi, _)| (lo, hi)));
                             distinct_bases.insert(def.name, def.base);
                         }
                     }
@@ -2924,8 +2935,12 @@ fn compile_build_from_front_end(
         let mut globals = std::collections::HashMap::new();
         for module in &bundle.modules {
             for item in &module.items {
-                let crate::AST::Item::Const(def) = item else { continue };
-                if !def.is_comptime { continue; }
+                let crate::AST::Item::Const(def) = item else {
+                    continue;
+                };
+                if !def.is_comptime {
+                    continue;
+                }
                 let Some(value) = &def.ct else { continue };
                 globals.insert(format!("{}::{}", module.alias, def.name), value.clone());
                 if const_name_counts.get(&def.name) == Some(&1) {
@@ -2958,16 +2973,18 @@ fn compile_build_from_front_end(
         let package = build_package_name(file)?;
         let mut evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
             crate::BuildPluginHook::run_packaged_build_plugin,
-            || crate::Comptime::run_build_entry_with_policy(
-                build,
-                &funcs,
-                base_dir,
-                &info,
-                program_value,
-                &package,
-                options.gates,
-                options.policy.clone(),
-            ),
+            || {
+                crate::Comptime::run_build_entry_with_policy(
+                    build,
+                    &funcs,
+                    base_dir,
+                    &info,
+                    program_value,
+                    &package,
+                    options.gates,
+                    options.policy.clone(),
+                )
+            },
         )
         .map_err(|diag| vec![diag])?;
 
@@ -3030,18 +3047,17 @@ fn compile_build_from_front_end(
             .iter()
             .map(|spec| (spec.name.clone(), spec.clone()))
             .collect::<BTreeMap<_, _>>();
-        let compiler_runner = move |
-            action: &crate::Comptime::Build::BuildAction,
-            snapshots: &[crate::Comptime::Build::ActionInputSnapshot],
-        | {
-            let package_name = action
-                .labels
-                .get("compiler.package")
-                .ok_or_else(|| "compiler action has no package identity".to_string())?;
-            let spec = compiler_artifacts
-                .get(package_name)
-                .ok_or_else(|| format!("compiler package `{package_name}` was not prepared"))?;
-            let mut artifact = format!(
+        let compiler_runner =
+            move |action: &crate::Comptime::Build::BuildAction,
+                  snapshots: &[crate::Comptime::Build::ActionInputSnapshot]| {
+                let package_name = action
+                    .labels
+                    .get("compiler.package")
+                    .ok_or_else(|| "compiler action has no package identity".to_string())?;
+                let spec = compiler_artifacts
+                    .get(package_name)
+                    .ok_or_else(|| format!("compiler package `{package_name}` was not prepared"))?;
+                let mut artifact = format!(
                 "jet.sealed-package.v1\npackage={}\nsource={}\ncompiler={}\ntarget={}\nprofile={}\n",
                 package_name,
                 spec.source_digest.as_str(),
@@ -3049,15 +3065,15 @@ fn compile_build_from_front_end(
                 action.labels.get("compiler.target").map(String::as_str).unwrap_or_default(),
                 action.labels.get("compiler.profile").map(String::as_str).unwrap_or_default(),
             );
-            for snapshot in snapshots {
-                artifact.push_str("dependency=");
-                artifact.push_str(snapshot.path.as_str());
-                artifact.push('=');
-                artifact.push_str(snapshot.digest.as_str());
-                artifact.push('\n');
-            }
-            Ok(vec![artifact.into_bytes()])
-        };
+                for snapshot in snapshots {
+                    artifact.push_str("dependency=");
+                    artifact.push_str(snapshot.path.as_str());
+                    artifact.push('=');
+                    artifact.push_str(snapshot.digest.as_str());
+                    artifact.push('\n');
+                }
+                Ok(vec![artifact.into_bytes()])
+            };
 
         let selected_actions = evaluated
             .plan
@@ -3078,7 +3094,12 @@ fn compile_build_from_front_end(
             .actions()
             .iter()
             .filter(|action| selected_actions.contains(&action.id))
-            .flat_map(|action| action.outputs.iter().map(|output| output.as_str().to_string()))
+            .flat_map(|action| {
+                action
+                    .outputs
+                    .iter()
+                    .map(|output| output.as_str().to_string())
+            })
             .collect::<Vec<_>>();
         validate_selected_action_outputs(
             &evaluated.plan,
@@ -3187,16 +3208,14 @@ fn compile_build_from_front_end(
                 })
                 .collect::<Vec<_>>();
             locked_provenance.extend(evaluated.comptime_inputs.iter().cloned());
-            for action in evaluated
-                .plan
-                .actions()
-                .iter()
-                .filter(|action| {
-                    selected_actions.contains(&action.id) && !action.is_compiler_owned()
-                })
-            {
+            for action in evaluated.plan.actions().iter().filter(|action| {
+                selected_actions.contains(&action.id) && !action.is_compiler_owned()
+            }) {
                 for input in &action.inputs {
-                    let path = normalize_project_path(&bundle.project_root, std::path::Path::new(input.as_str()));
+                    let path = normalize_project_path(
+                        &bundle.project_root,
+                        std::path::Path::new(input.as_str()),
+                    );
                     let bytes = read_build_file(&bundle.project_root, &path)
                         .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
                     locked_provenance.push(crate::AST::ComptimeInput {
@@ -3207,7 +3226,10 @@ fn compile_build_from_front_end(
                     });
                 }
                 for output in &action.outputs {
-                    let path = normalize_project_path(&bundle.project_root, std::path::Path::new(output.as_str()));
+                    let path = normalize_project_path(
+                        &bundle.project_root,
+                        std::path::Path::new(output.as_str()),
+                    );
                     let bytes = read_build_file(&bundle.project_root, &path)
                         .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
                     locked_provenance.push(crate::AST::ComptimeInput {
@@ -3229,12 +3251,8 @@ fn compile_build_from_front_end(
         let mut planned_bundle = if options.execute {
             let project_root = bundle.project_root.clone();
             let stashed_runtime_bundle = runtime_bundle_for_package.take();
-            load_planned_runtime_bundle(
-                file,
-                &evaluated.plan,
-                &generated,
-                &project_root,
-                || match stashed_runtime_bundle {
+            load_planned_runtime_bundle(file, &evaluated.plan, &generated, &project_root, || {
+                match stashed_runtime_bundle {
                     // Stashed before the build-entry check ran, so it still
                     // holds unfolded fact reads.
                     Some(runtime) => Ok(runtime),
@@ -3245,13 +3263,9 @@ fn compile_build_from_front_end(
                     // longer answer the final snapshot. Re-parse the entry and
                     // let the complete front end below fold the contributed
                     // values.
-                    None => load_build_entry_bundle(
-                        file,
-                        overlay,
-                        direct_package_overlay.as_ref(),
-                    ),
-                },
-            )?
+                    None => load_build_entry_bundle(file, overlay, direct_package_overlay.as_ref()),
+                }
+            })?
         } else {
             bundle
         };
@@ -3294,7 +3308,11 @@ fn compile_build_from_front_end(
     if build_run.is_some() && options.execute {
         let (planned_diags, planned_facts) = if options.freestanding && !options.gates.is_empty() {
             (
-                crate::Sema::check_bundle_freestanding_with_gates(&mut bundle, compile_mode, options.gates),
+                crate::Sema::check_bundle_freestanding_with_gates(
+                    &mut bundle,
+                    compile_mode,
+                    options.gates,
+                ),
                 None,
             )
         } else if options.freestanding {
@@ -3350,7 +3368,7 @@ fn compile_build_from_front_end(
             options.locked,
             &bundle.build_facts.stamp,
         )
-            .map_err(|diagnostic| vec![diagnostic])?;
+        .map_err(|diagnostic| vec![diagnostic])?;
     }
     if options.execute {
         if let Some(build_run) = build_run.as_ref() {
@@ -3584,12 +3602,9 @@ fn load_planned_runtime_bundle(
                 continue;
             };
             let alias = import.import_alias();
-            inline_imports.entry(alias).or_insert_with(|| {
-                (
-                    target.items.clone(),
-                    target.web_target_ceiling,
-                )
-            });
+            inline_imports
+                .entry(alias)
+                .or_insert_with(|| (target.items.clone(), target.web_target_ceiling));
         }
     }
 
@@ -3606,7 +3621,10 @@ fn load_planned_runtime_bundle(
         }
     }
 
-    let inline_aliases = inline_imports.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+    let inline_aliases = inline_imports
+        .keys()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
     for (alias, (items, web_target)) in inline_imports {
         bundle.modules[bundle.entry]
             .items
@@ -3755,7 +3773,11 @@ fn validate_selected_action_outputs(
         .iter()
         .map(|source| normalize_project_path(root, source))
         .collect::<std::collections::BTreeSet<_>>();
-    for action in plan.actions().iter().filter(|action| selected_actions.contains(&action.id)) {
+    for action in plan
+        .actions()
+        .iter()
+        .filter(|action| selected_actions.contains(&action.id))
+    {
         for output in &action.outputs {
             let path = normalize_project_path(root, std::path::Path::new(output.as_str()));
             if has_symlinked_component(root, &path) {
@@ -3772,7 +3794,11 @@ fn validate_selected_action_outputs(
                 )]);
             }
             if source_paths.contains(&path) {
-                return Err(vec![generated_collision_diag(&action.name, output.as_str(), span)]);
+                return Err(vec![generated_collision_diag(
+                    &action.name,
+                    output.as_str(),
+                    span,
+                )]);
             }
             if generated.iter().any(|module| {
                 normalize_project_path(root, std::path::Path::new(module.path.as_str())) == path
@@ -3822,12 +3848,13 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
         }
         | crate::AST::Stmt::ComptimeSwitch {
             arms, else_body, ..
-        } => arms.iter().any(|arm| contains_impure_gate(&arm.body))
-            || else_body
-                .as_deref()
-                .is_some_and(contains_impure_gate),
+        } => {
+            arms.iter().any(|arm| contains_impure_gate(&arm.body))
+                || else_body.as_deref().is_some_and(contains_impure_gate)
+        }
         crate::AST::Stmt::CountedLoop { step, body, .. } => {
-            step.as_deref().is_some_and(|step| contains_impure_gate(std::slice::from_ref(step)))
+            step.as_deref()
+                .is_some_and(|step| contains_impure_gate(std::slice::from_ref(step)))
                 || contains_impure_gate(body)
         }
         crate::AST::Stmt::ComptimeIf {
@@ -3836,12 +3863,11 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
             ..
         } => {
             contains_impure_gate(then_body)
-                || else_body
-                    .as_deref()
-                    .is_some_and(contains_impure_gate)
+                || else_body.as_deref().is_some_and(contains_impure_gate)
         }
-        crate::AST::Stmt::ContextBlock { body, .. }
-        | crate::AST::Stmt::AssumeDet { body, .. } => contains_impure_gate(body),
+        crate::AST::Stmt::ContextBlock { body, .. } | crate::AST::Stmt::AssumeDet { body, .. } => {
+            contains_impure_gate(body)
+        }
         _ => false,
     })
 }
@@ -3986,8 +4012,7 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
                 .is_none_or(|workspace| crate::Loader::is_physically_within(workspace, root))
         });
     if let Some(root) = package_root {
-        let resolver = AuthorityResolver::open(&root)
-            .map_err(|error| vec![error.diagnostic()])?;
+        let resolver = AuthorityResolver::open(&root).map_err(|error| vec![error.diagnostic()])?;
         let checked = resolver
             .checked_manifest(std::path::Path::new("."))
             .map_err(|error| vec![error.diagnostic()])?;
@@ -4005,9 +4030,10 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
         .map_err(|error| {
             vec![match &error {
                 crate::Package::PackageParseError::Composition(detail)
-                    if detail.contains("is a diagnostic code") => {
-                        crate::Manifest::manifest_parse_diagnostic(&checked.file.path, &error)
-                    }
+                    if detail.contains("is a diagnostic code") =>
+                {
+                    crate::Manifest::manifest_parse_diagnostic(&checked.file.path, &error)
+                }
                 _ => Diagnostic::error(
                     "E1206",
                     "invalid package manifest".to_string(),
@@ -4039,8 +4065,8 @@ fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
 fn package_build_entry_source(
     project_root: &std::path::Path,
 ) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
-    let resolver = AuthorityResolver::open(project_root)
-        .map_err(|error| vec![error.diagnostic()])?;
+    let resolver =
+        AuthorityResolver::open(project_root).map_err(|error| vec![error.diagnostic()])?;
     let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
         Ok(checked) => checked,
         Err(error) if error.is_missing() => return Ok(None),
@@ -4053,9 +4079,7 @@ fn package_build_entry_source(
     let Some(entry) = entry else {
         return Ok(None);
     };
-    let raw_source = entry
-        .text()
-        .map_err(|error| vec![error.diagnostic()])?;
+    let raw_source = entry.text().map_err(|error| vec![error.diagnostic()])?;
     let source = if entry.path.file_name().and_then(|name| name.to_str())
         == Some(crate::Syntax::PACKAGE_FILE)
     {
@@ -4089,7 +4113,13 @@ fn build_entry_resolution_diagnostic(error: &str) -> Diagnostic {
             "repair the package source and try the build again",
         )
     };
-    Diagnostic::error(code, error.to_string(), why.to_string(), fix.to_string(), None)
+    Diagnostic::error(
+        code,
+        error.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        None,
+    )
 }
 
 /// D-BUILDENTRY1 / D-CONF-ENTRY1: does this program select a `fn build`?
@@ -4158,23 +4188,22 @@ fn package_manifest_build_overlay(
     } else {
         std::env::current_dir()
             .map(|directory| directory.join(path))
-            .map_err(|error| vec![Diagnostic::error(
-                "E1334",
-                "package manifest path cannot be resolved".to_string(),
-                error.to_string(),
-                "use an existing package.jet path".to_string(),
-                None,
-            )])?
+            .map_err(|error| {
+                vec![Diagnostic::error(
+                    "E1334",
+                    "package manifest path cannot be resolved".to_string(),
+                    error.to_string(),
+                    "use an existing package.jet path".to_string(),
+                    None,
+                )]
+            })?
     };
     let root = absolute.parent().unwrap_or(std::path::Path::new("."));
-    let resolver = AuthorityResolver::open(root)
-        .map_err(|error| vec![error.diagnostic()])?;
+    let resolver = AuthorityResolver::open(root).map_err(|error| vec![error.diagnostic()])?;
     let checked = resolver
         .checked_manifest(std::path::Path::new("."))
         .map_err(|error| vec![error.diagnostic()])?;
-    if normalize_project_path(root, &absolute)
-        != normalize_project_path(root, &checked.file.path)
-    {
+    if normalize_project_path(root, &absolute) != normalize_project_path(root, &checked.file.path) {
         return Err(vec![Diagnostic::error(
             "E1334",
             "package manifest path changed during resolution".to_string(),
@@ -4312,15 +4341,22 @@ fn validate_legacy_project_imports(
         let Some(kind) = action.legacy_wrapper else {
             return Err(vec![Diagnostic::error(
                 "E3502",
-                format!("legacy import `{}` is not attached to a legacy wrapper", project_file),
-                "a project-file import must be owned by the typed legacy wrapper that reads it".to_string(),
+                format!(
+                    "legacy import `{}` is not attached to a legacy wrapper",
+                    project_file
+                ),
+                "a project-file import must be owned by the typed legacy wrapper that reads it"
+                    .to_string(),
                 "declare the project file through the legacy wrapper import".to_string(),
                 Some(span),
             )]);
         };
         if project_file != kind.project_file()
             || crate::Comptime::Build::BuildPath::new(project_file.clone()).is_err()
-            || !action.inputs.iter().any(|input| input.as_str() == project_file)
+            || !action
+                .inputs
+                .iter()
+                .any(|input| input.as_str() == project_file)
         {
             return Err(vec![Diagnostic::error(
                 "E3502",
@@ -4330,10 +4366,9 @@ fn validate_legacy_project_imports(
                 Some(span),
             )]);
         }
-        if let Err(error) = crate::Comptime::Build::LegacyWrapperSpec::read_legacy_project_file(
-            project_root,
-            kind,
-        ) {
+        if let Err(error) =
+            crate::Comptime::Build::LegacyWrapperSpec::read_legacy_project_file(project_root, kind)
+        {
             let (what, fix) = match error {
                 crate::Comptime::Build::BuildError::LegacyProjectFileMissing(_) => (
                     format!("legacy project file `{project_file}` is missing"),
@@ -4351,7 +4386,8 @@ fn validate_legacy_project_imports(
             return Err(vec![Diagnostic::error(
                 "E3502",
                 what,
-                "legacy graph import rejects links and directories before a wrapper can run".to_string(),
+                "legacy graph import rejects links and directories before a wrapper can run"
+                    .to_string(),
                 fix,
                 Some(span),
             )]);
@@ -4411,16 +4447,15 @@ fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
 
 fn build_function_location(module: &crate::AST::LoadedModule, index: usize) -> String {
     let line = match module.items.get(index) {
-        Some(crate::AST::Item::Func(function)) => source_line_at(&module.source, function.name_span.start),
+        Some(crate::AST::Item::Func(function)) => {
+            source_line_at(&module.source, function.name_span.start)
+        }
         _ => 1,
     };
     format!("{}:{line}", module.path.display())
 }
 
-fn duplicate_build_entries(
-    bundle: &crate::AST::ProgramBundle,
-    indices: &[usize],
-) -> Diagnostic {
+fn duplicate_build_entries(bundle: &crate::AST::ProgramBundle, indices: &[usize]) -> Diagnostic {
     let module = &bundle.modules[bundle.entry];
     let first = build_function_location(module, indices[0]);
     let second = build_function_location(module, indices[1]);
@@ -4452,12 +4487,12 @@ fn build_entry_conflict(
 ) -> Diagnostic {
     Diagnostic::error(
         "E3520",
-        format!(
-            "two build entries for {unit}: {first_location} and {second_location}"
-        ),
+        format!("two build entries for {unit}: {first_location} and {second_location}"),
         "one package has exactly one build entry so policy and provenance have one auditable home"
             .to_string(),
-        format!("keep the `fn build` in {first_location} and remove the entry in {second_location}"),
+        format!(
+            "keep the `fn build` in {first_location} and remove the entry in {second_location}"
+        ),
         span,
     )
 }
@@ -4471,7 +4506,12 @@ fn materialize_and_check_generated(
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
 ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
     let mut modules = modules.to_vec();
-    modules.sort_by(|left, right| left.path.as_str().cmp(right.path.as_str()).then_with(|| left.name.cmp(&right.name)));
+    modules.sort_by(|left, right| {
+        left.path
+            .as_str()
+            .cmp(right.path.as_str())
+            .then_with(|| left.name.cmp(&right.name))
+    });
     let lock = crate::Lock::load(root);
     let existing_source_paths = existing_source_paths
         .iter()
@@ -4505,18 +4545,34 @@ fn materialize_and_check_generated(
             )]);
         }
         if has_symlinked_component(root, &path) {
-            return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
+            return Err(vec![generated_collision_diag(
+                &module.name,
+                module.path.as_str(),
+                span,
+            )]);
         }
         let managed = managed_generated_file(lock.as_ref(), root, &path, &module.source_digest);
         if existing_source_paths.iter().any(|source| source == &path) && !managed {
-            return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
+            return Err(vec![generated_collision_diag(
+                &module.name,
+                module.path.as_str(),
+                span,
+            )]);
         }
         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
             if metadata.file_type().is_symlink() || (!metadata.is_file() && !managed) {
-                return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
+                return Err(vec![generated_collision_diag(
+                    &module.name,
+                    module.path.as_str(),
+                    span,
+                )]);
             }
             if metadata.is_file() && !managed {
-                return Err(vec![generated_collision_diag(&module.name, module.path.as_str(), span)]);
+                return Err(vec![generated_collision_diag(
+                    &module.name,
+                    module.path.as_str(),
+                    span,
+                )]);
             }
         }
     }
@@ -4819,7 +4875,8 @@ fn generated_cycle_diag(
     Diagnostic::error(
         "E3511",
         format!("generation rounds form a cycle: `{name}` at `{path}`"),
-        "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
+        "generated source must reach a bounded deterministic order, not loop until quiescent"
+            .to_string(),
         format!("{reason}; break the dependency between these generators"),
         span,
     )
@@ -4973,9 +5030,15 @@ fn compile_bundle_path_opts_on_compiler_stack(
             None,
         )
     } else if freestanding {
-        (crate::Sema::check_bundle_freestanding(&mut bundle, mode), None)
+        (
+            crate::Sema::check_bundle_freestanding(&mut bundle, mode),
+            None,
+        )
     } else if !gates.is_empty() {
-        (crate::Sema::check_bundle_gates(&mut bundle, mode, gates), None)
+        (
+            crate::Sema::check_bundle_gates(&mut bundle, mode, gates),
+            None,
+        )
     } else {
         let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
         (diags, Some(facts))
@@ -4990,18 +5053,10 @@ fn compile_bundle_path_opts_on_compiler_stack(
     if let Some(target) = cross_target {
         diags.extend(crate::Sema::check_target_surface(&bundle, target));
     }
-    let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
-        &bundle,
-        effect_facts.as_ref(),
-        &diags,
-    );
+    let extension_diags =
+        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, effect_facts.as_ref(), &diags);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let lints = gate_diagnostics(
-        &bundle,
-        parse_teaching,
-        diags,
-        extension_diags,
-    )?;
+    let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
     let ffi_result = match cross_target {
         Some(target) => crate::FFI::prepare_for_target(&bundle, target),
         None => crate::FFI::prepare(&bundle),
@@ -5085,9 +5140,9 @@ fn compile_bundle_path_opts_on_compiler_stack(
     } else {
         None
     };
-    let library = library_config.as_ref().map(|config| {
-        crate::Codegen::emit_library(&bundle, &rust, &config.name, &config.bindings)
-    });
+    let library = library_config
+        .as_ref()
+        .map(|config| crate::Codegen::emit_library(&bundle, &rust, &config.name, &config.bindings));
     if timing {
         timer.lap("codegen");
         timer.metric("rust_bytes", rust.len() as u128);
@@ -5189,9 +5244,7 @@ fn compile_src_with_options_and_policy(
     options: CompileSrcOptions,
     generated: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    crate::run_compiler_work(|| {
-        compile_src_on_compiler_stack(src, file, mode, options, generated)
-    })
+    crate::run_compiler_work(|| compile_src_on_compiler_stack(src, file, mode, options, generated))
 }
 
 fn compile_src_on_compiler_stack(
@@ -5299,15 +5352,17 @@ fn compile_src_on_compiler_stack(
     }
     let rust = crate::Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
     let web = if options.web_target {
-        Some(crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
-            vec![Diagnostic::error(
-                "E-WEB-TIR-UNSUPPORTED",
-                format!("web output cannot compile `{}` yet", miss.func_name),
-                "web emitter ability facts drifted after validation".to_string(),
-                "report this compiler bug with the named function".to_string(),
-                Some(miss.span),
-            )]
-        })?)
+        Some(
+            crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
+                vec![Diagnostic::error(
+                    "E-WEB-TIR-UNSUPPORTED",
+                    format!("web output cannot compile `{}` yet", miss.func_name),
+                    "web emitter ability facts drifted after validation".to_string(),
+                    "report this compiler bug with the named function".to_string(),
+                    Some(miss.span),
+                )]
+            })?,
+        )
     } else {
         None
     };
@@ -5375,16 +5430,15 @@ pub fn check_file_with_effect_facts_and_settings(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(
-            file,
-            &overlays,
-            is_lsp,
-            None,
-            None,
-            "dev",
-            setting_overrides,
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &overlays,
+        is_lsp,
+        None,
+        None,
+        "dev",
+        setting_overrides,
+    );
     (diagnostics, bundle, facts)
 }
 
@@ -5401,16 +5455,15 @@ pub fn check_file_with_effect_facts_profile(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(
-            file,
-            &overlays,
-            is_lsp,
-            None,
-            None,
-            profile,
-            &BTreeMap::new(),
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &overlays,
+        is_lsp,
+        None,
+        None,
+        profile,
+        &BTreeMap::new(),
+    );
     (diagnostics, bundle, facts)
 }
 
@@ -5425,16 +5478,15 @@ pub fn check_file_with_effect_facts_incremental(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(
-            file,
-            &overlays,
-            is_lsp,
-            Some(cache),
-            None,
-            "dev",
-            &BTreeMap::new(),
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &overlays,
+        is_lsp,
+        Some(cache),
+        None,
+        "dev",
+        &BTreeMap::new(),
+    );
     (diagnostics, bundle, facts)
 }
 
@@ -5525,13 +5577,14 @@ fn check_file_on_compiler_stack(
     Vec<std::path::PathBuf>,
 ) {
     let (loaded, dependencies, loader_diagnostics) = match prepared_frontend {
-        Some(prepared_frontend) =>
+        Some(prepared_frontend) => {
             crate::Loader::load_entry_with_overlays_and_prepared_frontend_with_diagnostics(
                 file,
                 overlays,
                 is_lsp,
                 prepared_frontend,
-            ),
+            )
+        }
         None => crate::Loader::load_entry_with_overlays_and_dependencies_with_diagnostics(
             file, overlays, is_lsp,
         ),
@@ -5539,12 +5592,9 @@ fn check_file_on_compiler_stack(
     match loaded {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            if let Err(fact_diags) = seed_build_facts(
-                &mut bundle,
-                profile,
-                false,
-                setting_overrides,
-            ) {
+            if let Err(fact_diags) =
+                seed_build_facts(&mut bundle, profile, false, setting_overrides)
+            {
                 diags.extend(fact_diags);
                 return (
                     diags,
@@ -5574,11 +5624,8 @@ fn check_file_on_compiler_stack(
                     diags.push(bad_build_signature(build.name_span));
                 }
             }
-            let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
-                &bundle,
-                Some(&facts),
-                &diags,
-            );
+            let extension_diags =
+                crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&facts), &diags);
             diags.extend(extension_diags);
             let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
                 Ok(diags) => diags,
@@ -5612,16 +5659,15 @@ pub fn check_file_with_overlays(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl(
-            file,
-            overlays,
-            is_lsp,
-            None,
-            None,
-            "dev",
-            &BTreeMap::new(),
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        overlays,
+        is_lsp,
+        None,
+        None,
+        "dev",
+        &BTreeMap::new(),
+    );
     (diagnostics, bundle, facts)
 }
 
@@ -5636,9 +5682,7 @@ pub fn check_file_with_overlays_and_import_root(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
-    crate::run_compiler_work(|| {
-        check_file_with_import_root_on_compiler_stack(file, overlays)
-    })
+    crate::run_compiler_work(|| check_file_with_import_root_on_compiler_stack(file, overlays))
 }
 
 fn check_file_with_import_root_on_compiler_stack(
@@ -5652,29 +5696,17 @@ fn check_file_with_import_root_on_compiler_stack(
     match crate::Loader::load_entry_with_overlays_and_import_root(file, overlays, false) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            if let Err(fact_diags) = seed_build_facts(
-                &mut bundle,
-                "dev",
-                false,
-                &BTreeMap::new(),
-            ) {
+            if let Err(fact_diags) = seed_build_facts(&mut bundle, "dev", false, &BTreeMap::new()) {
                 diags.extend(fact_diags);
-                return (
-                    diags,
-                    None,
-                    crate::Sema::SemIndexEffectFacts::default(),
-                );
+                return (diags, None, crate::Sema::SemIndexEffectFacts::default());
             }
             let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
                 &mut bundle,
                 crate::Sema::CompileMode::Check,
             );
             diags.extend(check_diags);
-            let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
-                &bundle,
-                Some(&facts),
-                &diags,
-            );
+            let extension_diags =
+                crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&facts), &diags);
             diags.extend(extension_diags);
             let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
                 Ok(diags) => diags,
@@ -5714,21 +5746,11 @@ fn check_eval_on_compiler_stack(
 ) {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     if !lex_diags.is_empty() {
-        return (
-            lex_diags,
-            None,
-            crate::Sema::SemIndexEffectFacts::default(),
-        );
+        return (lex_diags, None, crate::Sema::SemIndexEffectFacts::default());
     }
     let mut prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
-        Err(ds) => {
-            return (
-                ds,
-                None,
-                crate::Sema::SemIndexEffectFacts::default(),
-            )
-        }
+        Err(ds) => return (ds, None, crate::Sema::SemIndexEffectFacts::default()),
     };
     let mut bundle = crate::AST::ProgramBundle {
         entry: 0,
@@ -5774,27 +5796,15 @@ fn check_eval_on_compiler_stack(
         edition: crate::Manifest::latest_edition().to_string(),
     };
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-        return (
-            diags,
-            None,
-            crate::Sema::SemIndexEffectFacts::default(),
-        );
+        return (diags, None, crate::Sema::SemIndexEffectFacts::default());
     }
     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
         Ok(c) => c,
-        Err(diags) => {
-            return (
-                diags,
-                None,
-                crate::Sema::SemIndexEffectFacts::default(),
-            )
-        }
+        Err(diags) => return (diags, None, crate::Sema::SemIndexEffectFacts::default()),
     };
     bundle.materialize_script_entries();
-    let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(
-        &mut bundle,
-        crate::Sema::CompileMode::Eval,
-    );
+    let (diags, facts) =
+        crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Eval);
     (diags, Some(bundle), facts)
 }
 
@@ -5824,10 +5834,7 @@ fn compile_tests_on_compiler_stack(
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
         &bundle,
-        parse_teaching
-            .into_iter()
-            .chain(diags)
-            .collect(),
+        parse_teaching.into_iter().chain(diags).collect(),
         false,
     )?;
     let ffi = match crate::FFI::prepare(&bundle) {
@@ -5879,10 +5886,7 @@ fn compile_fuzz_on_compiler_stack(
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
         &bundle,
-        parse_teaching
-            .into_iter()
-            .chain(diags)
-            .collect(),
+        parse_teaching.into_iter().chain(diags).collect(),
         false,
     )
     .map_err(FuzzCompileError::Diagnostics)?;
@@ -5940,12 +5944,7 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
     // Entry-swap uses plain `check_bundle` (no effect-facts return). Pass
     // `None` → omit `ReadEffects`; do not invent effect rows (D-DX5-HOOK1).
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-    let lints = gate_diagnostics(
-        &bundle,
-        parse_teaching,
-        diags,
-        extension_diags,
-    )?;
+    let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
@@ -6079,8 +6078,8 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         return_type_span: target.return_type_span,
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
@@ -6092,7 +6091,7 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         state_requires: None,
         state_transition: None,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,
@@ -6123,9 +6122,7 @@ fn compile_command_override(
     kind: crate::Codegen::CommandOverrideKind,
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    crate::run_compiler_work(|| {
-        compile_command_override_on_compiler_stack(file, kind, coverage)
-    })
+    crate::run_compiler_work(|| compile_command_override_on_compiler_stack(file, kind, coverage))
 }
 
 fn compile_command_override_on_compiler_stack(
@@ -6142,22 +6139,14 @@ fn compile_command_override_on_compiler_stack(
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
         &bundle,
-        parse_teaching
-            .into_iter()
-            .chain(diags)
-            .collect(),
+        parse_teaching.into_iter().chain(diags).collect(),
         false,
     )?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    let rust = crate::Codegen::emit_bundle_command_override(
-        &bundle,
-        ffi.as_ref(),
-        kind,
-        coverage,
-    );
+    let rust = crate::Codegen::emit_bundle_command_override(&bundle, ffi.as_ref(), kind, coverage);
     Ok((rust, ffi))
 }
 
@@ -6178,8 +6167,8 @@ fn swap_command_entry_point(
     bundle: &mut crate::AST::ProgramBundle,
     kind: crate::Codegen::CommandOverrideKind,
 ) {
-    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt};
     use crate::Diagnostics::Span;
+    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt};
 
     // S12: the program entry the override wrapper is installed as, and the name
     // `Codegen::command_override_entry` looks up when it emits the harness.
@@ -6207,7 +6196,11 @@ fn swap_command_entry_point(
     let alias_base = format!("__jet_command_{}", suite_name.to_ascii_lowercase());
     let mut alias = alias_base.clone();
     let mut suffix = 0;
-    while entry_module.imports.iter().any(|import| import.import_alias() == alias) {
+    while entry_module
+        .imports
+        .iter()
+        .any(|import| import.import_alias() == alias)
+    {
         suffix += 1;
         alias = format!("{alias_base}_{suffix}");
     }

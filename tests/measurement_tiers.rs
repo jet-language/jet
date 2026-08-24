@@ -4,9 +4,9 @@
 use std::fs;
 use std::process::Command;
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 const SOURCE: &str = r#"
 fn run() {
@@ -33,7 +33,12 @@ fn have_tool(name: &str) -> bool {
 
 fn have_wasm_target() -> bool {
     Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -42,7 +47,10 @@ fn have_wasm_target() -> bool {
 #[test]
 fn measurement_parser_accepts_the_canonical_constructor() {
     let (tokens, diagnostics) = jet::Lexer::lex(SOURCE);
-    assert!(diagnostics.is_empty(), "lexer rejected measurement: {diagnostics:?}");
+    assert!(
+        diagnostics.is_empty(),
+        "lexer rejected measurement: {diagnostics:?}"
+    );
     assert!(
         jet::Parser::parse(&tokens).is_ok(),
         "parser rejected the canonical measurement constructor"
@@ -60,8 +68,7 @@ fn measurement_tir_keeps_the_carrier_and_operation() {
     let compiled = jet::compile(SOURCE).expect("measurement source must reach TIR");
     assert!(compiled.rust.contains("JetMeasurement"));
     assert!(
-        compiled.rust.contains("jet_std::JetMeasurement::new")
-            || compiled.rust.contains(".add("),
+        compiled.rust.contains("jet_std::JetMeasurement::new") || compiled.rust.contains(".add("),
         "TIR lost the measured carrier operation:\n{}",
         compiled.rust
     );
@@ -123,7 +130,10 @@ fn measurement_repl_matches_the_known_result() {
         ],
         None,
     );
-    assert!(!transcript.contains("error ["), "REPL rejected measurement: {transcript}");
+    assert!(
+        !transcript.contains("error ["),
+        "REPL rejected measurement: {transcript}"
+    );
     assert!(
         transcript.contains(EXPECTED.trim_end()),
         "REPL disagreed with the execution tiers: {transcript}"
@@ -132,11 +142,9 @@ fn measurement_repl_matches_the_known_result() {
 
 #[test]
 fn measurement_web_js_and_wasm_use_the_same_kernel() {
-    let output = jet::compile_web_with_path(
-        &web_source(),
-        "tests/fixtures/measurement_tiers_web.jet",
-    )
-    .unwrap_or_else(|diagnostics| panic!("web measurement rejected: {diagnostics:#?}"));
+    let output =
+        jet::compile_web_with_path(&web_source(), "tests/fixtures/measurement_tiers_web.jet")
+            .unwrap_or_else(|diagnostics| panic!("web measurement rejected: {diagnostics:#?}"));
     let web = output.web.expect("web target must produce artifacts");
     assert!(web.js_app.contains("jet_measurement_kernel_add"));
     assert!(web.js_app.contains("jet_measurement_show"));
@@ -144,7 +152,9 @@ fn measurement_web_js_and_wasm_use_the_same_kernel() {
     assert!(web.wasm_rust.contains("JetMeasurement"));
 
     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
-        eprintln!("note: skipping measured-value web execution (need rustc, wasm32 target, and node)");
+        eprintln!(
+            "note: skipping measured-value web execution (need rustc, wasm32 target, and node)"
+        );
         return;
     }
 

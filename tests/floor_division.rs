@@ -398,13 +398,19 @@ fn run() {
             .any(|line| line.starts_with("caller") && line.contains("tier1 native")),
         "caller did not run natively: {err}"
     );
-    assert!(err.contains("Stop [E3001]") && err.contains("missing"), "{err}");
+    assert!(
+        err.contains("Stop [E3001]") && err.contains("missing"),
+        "{err}"
+    );
     assert!(
         err.contains("jit_nested_source_restore.jet:7 in caller()")
             && err.contains(r#"7 |     print(values["missing"])"#),
         "stop kept incomplete callee context instead of the caller source location: {err}"
     );
-    assert!(!err.contains("jit_nested_source_restore.jet:7 in leaf()"), "{err}");
+    assert!(
+        !err.contains("jit_nested_source_restore.jet:7 in leaf()"),
+        "{err}"
+    );
 }
 
 /// #1483: `env.get` under `jet run` reads the live process environment — not a
@@ -420,7 +426,8 @@ fn run() {{
 }}
 "
     );
-    let (code, out, err) = jit_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
+    let (code, out, err) =
+        jit_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
     assert_eq!(code, 0, "live env divisor must run: out={out} err={err}");
     assert_eq!(out, "5\n", "10 /% 2 from live env, got: {out}");
 }
@@ -438,8 +445,7 @@ fn run() {{
 }}
 "
     );
-    let (code, out, err) =
-        jit_run_with_env_args("jit_args_live_divisor", &src, &[], &["5"]);
+    let (code, out, err) = jit_run_with_env_args("jit_args_live_divisor", &src, &[], &["5"]);
     assert_eq!(code, 0, "live args divisor must run: out={out} err={err}");
     assert_eq!(out, "2\n", "10 /% 5 from argv, got: {out}");
     assert!(
@@ -464,20 +470,35 @@ fn every_tier_reports_one_trap_wording() {
     // 1. The shared Prelude kernel is the one Rust wording owner. Its AOT
     // adapters name those constants instead of repeating their literals.
     for (wording, symbol) in [
-        (MathLayout::INTEGER_POWER_NEGATIVE, "JET_ARITHMETIC_POWER_NEGATIVE"),
-        (MathLayout::INTEGER_POWER_OVERFLOW, "JET_ARITHMETIC_POWER_OVERFLOW"),
-        (MathLayout::INTEGER_DIVIDE_ZERO, "JET_ARITHMETIC_DIVIDE_ZERO"),
+        (
+            MathLayout::INTEGER_POWER_NEGATIVE,
+            "JET_ARITHMETIC_POWER_NEGATIVE",
+        ),
+        (
+            MathLayout::INTEGER_POWER_OVERFLOW,
+            "JET_ARITHMETIC_POWER_OVERFLOW",
+        ),
+        (
+            MathLayout::INTEGER_DIVIDE_ZERO,
+            "JET_ARITHMETIC_DIVIDE_ZERO",
+        ),
         (
             MathLayout::INTEGER_DIVIDE_OVERFLOW,
             "JET_ARITHMETIC_DIVIDE_OVERFLOW",
         ),
     ] {
-        assert!(contracts.contains(wording), "contract kernel lost: {wording}");
+        assert!(
+            contracts.contains(wording),
+            "contract kernel lost: {wording}"
+        );
         assert!(
             power.contains(symbol) || division.contains(symbol),
             "AOT adapter no longer reads {symbol}"
         );
-        assert!(!power.contains(&format!("{wording:?}")), "Power.rs duplicated {wording}");
+        assert!(
+            !power.contains(&format!("{wording:?}")),
+            "Power.rs duplicated {wording}"
+        );
         assert!(
             !division.contains(&format!("{wording:?}")),
             "Division.rs duplicated {wording}"

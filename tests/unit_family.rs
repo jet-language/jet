@@ -122,11 +122,7 @@ fn run() {
     print(i)
 }
 "#;
-    tir_support::assert_tiers_agree(
-        "imaginary_literal_tiers",
-        source,
-        "-7 + 24i\n5.0\n9\n",
-    );
+    tir_support::assert_tiers_agree("imaginary_literal_tiers", source, "-7 + 24i\n5.0\n9\n");
 }
 
 #[test]
@@ -136,7 +132,10 @@ fn derived_dimension_requires_one_scale_one_anchor() {
     assert!(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}");
     let diagnostics = jet::Parser::parse(&tokens).expect_err("a derived dimension needs `base:`");
     assert_eq!(
-        diagnostics.iter().map(|diagnostic| diagnostic.code.as_str()).collect::<Vec<_>>(),
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>(),
         ["E0003"]
     );
     assert_eq!(
@@ -241,7 +240,11 @@ fn run() {
 
     let (code, stdout, stderr) =
         tir_support::build_and_run_full("jet_unit_family", "standard_force_ratio", src);
-    assert_eq!((code, stdout.as_str()), (0, "44482216152605.0\n"), "{stderr}");
+    assert_eq!(
+        (code, stdout.as_str()),
+        (0, "44482216152605.0\n"),
+        "{stderr}"
+    );
 
     let dir = common::unique_tmp("standard_force_ratio_tiers");
     std::fs::create_dir_all(&dir).unwrap();
@@ -367,7 +370,10 @@ fn scaled_and_affine_metadata_is_exact_and_normalized() {
     celsius(scale: 2/2, offset: 54630/200)
 }"#,
     );
-    assert_eq!(family.base.as_ref().map(|base| base.0.as_str()), Some("kelvin"));
+    assert_eq!(
+        family.base.as_ref().map(|base| base.0.as_str()),
+        Some("kelvin")
+    );
     let celsius = family
         .members
         .iter()
@@ -404,7 +410,10 @@ fn zero_ratio_denominator_points_at_the_denominator() {
         .find(|diagnostic| diagnostic.what.contains("denominator is zero"))
         .expect("zero-denominator diagnostic");
     let zero = src.rfind('0').unwrap();
-    assert_eq!(diagnostic.span, Some(jet::Diagnostics::Span::new(zero, zero + 1)));
+    assert_eq!(
+        diagnostic.span,
+        Some(jet::Diagnostics::Span::new(zero, zero + 1))
+    );
 }
 
 #[test]
@@ -415,7 +424,11 @@ fn affine_family_mints_point_and_delta_types_only() {
     celsius(scale: 1, offset: 27315/100)
 }"#,
     );
-    let names: Vec<_> = family.distinct_defs().into_iter().map(|def| def.name).collect();
+    let names: Vec<_> = family
+        .distinct_defs()
+        .into_iter()
+        .map(|def| def.name)
+        .collect();
     assert_eq!(
         names,
         ["KelvinPoint", "KelvinDelta", "CelsiusPoint", "CelsiusDelta"]
@@ -433,7 +446,8 @@ pub fn length() Millimeter { return Millimeter.from_float(1.0)? }
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty());
     let program = jet::Parser::parse(&tokens).expect("scaled family should parse");
-    let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "geometry", "1.0.0");
+    let snapshot =
+        jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "geometry", "1.0.0");
     assert_eq!(
         snapshot.funcs[0].signature,
         "fn length() Millimeter{package=geometry; family=Length; base=Meter; dimension=geometry%3A%3ALength:1; scale=1/1000; provenance=Rational; offset=0}"
@@ -479,7 +493,10 @@ fn run() {
 }
 "#;
     let codes = codes_of(src);
-    assert!(codes.is_empty(), "Point/Delta model must be one complete algebra: {codes:?}");
+    assert!(
+        codes.is_empty(),
+        "Point/Delta model must be one complete algebra: {codes:?}"
+    );
 }
 
 #[test]
@@ -500,7 +517,10 @@ fn run() {
 }
 "#;
     let codes = codes_of(src);
-    assert!(codes.is_empty(), "exact implicit conversions must share one path: {codes:?}");
+    assert!(
+        codes.is_empty(),
+        "exact implicit conversions must share one path: {codes:?}"
+    );
 }
 
 #[test]
@@ -514,8 +534,13 @@ fn takes_meter(value: Meter) { print("{(value.raw())}") }
 fn run() { takes_meter(3000millimeter) }
 "#;
     let codes = codes_of(src);
-    assert!(codes.is_empty(), "3000 millimeters is exactly 3 meters: {codes:?}");
-    let generated = jet::compile(src).expect("implicit exact conversion should compile").rust;
+    assert!(
+        codes.is_empty(),
+        "3000 millimeters is exactly 3 meters: {codes:?}"
+    );
+    let generated = jet::compile(src)
+        .expect("implicit exact conversion should compile")
+        .rust;
     assert!(
         generated.contains("Meter(match jet_unit_conversion_exact("),
         "implicit conversion must lower through the shared TIR UnitConvert path"
@@ -539,25 +564,22 @@ fn takes_meter(value: Meter) { print(value.raw()) }
         );
     }
 
-    let direct_negative = format!(
-        "{family}\nfn run() {{ takes_meter(Double.from_float(-1.0)) }}\n"
-    );
+    let direct_negative =
+        format!("{family}\nfn run() {{ takes_meter(Double.from_float(-1.0)) }}\n");
     assert!(
         check_codes_of(&direct_negative).is_empty(),
         "direct negative literal has an exact scale-2 conversion"
     );
 
-    let bound_negative = format!(
-        "{family}\nfn run() {{ value :: Double.from_float(-2.0)\n takes_meter(value) }}\n"
-    );
+    let bound_negative =
+        format!("{family}\nfn run() {{ value :: Double.from_float(-2.0)\n takes_meter(value) }}\n");
     assert!(
         check_codes_of(&bound_negative).is_empty(),
         "immutable negative literal binding preserves its exact value"
     );
 
-    let inexact_negative = format!(
-        "{family}\nfn run() {{ takes_meter(Double.from_float(-0.25)) }}\n"
-    );
+    let inexact_negative =
+        format!("{family}\nfn run() {{ takes_meter(Double.from_float(-0.25)) }}\n");
     assert_eq!(
         check_codes_of(&inexact_negative),
         vec!["E0127"],
@@ -757,15 +779,7 @@ fn rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits() {
 
     for scale in ["9007199254740993", "-9007199254740993"] {
         assert_eq!(
-            jet_foundation::jet_unit_conversion_rounded(
-                1.0,
-                scale,
-                "1",
-                "0",
-                "1",
-                NearestEven,
-                0,
-            ),
+            jet_foundation::jet_unit_conversion_rounded(1.0, scale, "1", "0", "1", NearestEven, 0,),
             Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
             "rounded conversion must not add Float precision loss"
         );
@@ -788,15 +802,7 @@ fn rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits() {
             );
         }
         assert_eq!(
-            jet_foundation::jet_unit_conversion_rounded(
-                1.0,
-                "1",
-                "3",
-                "0",
-                "1",
-                mode,
-                i64::MAX,
-            ),
+            jet_foundation::jet_unit_conversion_rounded(1.0, "1", "3", "0", "1", mode, i64::MAX,),
             Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
             "huge precision must reject a rounded rational Float cannot represent"
         );
@@ -822,10 +828,34 @@ fn rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits() {
     let just_below_negative_one = format!("-{just_above_one}");
     let halfway_below_negative_one = format!("-{halfway_above_one}");
     for (scale, toward_zero, floor, ceiling, nearest) in [
-        (just_above_one.as_str(), Ok(1.0), Ok(1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(1.0)),
-        (just_below_negative_one.as_str(), Ok(-1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(-1.0), Ok(-1.0)),
-        (halfway_above_one.as_str(), Ok(1.0), Ok(1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(1.0)),
-        (halfway_below_negative_one.as_str(), Ok(-1.0), Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE), Ok(-1.0), Ok(-1.0)),
+        (
+            just_above_one.as_str(),
+            Ok(1.0),
+            Ok(1.0),
+            Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+            Ok(1.0),
+        ),
+        (
+            just_below_negative_one.as_str(),
+            Ok(-1.0),
+            Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+            Ok(-1.0),
+            Ok(-1.0),
+        ),
+        (
+            halfway_above_one.as_str(),
+            Ok(1.0),
+            Ok(1.0),
+            Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+            Ok(1.0),
+        ),
+        (
+            halfway_below_negative_one.as_str(),
+            Ok(-1.0),
+            Err(jet_foundation::UNIT_ROUNDING_UNREPRESENTABLE),
+            Ok(-1.0),
+            Ok(-1.0),
+        ),
     ] {
         for (mode, expected) in [
             (TowardZero, toward_zero),
@@ -858,7 +888,10 @@ fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q { return value }
 fn run() { source :: 3meter; value :: keep(^source); print("{(value.raw())}") }
 "#;
     let codes = codes_of(src);
-    assert!(codes.is_empty(), "Quantity bounds must accept a determined concrete unit: {codes:?}");
+    assert!(
+        codes.is_empty(),
+        "Quantity bounds must accept a determined concrete unit: {codes:?}"
+    );
 }
 
 #[test]
@@ -942,7 +975,9 @@ fn run() {
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0905"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0905"),
         "explicit imported type arguments must satisfy Quantity bounds: {diagnostics:?}"
     );
 }
@@ -957,8 +992,7 @@ fn quantity_bounds_accept_open_dimensions_but_reject_unknown_kinds() {
         "open dimension names must not come from a compiler table"
     );
 
-    let bad_kind =
-        "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) Q { return value }";
+    let bad_kind = "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) Q { return value }";
     let (tokens, lex) = jet::Lexer::lex(bad_kind);
     assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
     assert!(jet::Parser::parse(&tokens).is_err());
@@ -971,12 +1005,8 @@ fn quantity_generic_bounds_are_frozen_into_public_api_identity() {
         assert!(diagnostics.is_empty());
         jet::Parser::parse(&tokens).expect("public Quantity generic should parse")
     };
-    let length = parse(
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q { return value }",
-    );
-    let time = parse(
-        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) Q { return value }",
-    );
+    let length = parse("pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q { return value }");
+    let time = parse("pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) Q { return value }");
     let length = jet::Publish::ApiFreeze::snapshot_from_items(&length.items, "units", "1.0.0");
     let time = jet::Publish::ApiFreeze::snapshot_from_items(&time.items, "units", "1.0.0");
     assert_eq!(
@@ -1087,7 +1117,9 @@ fn run() {
     print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
 }
 "#;
-    let generated = jet::compile(src).expect("explicit unit conversions should compile").rust;
+    let generated = jet::compile(src)
+        .expect("explicit unit conversions should compile")
+        .rust;
     assert!(
         !generated.contains("fn __jet_from_"),
         "unit conversion behavior belongs to TIR, not generated destination methods"
@@ -1248,9 +1280,18 @@ fn run() {
 "#;
     let out = jet::compile(src).expect("dimensionally valid program should compile");
     assert!(out.rust.contains("__jet_Meter"));
-    assert!(out.rust.contains(".0 /"), "unit division must erase to base arithmetic");
-    assert!(out.rust.contains(".0 *"), "unit multiplication must erase to base arithmetic");
-    assert!(!out.rust.contains("Quantity<"), "dimension facts must not reach emitted Rust");
+    assert!(
+        out.rust.contains(".0 /"),
+        "unit division must erase to base arithmetic"
+    );
+    assert!(
+        out.rust.contains(".0 *"),
+        "unit multiplication must erase to base arithmetic"
+    );
+    assert!(
+        !out.rust.contains("Quantity<"),
+        "dimension facts must not reach emitted Rust"
+    );
 }
 
 #[test]
@@ -1355,7 +1396,9 @@ fn run() {
                 stdout,
                 "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
             ),
-            RunOutcome::Problems(diagnostics) => panic!("JIT rejected unit display: {diagnostics:?}"),
+            RunOutcome::Problems(diagnostics) => {
+                panic!("JIT rejected unit display: {diagnostics:?}")
+            }
         }
     }
 
@@ -1457,7 +1500,10 @@ fn run() {}
         "rustc rejected custom unit Display web output:\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
-    assert!(wasm_bin.is_file(), "web build did not produce a Wasm artifact");
+    assert!(
+        wasm_bin.is_file(),
+        "web build did not produce a Wasm artifact"
+    );
 }
 
 #[test]
@@ -1643,7 +1689,10 @@ fn run() {}
         "rustc rejected imported unit Display web output:\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
-    assert!(wasm_bin.is_file(), "web build did not produce a Wasm artifact");
+    assert!(
+        wasm_bin.is_file(),
+        "web build did not produce a Wasm artifact"
+    );
 }
 
 #[test]
@@ -1653,7 +1702,11 @@ fn physical_dimension_mismatch_is_rejected_in_sema() {
 fn run() { bad :: 1meter + 1s }
 "#;
     let codes = codes_of(src);
-    assert_eq!(codes, vec!["E0359"], "expected one dimension mismatch, got {codes:?}");
+    assert_eq!(
+        codes,
+        vec!["E0359"],
+        "expected one dimension mismatch, got {codes:?}"
+    );
 }
 
 #[test]
@@ -1667,7 +1720,8 @@ fn run() { bad :: 1meter < 1.0 }
 
 #[test]
 fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
-    let mut src = String::from("#UnitFamily(Length, dimension) { meter }\nfn run() {\n    q0 :: 1meter\n");
+    let mut src =
+        String::from("#UnitFamily(Length, dimension) { meter }\nfn run() {\n    q0 :: 1meter\n");
     for exponent in 1..=31 {
         src.push_str(&format!(
             "    q{exponent} :: q{} * q{}\n",
@@ -1680,7 +1734,9 @@ fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
     let diagnostics = result
         .expect("checked dimension overflow must not panic")
         .expect_err("2^31 Length exponent must be rejected in sema");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0359"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E0359"));
 }
 
 #[test]
@@ -1708,7 +1764,11 @@ fn run() {
         let (code, stdout) = tir_support::build_and_run_multi(
             "quantity_composite_same_leaf",
             "main.jet",
-            &[("length.jet", length), ("time.jet", time), ("main.jet", good)],
+            &[
+                ("length.jet", length),
+                ("time.jet", time),
+                ("main.jet", good),
+            ],
         );
         assert_eq!(code, 0);
         assert_eq!(stdout, "ok\n");
@@ -1720,15 +1780,23 @@ fn run() {
     std::fs::write(dir.join("length.jet"), length).unwrap();
     std::fs::write(dir.join("time.jet"), time).unwrap();
     let entry = dir.join("main.jet");
-    std::fs::write(&entry, r#"
+    std::fs::write(
+        &entry,
+        r#"
 use "length" as length
 use "time" as time
 fn run() { bad :: length.first(length.sample()) + time.first(time.sample()) }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     let src = std::fs::read_to_string(&entry).unwrap();
     let result = jet::compile_with_path(&src, entry.to_str().unwrap());
     let _ = std::fs::remove_dir_all(&dir);
-    let codes: Vec<_> = result.unwrap_err().into_iter().map(|d| d.code.to_string()).collect();
+    let codes: Vec<_> = result
+        .unwrap_err()
+        .into_iter()
+        .map(|d| d.code.to_string())
+        .collect();
     assert_eq!(codes, vec!["E0359"]);
 }
 
@@ -1782,15 +1850,15 @@ fn currency_keeps_nominal_arithmetic_behavior() {
         FAMILY
     );
     let codes = codes_of(&src);
-    assert!(codes.is_empty(), "Currency is outside physical dimension math: {codes:?}");
+    assert!(
+        codes.is_empty(),
+        "Currency is outside physical dimension math: {codes:?}"
+    );
 }
 
 #[test]
 fn physical_dimensions_cross_file_boundaries_canonically() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_quantity_packages_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_quantity_packages_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -1885,15 +1953,14 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
         "ordinary Prelude units have one owner across packages: {diagnostics:?}"
     );
     for module in &bundle.modules {
-        let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(
-            &module.items,
-            &module.alias,
-            "0.1.0",
-        );
+        let snapshot =
+            jet::Publish::ApiFreeze::snapshot_from_items(&module.items, &module.alias, "0.1.0");
         for function in snapshot.funcs {
             if function.name == "local" || function.name == "distance" {
                 assert!(
-                    function.signature.contains("package=core.units; family=Length"),
+                    function
+                        .signature
+                        .contains("package=core.units; family=Length"),
                     "checked standard-unit API identity must use its semantic owner: {}",
                     function.signature
                 );
@@ -1936,7 +2003,10 @@ fn qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fai
     .unwrap();
     let diagnostics = jet::check_with_path(&ambiguous.to_string_lossy());
     assert_eq!(
-        diagnostics.iter().map(|diagnostic| diagnostic.code.as_str()).collect::<Vec<_>>(),
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>(),
         ["E0905"],
         "an unqualified collision must not depend on import order: {diagnostics:?}"
     );
@@ -1948,10 +2018,7 @@ fn qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fai
 
 #[test]
 fn custom_axis_identity_ignores_checkout_root_and_separates_packages() {
-    fn resolved_axis(
-        root: &std::path::Path,
-        package: &str,
-    ) -> (jet::AST::Dimension, String) {
+    fn resolved_axis(root: &std::path::Path, package: &str) -> (jet::AST::Dimension, String) {
         std::fs::create_dir_all(root).unwrap();
         std::fs::write(
             root.join("package.jet"),
@@ -1991,12 +2058,24 @@ fn custom_axis_identity_ignores_checkout_root_and_separates_packages() {
     let first = resolved_axis(&scratch.join("checkout-a"), "warehouse");
     let second = resolved_axis(&scratch.join("checkout-b"), "warehouse");
     let distinct = resolved_axis(&scratch.join("checkout-c"), "ledger");
-    assert_eq!(first.0, second.0, "checkout roots are not semantic identity");
+    assert_eq!(
+        first.0, second.0,
+        "checkout roots are not semantic identity"
+    );
     assert_eq!(first.1, second.1, "API identity must ignore checkout roots");
-    assert_ne!(first.0, distinct.0, "distinct package metadata must not collide");
-    assert_ne!(first.1, distinct.1, "distinct package APIs must not collide");
+    assert_ne!(
+        first.0, distinct.0,
+        "distinct package metadata must not collide"
+    );
+    assert_ne!(
+        first.1, distinct.1,
+        "distinct package APIs must not collide"
+    );
     assert!(
-        !first.0.identity().contains(&scratch.to_string_lossy().as_ref()),
+        !first
+            .0
+            .identity()
+            .contains(&scratch.to_string_lossy().as_ref()),
         "serialized dimension identity must not expose a checkout path"
     );
 }

@@ -71,7 +71,9 @@ fn storing_a_quotient_in_a_whole_number_points_at_floor_division() {
         let path = dir.join("intdiv_compound.jet");
         std::fs::write(&path, src).unwrap();
         let shown = path.to_string_lossy().into_owned();
-        let diags = jet::compile_with_path(src, &shown).err().unwrap_or_default();
+        let diags = jet::compile_with_path(src, &shown)
+            .err()
+            .unwrap_or_default();
         let rendered = jet::render_diagnostics(&shown, src, &diags);
         assert!(
             diags.iter().any(|d| d.code == "E0108"),
@@ -127,11 +129,7 @@ fn run() {{
 }}
 "
     );
-    assert_tiers_agree(
-        "intdiv_tiers",
-        &src,
-        "3.5\n3.0\n-3.5\n0.25\n8.5\n8\n",
-    );
+    assert_tiers_agree("intdiv_tiers", &src, "3.5\n3.0\n-3.5\n0.25\n8.5\n8\n");
 }
 
 /// #1484: fixed-width `/` by zero must use the Prelude wording and exit 70 —

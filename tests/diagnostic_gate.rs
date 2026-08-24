@@ -147,7 +147,10 @@ fn pure_teaching_fails_default_run() {
         String::from_utf8_lossy(&run.stdout)
     );
     assert!(build_text.contains("E0927") && run_text.contains("E0927"));
-    assert!(!run_text.contains("hi"), "jet run must not execute past the gate");
+    assert!(
+        !run_text.contains("hi"),
+        "jet run must not execute past the gate"
+    );
 }
 
 /// `jet dev` / interpreter deopt entry uses the same gate via `checked_bundle`.

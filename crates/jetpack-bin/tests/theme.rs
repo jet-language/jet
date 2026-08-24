@@ -14,7 +14,10 @@ fn redirected_help_auto_is_ansi_free() {
         .unwrap();
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("jetpack —"));
-    assert!(!output.stdout.contains(&0x1b), "redirected help contained ANSI");
+    assert!(
+        !output.stdout.contains(&0x1b),
+        "redirected help contained ANSI"
+    );
 }
 
 #[test]

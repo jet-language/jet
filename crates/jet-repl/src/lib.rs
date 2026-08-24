@@ -38,13 +38,13 @@
 // D-ARCH-SOURCE1=A: the REPL is a real outer seam over the compiler driver.
 // Re-export inward compiler vocabulary so moved subsystem source keeps its
 // established `crate::AST`/`crate::Comptime` paths without depending on root.
-pub use jet_driver::{AST, Comptime, Diagnostics, Lexer, Loader, Manifest, Parser, Sema, Syntax};
+pub use jet_driver::{Comptime, Diagnostics, Lexer, Loader, Manifest, Parser, Sema, Syntax, AST};
 
 pub mod SemanticSymbols;
 pub mod Term;
 
-use jet_foundation::Terminal::{ColorChoice, Theme};
 use jet_foundation::Authority::{answer, parse_right, Holds, Verdict};
+use jet_foundation::Terminal::{ColorChoice, Theme};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -99,15 +99,24 @@ impl ReplFlags {
 }
 
 fn canonical_flag(value: &str) -> String {
-    parse_right(value)
-        .unwrap_or_else(|| value.to_ascii_lowercase())
+    parse_right(value).unwrap_or_else(|| value.to_ascii_lowercase())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PromptChoice { Once, Session, Deny, Continue, Revoke }
+pub(crate) enum PromptChoice {
+    Once,
+    Session,
+    Deny,
+    Continue,
+    Revoke,
+}
 
 pub(crate) trait EffectPrompt {
-    fn choose(&mut self, request: &crate::Comptime::ReplEffectRequest, reused: bool) -> PromptChoice;
+    fn choose(
+        &mut self,
+        request: &crate::Comptime::ReplEffectRequest,
+        reused: bool,
+    ) -> PromptChoice;
     fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
         if !prompt.is_empty() {
             print!("{prompt}");
@@ -166,7 +175,10 @@ impl ReplPolicy {
         &'a mut self,
         prompt: Option<&'a mut dyn EffectPrompt>,
     ) -> ReplAuthorization<'a> {
-        ReplAuthorization { policy: self, prompt }
+        ReplAuthorization {
+            policy: self,
+            prompt,
+        }
     }
 }
 
@@ -176,20 +188,46 @@ struct ReplAuthorization<'a> {
 }
 
 impl ReplAuthorization<'_> {
-    fn e1803(&self, request: &crate::Comptime::ReplEffectRequest, why: &str, span: crate::Diagnostics::Span) -> Diagnostic {
+    fn e1803(
+        &self,
+        request: &crate::Comptime::ReplEffectRequest,
+        why: &str,
+        span: crate::Diagnostics::Span,
+    ) -> Diagnostic {
         Diagnostic::error(
             "E1803",
-            format!("{}.{} for `{}` was denied", request.root, request.operation, request.resource),
+            format!(
+                "{}.{} for `{}` was denied",
+                request.root, request.operation, request.resource
+            ),
             format!("{why}; the host operation did not run"),
-            format!("approve this exact operation interactively, or restart with `jet repl --allow-{}`", request.root.to_ascii_lowercase()),
+            format!(
+                "approve this exact operation interactively, or restart with `jet repl --allow-{}`",
+                request.root.to_ascii_lowercase()
+            ),
             Some(span),
         )
     }
 
-    fn validate_file_target(&self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
-        if request.root != "FS" { return Ok(()); }
+    fn validate_file_target(
+        &self,
+        request: &crate::Comptime::ReplEffectRequest,
+        span: crate::Diagnostics::Span,
+    ) -> Result<(), Diagnostic> {
+        if request.root != "FS" {
+            return Ok(());
+        }
         let relative = std::path::Path::new(&request.resource);
-        if relative.is_absolute() || relative.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
+        if relative.is_absolute()
+            || relative.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+        {
             return Err(self.e1803(request, "filesystem ability is confined to the REPL project root and rejects absolute or parent paths", span));
         }
         let mut cursor = self.policy.root.clone();
@@ -197,7 +235,11 @@ impl ReplAuthorization<'_> {
             if let std::path::Component::Normal(part) = component {
                 cursor.push(part);
                 if std::fs::symlink_metadata(&cursor).is_ok_and(|m| m.file_type().is_symlink()) {
-                    return Err(self.e1803(request, "filesystem ability rejects symlink traversal", span));
+                    return Err(self.e1803(
+                        request,
+                        "filesystem ability rejects symlink traversal",
+                        span,
+                    ));
                 }
             }
         }
@@ -206,9 +248,13 @@ impl ReplAuthorization<'_> {
 }
 
 impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
-    fn preflight(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
-        let needs_handles = request.root == "FS"
-            || (request.root == "Exec" && request.operation == "Run");
+    fn preflight(
+        &mut self,
+        request: &crate::Comptime::ReplEffectRequest,
+        span: crate::Diagnostics::Span,
+    ) -> Result<(), Diagnostic> {
+        let needs_handles =
+            request.root == "FS" || (request.root == "Exec" && request.operation == "Run");
         if needs_handles && !self.policy.handles_available {
             return Err(self.e1803(
                 request,
@@ -219,23 +265,33 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
         Ok(())
     }
 
-    fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+    fn authorize(
+        &mut self,
+        request: &crate::Comptime::ReplEffectRequest,
+        span: crate::Diagnostics::Span,
+    ) -> Result<(), Diagnostic> {
         self.validate_file_target(request, span)?;
         let root = parse_right(&request.root).unwrap_or_else(|| request.root.clone());
         let allow: Holds = self.policy.flags.allow.iter().cloned().collect();
         let deny: Holds = self.policy.flags.deny.iter().cloned().collect();
         let verdict = answer(&allow, &deny, &root);
         if verdict == Verdict::Denied {
-            return Err(self.e1803(request, "an explicit `--deny` policy overrides every prompt and allowance", span));
+            return Err(self.e1803(
+                request,
+                "an explicit `--deny` policy overrides every prompt and allowance",
+                span,
+            ));
         }
-        if verdict == Verdict::Allowed
-            && (request.operation != "Exit" || self.prompt.is_none())
-        {
+        if verdict == Verdict::Allowed && (request.operation != "Exit" || self.prompt.is_none()) {
             return Ok(());
         }
         let reused = self.policy.session.contains(request);
         let Some(prompt) = self.prompt.as_deref_mut() else {
-            return Err(self.e1803(request, "non-TTY REPL sessions never prompt and no matching `--allow` flag was supplied", span));
+            return Err(self.e1803(
+                request,
+                "non-TTY REPL sessions never prompt and no matching `--allow` flag was supplied",
+                span,
+            ));
         };
         match prompt.choose(request, reused) {
             PromptChoice::Once | PromptChoice::Continue => Ok(()),
@@ -251,7 +307,11 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
                         self.policy.session.insert(request.clone());
                         Ok(())
                     }
-                    _ => Err(self.e1803(request, "session ability was revoked and the replacement request was denied", span)),
+                    _ => Err(self.e1803(
+                        request,
+                        "session ability was revoked and the replacement request was denied",
+                        span,
+                    )),
                 }
             }
             PromptChoice::Deny => Err(self.e1803(request, "interactive ability was denied", span)),
@@ -321,7 +381,11 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
     }
 
     fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
-        self.policy.root_dir.as_ref().map_err(clone_io_error)?.try_clone()
+        self.policy
+            .root_dir
+            .as_ref()
+            .map_err(clone_io_error)?
+            .try_clone()
     }
 }
 
@@ -356,9 +420,8 @@ mod rooted_fs {
     }
 
     fn c_name(name: &OsStr) -> std::io::Result<CString> {
-        CString::new(name.as_bytes()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL")
-        })
+        CString::new(name.as_bytes())
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"))
     }
 
     fn components(path: &str) -> std::io::Result<Vec<&OsStr>> {
@@ -501,12 +564,24 @@ mod rooted_fs {
         ))
     }
 
-    pub fn read(_: &File, _: &str) -> std::io::Result<Vec<u8>> { unsupported() }
-    pub fn write(_: &File, _: &str, _: &[u8], _: bool) -> std::io::Result<()> { unsupported() }
-    pub fn exists(_: &File, _: &str) -> std::io::Result<bool> { unsupported() }
-    pub fn is_dir(_: &File, _: &str) -> std::io::Result<bool> { unsupported() }
-    pub fn create_dir(_: &File, _: &str) -> std::io::Result<()> { unsupported() }
-    pub fn remove(_: &File, _: &str) -> std::io::Result<()> { unsupported() }
+    pub fn read(_: &File, _: &str) -> std::io::Result<Vec<u8>> {
+        unsupported()
+    }
+    pub fn write(_: &File, _: &str, _: &[u8], _: bool) -> std::io::Result<()> {
+        unsupported()
+    }
+    pub fn exists(_: &File, _: &str) -> std::io::Result<bool> {
+        unsupported()
+    }
+    pub fn is_dir(_: &File, _: &str) -> std::io::Result<bool> {
+        unsupported()
+    }
+    pub fn create_dir(_: &File, _: &str) -> std::io::Result<()> {
+        unsupported()
+    }
+    pub fn remove(_: &File, _: &str) -> std::io::Result<()> {
+        unsupported()
+    }
 }
 
 /// Effect markers used to classify a Stmts turn as "effectful" for
@@ -515,9 +590,24 @@ mod rooted_fs {
 /// asks for one extra confirmation; a false negative would silently replay
 /// a side effect, which the ratified design forbids).
 const EFFECT_MARKERS: &[&str] = &[
-    "print(", "eprint(", "input(", ".write(", ".append(", ".delete(", ".remove_file(",
-    "fs.write", "fs.append", "fs.delete", "fs.remove", "io.print", "io.eprint",
-    "io.read_line", "io.write", ".send(", ".emit(", ".emit_async(",
+    "print(",
+    "eprint(",
+    "input(",
+    ".write(",
+    ".append(",
+    ".delete(",
+    ".remove_file(",
+    "fs.write",
+    "fs.append",
+    "fs.delete",
+    "fs.remove",
+    "io.print",
+    "io.eprint",
+    "io.read_line",
+    "io.write",
+    ".send(",
+    ".emit(",
+    ".emit_async(",
 ];
 
 /// D-FE-REPL-RERUN1=A: whether `input` looks like it produced (or would
@@ -536,23 +626,51 @@ struct TrackingAuthorizer<'a> {
 }
 
 impl crate::Comptime::ReplAuthorizer for TrackingAuthorizer<'_> {
-    fn preflight(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+    fn preflight(
+        &mut self,
+        request: &crate::Comptime::ReplEffectRequest,
+        span: crate::Diagnostics::Span,
+    ) -> Result<(), Diagnostic> {
         self.inner.preflight(request, span)
     }
-    fn authorize(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
+    fn authorize(
+        &mut self,
+        request: &crate::Comptime::ReplEffectRequest,
+        span: crate::Diagnostics::Span,
+    ) -> Result<(), Diagnostic> {
         let result = self.inner.authorize(request, span);
-        if result.is_ok() { self.observed = true; }
+        if result.is_ok() {
+            self.observed = true;
+        }
         result
     }
-    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> { self.inner.fs_read(path) }
-    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> { self.inner.fs_write(path, bytes, append) }
-    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool> { self.inner.fs_exists(path) }
-    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool> { self.inner.fs_is_dir(path) }
-    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> { self.inner.fs_create_dir(path) }
-    fn fs_remove(&mut self, path: &str) -> std::io::Result<()> { self.inner.fs_remove(path) }
-    fn verified_root(&mut self) -> std::io::Result<std::fs::File> { self.inner.verified_root() }
-    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> { self.inner.read_input(prompt) }
-    fn reset_session(&mut self) { self.inner.reset_session() }
+    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> {
+        self.inner.fs_read(path)
+    }
+    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> {
+        self.inner.fs_write(path, bytes, append)
+    }
+    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool> {
+        self.inner.fs_exists(path)
+    }
+    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool> {
+        self.inner.fs_is_dir(path)
+    }
+    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> {
+        self.inner.fs_create_dir(path)
+    }
+    fn fs_remove(&mut self, path: &str) -> std::io::Result<()> {
+        self.inner.fs_remove(path)
+    }
+    fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
+        self.inner.verified_root()
+    }
+    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
+        self.inner.read_input(prompt)
+    }
+    fn reset_session(&mut self) {
+        self.inner.reset_session()
+    }
 }
 
 const TERMINAL_SHIFT_IN: &str = "\x0f";
@@ -847,7 +965,9 @@ impl Session {
     pub fn record_stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             if let Stmt::Val(binding) = stmt {
-                if binding.name == "__repl_echo__" { continue; }
+                if binding.name == "__repl_echo__" {
+                    continue;
+                }
                 if binding.mutable {
                     self.mutable_names.insert(binding.name.clone());
                 } else {
@@ -1109,8 +1229,15 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         let _ = writeln!(out_sink, "note: session is empty — nothing to run");
         return;
     }
-    if session.turns.iter().any(|turn| turn.input.contains("#Abilities")) {
-        let _ = writeln!(out_sink, "Error [E1803]: `:run` will not replay effectful turns");
+    if session
+        .turns
+        .iter()
+        .any(|turn| turn.input.contains("#Abilities"))
+    {
+        let _ = writeln!(
+            out_sink,
+            "Error [E1803]: `:run` will not replay effectful turns"
+        );
         let _ = writeln!(out_sink, " Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
         let _ = writeln!(out_sink, " Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`");
         return;
@@ -1177,7 +1304,11 @@ fn cmd_run_transcript(session: &Session) -> String {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
         return "note: session is empty — nothing to run\n".to_string();
     }
-    if session.turns.iter().any(|turn| turn.input.contains("#Abilities")) {
+    if session
+        .turns
+        .iter()
+        .any(|turn| turn.input.contains("#Abilities"))
+    {
         return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\n".to_string();
     }
 
@@ -1457,13 +1588,9 @@ pub(crate) fn update_core_imports_from_ledger(
         if matches!(import.kind, ImportKind::Unqualified { .. }) {
             for binding in import.walk_bindings() {
                 let local = binding.local;
-                if let Some(binding) = bundle
-                    .name_ledger
-                    .effective_alias(module_idx, &local)
-                {
+                if let Some(binding) = bundle.name_ledger.effective_alias(module_idx, &local) {
                     let target = binding.target.as_str();
-                    let module = if target == "core"
-                        || crate::Syntax::is_known_core_module(target)
+                    let module = if target == "core" || crate::Syntax::is_known_core_module(target)
                     {
                         Some(target.to_string())
                     } else {
@@ -1543,15 +1670,11 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.db") {
         return Some("`core.db` (SQLite)");
     }
-    if import != Some("core.reactive.loadable")
-        && t.contains("core.reactive")
-    {
+    if import != Some("core.reactive.loadable") && t.contains("core.reactive") {
         return Some("`core.reactive`");
     }
     // Beginner `core.crypto` stays native-only; expert pure ports are tier-0.
-    if import != Some("core.crypto.expert")
-        && t.contains("core.crypto")
-    {
+    if import != Some("core.crypto.expert") && t.contains("core.crypto") {
         return Some("`core.crypto`");
     }
     if t.contains("core.auth") {
@@ -1611,8 +1734,7 @@ pub(crate) fn raw_input_is_complete(text: &str) -> bool {
             // construct (quote/comment/interpolation). If the error ends
             // earlier, another line cannot repair it and Enter must submit.
             return !lex_diags.iter().any(|diag| {
-                diag.code == "E0002"
-                    && diag.span.is_some_and(|span| span.end >= cutoff)
+                diag.code == "E0002" && diag.span.is_some_and(|span| span.end >= cutoff)
             });
         }
         match crate::Parser::parse_for_check(&tokens) {
@@ -1837,9 +1959,7 @@ fn type_check_stmts(
         session.import_src(),
         session.accumulated_src(),
     );
-    let prog_src = format!(
-        "{base_src}\nfn __repl_check_{step}__() {{\n{check_src}\n}}\n"
-    );
+    let prog_src = format!("{base_src}\nfn __repl_check_{step}__() {{\n{check_src}\n}}\n");
     let mut body = session.sema_stmts.clone();
     body.extend_from_slice(stmts);
     run_sema_with_body(
@@ -2226,7 +2346,11 @@ fn cmd_load(
 
 fn cmd_type(name: &str, session: &Session, color: bool) {
     if let Some(v) = session.scope.get(name) {
-        let ty = session.binding_types.get(name).map(|t| t.name()).unwrap_or_else(|| type_name(v).to_string());
+        let ty = session
+            .binding_types
+            .get(name)
+            .map(|t| t.name())
+            .unwrap_or_else(|| type_name(v).to_string());
         println!("{} : {}", name, ty);
     } else if session.func_defs.contains_key(name) {
         println!("{} : fn", name);
@@ -2242,7 +2366,10 @@ fn cmd_type(name: &str, session: &Session, color: bool) {
 // ── diagnostic rendering ───────────────────────────────────────────────────
 
 fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
-    eprint!("{}", crate::Diagnostics::render_all_colored(file, src, diags, color));
+    eprint!(
+        "{}",
+        crate::Diagnostics::render_all_colored(file, src, diags, color)
+    );
     let n = diags.len();
     eprintln!("{} problem{} found", n, if n == 1 { "" } else { "s" });
 }
@@ -2261,7 +2388,10 @@ pub fn run(project_dir: Option<&str>, flags: ReplFlags) -> i32 {
     use std::io::IsTerminal;
     let color = flags.color.resolve(io::stdout().is_terminal());
     let raw_guard = Terminal::RawGuard::enable();
-    println!("{}", Render::render_banner(env!("CARGO_PKG_VERSION"), color));
+    println!(
+        "{}",
+        Render::render_banner(env!("CARGO_PKG_VERSION"), color)
+    );
     println!();
     eprintln!(
         "{}",
@@ -2340,7 +2470,15 @@ fn run_cooked(project_dir: Option<&str>, color: bool, flags: ReplFlags) -> i32 {
         }
 
         let mut authorizer = policy.authorizer(None);
-        if execute_line(trimmed, &mut session, &base_dir, color, false, false, &mut authorizer) {
+        if execute_line(
+            trimmed,
+            &mut session,
+            &base_dir,
+            color,
+            false,
+            false,
+            &mut authorizer,
+        ) {
             break;
         }
     }
@@ -2363,11 +2501,22 @@ fn rerun_cooked(
             return;
         }
     };
-    let original = session.turns.iter().find(|turn| turn.id == id).unwrap().input.clone();
+    let original = session
+        .turns
+        .iter()
+        .find(|turn| turn.id == id)
+        .unwrap()
+        .input
+        .clone();
     print!("edit turn {id} [{original}]: ");
     io::stdout().flush().ok();
     let mut edited = String::new();
-    if input.read_line(&mut edited).ok().filter(|n| *n > 0).is_none() {
+    if input
+        .read_line(&mut edited)
+        .ok()
+        .filter(|n| *n > 0)
+        .is_none()
+    {
         eprintln!("rerun cancelled at end of input");
         return;
     }
@@ -2383,8 +2532,13 @@ fn rerun_cooked(
     println!("{}", RerunPlan::render_replay_plan(&plan, color));
     let mut stale_from = None;
     for step in &plan.steps {
-        if step.kind != RerunPlan::StepKind::ConfirmEffect { continue; }
-        print!("replay effect turn {}? [y] replay  [s] skip and mark stale: ", step.turn_id);
+        if step.kind != RerunPlan::StepKind::ConfirmEffect {
+            continue;
+        }
+        print!(
+            "replay effect turn {}? [y] replay  [s] skip and mark stale: ",
+            step.turn_id
+        );
         io::stdout().flush().ok();
         let mut answer = String::new();
         if input.read_line(&mut answer).is_err() || !answer.trim().eq_ignore_ascii_case("y") {
@@ -2553,29 +2707,25 @@ pub(crate) fn execute_line(
         }
 
         InputKind::Stmts(stmts, suppress, check_src) => {
-            let (checked_stmts, checked_core_imports) = match type_check_stmts(
-                session,
-                &stmts,
-                session.step,
-                &check_src,
-            ) {
-                Ok(checked) => checked,
-                Err(errors) => {
-                    if !quiet {
-                        render_diags(&step_src, trimmed, &errors, color);
+            let (checked_stmts, checked_core_imports) =
+                match type_check_stmts(session, &stmts, session.step, &check_src) {
+                    Ok(checked) => checked,
+                    Err(errors) => {
+                        if !quiet {
+                            render_diags(&step_src, trimmed, &errors, color);
+                        }
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            errors
+                                .iter()
+                                .map(|d| format!("{}: {}", d.code, d.what))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        return false;
                     }
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    return false;
-                }
-            };
+                };
 
             // D-REPL8=A: detect which session bindings are moved by this input.
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
@@ -2601,7 +2751,10 @@ pub(crate) fn execute_line(
                 .map(|(k, v)| (k.clone(), v))
                 .collect();
             let mut sink = DevSink::new();
-            let mut tracking_authorizer = TrackingAuthorizer { inner: authorizer, observed: false };
+            let mut tracking_authorizer = TrackingAuthorizer {
+                inner: authorizer,
+                observed: false,
+            };
             // A turn commits as one transaction. Interpreter writes land in
             // this private scope and become session-visible only on success.
             let mut trial_scope = session.scope.clone();
@@ -2672,12 +2825,16 @@ pub(crate) fn execute_line(
                     if let Some(v) = echo_val {
                         if !matches!(v, CtValue::Unit) {
                             let shown = display_value(&v);
-                            let fold = fold_long_output.then(|| Render::fold_decision_for_value(&v)).flatten();
+                            let fold = fold_long_output
+                                .then(|| Render::fold_decision_for_value(&v))
+                                .flatten();
                             match fold {
                                 Some((count, elem_ty)) => {
                                     let marker = Render::render_fold_marker(count, &elem_ty, color);
                                     qprintln!("{}", marker);
-                                    summary.push_str(&Render::render_fold_marker(count, &elem_ty, false));
+                                    summary.push_str(&Render::render_fold_marker(
+                                        count, &elem_ty, false,
+                                    ));
                                     pending_unfold = Some(shown);
                                 }
                                 None => {
@@ -2694,7 +2851,13 @@ pub(crate) fn execute_line(
                         [only] => Some(only.clone()),
                         _ => None,
                     };
-                    session.record_turn_ex(trimmed, ReplTurnStatus::Ok, summary, had_effect, bound_name);
+                    session.record_turn_ex(
+                        trimmed,
+                        ReplTurnStatus::Ok,
+                        summary,
+                        had_effect,
+                        bound_name,
+                    );
                     if !quiet {
                         session.remember_success(trimmed);
                     }
@@ -2706,18 +2869,26 @@ pub(crate) fn execute_line(
                     }
                 }
                 Err(crate::Comptime::ReplStepError::Interrupted) => {
-                    qprintln!("Interrupted. External effects already performed were not rolled back.");
+                    qprintln!(
+                        "Interrupted. External effects already performed were not rolled back."
+                    );
                     session.record_turn_ex(
                         trimmed,
                         ReplTurnStatus::Interrupted,
                         "Interrupted".to_string(),
-                        tracking_authorizer.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty(),
+                        tracking_authorizer.observed
+                            || !sink.stdout.is_empty()
+                            || !sink.stderr.is_empty(),
                         None,
                     );
                 }
                 Err(crate::Comptime::ReplStepError::Diagnostic(d)) => {
                     let d = restore_move_diagnostic(d, &session.moved_names);
-                    let d = if d.code == "E2202" { e1801(REPL_FUEL_BUDGET) } else { d };
+                    let d = if d.code == "E2202" {
+                        e1801(REPL_FUEL_BUDGET)
+                    } else {
+                        d
+                    };
                     if !quiet {
                         render_diags(&step_src, trimmed, std::slice::from_ref(&d), color);
                     }
@@ -2785,11 +2956,12 @@ fn handle_meta(
             cmd_run_native(session, color, &mut stdout);
         }
         "turns" => render_turns(session, color),
-        "fold" => match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "folded", true))
-        {
-            Ok(()) => println!("turn folded"),
-            Err(msg) => eprintln!("{msg}"),
-        },
+        "fold" => {
+            match parse_turn_id(arg).and_then(|id| set_turn_flag(session, id, "folded", true)) {
+                Ok(()) => println!("turn folded"),
+                Err(msg) => eprintln!("{msg}"),
+            }
+        }
         "unfold" => match parse_turn_id(arg).and_then(|id| unfold_turn(session, id)) {
             Ok(full) => {
                 println!("turn unfolded");
@@ -2868,7 +3040,13 @@ fn handle_meta(
 /// from turn 1 through the plan's last step in order — turns before
 /// `plan.from_id` are known-good (their input/output already matched once)
 /// so they replay silently; only the plan's own steps print.
-fn apply_replay_plan(session: &mut Session, plan: &RerunPlan::ReplayPlan, base_dir: &Path, color: bool, authorizer: &mut dyn crate::Comptime::ReplAuthorizer) {
+fn apply_replay_plan(
+    session: &mut Session,
+    plan: &RerunPlan::ReplayPlan,
+    base_dir: &Path,
+    color: bool,
+    authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
+) {
     apply_replay_plan_with_stale(session, plan, None, base_dir, color, authorizer);
 }
 
@@ -2896,7 +3074,9 @@ pub(crate) fn apply_replay_plan_with_stale_quiet(
     color: bool,
     authorizer: &mut dyn crate::Comptime::ReplAuthorizer,
 ) {
-    apply_replay_plan_with_stale_mode(session, plan, stale_from, base_dir, color, authorizer, false);
+    apply_replay_plan_with_stale_mode(
+        session, plan, stale_from, base_dir, color, authorizer, false,
+    );
 }
 
 fn apply_replay_plan_with_stale_mode(
@@ -2935,7 +3115,10 @@ fn apply_replay_plan_with_stale_mode(
                 pending_unfold: None,
             });
             if announce {
-                println!("{}", dim(&format!("turn {} stale: not replayed", step.turn_id), color));
+                println!(
+                    "{}",
+                    dim(&format!("turn {} stale: not replayed", step.turn_id), color)
+                );
             }
             continue;
         }
@@ -2945,7 +3128,15 @@ fn apply_replay_plan_with_stale_mode(
                 dim(&format!("rerun #{}: {}", step.turn_id, step.input), color)
             );
         }
-        execute_line(&step.input, session, base_dir, color, false, false, authorizer);
+        execute_line(
+            &step.input,
+            session,
+            base_dir,
+            color,
+            false,
+            false,
+            authorizer,
+        );
     }
 }
 
@@ -2959,75 +3150,133 @@ fn help_text(color: bool) -> String {
         out,
         "  {}         clear all bindings and start fresh",
         bold(":reset", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}  load a Jet file into the session",
         bold(":load <file.jet>", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}      show the type of a binding",
         bold(":type <name>", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}           compile + run the session (bypasses fuel cap)",
         bold(":run", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}         list notebook turns, status, pins, and folds",
         bold(":turns", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {} search or erase successful submission history",
         bold(":history search <text> | clear", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}       rerun a prior turn as a preview",
         bold(":rerun <id>", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}        fold or unfold a turn's output summary",
         bold(":fold <id>", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  {}         pin or unpin a turn in the notebook rail",
         bold(":pin <id>", color)
-    ).unwrap();
-    writeln!(out, "  {}           show docs/type info for a name", bold("?name", color)).unwrap();
-    writeln!(out, "  {}         alias for {}", bold(":? <name>", color), bold("?name", color)).unwrap();
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}           show docs/type info for a name",
+        bold("?name", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}         alias for {}",
+        bold(":? <name>", color),
+        bold("?name", color)
+    )
+    .unwrap();
     writeln!(out, "  {}          show this message", bold(":help", color)).unwrap();
     writeln!(out).unwrap();
     writeln!(out, "{}", bold("Interactive terminal only", color)).unwrap();
-    writeln!(out, "  {}             complete the current name", bold("Tab", color)).unwrap();
-    writeln!(out, "  {}              docs for the name under the cursor", bold("F1", color)).unwrap();
-    writeln!(out, "  {}              search successful submission history", bold("F3", color)).unwrap();
-    writeln!(out, "  {}              pin or unpin the latest turn", bold("^P", color)).unwrap();
-    writeln!(out, "  {}              fold or unfold the latest turn", bold("^F", color)).unwrap();
-    writeln!(out, "  {}              edit and rerun a prior turn", bold("^R", color)).unwrap();
-    writeln!(out, "  {}              open or close live bindings", bold("^B", color)).unwrap();
+    writeln!(
+        out,
+        "  {}             complete the current name",
+        bold("Tab", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}              docs for the name under the cursor",
+        bold("F1", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}              search successful submission history",
+        bold("F3", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}              pin or unpin the latest turn",
+        bold("^P", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}              fold or unfold the latest turn",
+        bold("^F", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}              edit and rerun a prior turn",
+        bold("^R", color)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  {}              open or close live bindings",
+        bold("^B", color)
+    )
+    .unwrap();
     writeln!(out).unwrap();
     writeln!(
         out,
         "  Tip: end a line with {} to suppress echo of its value.",
         bold(";", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  Tip: {} is auto-imported — type `print(\"hello\")` to try it.",
         bold("core.term", color)
-    ).unwrap();
+    )
+    .unwrap();
     writeln!(
         out,
         "  Tip: a `{}` line is kept for the whole session — import once, use it on any later line.",
         bold("use core.math as math", color)
-    ).unwrap();
+    )
+    .unwrap();
     out
 }
 
@@ -3103,7 +3352,11 @@ pub fn eval_once(
         // nothing. A `:meta` command never reaches here — the CLI rejects it
         // as a malformed argument before calling in.
         InputKind::Meta(..) | InputKind::Item(_) | InputKind::Import(_) | InputKind::Empty => {
-            return Ok(EvalOnce { value: None, stdout: String::new(), stderr: String::new() });
+            return Ok(EvalOnce {
+                value: None,
+                stdout: String::new(),
+                stderr: String::new(),
+            });
         }
     };
 
@@ -3128,7 +3381,11 @@ pub fn eval_once(
         &session.binding_types,
         &mut authorizer,
     ) {
-        Ok(value) => Ok(EvalOnce { value, stdout: sink.stdout, stderr: sink.stderr }),
+        Ok(value) => Ok(EvalOnce {
+            value,
+            stdout: sink.stdout,
+            stderr: sink.stderr,
+        }),
         Err(diagnostic) => Err(vec![diagnostic]),
     }
 }
@@ -3182,11 +3439,7 @@ pub fn run_transcript_with_preload(
     )
 }
 
-fn run_transcript_with(
-    inputs: &[&str],
-    project_dir: Option<&str>,
-    flags: ReplFlags,
-) -> String {
+fn run_transcript_with(inputs: &[&str], project_dir: Option<&str>, flags: ReplFlags) -> String {
     jet_driver::boot_tir_eval();
     let base_dir: std::path::PathBuf = project_dir
         .map(std::path::PathBuf::from)
@@ -3274,7 +3527,11 @@ fn run_transcript_with(
                             }
                         };
                         if let Some(v) = session.scope.get(name) {
-                            let ty = session.binding_types.get(name).map(|t| t.name()).unwrap_or_else(|| type_name(v).to_string());
+                            let ty = session
+                                .binding_types
+                                .get(name)
+                                .map(|t| t.name())
+                                .unwrap_or_else(|| type_name(v).to_string());
                             out.push_str(&format!("{} : {}\n", name, ty));
                         } else if session.func_defs.contains_key(name) {
                             out.push_str(&format!("{} : fn\n", name));
@@ -3326,8 +3583,11 @@ fn run_transcript_with(
                     }
                     "rerun" => match parse_turn_id(arg.as_deref()) {
                         Ok(id) => {
-                            if let Some(input) =
-                                session.turns.iter().find(|t| t.id == id).map(|t| t.input.clone())
+                            if let Some(input) = session
+                                .turns
+                                .iter()
+                                .find(|t| t.id == id)
+                                .map(|t| t.input.clone())
                             {
                                 out.push_str(&format!("rerun #{id}: {input}\n"));
                                 out.push_str(&run_transcript(&[input.as_str()], project_dir));
@@ -3337,27 +3597,25 @@ fn run_transcript_with(
                         }
                         Err(msg) => out.push_str(&format!("{msg}\n")),
                     },
-                    "history" => {
-                        match arg.as_deref() {
-                            Some("clear") => {
-                                session.history.clear().ok();
-                                out.push_str("History cleared.\n");
-                            }
-                            Some(arg) if arg.starts_with("search ") => {
-                                let needle = &arg[7..];
-                                let matches = session.history.search(needle);
-                                if matches.is_empty() {
-                                    out.push_str("No history matches.\n");
-                                } else {
-                                    for entry in matches {
-                                        out.push_str(entry);
-                                        out.push('\n');
-                                    }
+                    "history" => match arg.as_deref() {
+                        Some("clear") => {
+                            session.history.clear().ok();
+                            out.push_str("History cleared.\n");
+                        }
+                        Some(arg) if arg.starts_with("search ") => {
+                            let needle = &arg[7..];
+                            let matches = session.history.search(needle);
+                            if matches.is_empty() {
+                                out.push_str("No history matches.\n");
+                            } else {
+                                for entry in matches {
+                                    out.push_str(entry);
+                                    out.push('\n');
                                 }
                             }
-                            _ => out.push_str("usage: :history search <text> | :history clear\n"),
                         }
-                    }
+                        _ => out.push_str("usage: :history search <text> | :history clear\n"),
+                    },
                     "?" => {
                         // D-FE-REPL-DOCS1=B: same shared-docs-index lookup the
                         // cooked/interactive loops use (`Docs::lookup`), so
@@ -3441,29 +3699,25 @@ fn run_transcript_with(
             }
 
             InputKind::Stmts(stmts, suppress, check_src) => {
-                let (checked_stmts, checked_core_imports) = match type_check_stmts(
-                    &session,
-                    &stmts,
-                    session.step,
-                    &check_src,
-                ) {
-                    Ok(checked) => checked,
-                    Err(errors) => {
-                        for d in &errors {
-                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                let (checked_stmts, checked_core_imports) =
+                    match type_check_stmts(&session, &stmts, session.step, &check_src) {
+                        Ok(checked) => checked,
+                        Err(errors) => {
+                            for d in &errors {
+                                out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                            }
+                            session.record_turn(
+                                trimmed,
+                                ReplTurnStatus::Error,
+                                errors
+                                    .iter()
+                                    .map(|d| format!("{}: {}", d.code, d.what))
+                                    .collect::<Vec<_>>()
+                                    .join("; "),
+                            );
+                            continue;
                         }
-                        session.record_turn(
-                            trimmed,
-                            ReplTurnStatus::Error,
-                            errors
-                                .iter()
-                                .map(|d| format!("{}: {}", d.code, d.what))
-                                .collect::<Vec<_>>()
-                                .join("; "),
-                        );
-                        continue;
-                    }
-                };
+                    };
 
                 // D-REPL8=A: detect which session bindings are moved by this input.
                 let session_binding_names: HashSet<String> =
@@ -3538,8 +3792,9 @@ fn run_transcript_with(
                                 summary.push_str(&shown);
                             }
                         }
-                        let had_effect =
-                            looks_effectful(trimmed) || !sink.stdout.is_empty() || !sink.stderr.is_empty();
+                        let had_effect = looks_effectful(trimmed)
+                            || !sink.stdout.is_empty()
+                            || !sink.stderr.is_empty();
                         let bound_name = match new_names.as_slice() {
                             [only] => Some(only.clone()),
                             _ => None,
@@ -3589,11 +3844,7 @@ mod tests {
     struct CountingPrompt(usize);
 
     impl EffectPrompt for CountingPrompt {
-        fn choose(
-            &mut self,
-            _: &crate::Comptime::ReplEffectRequest,
-            _: bool,
-        ) -> PromptChoice {
+        fn choose(&mut self, _: &crate::Comptime::ReplEffectRequest, _: bool) -> PromptChoice {
             self.0 += 1;
             PromptChoice::Once
         }
@@ -3627,7 +3878,10 @@ mod tests {
             assert!(error.why.contains("no runtime ability was offered"));
         }
         assert_eq!(prompt.0, 0, "platform denial must not ask for ability");
-        assert!(!target.exists(), "platform denial executed filesystem operation");
+        assert!(
+            !target.exists(),
+            "platform denial executed filesystem operation"
+        );
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -3638,8 +3892,8 @@ mod tests {
         let expected = jet_foundation::Authority::parse_right(written).expect("known right");
         assert_eq!(expected, "IO");
 
-        let compile = crate::Sema::Effects::parse_effect_name(external_spelling)
-            .expect("compile right");
+        let compile =
+            crate::Sema::Effects::parse_effect_name(external_spelling).expect("compile right");
         assert_eq!(compile, expected);
         assert!(crate::Sema::Effects::effect_covers(written, &expected));
 

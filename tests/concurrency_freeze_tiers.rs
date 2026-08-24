@@ -34,8 +34,14 @@ const EXPECTED: &str = "41\n41\n7\n41\n";
 #[test]
 fn parser_and_sema_accept_the_ratified_crossing_surface() {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(SOURCE);
-    assert!(lexer_diagnostics.is_empty(), "lexer diagnostics: {lexer_diagnostics:?}");
-    assert!(jet::Parser::parse(&tokens).is_ok(), "freeze/^ fixture must parse");
+    assert!(
+        lexer_diagnostics.is_empty(),
+        "lexer diagnostics: {lexer_diagnostics:?}"
+    );
+    assert!(
+        jet::Parser::parse(&tokens).is_ok(),
+        "freeze/^ fixture must parse"
+    );
     jet::compile(SOURCE).expect("freeze/^ fixture must pass sema");
 }
 
@@ -55,9 +61,8 @@ fn aot_jit_and_interpreter_agree_on_crossing_and_freeze() {
 
 #[test]
 fn comptime_accepts_the_same_pure_freeze_operation() {
-    let source = format!(
-        "{SOURCE}\n@folded :: freeze(41)\n\nfn show() {{\n    print(@folded)\n}}\n"
-    );
+    let source =
+        format!("{SOURCE}\n@folded :: freeze(41)\n\nfn show() {{\n    print(@folded)\n}}\n");
     jet::compile(&source).expect("comptime freeze must use the shared front end");
 }
 
@@ -131,11 +136,8 @@ fn crossing_plane_tir_erase_the_fact() {
 #[test]
 fn crossing_plane_aot_matches_expected() {
     if tir_support::have_rustc() {
-        let (code, stdout, stderr) = tir_support::build_and_run_full(
-            "jet_crossing_plane",
-            "aot",
-            CROSSING_SOURCE,
-        );
+        let (code, stdout, stderr) =
+            tir_support::build_and_run_full("jet_crossing_plane", "aot", CROSSING_SOURCE);
         assert_eq!(code, 0, "AOT failed: {stderr}");
         assert_eq!(stdout, CROSSING_EXPECTED, "AOT output drifted: {stderr}");
     }
@@ -143,14 +145,11 @@ fn crossing_plane_aot_matches_expected() {
 
 #[test]
 fn crossing_plane_jit_matches_expected() {
-    let (code, stdout, stderr) = tir_support::jit_run(
-        "concurrency_crossing_plane_jit",
-        CROSSING_SOURCE,
-    );
+    let (code, stdout, stderr) =
+        tir_support::jit_run("concurrency_crossing_plane_jit", CROSSING_SOURCE);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
-        stdout,
-        CROSSING_EXPECTED,
+        stdout, CROSSING_EXPECTED,
         "default jet run output drifted: {stderr}"
     );
 }
@@ -161,17 +160,15 @@ fn crossing_plane_interpreter_matches_expected() {
         tir_support::interpreter_run("concurrency_crossing_plane_interpreter", CROSSING_SOURCE);
     assert_eq!(code, 0, "interpreter failed: {stderr}");
     assert_eq!(
-        stdout,
-        CROSSING_EXPECTED,
+        stdout, CROSSING_EXPECTED,
         "interpreter output drifted: {stderr}"
     );
 }
 
 #[test]
 fn crossing_plane_comptime_uses_the_same_front_end() {
-    let source = format!(
-        "{CROSSING_SOURCE}\n@folded :: 40 + 2\n\nfn show() {{ print(@folded) }}\n"
-    );
+    let source =
+        format!("{CROSSING_SOURCE}\n@folded :: 40 + 2\n\nfn show() {{ print(@folded) }}\n");
     jet::compile(&source).expect("comptime crossing source must use the shared sema path");
 }
 

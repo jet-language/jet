@@ -3,10 +3,10 @@ use crate::Diagnostics::{Diagnostic, TextEdit};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, CodeModule, ConstAttr, EnumLitArg, Expr, ForKind, Func,
-    GenericModuleDef, GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef,
-    ModuleArg, OrFallback, Param, ParamZone, Pattern, ProgramBundle, RustConstKind, Stmt, StrPart,
-    SwitchArm, Type, VariantPayload,
+    AccessConvention, CodeModule, ConstAttr, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
+    GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg,
+    OrFallback, Param, ParamZone, Pattern, ProgramBundle, RustConstKind, Stmt, StrPart, SwitchArm,
+    Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -37,14 +37,12 @@ use Pipeline::{
     check_bundle_opts_for_output as pipeline_check_bundle_opts_for_output,
     check_bundle_opts_for_output_with_context as pipeline_check_bundle_opts_for_output_with_context,
 };
+use Validation::{apply_helper_layer_inference, qualified_effect_facts, taint_check_item};
 #[allow(unused_imports)]
 pub(crate) use Validation::{
     check_func_body_bundle, check_module_bodies, collect_core_expr, collect_core_lvalue,
     collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
     func_sig_to_fn_type, register_func_item,
-};
-use Validation::{
-    apply_helper_layer_inference, qualified_effect_facts, taint_check_item,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -86,7 +84,9 @@ fn mark_failed_pending_functions(
         if !matches!(diagnostic.severity, crate::Diagnostics::Severity::Error) {
             continue;
         }
-        let Some(span) = diagnostic.span else { continue };
+        let Some(span) = diagnostic.span else {
+            continue;
+        };
         for candidate in pending {
             if span.start >= candidate.function_span.start
                 && span.end <= candidate.function_span.end
@@ -332,7 +332,12 @@ fn dedupe_soft_public_lints(diagnostics: &mut Vec<Diagnostic>) {
         let Some(span) = diagnostic.span else {
             return true;
         };
-        seen.insert((diagnostic.code.clone(), diagnostic.what.clone(), span.start, span.end))
+        seen.insert((
+            diagnostic.code.clone(),
+            diagnostic.what.clone(),
+            span.start,
+            span.end,
+        ))
     });
 }
 
@@ -352,18 +357,10 @@ fn check_fact_tags_and_states(
     let mut field_types = HashMap::new();
     let mut known_sources = std::collections::BTreeSet::new();
     for module in &bundle.modules {
-        super::Taint::collect_function_paths(
-            &module.alias,
-            &module.items,
-            &mut known_sources,
-        );
+        super::Taint::collect_function_paths(&module.alias, &module.items, &mut known_sources);
     }
     for module in &bundle.modules {
-        super::Taint::collect_field_facts(
-            &module.items,
-            &mut field_tags,
-            &mut field_types,
-        );
+        super::Taint::collect_field_facts(&module.items, &mut field_tags, &mut field_types);
         super::Taint::collect_tag_facts(
             &module.items,
             &mut facts,
@@ -412,10 +409,7 @@ fn check_fact_tags_and_states(
     state_table.into_facts()
 }
 
-fn register_effect_facts(
-    bundle: &ProgramBundle,
-    facts: &mut jet_foundation::Facts::FactRegistry,
-) {
+fn register_effect_facts(bundle: &ProgramBundle, facts: &mut jet_foundation::Facts::FactRegistry) {
     use jet_foundation::Facts::FactKind;
     for effect in jet_foundation::Authority::EFFECT_ROOTS.iter() {
         facts.declare(FactKind::Effect, (*effect).to_string(), std::iter::empty());
@@ -703,8 +697,7 @@ impl IncrementalSemaCache {
                     .module_dependencies
                     .iter()
                     .map(|(module, dependencies)| {
-                        module.len()
-                            + dependencies.iter().map(String::len).sum::<usize>()
+                        module.len() + dependencies.iter().map(String::len).sum::<usize>()
                     })
                     .sum::<usize>()
                 + self
@@ -789,9 +782,9 @@ impl IncrementalSemaCache {
 
         if !dirty.is_empty() {
             self.functions.retain(|key, _| {
-                !dirty.iter().any(|module| {
-                    key == module || key.starts_with(&format!("{module}::"))
-                })
+                !dirty
+                    .iter()
+                    .any(|module| key == module || key.starts_with(&format!("{module}::")))
             });
         }
         self.module_interfaces = interfaces;
@@ -855,7 +848,9 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
         &module.rule_facts,
         &module.script_body,
     );
-    out.extend(crate::CanonicalAST::canonical_fragment(&additional_metadata));
+    out.extend(crate::CanonicalAST::canonical_fragment(
+        &additional_metadata,
+    ));
     out.extend(format!("{additional_metadata:?}").into_bytes());
     for item in &module.items {
         let mut item = item.clone();
@@ -869,9 +864,7 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
     out
 }
 
-fn incremental_module_dependencies(
-    bundle: &ProgramBundle,
-) -> HashMap<String, Vec<String>> {
+fn incremental_module_dependencies(bundle: &ProgramBundle) -> HashMap<String, Vec<String>> {
     bundle
         .modules
         .iter()
@@ -919,13 +912,16 @@ fn incremental_import_target(
         .iter()
         .filter(|candidate| candidate.display != source.display)
         .find(|candidate| {
-            requested_path.as_ref().is_some_and(|path| {
-                normalize_incremental_path(&candidate.path) == *path
-            }) || candidate.alias == requested
+            requested_path
+                .as_ref()
+                .is_some_and(|path| normalize_incremental_path(&candidate.path) == *path)
+                || candidate.alias == requested
                 || candidate.alias == requested_stem
                 || candidate.display == requested
                 || candidate.display.ends_with(&format!("/{requested}"))
-                || candidate.display.ends_with(&format!("/{requested_stem}.jet"))
+                || candidate
+                    .display
+                    .ends_with(&format!("/{requested_stem}.jet"))
         })
         .map(|candidate| candidate.display.clone())
 }
@@ -977,28 +973,45 @@ fn clear_callable_bodies(item: &mut Item) {
 
 fn builtin_type_registry() -> TypeRegistry {
     let zero = Span::new(0, 0);
-    let variants = ["Less", "Equal", "Greater"].into_iter().map(|name| {
-        (name.to_string(), (zero, VariantPayload::Unit))
-    }).collect::<HashMap<_, _>>();
+    let variants = ["Less", "Equal", "Greater"]
+        .into_iter()
+        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+        .collect::<HashMap<_, _>>();
     let mut types = HashMap::new();
-    types.insert(Syntax::TYPE_ORDERING.to_string(), TypeDef::Enum {
-        variants, variant_order: vec!["Less".to_string(), "Equal".to_string(), "Greater".to_string()],
-        groups: HashMap::new(), methods: HashMap::new(), single_use: false,
-        deprecation: None, must_use: false, c_layout_tag: None,
-    });
-    let remove_by_variants = ["Val", "Slot"].into_iter().map(|name| {
-        (name.to_string(), (zero, VariantPayload::Unit))
-    }).collect::<HashMap<_, _>>();
-    types.insert(crate::Syntax::TYPE_REMOVE_BY.to_string(), TypeDef::Enum {
-        variants: remove_by_variants,
-        variant_order: vec!["Val".to_string(), "Slot".to_string()],
-        groups: HashMap::new(),
-        methods: HashMap::new(),
-        deprecation: None,
-        single_use: false,
-        must_use: false,
-        c_layout_tag: None,
-    });
+    types.insert(
+        Syntax::TYPE_ORDERING.to_string(),
+        TypeDef::Enum {
+            variants,
+            variant_order: vec![
+                "Less".to_string(),
+                "Equal".to_string(),
+                "Greater".to_string(),
+            ],
+            groups: HashMap::new(),
+            methods: HashMap::new(),
+            single_use: false,
+            deprecation: None,
+            must_use: false,
+            c_layout_tag: None,
+        },
+    );
+    let remove_by_variants = ["Val", "Slot"]
+        .into_iter()
+        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+        .collect::<HashMap<_, _>>();
+    types.insert(
+        crate::Syntax::TYPE_REMOVE_BY.to_string(),
+        TypeDef::Enum {
+            variants: remove_by_variants,
+            variant_order: vec!["Val".to_string(), "Slot".to_string()],
+            groups: HashMap::new(),
+            methods: HashMap::new(),
+            deprecation: None,
+            single_use: false,
+            must_use: false,
+            c_layout_tag: None,
+        },
+    );
     // D-UNITLIT1=A: literal facts enter a module only with an in-scope unit
     // family. Pipeline registration fills the fact registry after Prelude
     // injection; keeping it empty prevents `#NoPrelude` from gaining Time.
@@ -1091,7 +1104,6 @@ fn unit_fact(
     })
 }
 
-
 fn declare_name(
     ledger: &mut jet_foundation::Names::NameLedger,
     module: usize,
@@ -1112,7 +1124,10 @@ fn declare_name(
 }
 
 fn scoped_name(prefix: Option<&str>, name: &str) -> String {
-    prefix.map_or_else(|| name.to_string(), |prefix| jet_foundation::Names::member_name(prefix, name))
+    prefix.map_or_else(
+        || name.to_string(),
+        |prefix| jet_foundation::Names::member_name(prefix, name),
+    )
 }
 
 fn scoped_path(prefix: &str, name: &str) -> String {
@@ -1134,10 +1149,7 @@ fn declare_method_names(
             format!("{owner_path}.{}", method.name),
             "method",
             method.name_span,
-            jet_foundation::Names::NameVisibility::from_flags(
-                method.is_pub,
-                method.is_package_pub,
-            ),
+            jet_foundation::Names::NameVisibility::from_flags(method.is_pub, method.is_package_pub),
         );
     }
 }
@@ -1184,13 +1196,7 @@ fn declare_item_names_scoped(
                     NameVisibility::from_flags(field.is_pub, field.is_package_pub),
                 );
             }
-            declare_method_names(
-                ledger,
-                module,
-                &item_name,
-                &item_path,
-                &definition.methods,
-            );
+            declare_method_names(ledger, module, &item_name, &item_path, &definition.methods);
             for implementation in &definition.trait_impls {
                 declare_method_names(
                     ledger,
@@ -1204,7 +1210,8 @@ fn declare_item_names_scoped(
         Item::Enum(definition) => {
             let item_name = scoped_name(name_prefix, &definition.name);
             let item_path = scoped_path(path_prefix, &definition.name);
-            let visibility = NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
+            let visibility =
+                NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
             declare_name(
                 ledger,
                 module,
@@ -1225,13 +1232,7 @@ fn declare_item_names_scoped(
                     visibility,
                 );
             }
-            declare_method_names(
-                ledger,
-                module,
-                &item_name,
-                &item_path,
-                &definition.methods,
-            );
+            declare_method_names(ledger, module, &item_name, &item_path, &definition.methods);
             for implementation in &definition.trait_impls {
                 declare_method_names(
                     ledger,
@@ -1276,7 +1277,8 @@ fn declare_item_names_scoped(
         Item::Trait(definition) => {
             let item_name = scoped_name(name_prefix, &definition.name);
             let item_path = scoped_path(path_prefix, &definition.name);
-            let visibility = NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
+            let visibility =
+                NameVisibility::from_flags(definition.is_pub, definition.is_package_pub);
             declare_name(
                 ledger,
                 module,
@@ -1310,13 +1312,7 @@ fn declare_item_names_scoped(
         Item::Impl(implementation) => {
             let owner = scoped_name(name_prefix, &implementation.type_name);
             let owner_path = scoped_path(path_prefix, &implementation.type_name);
-            declare_method_names(
-                ledger,
-                module,
-                &owner,
-                &owner_path,
-                &implementation.methods,
-            );
+            declare_method_names(ledger, module, &owner, &owner_path, &implementation.methods);
             for (name, span, _) in &implementation.assoc_type_impls {
                 declare_name(
                     ledger,
@@ -1367,10 +1363,8 @@ fn declare_item_names_scoped(
         Item::CodeModule(code_module) => {
             let item_name = scoped_name(name_prefix, &code_module.name);
             let item_path = scoped_path(path_prefix, &code_module.name);
-            let visibility = NameVisibility::from_flags(
-                code_module.is_pub,
-                code_module.is_package_pub,
-            );
+            let visibility =
+                NameVisibility::from_flags(code_module.is_pub, code_module.is_package_pub);
             declare_name(
                 ledger,
                 module,
@@ -1386,13 +1380,7 @@ fn declare_item_names_scoped(
             );
             if let Some(body) = &code_module.body {
                 for nested in body {
-                    declare_item_names_scoped(
-                        ledger,
-                        module,
-                        &item_path,
-                        Some(&item_name),
-                        nested,
-                    );
+                    declare_item_names_scoped(ledger, module, &item_path, Some(&item_name), nested);
                 }
             }
         }
@@ -1465,10 +1453,7 @@ fn populate_name_ledger(
     ledger: &mut jet_foundation::Names::NameLedger,
 ) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let package = jet_foundation::Names::package_scope_for(
-            &module.path,
-            &bundle.project_root,
-        );
+        let package = jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
         ledger.set_module(
             module_idx,
             module.alias.clone(),
@@ -1504,10 +1489,8 @@ fn populate_name_ledger(
                 // member naming (`hoist_inline_module_member_types`), so project
                 // them back to `module.Type` for every message and tool.
                 if instance.instance_identity.is_none() && instance.body.is_some() {
-                    for (internal, display) in GenericModules::plain_inline_module_display_paths(
-                        instance,
-                        &module.items,
-                    )
+                    for (internal, display) in
+                        GenericModules::plain_inline_module_display_paths(instance, &module.items)
                     {
                         ledger.record_display_path(
                             module_idx,
@@ -1524,19 +1507,18 @@ fn populate_name_ledger(
                 import.is_pub,
                 import.is_package_pub,
             );
-            let (import_target, target_module) = if let Some(target) =
-                ledger.import_target(module_idx, import.span)
-            {
-                (bundle.modules[target].alias.clone(), Some(target))
-            } else if let Some(core_path) = import.core_module_path() {
-                (core_path, None)
-            } else {
-                let target = match &import.kind {
-                    ImportKind::File(path, _) | ImportKind::Module(path, _) => path.clone(),
-                    ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
+            let (import_target, target_module) =
+                if let Some(target) = ledger.import_target(module_idx, import.span) {
+                    (bundle.modules[target].alias.clone(), Some(target))
+                } else if let Some(core_path) = import.core_module_path() {
+                    (core_path, None)
+                } else {
+                    let target = match &import.kind {
+                        ImportKind::File(path, _) | ImportKind::Module(path, _) => path.clone(),
+                        ImportKind::Unqualified { module_alias, .. } => module_alias.clone(),
+                    };
+                    (target, None)
                 };
-                (target, None)
-            };
             ledger.record_alias(
                 module_idx,
                 import_alias,
@@ -1551,30 +1533,29 @@ fn populate_name_ledger(
                     continue;
                 };
                 let local = binding.local.as_str();
-                let target = if let Some(core_prefix) =
-                    crate::AST::core_list_prefix(binding.module_alias)
-                {
-                    Some((format!("{core_prefix}.{original}"), None))
-                } else if let Some(target_module) = state.imports.get(local) {
-                    Some((
-                        bundle.modules[*target_module].alias.clone(),
-                        Some(*target_module),
-                    ))
-                } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
-                    Some((
-                        format!("{}.{}", bundle.modules[*target_module].alias, real),
-                        Some(*target_module),
-                    ))
-                } else if let Some(resolved) = state.unqualified.get(local) {
-                    Some((resolved.clone(), Some(module_idx)))
-                } else if let Some(target_module) = state.imports.get(binding.module_alias) {
-                    Some((
-                        format!("{}.{}", bundle.modules[*target_module].alias, original),
-                        Some(*target_module),
-                    ))
-                } else {
-                    None
-                };
+                let target =
+                    if let Some(core_prefix) = crate::AST::core_list_prefix(binding.module_alias) {
+                        Some((format!("{core_prefix}.{original}"), None))
+                    } else if let Some(target_module) = state.imports.get(local) {
+                        Some((
+                            bundle.modules[*target_module].alias.clone(),
+                            Some(*target_module),
+                        ))
+                    } else if let Some((real, target_module)) = state.unqualified_file.get(local) {
+                        Some((
+                            format!("{}.{}", bundle.modules[*target_module].alias, real),
+                            Some(*target_module),
+                        ))
+                    } else if let Some(resolved) = state.unqualified.get(local) {
+                        Some((resolved.clone(), Some(module_idx)))
+                    } else if let Some(target_module) = state.imports.get(binding.module_alias) {
+                        Some((
+                            format!("{}.{}", bundle.modules[*target_module].alias, original),
+                            Some(*target_module),
+                        ))
+                    } else {
+                        None
+                    };
                 if let Some((target, target_module)) = target {
                     ledger.record_alias(
                         module_idx,
@@ -1594,7 +1575,15 @@ fn populate_name_ledger(
 /// `helper(x)` must lower to the mangled `__jet_math__helper`. This pre-pass rewrites
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), None, None).0
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        false,
+        crate::Policy::GateSet::default(),
+        None,
+        None,
+    )
+    .0
 }
 
 fn validate_script_entries(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
@@ -1667,9 +1656,7 @@ fn script_conflict_edit(source: &str, body: &[Stmt], run: &Func) -> Option<TextE
     if spans.len() != statement_spans.len() {
         return None;
     }
-    if spans
-        .windows(2)
-        .any(|pair| pair[0].end > pair[1].start)
+    if spans.windows(2).any(|pair| pair[0].end > pair[1].start)
         || spans
             .iter()
             .any(|span| span.start < run.span.end && span.end > run.span.start)
@@ -1677,10 +1664,7 @@ fn script_conflict_edit(source: &str, body: &[Stmt], run: &Func) -> Option<TextE
         return None;
     }
 
-    let open = source
-        .get(run.name_span.start..run.span.end)?
-        .find('{')?
-        + run.name_span.start;
+    let open = source.get(run.name_span.start..run.span.end)?.find('{')? + run.name_span.start;
     let close = matching_brace(source, open)?;
     let before = body
         .iter()
@@ -1811,9 +1795,7 @@ fn source_statement_end(source: &str, start: usize, initial_end: usize) -> Optio
         if string_delimiter != 0 || character {
             if byte == b'\\' {
                 index = index.saturating_add(2);
-            } else if string_delimiter == 3
-                && bytes.get(index..index + 3) == Some(b"\"\"\"")
-            {
+            } else if string_delimiter == 3 && bytes.get(index..index + 3) == Some(b"\"\"\"") {
                 string_delimiter = 0;
                 index += 3;
             } else {
@@ -1952,7 +1934,15 @@ pub fn check_bundle_for_output(
     mode: CompileMode,
     output: &str,
 ) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), Some(output), None).0
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        false,
+        crate::Policy::GateSet::default(),
+        Some(output),
+        None,
+    )
+    .0
 }
 
 pub fn check_bundle_for_output_opts(
@@ -1962,15 +1952,7 @@ pub fn check_bundle_for_output_opts(
     freestanding: bool,
     gates: crate::Policy::GateSet,
 ) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(
-        bundle,
-        mode,
-        freestanding,
-        gates,
-        Some(output),
-        None,
-    )
-    .0
+    pipeline_check_bundle_opts_for_output(bundle, mode, freestanding, gates, Some(output), None).0
 }
 
 /// Like `check_bundle` but also returns effect facts for D-SEMINDEX1.
@@ -1978,7 +1960,14 @@ pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), None, None)
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        false,
+        crate::Policy::GateSet::default(),
+        None,
+        None,
+    )
 }
 
 /// Check the compiler-host build entry with the read-only compiler API enabled.
@@ -2065,23 +2054,45 @@ pub fn check_bundle_with_effect_facts_incremental(
     mode: CompileMode,
     cache: &mut IncrementalSemaCache,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, crate::Policy::GateSet::default(), None, Some(cache))
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        false,
+        crate::Policy::GateSet::default(),
+        None,
+        Some(cache),
+    )
 }
 
 /// Like `check_bundle` but with extra build options (E2-M15).
 pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, true, crate::Policy::GateSet::default(), None, None).0
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        true,
+        crate::Policy::GateSet::default(),
+        None,
+        None,
+    )
+    .0
 }
 
-pub fn check_bundle_freestanding_with_gates(bundle: &mut ProgramBundle, mode: CompileMode, gates: crate::Policy::GateSet) -> Vec<Diagnostic> {
+pub fn check_bundle_freestanding_with_gates(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    gates: crate::Policy::GateSet,
+) -> Vec<Diagnostic> {
     pipeline_check_bundle_opts_for_output(bundle, mode, true, gates, None, None).0
 }
 
 /// Check the audited-escape family with one invocation gate set.
-pub fn check_bundle_gates(bundle: &mut ProgramBundle, mode: CompileMode, gates: crate::Policy::GateSet) -> Vec<Diagnostic> {
+pub fn check_bundle_gates(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    gates: crate::Policy::GateSet,
+) -> Vec<Diagnostic> {
     pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None).0
 }
-
 
 #[cfg(test)]
 mod structure_tests {
@@ -2194,7 +2205,10 @@ mod structure_tests {
         let edit = script_conflict_edit(source, &body, &run).expect("structured script edit");
         let fixed = edit.new_text;
         let (fixed_tokens, fixed_lexer_diagnostics) = crate::Lexer::lex(&fixed);
-        assert!(fixed_lexer_diagnostics.is_empty(), "{fixed_lexer_diagnostics:?}");
+        assert!(
+            fixed_lexer_diagnostics.is_empty(),
+            "{fixed_lexer_diagnostics:?}"
+        );
         let fixed_program = crate::Parser::parse(&fixed_tokens).unwrap();
         assert_eq!(
             fixed_program
@@ -2295,8 +2309,14 @@ mod structure_tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        let token = families.iter().find(|family| family.family == "Token").unwrap();
-        let time = families.iter().find(|family| family.family == "Time").unwrap();
+        let token = families
+            .iter()
+            .find(|family| family.family == "Token")
+            .unwrap();
+        let time = families
+            .iter()
+            .find(|family| family.family == "Time")
+            .unwrap();
         let rate = families
             .iter()
             .find(|family| family.family == "TokenRate")
@@ -2310,7 +2330,10 @@ mod structure_tests {
                 .divide(time.resolved_dimension.as_ref().unwrap())
         );
 
-        let mass = families.iter().find(|family| family.family == "Mass").unwrap();
+        let mass = families
+            .iter()
+            .find(|family| family.family == "Mass")
+            .unwrap();
         let dalton = mass
             .members
             .iter()
@@ -2365,11 +2388,8 @@ mod structure_tests {
     fn pending_diagnostics_have_exact_retained_byte_cost() {
         let mut bundle = incremental_bundle("fn run() {}\n");
         let mut cache = IncrementalSemaCache::new();
-        let (diagnostics, _) = check_bundle_with_effect_facts_incremental(
-            &mut bundle,
-            CompileMode::Check,
-            &mut cache,
-        );
+        let (diagnostics, _) =
+            check_bundle_with_effect_facts_incremental(&mut bundle, CompileMode::Check, &mut cache);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(cache.functions.len(), 1);
 
@@ -2440,7 +2460,10 @@ mod structure_tests {
                 completion.as_str(),
             ),
             ("src/Sema/Bundle/Validation.rs", validation.as_str()),
-            ("src/Sema/Bundle/Validation/CoreUsage.rs", core_usage.as_str()),
+            (
+                "src/Sema/Bundle/Validation/CoreUsage.rs",
+                core_usage.as_str(),
+            ),
         ] {
             assert!(
                 source.lines().count() < MAX_MODULE_LINES,
@@ -2466,8 +2489,7 @@ mod structure_tests {
             "collect_used_core(bundle, &states)",
             "apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);",
         ];
-        let ordered_source =
-            format!("{production}\n{pipeline}\n{inline_imports}\n{completion}");
+        let ordered_source = format!("{production}\n{pipeline}\n{inline_imports}\n{completion}");
         let positions: Vec<usize> = ordered
             .iter()
             .map(|needle| ordered_source.find(needle).unwrap())

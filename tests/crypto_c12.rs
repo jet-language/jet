@@ -58,8 +58,8 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
     std::fs::create_dir_all(std::env::temp_dir()).unwrap();
     let path = "examples/features/crypto/typed_crypto.jet";
     let source = std::fs::read_to_string(path).unwrap();
-    let expected = std::fs::read_to_string("examples/features/expected/crypto/typed_crypto.out")
-        .unwrap();
+    let expected =
+        std::fs::read_to_string("examples/features/expected/crypto/typed_crypto.out").unwrap();
 
     let mut bundle = jet::Loader::load_entry(path).expect("typed crypto bundle loads");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -67,7 +67,10 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         .iter()
         .filter(|diagnostic| diagnostic.severity == Severity::Error)
         .collect();
-    assert!(errors.is_empty(), "typed crypto must type-check: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "typed crypto must type-check: {errors:?}"
+    );
     jet_jit::try_compile_bundle(&bundle)
         .expect("typed crypto must compile natively in the resident JIT");
 

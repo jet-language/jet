@@ -236,19 +236,14 @@ pub fn prepare_for_target(
     });
     // D-HTTP-CLIENT2=A / D-DEP-HTTP2=B: the native HTTP client uses only the
     // separately-ratified rustls/system-root TLS bridge.
-    let needs_http_client = bundle
-        .used_core
-        .iter()
-        .any(|u| {
-            u == "core.http.client"
-                || u.starts_with("core.http.client::")
-                || matches!(
-                    u.as_str(),
-                    "core.http::get"
-                        | "core.http::post"
-                        | "core.http::request"
-                )
-        });
+    let needs_http_client = bundle.used_core.iter().any(|u| {
+        u == "core.http.client"
+            || u.starts_with("core.http.client::")
+            || matches!(
+                u.as_str(),
+                "core.http::get" | "core.http::post" | "core.http::request"
+            )
+    });
     // D-TLSSERVE1=A: server-side TLS uses rustls through the hidden bridge
     // only when the named `tls:` option is constructed.
     let needs_http_server_tls = bundle
@@ -343,9 +338,12 @@ pub fn prepare_for_target(
 }
 
 fn inline_asm_target_diagnostic(entries: &[ExternEntry], target: &str) -> Option<Diagnostic> {
-    let asm = entries
-        .iter()
-        .find(|entry| entry.inline.as_ref().is_some_and(|inline| inline.lang == "asm"))?;
+    let asm = entries.iter().find(|entry| {
+        entry
+            .inline
+            .as_ref()
+            .is_some_and(|inline| inline.lang == "asm")
+    })?;
     if target.split('-').next() == Some("x86_64") {
         return None;
     }
@@ -432,7 +430,9 @@ mod http_server_tls_persist_tests {
     fn client(
         addr: std::net::SocketAddr,
     ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
-        use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+        use rustls::client::danger::{
+            HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
+        };
         use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
         use rustls::{DigitallySignedStruct, Error as TLSError, SignatureScheme};
 
@@ -504,7 +504,9 @@ mod http_server_tls_persist_tests {
                 Ok(0) => break,
                 Ok(n) => {
                     raw.extend_from_slice(&buf[..n]);
-                    if let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+                    if let Some(header_end) =
+                        raw.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
                         let headers = std::str::from_utf8(&raw[..header_end]).unwrap_or("");
                         let length = headers.lines().skip(1).find_map(|line| {
                             let (name, value) = line.split_once(':')?;
@@ -591,7 +593,9 @@ mod http_server_tls_persist_tests {
         assert!(first.ends_with("\r\n\r\npong1"), "{first}");
         assert!(second.ends_with("\r\n\r\npong2"), "{second}");
         assert!(
-            first.to_ascii_lowercase().contains("connection: keep-alive"),
+            first
+                .to_ascii_lowercase()
+                .contains("connection: keep-alive"),
             "{first}"
         );
         assert_eq!(calls.load(Ordering::Acquire), 2);
@@ -745,17 +749,13 @@ mod http_server_tls_persist_tests {
         });
 
         let mut client = client(addr);
-        let first = exchange(
-            &mut client,
-            b"GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n",
-        );
-        let second = exchange(
-            &mut client,
-            b"GET /two HTTP/1.1\r\nHost: localhost\r\n\r\n",
-        );
+        let first = exchange(&mut client, b"GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let second = exchange(&mut client, b"GET /two HTTP/1.1\r\nHost: localhost\r\n\r\n");
         assert!(first.ends_with("\r\n\r\ncap1"), "{first}");
         assert!(
-            first.to_ascii_lowercase().contains("connection: keep-alive"),
+            first
+                .to_ascii_lowercase()
+                .contains("connection: keep-alive"),
             "first of cap must stay keep-alive: {first}"
         );
         assert!(second.ends_with("\r\n\r\ncap2"), "{second}");
@@ -881,8 +881,14 @@ mod net_tls_close_tests {
         let socket = std::net::TcpStream::connect(address).unwrap();
         let error = connect_with_ca_for_test(socket, "example.com", &pem)
             .expect_err("custom CA must not disable DNS-name verification");
-        assert!(error.contains("TLS handshake with `example.com` failed"), "{error}");
-        assert!(error.to_ascii_lowercase().contains("not valid for name"), "{error}");
+        assert!(
+            error.contains("TLS handshake with `example.com` failed"),
+            "{error}"
+        );
+        assert!(
+            error.to_ascii_lowercase().contains("not valid for name"),
+            "{error}"
+        );
         server.join().unwrap();
     }
 
@@ -903,10 +909,18 @@ mod net_tls_close_tests {
     fn tls_config_encodes_and_validates_alpn_protocols() {
         let pem = include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem");
         let config = jet_net_tls_config(
-            1, Some(pem), None, 12, 13, &["h2".to_string(), "http/1.1".to_string()],
+            1,
+            Some(pem),
+            None,
+            12,
+            13,
+            &["h2".to_string(), "http/1.1".to_string()],
         )
-            .expect("valid ALPN protocols");
-        assert_eq!(config.alpn_protocols, vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+        .expect("valid ALPN protocols");
+        assert_eq!(
+            config.alpn_protocols,
+            vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+        );
 
         let error = match jet_net_tls_config(1, Some(pem), None, 12, 13, &[String::new()]) {
             Ok(_) => panic!("empty ALPN protocol accepted"),
@@ -929,8 +943,8 @@ mod net_tls_close_tests {
         let mismatch = jet_net_tls_validate_identity_impl(&chain, &other_key).unwrap_err();
         assert!(mismatch.contains("does not match"), "{mismatch}");
 
-        let versions = jet_net_tls_config(2, Some(&roots), Some((&chain, &key)), 13, 12, &[])
-            .unwrap_err();
+        let versions =
+            jet_net_tls_config(2, Some(&roots), Some((&chain, &key)), 13, 12, &[]).unwrap_err();
         assert!(versions.contains("version bounds"), "{versions}");
     }
 
@@ -947,16 +961,23 @@ mod net_tls_close_tests {
         include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
     }
 
-    static SMTP_CANCELLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    static SMTP_DEADLINE_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(i64::MAX);
+    static SMTP_CANCELLED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    static SMTP_DEADLINE_MS: std::sync::atomic::AtomicI64 =
+        std::sync::atomic::AtomicI64::new(i64::MAX);
     static SMTP_WIPES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     static SMTP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn smtp_now_ms() -> i64 {
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-            .unwrap().as_millis().min(i64::MAX as u128) as i64
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
+            .min(i64::MAX as u128) as i64
     }
-    fn smtp_cancelled() -> bool { SMTP_CANCELLED.load(std::sync::atomic::Ordering::SeqCst) }
+    fn smtp_cancelled() -> bool {
+        SMTP_CANCELLED.load(std::sync::atomic::Ordering::SeqCst)
+    }
     fn smtp_remaining() -> Option<i64> {
         let deadline = SMTP_DEADLINE_MS.load(std::sync::atomic::Ordering::SeqCst);
         (deadline != i64::MAX).then(|| deadline.saturating_sub(smtp_now_ms()))
@@ -976,9 +997,14 @@ mod net_tls_close_tests {
     }
     fn smtp_dkim_sign(key: &Vec<u8>, message: &[u8]) -> Result<Vec<u8>, String> {
         use ed25519_dalek::Signer;
-        let seed: [u8; 32] = key.as_slice().try_into()
+        let seed: [u8; 32] = key
+            .as_slice()
+            .try_into()
             .map_err(|_| "DKIM test key length".to_string())?;
-        Ok(ed25519_dalek::SigningKey::from_bytes(&seed).sign(message).to_bytes().to_vec())
+        Ok(ed25519_dalek::SigningKey::from_bytes(&seed)
+            .sign(message)
+            .to_bytes()
+            .to_vec())
     }
 
     fn smtp_runtime() -> smtp_adapter::jet_email::RuntimeFns {
@@ -1005,30 +1031,52 @@ mod net_tls_close_tests {
     }
 
     fn smtp_server_config() -> std::sync::Arc<rustls::ServerConfig> {
-        let certs = jet_net_tls_pem_certificates(include_bytes!("../../../tests/fixtures/tls/smtp.server.cert.pem")).unwrap();
-        let key_text = std::str::from_utf8(include_bytes!("../../../tests/fixtures/tls/smtp.server.key.pem")).unwrap();
-        let body = key_text.strip_prefix("-----BEGIN PRIVATE KEY-----").unwrap()
-            .strip_suffix("-----END PRIVATE KEY-----\n").unwrap();
+        let certs = jet_net_tls_pem_certificates(include_bytes!(
+            "../../../tests/fixtures/tls/smtp.server.cert.pem"
+        ))
+        .unwrap();
+        let key_text = std::str::from_utf8(include_bytes!(
+            "../../../tests/fixtures/tls/smtp.server.key.pem"
+        ))
+        .unwrap();
+        let body = key_text
+            .strip_prefix("-----BEGIN PRIVATE KEY-----")
+            .unwrap()
+            .strip_suffix("-----END PRIVATE KEY-----\n")
+            .unwrap();
         let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
             rustls::pki_types::PrivatePkcs8KeyDer::from(jet_net_tls_pem_base64(body).unwrap()),
         );
-        std::sync::Arc::new(rustls::ServerConfig::builder().with_no_client_auth()
-            .with_single_cert(certs, key).unwrap())
+        std::sync::Arc::new(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap(),
+        )
     }
 
     fn smtp_read_line<T: std::io::Read>(io: &mut T) -> String {
         let mut bytes = Vec::new();
         loop {
             let mut byte = [0u8; 1];
-            if io.read(&mut byte).unwrap_or(0) == 0 { break; }
+            if io.read(&mut byte).unwrap_or(0) == 0 {
+                break;
+            }
             bytes.push(byte[0]);
-            if bytes.ends_with(b"\r\n") { break; }
+            if bytes.ends_with(b"\r\n") {
+                break;
+            }
         }
         String::from_utf8(bytes).unwrap()
     }
 
     #[derive(Clone, Copy)]
-    enum SMTPFixture { Success, CloseAfterData, RejectAuth, StallGreeting }
+    enum SMTPFixture {
+        Success,
+        CloseAfterData,
+        RejectAuth,
+        StallGreeting,
+    }
 
     fn smtp_tls_session<T: std::io::Read + std::io::Write>(
         io: &mut T,
@@ -1042,45 +1090,75 @@ mod net_tls_close_tests {
                 let _ = io.read(&mut byte);
                 return;
             }
-            io.write_all(b"220 relay ready\r\n").unwrap(); io.flush().unwrap();
+            io.write_all(b"220 relay ready\r\n").unwrap();
+            io.flush().unwrap();
         }
-        let ehlo = smtp_read_line(io); transcript.lock().unwrap().push(ehlo.clone());
+        let ehlo = smtp_read_line(io);
+        transcript.lock().unwrap().push(ehlo.clone());
         assert_eq!(ehlo, "EHLO localhost\r\n");
-        io.write_all(b"250-relay\r\n250 AUTH PLAIN LOGIN\r\n").unwrap(); io.flush().unwrap();
-        let auth = smtp_read_line(io); transcript.lock().unwrap().push(auth.clone());
-        assert!(auth.starts_with("AUTH PLAIN ")); assert!(!auth.contains("swordfish"));
+        io.write_all(b"250-relay\r\n250 AUTH PLAIN LOGIN\r\n")
+            .unwrap();
+        io.flush().unwrap();
+        let auth = smtp_read_line(io);
+        transcript.lock().unwrap().push(auth.clone());
+        assert!(auth.starts_with("AUTH PLAIN "));
+        assert!(!auth.contains("swordfish"));
         if matches!(fixture, SMTPFixture::RejectAuth) {
-            io.write_all(b"535 bad credentials\r\n").unwrap(); io.flush().unwrap();
+            io.write_all(b"535 bad credentials\r\n").unwrap();
+            io.flush().unwrap();
             return;
         }
-        io.write_all(b"235 authenticated\r\n").unwrap(); io.flush().unwrap();
-        let mail = smtp_read_line(io); transcript.lock().unwrap().push(mail.clone());
+        io.write_all(b"235 authenticated\r\n").unwrap();
+        io.flush().unwrap();
+        let mail = smtp_read_line(io);
+        transcript.lock().unwrap().push(mail.clone());
         assert!(mail.starts_with("MAIL FROM:<sender@example.com>"));
-        io.write_all(b"250 sender ok\r\n").unwrap(); io.flush().unwrap();
-        let rcpt = smtp_read_line(io); transcript.lock().unwrap().push(rcpt.clone());
+        io.write_all(b"250 sender ok\r\n").unwrap();
+        io.flush().unwrap();
+        let rcpt = smtp_read_line(io);
+        transcript.lock().unwrap().push(rcpt.clone());
         assert!(rcpt.starts_with("RCPT TO:<recipient@example.net>"));
-        io.write_all(b"250 recipient ok\r\n").unwrap(); io.flush().unwrap();
-        let data = smtp_read_line(io); transcript.lock().unwrap().push(data.clone());
+        io.write_all(b"250 recipient ok\r\n").unwrap();
+        io.flush().unwrap();
+        let data = smtp_read_line(io);
+        transcript.lock().unwrap().push(data.clone());
         assert_eq!(data, "DATA\r\n");
-        io.write_all(b"354 continue\r\n").unwrap(); io.flush().unwrap();
+        io.write_all(b"354 continue\r\n").unwrap();
+        io.flush().unwrap();
         let mut body = Vec::new();
         loop {
             let mut byte = [0u8; 1];
-            if io.read(&mut byte).unwrap_or(0) == 0 { return; }
+            if io.read(&mut byte).unwrap_or(0) == 0 {
+                return;
+            }
             body.push(byte[0]);
-            if body.ends_with(b"\r\n.\r\n") { break; }
+            if body.ends_with(b"\r\n.\r\n") {
+                break;
+            }
         }
-        transcript.lock().unwrap().push(String::from_utf8_lossy(&body).into_owned());
-        if matches!(fixture, SMTPFixture::CloseAfterData) { return; }
-        io.write_all(b"250 queued q-1\r\n").unwrap(); io.flush().unwrap();
-        let quit = smtp_read_line(io); transcript.lock().unwrap().push(quit);
-        let _ = io.write_all(b"221 bye\r\n"); let _ = io.flush();
+        transcript
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(&body).into_owned());
+        if matches!(fixture, SMTPFixture::CloseAfterData) {
+            return;
+        }
+        io.write_all(b"250 queued q-1\r\n").unwrap();
+        io.flush().unwrap();
+        let quit = smtp_read_line(io);
+        transcript.lock().unwrap().push(quit);
+        let _ = io.write_all(b"221 bye\r\n");
+        let _ = io.flush();
     }
 
     fn spawn_smtp_server(
         starttls: bool,
         fixture: SMTPFixture,
-    ) -> (std::net::SocketAddr, std::sync::Arc<std::sync::Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
+    ) -> (
+        std::net::SocketAddr,
+        std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        std::thread::JoinHandle<()>,
+    ) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let transcript = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1089,17 +1167,26 @@ mod net_tls_close_tests {
         let server = std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             if starttls {
-                socket.write_all(b"220 relay ready\r\n").unwrap(); socket.flush().unwrap();
-                let ehlo = smtp_read_line(&mut socket); server_transcript.lock().unwrap().push(ehlo);
-                socket.write_all(b"250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n").unwrap(); socket.flush().unwrap();
-                let command = smtp_read_line(&mut socket); server_transcript.lock().unwrap().push(command.clone());
+                socket.write_all(b"220 relay ready\r\n").unwrap();
+                socket.flush().unwrap();
+                let ehlo = smtp_read_line(&mut socket);
+                server_transcript.lock().unwrap().push(ehlo);
+                socket
+                    .write_all(b"250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n")
+                    .unwrap();
+                socket.flush().unwrap();
+                let command = smtp_read_line(&mut socket);
+                server_transcript.lock().unwrap().push(command.clone());
                 assert_eq!(command, "STARTTLS\r\n");
-                socket.write_all(b"220 begin TLS\r\n").unwrap(); socket.flush().unwrap();
+                socket.write_all(b"220 begin TLS\r\n").unwrap();
+                socket.flush().unwrap();
             }
             let conn = rustls::ServerConnection::new(config).unwrap();
             let mut tls = rustls::StreamOwned::new(conn, socket);
             while tls.conn.is_handshaking() {
-                if tls.conn.complete_io(&mut tls.sock).is_err() { return; }
+                if tls.conn.complete_io(&mut tls.sock).is_err() {
+                    return;
+                }
             }
             smtp_tls_session(&mut tls, !starttls, fixture, &server_transcript);
         });
@@ -1110,16 +1197,32 @@ mod net_tls_close_tests {
         use smtp_adapter::jet_email as email;
         let from = email::address(&"sender@example.com".to_string()).unwrap();
         let to = email::address(&"recipient@example.net".to_string()).unwrap();
-        email::message(&from, &vec![to], &vec![], &"subject".to_string(),
-            &"first\r\n.second".to_string(), &String::new(), &vec![]).unwrap()
+        email::message(
+            &from,
+            &vec![to],
+            &vec![],
+            &"subject".to_string(),
+            &"first\r\n.second".to_string(),
+            &String::new(),
+            &vec![],
+        )
+        .unwrap()
     }
 
     fn smtp_config(port: u16, starttls: bool) -> smtp_adapter::jet_email::SMTPConfig<Vec<u8>> {
         use smtp_adapter::jet_email as email;
         email::SMTPConfig {
-            host: "localhost".to_string(), port: port as i64,
-            security: if starttls { email::SMTPSecurity::StartTls } else { email::SMTPSecurity::TLS },
-            auth: email::SMTPAuth::Password { username: "mailer".to_string(), password: b"swordfish".to_vec() },
+            host: "localhost".to_string(),
+            port: port as i64,
+            security: if starttls {
+                email::SMTPSecurity::StartTls
+            } else {
+                email::SMTPSecurity::TLS
+            },
+            auth: email::SMTPAuth::Password {
+                username: "mailer".to_string(),
+                password: b"swordfish".to_vec(),
+            },
             recipient_policy: email::RecipientPolicy::RequireAll,
             trust: email::TLSTrust::SystemPlusCa {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
@@ -1131,17 +1234,32 @@ mod net_tls_close_tests {
 
     fn test_base64_decode(text: &str) -> Vec<u8> {
         let value = |byte| match byte {
-            b'A'..=b'Z' => byte - b'A', b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52, b'+' => 62, b'/' => 63,
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
             _ => 0,
         };
-        let bytes: Vec<u8> = text.bytes().filter(|byte| !byte.is_ascii_whitespace()).collect();
+        let bytes: Vec<u8> = text
+            .bytes()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect();
         let mut out = Vec::new();
         for chunk in bytes.chunks_exact(4) {
-            let values = [value(chunk[0]), value(chunk[1]), value(chunk[2]), value(chunk[3])];
+            let values = [
+                value(chunk[0]),
+                value(chunk[1]),
+                value(chunk[2]),
+                value(chunk[3]),
+            ];
             out.push(values[0] << 2 | values[1] >> 4);
-            if chunk[2] != b'=' { out.push(values[1] << 4 | values[2] >> 2); }
-            if chunk[3] != b'=' { out.push(values[2] << 6 | values[3]); }
+            if chunk[2] != b'=' {
+                out.push(values[1] << 4 | values[2] >> 2);
+            }
+            if chunk[3] != b'=' {
+                out.push(values[2] << 6 | values[3]);
+            }
         }
         out
     }
@@ -1149,7 +1267,10 @@ mod net_tls_close_tests {
     fn test_relaxed_header(header: &str) -> String {
         let (name, value) = header.split_once(':').unwrap();
         let unfolded = value.replace("\r\n ", " ").replace("\r\n\t", " ");
-        let value = unfolded.split_ascii_whitespace().collect::<Vec<_>>().join(" ");
+        let value = unfolded
+            .split_ascii_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         format!("{}:{}\r\n", name.to_ascii_lowercase(), value)
     }
 
@@ -1160,34 +1281,54 @@ mod net_tls_close_tests {
         let body = &wire[boundary + 4..];
         let mut first_end = 0usize;
         for (index, line) in headers.split("\r\n").enumerate() {
-            if index != 0 && !line.starts_with([' ', '\t']) { break; }
+            if index != 0 && !line.starts_with([' ', '\t']) {
+                break;
+            }
             first_end += line.len() + 2;
         }
         let dkim_header = &headers[..first_end - 2];
         let unfolded = dkim_header.replace("\r\n ", " ");
-        let tags = unfolded.split_once(':').unwrap().1.split(';')
+        let tags = unfolded
+            .split_once(':')
+            .unwrap()
+            .1
+            .split(';')
             .filter_map(|tag| tag.trim().split_once('='))
-            .map(|(name, value)| (name, value)).collect::<std::collections::HashMap<_, _>>();
+            .map(|(name, value)| (name, value))
+            .collect::<std::collections::HashMap<_, _>>();
         assert_eq!(tags["a"], "ed25519-sha256");
         assert_eq!(tags["c"], "relaxed/relaxed");
         assert_eq!(tags["d"], "example.com");
         assert_eq!(tags["s"], "login-2026");
 
         let mut body_lines: Vec<&str> = body.split("\r\n").collect();
-        while body_lines.last().is_some_and(|line| line.trim_end_matches([' ', '\t']).is_empty()) {
+        while body_lines
+            .last()
+            .is_some_and(|line| line.trim_end_matches([' ', '\t']).is_empty())
+        {
             body_lines.pop();
         }
-        let canonical_body = if body_lines.is_empty() { "\r\n".to_string() } else {
-            body_lines.into_iter().map(|line| line.trim_end_matches([' ', '\t']))
-                .collect::<Vec<_>>().join("\r\n") + "\r\n"
+        let canonical_body = if body_lines.is_empty() {
+            "\r\n".to_string()
+        } else {
+            body_lines
+                .into_iter()
+                .map(|line| line.trim_end_matches([' ', '\t']))
+                .collect::<Vec<_>>()
+                .join("\r\n")
+                + "\r\n"
         };
         let body_hash: [u8; 32] = sha2::Sha256::digest(canonical_body.as_bytes()).into();
         assert_eq!(test_base64_decode(tags["bh"]), body_hash);
 
         let mut signing_input = String::new();
         for wanted in tags["h"].split(':') {
-            let header = headers.rsplit("\r\n")
-                .find(|line| line.split_once(':').is_some_and(|(name, _)| name.eq_ignore_ascii_case(wanted)))
+            let header = headers
+                .rsplit("\r\n")
+                .find(|line| {
+                    line.split_once(':')
+                        .is_some_and(|(name, _)| name.eq_ignore_ascii_case(wanted))
+                })
                 .unwrap();
             signing_input.push_str(&test_relaxed_header(header));
         }
@@ -1195,8 +1336,12 @@ mod net_tls_close_tests {
         signing_input.push_str(&test_relaxed_header(&empty_b));
         let signature: [u8; 64] = test_base64_decode(tags["b"]).try_into().unwrap();
         let header_hash: [u8; 32] = sha2::Sha256::digest(signing_input.as_bytes()).into();
-        ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key()
-            .verify_strict(&header_hash, &ed25519_dalek::Signature::from_bytes(&signature))
+        ed25519_dalek::SigningKey::from_bytes(&seed)
+            .verifying_key()
+            .verify_strict(
+                &header_hash,
+                &ed25519_dalek::Signature::from_bytes(&signature),
+            )
             .unwrap();
     }
 
@@ -1210,20 +1355,40 @@ mod net_tls_close_tests {
             let config = smtp_config(address.port(), starttls);
             let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
             let report = mailer.send(smtp_message()).unwrap();
-            assert_eq!((report.response_code, report.accepted.len(), report.rejected.len()), (250, 1, 0));
+            assert_eq!(
+                (
+                    report.response_code,
+                    report.accepted.len(),
+                    report.rejected.len()
+                ),
+                (250, 1, 0)
+            );
             server.join().unwrap();
             let transcript = transcript.lock().unwrap().join("");
             assert_eq!(transcript.matches("DATA\r\n").count(), 1);
             assert!(!transcript.contains("swordfish"));
-            if starttls { assert!(transcript.contains("STARTTLS\r\nEHLO localhost\r\n")); }
+            if starttls {
+                assert!(transcript.contains("STARTTLS\r\nEHLO localhost\r\n"));
+            }
         }
 
         let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::CloseAfterData);
         let config = smtp_config(address.port(), false);
         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
-        assert!(matches!(mailer.send(smtp_message()), Err(email::Error::DeliveryUnknown { .. })));
+        assert!(matches!(
+            mailer.send(smtp_message()),
+            Err(email::Error::DeliveryUnknown { .. })
+        ));
         server.join().unwrap();
-        assert_eq!(transcript.lock().unwrap().join("").matches("DATA\r\n").count(), 1);
+        assert_eq!(
+            transcript
+                .lock()
+                .unwrap()
+                .join("")
+                .matches("DATA\r\n")
+                .count(),
+            1
+        );
 
         let (address, _, server) = spawn_smtp_server(false, SMTPFixture::RejectAuth);
         let config = smtp_config(address.port(), false);
@@ -1240,15 +1405,22 @@ mod net_tls_close_tests {
             std::thread::sleep(std::time::Duration::from_millis(60));
             SMTP_CANCELLED.store(true, std::sync::atomic::Ordering::SeqCst);
         });
-        assert!(matches!(mailer.send(smtp_message()), Err(email::Error::Cancelled { .. })));
-        cancel.join().unwrap(); server.join().unwrap();
+        assert!(matches!(
+            mailer.send(smtp_message()),
+            Err(email::Error::Cancelled { .. })
+        ));
+        cancel.join().unwrap();
+        server.join().unwrap();
         SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
 
         let (address, _, server) = spawn_smtp_server(false, SMTPFixture::StallGreeting);
         SMTP_DEADLINE_MS.store(smtp_now_ms() + 60, std::sync::atomic::Ordering::SeqCst);
         let config = smtp_config(address.port(), false);
         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
-        assert!(matches!(mailer.send(smtp_message()), Err(email::Error::TimedOut { .. })));
+        assert!(matches!(
+            mailer.send(smtp_message()),
+            Err(email::Error::TimedOut { .. })
+        ));
         server.join().unwrap();
         SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
     }
@@ -1262,26 +1434,49 @@ mod net_tls_close_tests {
             let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::Success);
             let mut config = smtp_config(address.port(), false);
             config.dkim = Ok(email::DkimConfig {
-                domain: "example.com".to_string(), selector: "login-2026".to_string(),
+                domain: "example.com".to_string(),
+                selector: "login-2026".to_string(),
                 private_key: seed.to_vec(),
-                signed_headers: ["from", "to", "subject", "mime-version", "content-type",
-                    "content-transfer-encoding"].iter().map(|value| value.to_string()).collect(),
+                signed_headers: [
+                    "from",
+                    "to",
+                    "subject",
+                    "mime-version",
+                    "content-type",
+                    "content-transfer-encoding",
+                ]
+                .iter()
+                .map(|value| value.to_string())
+                .collect(),
             });
             let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
             mailer.send(smtp_message()).unwrap();
             server.join().unwrap();
             let transcript = transcript.lock().unwrap();
-            let stuffed = transcript.iter().find(|part| part.starts_with("DKIM-Signature:")).unwrap();
-            wires.push(stuffed.strip_suffix(".\r\n").unwrap().replace("\r\n..", "\r\n."));
+            let stuffed = transcript
+                .iter()
+                .find(|part| part.starts_with("DKIM-Signature:"))
+                .unwrap();
+            wires.push(
+                stuffed
+                    .strip_suffix(".\r\n")
+                    .unwrap()
+                    .replace("\r\n..", "\r\n."),
+            );
         }
-        assert_eq!(wires[0], wires[1], "DKIM ordering and folding must be deterministic");
+        assert_eq!(
+            wires[0], wires[1],
+            "DKIM ordering and folding must be deterministic"
+        );
         verify_dkim_wire(&wires[0], seed);
         let mut relaxed_variant = wires[0].replace("\r\nFrom: ", "\r\nfRoM:\t  ");
         let body = relaxed_variant.find("\r\n\r\n").unwrap() + 4;
         let first_body_line = relaxed_variant[body..].find("\r\n").unwrap() + body;
         relaxed_variant.insert_str(first_body_line, " \t");
         verify_dkim_wire(&relaxed_variant, seed);
-        assert!(wires[0].starts_with("DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;\r\n"));
+        assert!(
+            wires[0].starts_with("DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;\r\n")
+        );
     }
 
     #[test]
@@ -1290,30 +1485,49 @@ mod net_tls_close_tests {
         SMTP_WIPES.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut config = smtp_config(465, false);
         config.dkim = Ok(email::DkimConfig {
-            domain: "example.com".to_string(), selector: "login-2026".to_string(),
-            private_key: vec![0x5a; 31], signed_headers: vec!["from".to_string()],
+            domain: "example.com".to_string(),
+            selector: "login-2026".to_string(),
+            private_key: vec![0x5a; 31],
+            signed_headers: vec!["from".to_string()],
         });
         let error = match email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()) {
             Err(error) => error,
             Ok(_) => panic!("31-byte DKIM seed was accepted"),
         };
-        assert!(matches!(&error, email::Error::Configuration { operation, reason, .. }
-            if operation == "dkim" && reason == "private_key must contain exactly 32 bytes"));
+        assert!(
+            matches!(&error, email::Error::Configuration { operation, reason, .. }
+            if operation == "dkim" && reason == "private_key must contain exactly 32 bytes")
+        );
         assert!(!format!("{error:?}").contains("5a5a"));
-        assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 2,
-            "construction failure must wipe copied SMTP password and DKIM seed");
+        assert_eq!(
+            SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "construction failure must wipe copied SMTP password and DKIM seed"
+        );
 
         config.dkim.as_mut().unwrap().private_key.push(0x5a);
-        let mailer = email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
+        let mailer =
+            email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
         drop(mailer);
-        assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 4,
-            "Mailer drop must wipe owned SMTP password and DKIM seed");
+        assert_eq!(
+            SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst),
+            4,
+            "Mailer drop must wipe owned SMTP password and DKIM seed"
+        );
 
-        config.dkim.as_mut().unwrap().signed_headers.push("x-absent".to_string());
-        let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
+        config
+            .dkim
+            .as_mut()
+            .unwrap()
+            .signed_headers
+            .push("x-absent".to_string());
+        let mut mailer =
+            email::smtp(&config, |secret| secret.clone(), smtp_counting_runtime()).unwrap();
         let error = mailer.send(smtp_message()).unwrap_err();
-        assert!(matches!(error, email::Error::Configuration { operation, reason, .. }
-            if operation == "dkim" && reason.contains("x-absent") && reason.contains("absent")));
+        assert!(
+            matches!(error, email::Error::Configuration { operation, reason, .. }
+            if operation == "dkim" && reason.contains("x-absent") && reason.contains("absent"))
+        );
         drop(mailer);
         assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 6);
     }
@@ -1322,9 +1536,12 @@ mod net_tls_close_tests {
     fn smtp_from_env_dkim_is_all_or_none_and_redacted() {
         use smtp_adapter::jet_email as email;
         let _guard = SMTP_ENV_LOCK.lock().unwrap();
-        for name in ["SMTP_DKIM_DOMAIN", "SMTP_DKIM_SELECTOR",
-            "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"]
-        {
+        for name in [
+            "SMTP_DKIM_DOMAIN",
+            "SMTP_DKIM_SELECTOR",
+            "SMTP_DKIM_PRIVATE_KEY_BASE64",
+            "SMTP_DKIM_SIGNED_HEADERS",
+        ] {
             std::env::remove_var(name);
         }
         std::env::set_var("SMTP_HOST", "localhost");
@@ -1335,8 +1552,10 @@ mod net_tls_close_tests {
             Err(error) => error,
             Ok(_) => panic!("partial DKIM environment was accepted"),
         };
-        assert!(matches!(partial, email::Error::Configuration { operation, reason, .. }
-            if operation == "smtp_from_env" && reason.contains("must be set together")));
+        assert!(
+            matches!(partial, email::Error::Configuration { operation, reason, .. }
+            if operation == "smtp_from_env" && reason.contains("must be set together"))
+        );
 
         std::env::set_var("SMTP_DKIM_SELECTOR", "login-2026");
         std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "private-key-not-base64");
@@ -1346,12 +1565,21 @@ mod net_tls_close_tests {
         };
         assert!(!format!("{malformed:?}").contains("private-key-not-base64"));
 
-        std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=");
+        std::env::set_var(
+            "SMTP_DKIM_PRIVATE_KEY_BASE64",
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        );
         let mailer = email::smtp_from_env(smtp_runtime()).unwrap();
         drop(mailer);
-        for name in ["SMTP_HOST", "SMTP_SECURITY", "SMTP_PORT", "SMTP_DKIM_DOMAIN",
-            "SMTP_DKIM_SELECTOR", "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"]
-        {
+        for name in [
+            "SMTP_HOST",
+            "SMTP_SECURITY",
+            "SMTP_PORT",
+            "SMTP_DKIM_DOMAIN",
+            "SMTP_DKIM_SELECTOR",
+            "SMTP_DKIM_PRIVATE_KEY_BASE64",
+            "SMTP_DKIM_SIGNED_HEADERS",
+        ] {
             std::env::remove_var(name);
         }
     }
@@ -1413,8 +1641,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
 /// Dependency-free `core.archive` ABI kernel used by the source package's
 /// internal boundary and the hidden bridge. Keeping one kernel prevents the
 /// offline ring package and direct `jet run` path from drifting apart.
-const ARCHIVE_SOURCE: &str =
-    include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
+const ARCHIVE_SOURCE: &str = include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
 
 /// Hand-written database runtime emitted into the bridge crate when `core.db`
 /// is used. This is the only code that touches the `rusqlite` crate.
@@ -1491,8 +1718,7 @@ const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
 /// world (`compiler-extension-v1`) and entry points. Compiled only by the
 /// isolated `jetpack` binary; kept here beside other prelude runtimes for
 /// substrate parity. Not mixed into application `core.plugin` bridges.
-pub const COMPILER_EXTENSION_RUNTIME: &str =
-    include_str!("Prelude/CompilerExtension.rs");
+pub const COMPILER_EXTENSION_RUNTIME: &str = include_str!("Prelude/CompilerExtension.rs");
 
 /// The `age` crate version backing `core.crypto.vault` (U13, D-JPK-SECRETCRYPTO1=A) —
 /// the age-style crypto bridge: X25519 recipients, ChaCha20-Poly1305 payload.
@@ -1560,9 +1786,15 @@ pub fn cached_crypto_helper_path() -> PathBuf {
     let target = host_target();
     let mut deps = BTreeMap::new();
     for (name, version) in [
-        AES_GCM_CRATE_SPEC, CHACHA_POLY_CRATE_SPEC, ED25519_CRATE_SPEC,
-        ARGON2_CRATE_SPEC, SHA2_CRATE_SPEC, BLAKE3_CRATE_SPEC,
-        HKDF_CRATE_SPEC, X25519_CRATE_SPEC, SUBTLE_CRATE_SPEC,
+        AES_GCM_CRATE_SPEC,
+        CHACHA_POLY_CRATE_SPEC,
+        ED25519_CRATE_SPEC,
+        ARGON2_CRATE_SPEC,
+        SHA2_CRATE_SPEC,
+        BLAKE3_CRATE_SPEC,
+        HKDF_CRATE_SPEC,
+        X25519_CRATE_SPEC,
+        SUBTLE_CRATE_SPEC,
     ] {
         deps.insert(name.to_string(), version.to_string());
     }
@@ -1752,8 +1984,7 @@ fn build_bridge_full(
             entries,
             artifacts,
         )
-    })
-    {
+    }) {
         let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
             crate_name,
@@ -1810,8 +2041,7 @@ fn build_bridge_full(
             entries,
             artifacts,
         )
-    })
-    {
+    }) {
         let cdylib = artifacts[1].clone();
         return Ok(FfiLink {
             crate_name,
@@ -1939,17 +2169,15 @@ fn build_bridge_full(
     if !native_link_args.is_empty() {
         cargo.env("CARGO_ENCODED_RUSTFLAGS", native_link_args.join("\u{1f}"));
     }
-    let out = cargo
-        .output()
-        .map_err(|e| {
-            vec![Diagnostic::error(
-                "E0703",
-                format!("couldn't run `cargo`: {}", e),
-                "Jet needs `cargo` to build foreign crate wrappers".to_string(),
-                "install Rust from https://rustup.rs, then try again".to_string(),
-                None,
-            )]
-        })?;
+    let out = cargo.output().map_err(|e| {
+        vec![Diagnostic::error(
+            "E0703",
+            format!("couldn't run `cargo`: {}", e),
+            "Jet needs `cargo` to build foreign crate wrappers".to_string(),
+            "install Rust from https://rustup.rs, then try again".to_string(),
+            None,
+        )]
+    })?;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -2402,21 +2630,15 @@ fn bridge_paths(key: &str, selected_target: &str, native_link_args: &[String]) -
 /// rebuild a per-key dir would have avoided. The profile is the `release` path
 /// segment Cargo itself appends.
 fn shared_target_dir(selected_target: &str, native_link_args: &[String]) -> PathBuf {
-    let mut identity = crate::ForeignBridge::IdentityBuilder::new(
-        crate::ForeignBridge::IDENTITY_SCHEMA,
-    );
+    let mut identity =
+        crate::ForeignBridge::IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
     identity.field("descriptor_schema", SHARED_DEPS_SCHEMA.as_bytes());
     identity.field("selected_target", selected_target.as_bytes());
-    identity.field(
-        "rust_toolchain",
-        native_toolchain_identity().as_bytes(),
-    );
+    identity.field("rust_toolchain", native_toolchain_identity().as_bytes());
     for argument in native_link_args {
         identity.field("rustflag", argument.as_bytes());
     }
-    cache_dir()
-        .join("deps")
-        .join(identity.finish())
+    cache_dir().join("deps").join(identity.finish())
 }
 
 /// Bin target names Cargo uplifts into the shared release dir. Keyed, because
@@ -2471,9 +2693,8 @@ fn cache_key_full(
     native_toolchain: Option<&InlineNativeToolchain>,
     native_link_args: &[String],
 ) -> String {
-    let mut identity = crate::ForeignBridge::IdentityBuilder::new(
-        crate::ForeignBridge::IDENTITY_SCHEMA,
-    );
+    let mut identity =
+        crate::ForeignBridge::IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
     identity.field("descriptor_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
     identity.field("selected_target", selected_target.as_bytes());
     let rust_toolchain = native_toolchain_identity();
@@ -2507,11 +2728,17 @@ fn cache_key_full(
     identity.field("needs_http_client", &[needs_http_client as u8]);
     if needs_http_client {
         identity.field("http_client_runtime", HTTP_CLIENT_RUNTIME.as_bytes());
-        identity.field("http_public_suffix_list", HTTP_PUBLIC_SUFFIX_LIST.as_bytes());
+        identity.field(
+            "http_public_suffix_list",
+            HTTP_PUBLIC_SUFFIX_LIST.as_bytes(),
+        );
     }
     identity.field("needs_http_server_tls", &[needs_http_server_tls as u8]);
     if needs_http_server_tls {
-        identity.field("http_server_tls_runtime", HTTP_SERVER_TLS_RUNTIME.as_bytes());
+        identity.field(
+            "http_server_tls_runtime",
+            HTTP_SERVER_TLS_RUNTIME.as_bytes(),
+        );
     }
     identity.field("needs_net_tls", &[needs_net_tls as u8]);
     if needs_net_tls {
@@ -2738,7 +2965,10 @@ fn bridge_artifact_paths(
         }
         paths.push(helper.to_path_buf());
     }
-    paths.iter().all(|path| path.starts_with(target)).then_some(paths)
+    paths
+        .iter()
+        .all(|path| path.starts_with(target))
+        .then_some(paths)
 }
 
 fn invalidate_bridge_artifacts(
@@ -2844,9 +3074,9 @@ fn bridge_cache_verified(
     if !artifacts_verified {
         return false;
     }
-    let Ok(provenance) = crate::ForeignBridge::read_provenance(&bridge_provenance_path(
-        target, crate_name,
-    )) else {
+    let Ok(provenance) =
+        crate::ForeignBridge::read_provenance(&bridge_provenance_path(target, crate_name))
+    else {
         return false;
     };
     if provenance.schema != BRIDGE_PROVENANCE_SCHEMA
@@ -2874,7 +3104,9 @@ fn bridge_cache_verified(
         let Some(digest) = provenance.value(&format!("artifact.{relative}")) else {
             return false;
         };
-        expected.get(&relative).is_some_and(|expected| digest == expected)
+        expected
+            .get(&relative)
+            .is_some_and(|expected| digest == expected)
     })
 }
 
@@ -2887,7 +3119,10 @@ fn publish_bridge_manifest(
     manifest.push('\n');
     for path in artifacts {
         let relative = artifact_relative_path(target, path).ok_or_else(|| {
-            format!("FFI artifact escapes the shared target dir: {}", path.display())
+            format!(
+                "FFI artifact escapes the shared target dir: {}",
+                path.display()
+            )
         })?;
         let bytes = fs::read(path)
             .map_err(|error| format!("could not read FFI artifact {}: {error}", path.display()))?;
@@ -2902,7 +3137,10 @@ fn publish_bridge_manifest(
         .map_err(|error| format!("could not stage {}: {error}", manifest_path.display()))?;
     if let Err(error) = fs::rename(&temporary, &manifest_path) {
         let _ = fs::remove_file(&temporary);
-        return Err(format!("could not publish {}: {error}", manifest_path.display()));
+        return Err(format!(
+            "could not publish {}: {error}",
+            manifest_path.display()
+        ));
     }
     Ok(())
 }
@@ -2924,8 +3162,12 @@ fn publish_bridge_provenance(
                 artifact.display()
             )
         })?;
-        let bytes = fs::read(artifact)
-            .map_err(|error| format!("could not read FFI artifact {}: {error}", artifact.display()))?;
+        let bytes = fs::read(artifact).map_err(|error| {
+            format!(
+                "could not read FFI artifact {}: {error}",
+                artifact.display()
+            )
+        })?;
         artifact_digests.push((relative, crate::SHA256::sha256_hex(&bytes)));
     }
     let toolchain_digest = crate::SHA256::sha256_hex(native_toolchain_identity().as_bytes());
@@ -2945,12 +3187,7 @@ fn publish_bridge_provenance(
         .iter()
         .map(|(name, value)| (*name, value.as_str()))
         .collect::<Vec<_>>();
-    crate::ForeignBridge::write_provenance(
-        path,
-        cache_identity,
-        &field_refs,
-        &artifact_digests,
-    )
+    crate::ForeignBridge::write_provenance(path, cache_identity, &field_refs, &artifact_digests)
 }
 
 fn cache_dir() -> PathBuf {
@@ -2978,23 +3215,36 @@ fn inline_native_toolchain(
     entries: &[ExternEntry],
     target: &str,
 ) -> Result<Option<InlineNativeToolchain>, Vec<Diagnostic>> {
-    let has_c = entries
-        .iter()
-        .any(|entry| entry.inline.as_ref().is_some_and(|inline| inline.lang == "c"));
-    let has_cpp = entries
-        .iter()
-        .any(|entry| entry.inline.as_ref().is_some_and(|inline| inline.lang == "cpp"));
+    let has_c = entries.iter().any(|entry| {
+        entry
+            .inline
+            .as_ref()
+            .is_some_and(|inline| inline.lang == "c")
+    });
+    let has_cpp = entries.iter().any(|entry| {
+        entry
+            .inline
+            .as_ref()
+            .is_some_and(|inline| inline.lang == "cpp")
+    });
     if !has_c && !has_cpp {
         return Ok(None);
     }
     let host = host_target();
     Ok(Some(InlineNativeToolchain {
         target: target.to_string(),
-        cc: has_c.then(|| resolve_native_tool("CC", target, &host, "clang")).transpose()?,
+        cc: has_c
+            .then(|| resolve_native_tool("CC", target, &host, "clang"))
+            .transpose()?,
         cxx: has_cpp
             .then(|| resolve_native_tool("CXX", target, &host, "clang++"))
             .transpose()?,
-        ar: resolve_native_tool("AR", target, &host, if target == host { "ar" } else { "llvm-ar" })?,
+        ar: resolve_native_tool(
+            "AR",
+            target,
+            &host,
+            if target == host { "ar" } else { "llvm-ar" },
+        )?,
     }))
 }
 
@@ -3006,7 +3256,11 @@ fn resolve_native_tool(
 ) -> Result<NativeTool, Vec<Diagnostic>> {
     let target_key = target.replace('-', "_");
     let selected = std::env::var_os(format!("{variable}_{target_key}"))
-        .or_else(|| (target == host).then(|| std::env::var_os(variable)).flatten())
+        .or_else(|| {
+            (target == host)
+                .then(|| std::env::var_os(variable))
+                .flatten()
+        })
         .unwrap_or_else(|| fallback.into());
     let requested = PathBuf::from(&selected);
     let path = if requested.components().count() > 1 {
@@ -3019,11 +3273,21 @@ fn resolve_native_tool(
                 .and_then(|candidate| fs::canonicalize(candidate).ok())
         })
     }
-    .ok_or_else(|| tool_error(&format!("selected native tool `{}` was not found", requested.display())))?;
+    .ok_or_else(|| {
+        tool_error(&format!(
+            "selected native tool `{}` was not found",
+            requested.display()
+        ))
+    })?;
     let output = Command::new(&path)
         .arg("--version")
         .output()
-        .map_err(|error| tool_error(&format!("couldn't inspect native tool `{}`: {error}", path.display())))?;
+        .map_err(|error| {
+            tool_error(&format!(
+                "couldn't inspect native tool `{}`: {error}",
+                path.display()
+            ))
+        })?;
     if !output.status.success() {
         return Err(tool_error(&format!(
             "selected native tool `{}` rejected `--version`",
@@ -3052,12 +3316,21 @@ fn inline_toolchain_identity(toolchain: &InlineNativeToolchain) -> String {
         proof_suffix_for_target(&toolchain.target),
         undefined_symbol_flag_for_target(&toolchain.target)
     );
-    for (name, tool) in [("cc", toolchain.cc.as_ref()), ("cxx", toolchain.cxx.as_ref())] {
+    for (name, tool) in [
+        ("cc", toolchain.cc.as_ref()),
+        ("cxx", toolchain.cxx.as_ref()),
+    ] {
         if let Some(tool) = tool {
-            value.push_str(&format!("{name}={}\ntarget-arg={:?}\n", tool.identity, tool.target_arg));
+            value.push_str(&format!(
+                "{name}={}\ntarget-arg={:?}\n",
+                tool.identity, tool.target_arg
+            ));
         }
     }
-    value.push_str(&format!("ar={}\narchive-flags=rcs\n", toolchain.ar.identity));
+    value.push_str(&format!(
+        "ar={}\narchive-flags=rcs\n",
+        toolchain.ar.identity
+    ));
     value
 }
 
@@ -3254,7 +3527,10 @@ fn emit_wrapper_lib(
     for e in entries {
         names.insert(e.jet_name.clone());
     }
-    if entries.iter().any(|e| emit_cabi_trampoline(e, &names).is_some()) {
+    if entries
+        .iter()
+        .any(|e| emit_cabi_trampoline(e, &names).is_some())
+    {
         out.push_str(
             "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {\n    if ptr.is_null() { return; }\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}\n\n",
         );
@@ -3339,11 +3615,7 @@ fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> Strin
             _ => call_args.push(format!("p{index}")),
         }
     }
-    let raw_call = format!(
-        "unsafe {{ {}({}) }}",
-        entry.rust_path,
-        call_args.join(", ")
-    );
+    let raw_call = format!("unsafe {{ {}({}) }}", entry.rust_path, call_args.join(", "));
     let call = match &entry.return_type {
         Some(Type::String) => format!(
             "    let ptr = {raw_call};\n    if ptr.is_null() {{ ffi_panic(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(ptr) }}.to_str().unwrap_or_else(|_| ffi_panic()).to_owned()"
@@ -3379,9 +3651,7 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .params
         .iter()
         .enumerate()
-        .map(|(i, (convention, ty))| {
-            format!("p{i}: {}", inline_rust_param_type(*convention, ty))
-        })
+        .map(|(i, (convention, ty))| format!("p{i}: {}", inline_rust_param_type(*convention, ty)))
         .collect::<Vec<_>>();
     let abi_params = entry
         .params
@@ -3425,9 +3695,7 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         .params
         .iter()
         .enumerate()
-        .map(|(i, (convention, ty))| {
-            format!("p{i}: {}", inline_rust_param_type(*convention, ty))
-        })
+        .map(|(i, (convention, ty))| format!("p{i}: {}", inline_rust_param_type(*convention, ty)))
         .collect::<Vec<_>>();
     let ret = entry
         .return_type
@@ -3616,9 +3884,7 @@ fn emit_native_inline_source(entry: &ExternEntry, index: usize) -> String {
         .params
         .iter()
         .enumerate()
-        .map(|(i, (convention, ty))| {
-            format!("{} p{i}", inline_c_param_type(*convention, ty, cpp))
-        })
+        .map(|(i, (convention, ty))| format!("{} p{i}", inline_c_param_type(*convention, ty, cpp)))
         .collect::<Vec<_>>();
     let types = entry
         .params
@@ -3665,7 +3931,10 @@ fn emit_inline_build_rs(entries: &[ExternEntry], toolchain: &InlineNativeToolcha
             }
             "cpp" => {
                 has_cpp = true;
-                let tool = toolchain.cxx.as_ref().expect("C++ entry has a C++ compiler");
+                let tool = toolchain
+                    .cxx
+                    .as_ref()
+                    .expect("C++ entry has a C++ compiler");
                 files.push(format!(
                     "({:?}, {:?}, true, {:?})",
                     format!("inline_{index}.cpp"),
@@ -4116,7 +4385,19 @@ mod tests {
 
     #[test]
     fn generated_bridge_reports_through_host_callback() {
-        let source = emit_wrapper_lib(&[], false, false, false, false, false, false, false, false, false, false);
+        let source = emit_wrapper_lib(
+            &[],
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        );
         assert!(source.contains("pub extern \"C\" fn jet_ffi_set_reporter"));
         assert!(source.contains("reporter(MESSAGE.as_ptr(), MESSAGE.len())"));
         assert!(source.contains("__jet_ffi_runtime__: {MESSAGE}"));
@@ -4142,7 +4423,10 @@ mod tests {
         let source = emit_cabi_trampoline(&value_entry, &HashSet::new()).unwrap();
         assert!(source.contains("String::from_utf8(bytes)"), "{source}");
         assert!(source.contains("p0_ptr.is_null()"), "{source}");
-        assert!(source.contains("out_ptr.is_null() || out_len.is_null()"), "{source}");
+        assert!(
+            source.contains("out_ptr.is_null() || out_len.is_null()"),
+            "{source}"
+        );
         assert!(!source.contains("from_utf8_unchecked"), "{source}");
 
         let capability_entry = ExternEntry {
@@ -4173,16 +4457,34 @@ mod tests {
         let inline = entry.inline.as_ref().unwrap();
         let wrapper = emit_inline_wrapper_fn(&entry, inline);
         assert!(wrapper.contains("p0: *mut i64"), "{wrapper}");
-        assert!(wrapper.contains("pub fn jet_ffi_edit(p0: &mut i64)"), "{wrapper}");
+        assert!(
+            wrapper.contains("pub fn jet_ffi_edit(p0: &mut i64)"),
+            "{wrapper}"
+        );
 
         let native = emit_native_inline_source(&entry, 0);
         assert!(native.contains("void edit(int64_t* value)"), "{native}");
-        assert!(native.contains("jet_inline_jet_ffi_edit(int64_t* p0)"), "{native}");
+        assert!(
+            native.contains("jet_inline_jet_ffi_edit(int64_t* p0)"),
+            "{native}"
+        );
     }
 
     #[test]
     fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
-        let source = emit_wrapper_lib(&[], false, false, false, false, false, false, true, false, false, false);
+        let source = emit_wrapper_lib(
+            &[],
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+        );
 
         assert!(source.contains("pub type JetOutcome<T, E> = Result<T, E>;"));
         assert!(source.contains("pub struct JetAbsent;"));

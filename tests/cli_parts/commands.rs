@@ -54,8 +54,14 @@ fn status_renders_each_receipt_verb_without_a_claim_inventory() {
     let json = String::from_utf8(output.stdout).unwrap();
     assert!(json.contains("\"claim\":\"custom-api\""), "{json}");
     assert!(json.contains("\"claim\":\"custom-test\""), "{json}");
-    assert!(json.contains("\"action\":\"jet custom-api run.jet\""), "{json}");
-    assert!(json.contains("\"action\":\"jet custom-test run.jet\""), "{json}");
+    assert!(
+        json.contains("\"action\":\"jet custom-api run.jet\""),
+        "{json}"
+    );
+    assert!(
+        json.contains("\"action\":\"jet custom-test run.jet\""),
+        "{json}"
+    );
 }
 
 #[test]
@@ -67,7 +73,14 @@ fn status_never_promotes_stale_receipt_to_proven() {
     let store = jet::ReceiptStore::ReceiptStore::new(&receipt_dir);
     let argv = vec!["prove".into(), "run.jet".into()];
     store
-        .record("prove", &argv, std::slice::from_ref(&source), 0, b"proof", b"")
+        .record(
+            "prove",
+            &argv,
+            std::slice::from_ref(&source),
+            0,
+            b"proof",
+            b"",
+        )
         .unwrap();
 
     let current = Command::new(jet())
@@ -76,7 +89,12 @@ fn status_never_promotes_stale_receipt_to_proven() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(current.status.code(), Some(0), "{}", String::from_utf8_lossy(&current.stderr));
+    assert_eq!(
+        current.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&current.stderr)
+    );
     assert!(String::from_utf8_lossy(&current.stdout).contains("\"state\":\"proven\""));
 
     fs::write(&source, "fn run() { print(\"changed\") }\n").unwrap();
@@ -86,7 +104,12 @@ fn status_never_promotes_stale_receipt_to_proven() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(stale.status.code(), Some(0), "{}", String::from_utf8_lossy(&stale.stderr));
+    assert_eq!(
+        stale.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&stale.stderr)
+    );
     let json = String::from_utf8(stale.stdout).unwrap();
     assert!(json.contains("\"state\":\"stale\""), "{json}");
     assert!(!json.contains("\"state\":\"proven\""), "{json}");
@@ -136,10 +159,24 @@ dependencies = ["textkit"]
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
     let human = String::from_utf8(human.stdout).unwrap();
-    assert!(human.contains("sha256:4be1…") && human.contains("logged 2026-08-01") && human.contains("ed25519:ak3f… \"textkit team\"") && human.contains("slsa v1.0"), "{human}");
-    assert!(human.contains("enforced") && human.contains("verified") && human.contains("recorded"), "{human}");
+    assert!(
+        human.contains("sha256:4be1…")
+            && human.contains("logged 2026-08-01")
+            && human.contains("ed25519:ak3f… \"textkit team\"")
+            && human.contains("slsa v1.0"),
+        "{human}"
+    );
+    assert!(
+        human.contains("enforced") && human.contains("verified") && human.contains("recorded"),
+        "{human}"
+    );
     check_snapshot("inspect_provenance.txt", &human);
 
     let json = Command::new(jet())
@@ -148,31 +185,95 @@ dependencies = ["textkit"]
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
     let json = String::from_utf8(json.stdout).unwrap();
-    assert!(parse_json(&json).is_ok(), "provenance report JSON must parse: {json}");
+    assert!(
+        parse_json(&json).is_ok(),
+        "provenance report JSON must parse: {json}"
+    );
     for field in ["integrity", "transparency", "publisher", "build"] {
-        assert!(json.contains(&format!("\"{field}\"")), "missing {field}: {json}");
+        assert!(
+            json.contains(&format!("\"{field}\"")),
+            "missing {field}: {json}"
+        );
     }
-    assert!(json.contains("\"evidence\":\"E1204\"") && json.contains("\"status\":\"enforced\""), "{json}");
+    assert!(
+        json.contains("\"evidence\":\"E1204\"") && json.contains("\"status\":\"enforced\""),
+        "{json}"
+    );
     check_snapshot("inspect_provenance.json", &json);
 }
 
 #[test]
 fn perl_bind_launders_parse_failure_as_e3208() {
-    if Command::new("perl").arg("-v").output().is_err(){return}
-    let dir=isolated_cwd("perl_bind_invalid");let script=dir.join("broken.pl");fs::write(&script,"sub Broken { if ( }\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","perl"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("syntax error at"));assert!(!stderr.contains("broken.pl line"));check_snapshot("bind_perl_invalid_e3208.txt",&scrub(&stderr,&script));
+    if Command::new("perl").arg("-v").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("perl_bind_invalid");
+    let script = dir.join("broken.pl");
+    fs::write(&script, "sub Broken { if ( }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "perl"])
+        .arg(&script)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(!stderr.contains("syntax error at"));
+    assert!(!stderr.contains("broken.pl line"));
+    check_snapshot("bind_perl_invalid_e3208.txt", &scrub(&stderr, &script));
 }
 
 #[test]
 fn ruby_bind_round_trips_datatree_state_timeout_and_cancellation() {
-    if Command::new("ruby").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("ruby_bind_round_trip");let script=dir.join("ops.rb");
-    let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/ruby");fs::copy(example.join("ops.rb"),&script).unwrap();
-    let bind=Command::new(jet()).args(["inspect","bind","ruby"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Ruby bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/ruby");assert!(cache.join("libjet_ruby_ops.a").is_file());assert!(cache.join("ops_worker.rb").is_file());assert!(cache.join("ops.provenance").is_file());
-    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Ruby binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    if Command::new("ruby").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("ruby_bind_round_trip");
+    let script = dir.join("ops.rb");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/ruby");
+    fs::copy(example.join("ops.rb"), &script).unwrap();
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "ruby"])
+        .arg(&script)
+        .args(["--pkg", "ops"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "Ruby bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let cache = dir.join(".jet/bindings/ruby");
+    assert!(cache.join("libjet_ruby_ops.a").is_file());
+    assert!(cache.join("ops_worker.rb").is_file());
+    assert!(cache.join("ops.provenance").is_file());
+    fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
+    let run = run_debug_aot("main.jet")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated Ruby binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        fs::read_to_string(example.join("expected.out")).unwrap()
+    );
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -185,24 +286,100 @@ static int64_t handle;static int64_t code;
 static void* call(void*unused){(void)unused;jet_ruby_ops_invoke_sleep_call(handle,"null",60000);code=jet_ruby_ops_take_error();return 0;}
 int main(void){handle=jet_ruby_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_ruby_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_ruby_ops_open();if(!fresh)return 4;jet_ruby_ops_close(fresh);return 0;}
 "#).unwrap();
-    let cc=Command::new("cc").arg("cancel.c").args(["-L.jet/bindings/ruby","-l:libjet_ruby_ops.a","-lpthread","-o","cancel"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"Ruby cancellation probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let cancel=Command::new(dir.join("cancel")).current_dir(&dir).output().unwrap();assert!(cancel.status.success(),"Ruby cancellation did not clean the worker: {:?}",cancel.status.code());
+    let cc = Command::new("cc")
+        .arg("cancel.c")
+        .args([
+            "-L.jet/bindings/ruby",
+            "-l:libjet_ruby_ops.a",
+            "-lpthread",
+            "-o",
+            "cancel",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        cc.status.success(),
+        "Ruby cancellation probe link failed:\n{}",
+        String::from_utf8_lossy(&cc.stderr)
+    );
+    let cancel = Command::new(dir.join("cancel"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        cancel.status.success(),
+        "Ruby cancellation did not clean the worker: {:?}",
+        cancel.status.code()
+    );
 }
 
 #[test]
 fn ruby_bind_launders_parse_failure_as_e3208() {
-    if Command::new("ruby").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("ruby_bind_invalid");let script=dir.join("broken.rb");fs::write(&script,"def broken(input)\n  if input\nend\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","ruby"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("syntax error"));assert!(!stderr.contains("broken.rb:"));check_snapshot("bind_ruby_invalid_e3208.txt",&scrub(&stderr,&script));
+    if Command::new("ruby").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("ruby_bind_invalid");
+    let script = dir.join("broken.rb");
+    fs::write(&script, "def broken(input)\n  if input\nend\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "ruby"])
+        .arg(&script)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(!stderr.contains("syntax error"));
+    assert!(!stderr.contains("broken.rb:"));
+    check_snapshot("bind_ruby_invalid_e3208.txt", &scrub(&stderr, &script));
 }
 
 #[test]
 fn php_bind_runs_a_persistent_bounded_worker_pool() {
-    if Command::new("php").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("php_bind_pool");let script=dir.join("ops.php");
-    let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/php");fs::copy(example.join("ops.php"),&script).unwrap();
-    let bind=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"PHP bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/php");assert!(cache.join("libjet_php_ops.a").is_file());assert!(cache.join("ops_worker.php").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("pool_workers=4"));
-    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PHP binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    if Command::new("php").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("php_bind_pool");
+    let script = dir.join("ops.php");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/php");
+    fs::copy(example.join("ops.php"), &script).unwrap();
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "php"])
+        .arg(&script)
+        .args(["--pkg", "ops"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "PHP bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let cache = dir.join(".jet/bindings/php");
+    assert!(cache.join("libjet_php_ops.a").is_file());
+    assert!(cache.join("ops_worker.php").is_file());
+    let provenance = fs::read_to_string(cache.join("ops.provenance")).unwrap();
+    assert!(provenance.contains("pool_workers=4"));
+    fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
+    let run = run_debug_aot("main.jet")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated PHP binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        fs::read_to_string(example.join("expected.out")).unwrap()
+    );
     fs::write(dir.join("pool.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <time.h>
@@ -220,21 +397,67 @@ static void* cancel_call(void*unused){(void)unused;jet_php_ops_invoke_sleep_call
 static int64_t millis(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (int64_t)t.tv_sec*1000+t.tv_nsec/1000000;}
 int main(void){const char*valid="{\"nested\":{},\"list\":[],\"scalar\":1,\"nothing\":null}";pool=jet_php_ops_open();if(!pool)return 1;pthread_t threads[4];int64_t start=millis();for(intptr_t i=0;i<4;i++)if(pthread_create(&threads[i],0,parallel_call,(void*)i))return 2;for(int i=0;i<4;i++)pthread_join(threads[i],0);if(millis()-start>2500)return 3;for(int i=0;i<4;i++)if(codes[i])return 4;jet_php_ops_invoke_sleep_call(pool,"null",100);if(jet_php_ops_take_error()!=2)return 5;jet_php_ops_invoke_transform(pool,valid,5000);int64_t recovery=jet_php_ops_take_error();if(recovery)return 20+(int)recovery;pthread_t cancelled;if(pthread_create(&cancelled,0,cancel_call,0))return 7;usleep(100000);jet_php_ops_cancel(pool);pthread_join(cancelled,0);if(codes[0]!=3)return 8;for(int i=0;i<4;i++){jet_php_ops_invoke_transform(pool,valid,5000);int64_t code=jet_php_ops_take_error();if(code)return 30+(int)code;}jet_php_ops_close(pool);int64_t pools[8];for(int i=0;i<8;i++)if(!(pools[i]=jet_php_ops_open()))return 40+i;if(jet_php_ops_open()!=0||jet_php_ops_take_error()!=1)return 49;for(int i=0;i<8;i++)jet_php_ops_close(pools[i]);return 0;}
 "#).unwrap();
-    let cc=Command::new("cc").arg("pool.c").args(["-L.jet/bindings/php","-l:libjet_php_ops.a","-lpthread","-o","pool"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"PHP pool probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let pool=Command::new(dir.join("pool")).current_dir(&dir).output().unwrap();assert!(pool.status.success(),"PHP worker-pool probe failed: {:?}",pool.status.code());
+    let cc = Command::new("cc")
+        .arg("pool.c")
+        .args([
+            "-L.jet/bindings/php",
+            "-l:libjet_php_ops.a",
+            "-lpthread",
+            "-o",
+            "pool",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        cc.status.success(),
+        "PHP pool probe link failed:\n{}",
+        String::from_utf8_lossy(&cc.stderr)
+    );
+    let pool = Command::new(dir.join("pool"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        pool.status.success(),
+        "PHP worker-pool probe failed: {:?}",
+        pool.status.code()
+    );
 }
 
 #[test]
 fn php_bind_launders_parse_failure_as_e3208() {
-    if Command::new("php").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("php_bind_invalid");let script=dir.join("broken.php");fs::write(&script,"<?php function broken($input) { if ( }\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("Parse error"));assert!(!stderr.contains("broken.php on line"));check_snapshot("bind_php_invalid_e3208.txt",&scrub(&stderr,&script));
+    if Command::new("php").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("php_bind_invalid");
+    let script = dir.join("broken.php");
+    fs::write(&script, "<?php function broken($input) { if ( }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "php"])
+        .arg(&script)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(!stderr.contains("Parse error"));
+    assert!(!stderr.contains("broken.php on line"));
+    check_snapshot("bind_php_invalid_e3208.txt", &scrub(&stderr, &script));
 }
 
 #[test]
 fn r_bind_round_trips_datatree_state_and_worker_lifecycle() {
-    if Command::new("Rscript").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("r_bind_round_trip");let script=dir.join("ops.R");
-    let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/r");fs::copy(example.join("ops.R"),&script).unwrap();
+    if Command::new("Rscript").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("r_bind_round_trip");
+    let script = dir.join("ops.R");
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/r");
+    fs::copy(example.join("ops.R"), &script).unwrap();
     fs::OpenOptions::new().append(true).open(&script).unwrap().write_all(br#"
 replace_plot <- function(value) {
   device <- dev.cur()
@@ -256,9 +479,40 @@ hostile_plot <- function(input) {
   replace_plot(value)
 }
 "#).unwrap();
-    let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"R bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/r");assert!(cache.join("libjet_r_ops.a").is_file());assert!(cache.join("ops_worker.R").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"));assert!(!provenance.to_ascii_lowercase().contains("cran"));
-    fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "r"])
+        .arg(&script)
+        .args(["--pkg", "ops"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "R bind failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let cache = dir.join(".jet/bindings/r");
+    assert!(cache.join("libjet_r_ops.a").is_file());
+    assert!(cache.join("ops_worker.R").is_file());
+    let provenance = fs::read_to_string(cache.join("ops.provenance")).unwrap();
+    assert!(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"));
+    assert!(!provenance.to_ascii_lowercase().contains("cran"));
+    fs::copy(example.join("main.jet"), dir.join("main.jet")).unwrap();
+    let run = run_debug_aot("main.jet")
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "generated R binding did not run:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        fs::read_to_string(example.join("expected.out")).unwrap()
+    );
     fs::write(dir.join("lifecycle.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -278,13 +532,44 @@ static void* call(void*unused){(void)unused;jet_r_ops_invoke_sleep_call_plot(han
 static int hostile(int64_t h,const char*kind){char input[64];snprintf(input,sizeof(input),"{\"kind\":\"%s\"}",kind);const char*response=jet_r_ops_invoke_hostile_plot_plot(h,input,5000);if(jet_r_ops_take_error()!=0||!response||!strstr(response,"\"ok\":false")||strstr(response,"secret"))return 1;return 0;}
 int main(void){handle=jet_r_ops_open();if(!handle)return 1;const char*svg=jet_r_ops_invoke_plot_scores_plot(handle,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true")||!strstr(svg,"<svg height=\\\"")||strstr(svg,"<?xml")||strstr(svg,"<script"))return 2;const char*kinds[]={"script","event","foreign","external","css","doctype","malformed","oversize"};for(int i=0;i<8;i++)if(hostile(handle,kinds[i]))return 10+i;const char*recovered=jet_r_ops_invoke_transform(handle,"{\"nested\":{},\"vector\":[1,2],\"scalar\":1,\"nothing\":null}",5000);if(jet_r_ops_take_error()!=0||!recovered||!strstr(recovered,"\"ok\":true"))return 20;jet_r_ops_invoke_sleep_call_plot(handle,"1",100);if(jet_r_ops_take_error()!=2)return 21;int64_t timed=jet_r_ops_open();if(!timed)return 22;svg=jet_r_ops_invoke_plot_scores_plot(timed,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true"))return 23;jet_r_ops_close(timed);handle=jet_r_ops_open();if(!handle)return 24;pthread_t thread;if(pthread_create(&thread,0,call,0))return 25;usleep(100000);jet_r_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 26;int64_t fresh=jet_r_ops_open();if(!fresh)return 27;svg=jet_r_ops_invoke_plot_scores_plot(fresh,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true"))return 28;jet_r_ops_close(fresh);int64_t sessions[32];for(int i=0;i<32;i++)if(!(sessions[i]=jet_r_ops_open()))return 40+i;if(jet_r_ops_open()!=0||jet_r_ops_take_error()!=1)return 72;for(int i=0;i<32;i++)jet_r_ops_close(sessions[i]);return 0;}
 "#).unwrap();
-    let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/r","-l:libjet_r_ops.a","-lpthread","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"R lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"R lifecycle probe failed: {:?}",lifecycle.status.code());
+    let cc = Command::new("cc")
+        .arg("lifecycle.c")
+        .args([
+            "-L.jet/bindings/r",
+            "-l:libjet_r_ops.a",
+            "-lpthread",
+            "-o",
+            "lifecycle",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        cc.status.success(),
+        "R lifecycle probe link failed:\n{}",
+        String::from_utf8_lossy(&cc.stderr)
+    );
+    let lifecycle = Command::new(dir.join("lifecycle"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        lifecycle.status.success(),
+        "R lifecycle probe failed: {:?}",
+        lifecycle.status.code()
+    );
 }
 
 #[test]
 fn r_bind_discovers_functions_without_executing_source() {
-    if Command::new("Rscript").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("r_bind_static_discovery");let script=dir.join("static.R");fs::write(&script,r#"stop("discovery executed source")
+    if Command::new("Rscript").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("r_bind_static_discovery");
+    let script = dir.join("static.R");
+    fs::write(
+        &script,
+        r#"stop("discovery executed source")
 # fake <- function(input) input
 text <- "also_fake <- function(input) input"
 outer <- function(input) {
@@ -292,48 +577,136 @@ outer <- function(input) {
   input
 }
 
-"#).unwrap();
-    let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","static_ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"static R discovery failed:\n{}",String::from_utf8_lossy(&bind.stderr));let generated=fs::read_to_string(dir.join(".jet/bindings/r/static_ops.jet")).unwrap();assert!(generated.contains("pub fn outer("));assert!(!generated.contains("pub fn fake("));assert!(!generated.contains("pub fn also_fake("));assert!(!generated.contains("pub fn nested("));
+"#,
+    )
+    .unwrap();
+    let bind = Command::new(jet())
+        .args(["inspect", "bind", "r"])
+        .arg(&script)
+        .args(["--pkg", "static_ops"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        bind.status.success(),
+        "static R discovery failed:\n{}",
+        String::from_utf8_lossy(&bind.stderr)
+    );
+    let generated = fs::read_to_string(dir.join(".jet/bindings/r/static_ops.jet")).unwrap();
+    assert!(generated.contains("pub fn outer("));
+    assert!(!generated.contains("pub fn fake("));
+    assert!(!generated.contains("pub fn also_fake("));
+    assert!(!generated.contains("pub fn nested("));
 }
 
 #[test]
 fn r_bind_launders_parse_failure_as_e3208() {
-    if Command::new("Rscript").arg("--version").output().is_err(){return}
-    let dir=isolated_cwd("r_bind_invalid");let script=dir.join("broken.R");fs::write(&script,"broken <- function(input) { if ( }\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(!stderr.contains("unexpected '}'"));assert!(!stderr.contains("broken.R:"));check_snapshot("bind_r_invalid_e3208.txt",&scrub(&stderr,&script));
+    if Command::new("Rscript").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = isolated_cwd("r_bind_invalid");
+    let script = dir.join("broken.R");
+    fs::write(&script, "broken <- function(input) { if ( }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "r"])
+        .arg(&script)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(!stderr.contains("unexpected '}'"));
+    assert!(!stderr.contains("broken.R:"));
+    check_snapshot("bind_r_invalid_e3208.txt", &scrub(&stderr, &script));
 }
 
 #[test]
 fn octave_bind_reports_checked_diagnostic_for_unsupported_shape() {
-    let dir=isolated_cwd("octave_bind_invalid");let script=dir.join("broken.m");fs::write(&script,"function [left, right] = split(input)\n  left = input; right = input;\nend\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","octave"]).arg(&script).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
-    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains("multiple-output"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.m:"));
+    let dir = isolated_cwd("octave_bind_invalid");
+    let script = dir.join("broken.m");
+    fs::write(
+        &script,
+        "function [left, right] = split(input)\n  left = input; right = input;\nend\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "octave"])
+        .arg(&script)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(stderr.contains("multiple-output"));
+    assert!(stderr.contains(" Why:"));
+    assert!(stderr.contains(" Fix:"));
+    assert!(!stderr.contains("broken.m:"));
 }
 
-#[cfg(not(target_os="windows"))]
+#[cfg(not(target_os = "windows"))]
 #[test]
 fn com_bind_rejects_non_windows_before_reading_input() {
-    let output=Command::new(jet()).args(["inspect","bind","com","missing.tlb","--pkg","excel"]).env("NO_COLOR","1").output().unwrap();assert_eq!(output.status.code(),Some(1));assert!(output.stdout.is_empty());check_snapshot("bind_com_non_windows_e3260.txt",&String::from_utf8_lossy(&output.stderr));
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "com", "missing.tlb", "--pkg", "excel"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    check_snapshot(
+        "bind_com_non_windows_e3260.txt",
+        &String::from_utf8_lossy(&output.stderr),
+    );
 }
 
 #[test]
 fn ada_bind_launders_gnat_failure_as_e3208() {
-    let dir=isolated_cwd("ada_bind_failure");let spec=dir.join("broken.ads");
+    let dir = isolated_cwd("ada_bind_failure");
+    let spec = dir.join("broken.ads");
     fs::write(&spec,"package Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"broken_value\"; end Broken;\n").unwrap();
     fs::write(dir.join("broken.adb"),"package body Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer is begin return N +; end Value; end Broken;\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","ada"]).arg(&spec).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
-    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));assert!(!stderr.contains("broken.adb:"));
-    check_snapshot("bind_ada_invalid_e3208.txt",&scrub(&stderr,&spec));
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "ada"])
+        .arg(&spec)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(stderr.contains(" Why:"));
+    assert!(stderr.contains(" Fix:"));
+    assert!(!stderr.contains("broken.adb:"));
+    check_snapshot("bind_ada_invalid_e3208.txt", &scrub(&stderr, &spec));
 }
 
 #[test]
 fn tcl_bind_missing_source_is_laundered_e3208() {
-    let dir=isolated_cwd("tcl_bind_missing");let source=dir.join("missing.tcl");
-    let output=Command::new(jet()).args(["inspect","bind","tcl"]).arg(&source).args(["--pkg","missing"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
-    assert!(!output.status.success());let stderr=String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Error [E3208]:"));assert!(stderr.contains(" Why:"));assert!(stderr.contains(" Fix:"));
-    check_snapshot("bind_tcl_missing_e3208.txt",&scrub(&stderr,&source));
+    let dir = isolated_cwd("tcl_bind_missing");
+    let source = dir.join("missing.tcl");
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "tcl"])
+        .arg(&source)
+        .args(["--pkg", "missing"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(stderr.contains(" Why:"));
+    assert!(stderr.contains(" Fix:"));
+    check_snapshot("bind_tcl_missing_e3208.txt", &scrub(&stderr, &source));
 }
 
 #[test]
@@ -379,24 +752,52 @@ end module broken_math
         !stderr.contains("    7 |"),
         "raw gfortran source frame leaked:\n{stderr}"
     );
-    check_snapshot(
-        "bind_fortran_invalid_e3208.txt",
-        &scrub(&stderr, &source),
-    );
+    check_snapshot("bind_fortran_invalid_e3208.txt", &scrub(&stderr, &source));
 }
 
 #[test]
 fn cobol_bind_launders_foreign_compiler_failure_as_e3208() {
-    let cobc = Command::new("cobc").arg("--version").output().expect("jet-env full must provision cobc");
-    assert!(cobc.status.success(), "provisioned cobc failed its version check");
-    let dir=isolated_cwd("cobol_bind_failure"); let source=dir.join("broken.cob"); let copybook=dir.join("record.cpy");
-    fs::write(&source,"       IDENTIFICATION DIVISION.\n       PROGRAM-ID. BROKEN.\n       THIS IS NOT COBOL.\n").unwrap();
-    fs::write(&copybook,"       01 RECORD.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap();
-    let output=Command::new(jet()).args(["inspect","bind","cobol"]).arg(&source).args(["--copybook"]).arg(&copybook).args(["--pkg","broken"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
-    assert!(!output.status.success()); let stderr=String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Error [E3208]:")); assert!(stderr.contains(" Why:")); assert!(stderr.contains(" Fix:"));
-    assert!(!stderr.contains("broken.cob:"),"raw cobc location leaked:\n{stderr}");
-    check_snapshot("bind_cobol_invalid_e3208.txt",&scrub(&stderr,&source));
+    let cobc = Command::new("cobc")
+        .arg("--version")
+        .output()
+        .expect("jet-env full must provision cobc");
+    assert!(
+        cobc.status.success(),
+        "provisioned cobc failed its version check"
+    );
+    let dir = isolated_cwd("cobol_bind_failure");
+    let source = dir.join("broken.cob");
+    let copybook = dir.join("record.cpy");
+    fs::write(
+        &source,
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. BROKEN.\n       THIS IS NOT COBOL.\n",
+    )
+    .unwrap();
+    fs::write(
+        &copybook,
+        "       01 RECORD.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["inspect", "bind", "cobol"])
+        .arg(&source)
+        .args(["--copybook"])
+        .arg(&copybook)
+        .args(["--pkg", "broken"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E3208]:"));
+    assert!(stderr.contains(" Why:"));
+    assert!(stderr.contains(" Fix:"));
+    assert!(
+        !stderr.contains("broken.cob:"),
+        "raw cobc location leaked:\n{stderr}"
+    );
+    check_snapshot("bind_cobol_invalid_e3208.txt", &scrub(&stderr, &source));
 }
 
 #[test]
@@ -426,10 +827,22 @@ fn cobol_bind_rejects_unknown_copybook_usage_as_e3208() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Error [E3208]:"), "missing E3208:\n{stderr}");
-    assert!(stderr.contains("unsupported PIC/usage"), "missing copybook cause:\n{stderr}");
-    assert!(stderr.contains(" Why:") && stderr.contains(" Fix:"), "incomplete diagnostic:\n{stderr}");
-    assert!(!stderr.contains("record.cpy:"), "raw copybook location leaked:\n{stderr}");
+    assert!(
+        stderr.contains("Error [E3208]:"),
+        "missing E3208:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("unsupported PIC/usage"),
+        "missing copybook cause:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(" Why:") && stderr.contains(" Fix:"),
+        "incomplete diagnostic:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("record.cpy:"),
+        "raw copybook location leaked:\n{stderr}"
+    );
 }
 
 #[test]
@@ -445,7 +858,10 @@ fn unknown_cross_target_is_e3302() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "unexpected stderr:\n{stderr}");
-    assert!(stderr.contains("Error [E3302]:"), "missing target diagnostic:\n{stderr}");
+    assert!(
+        stderr.contains("Error [E3302]:"),
+        "missing target diagnostic:\n{stderr}"
+    );
     assert!(stderr.contains("Why:"), "missing E3302 reason:\n{stderr}");
     assert!(stderr.contains("Fix:"), "missing E3302 fix:\n{stderr}");
     check_snapshot("unknown_target_e3302.txt", &stderr);
@@ -465,7 +881,10 @@ fn prove_unknown_lens_is_e2941() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "unexpected stderr:\n{stderr}");
-    assert!(stderr.contains("Error [E2941]:"), "missing lens diagnostic:\n{stderr}");
+    assert!(
+        stderr.contains("Error [E2941]:"),
+        "missing lens diagnostic:\n{stderr}"
+    );
     assert!(stderr.contains("Why:"), "missing E2941 reason:\n{stderr}");
     assert!(stderr.contains("Fix:"), "missing E2941 fix:\n{stderr}");
     check_snapshot("prove_unknown_lens_e2941.txt", &stderr);
@@ -940,8 +1359,7 @@ fn ext_optional_missing_path_keeps_original_name() {
 fn simple_exec_runs_without_a_manifest() {
     // A single file with a top-level `fn run` and no package.jet runs as an
     // executable with zero ceremony (R9 / D-ILE1).
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/run.jet");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/run.jet");
     // Isolated cwd: this fixture's stem is `main`, a common stem other tests
     // and examples also use — see `isolated_cwd`.
     let out = Command::new(jet())
@@ -969,7 +1387,15 @@ fn passthrough_forwards_tokens_after_separator() {
     // three forwarded tokens. process.argv().len() == 4.
     let p = args_fixture(&line!().to_string());
     let out = Command::new(jet())
-        .args(["run", "--profile=debug", p.to_str().unwrap(), "--", "--port", "8080", "x"])
+        .args([
+            "run",
+            "--profile=debug",
+            p.to_str().unwrap(),
+            "--",
+            "--port",
+            "8080",
+            "x",
+        ])
         .output()
         .unwrap();
     assert_eq!(

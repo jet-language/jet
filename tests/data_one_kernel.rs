@@ -24,16 +24,7 @@ const KERNEL: &str = "crates/jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs";
 
 /// Statistics names that must not head a second float-sequence function.
 const STAT_WORDS: &[&str] = &[
-    "sum",
-    "mean",
-    "min",
-    "max",
-    "median",
-    "variance",
-    "stddev",
-    "quantile",
-    "rolling",
-    "describe",
+    "sum", "mean", "min", "max", "median", "variance", "stddev", "quantile", "rolling", "describe",
 ];
 
 /// Arithmetic that only the kernel may contain.
@@ -96,10 +87,7 @@ fn stats_function_names(text: &str) -> Vec<String> {
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
         let lower = name.to_ascii_lowercase();
-        if lower
-            .split('_')
-            .any(|part| STAT_WORDS.contains(&part))
-        {
+        if lower.split('_').any(|part| STAT_WORDS.contains(&part)) {
             found.push(name);
         }
     }

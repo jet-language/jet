@@ -140,7 +140,10 @@ pub struct PersistPrep {
 
 /// Clone of the process-local shared store (session snapshots, tests).
 pub fn shared_clone() -> PersistStore {
-    shared_store().lock().expect("persist store lock poisoned").clone()
+    shared_store()
+        .lock()
+        .expect("persist store lock poisoned")
+        .clone()
 }
 
 /// Replace the process-local shared store.

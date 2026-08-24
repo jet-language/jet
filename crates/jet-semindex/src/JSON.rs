@@ -2,10 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use jet_foundation::AST::{AccessConvention, ParamZone, Type};
-use jet_foundation::AST::ProgramBundle;
-use jet_foundation::JSON::json_escape;
 use jet_foundation::Report::render_status_json;
+use jet_foundation::AST::ProgramBundle;
+use jet_foundation::AST::{AccessConvention, ParamZone, Type};
+use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::Package::{
     dep_display, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
@@ -15,28 +15,84 @@ use jet_pkg_model::Package::{
 use crate::Build::{SymDef, SymKind, SymRef};
 use crate::Symbols::canonical_symbol_name;
 use crate::Types::{
-    BypassFact, BypassKind, CallEdge, DefinitionFact, EffectFact, ExpandProjection, ExpandValue,
-    InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputFact, SemIndex,
-    CallableParameterFact, CallableSignatureFact, SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier, ViewProjectionFact,
-    ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
+    BypassFact, BypassKind, CallEdge, CallableParameterFact, CallableSignatureFact, DefinitionFact,
+    EffectFact, ExpandProjection, ExpandValue, InstanceFact, MemberFact, MemberKind, MemberOrigin,
+    OutputFact, SemIndex, SourceSpan, SymbolDef, SymbolKind, SymbolRef, TypeDossier,
+    ViewProjectionFact, ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact,
 };
 
 fn json_instance(value: &InstanceFact) -> String {
-    let arguments = value.arguments.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
-    let argument_values = value.argument_values.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
-    let argument_provenance = value.argument_provenance.iter().map(|values| {
-        format!("[{}]", values.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(","))
-    }).collect::<Vec<_>>().join(",");
-    let applications = value.applications.iter().map(|application| format!("{{\"name\":{},\"module_path\":{},\"semantic_identity\":{},\"span\":{}}}", json_str(&application.name), json_str(&application.module_path), json_str(&application.semantic_identity), json_span(application.span))).collect::<Vec<_>>().join(",");
-    let members = value.exported_members.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
+    let arguments = value
+        .arguments
+        .iter()
+        .map(|value| json_str(value))
+        .collect::<Vec<_>>()
+        .join(",");
+    let argument_values = value
+        .argument_values
+        .iter()
+        .map(|value| json_str(value))
+        .collect::<Vec<_>>()
+        .join(",");
+    let argument_provenance = value
+        .argument_provenance
+        .iter()
+        .map(|values| {
+            format!(
+                "[{}]",
+                values
+                    .iter()
+                    .map(|value| json_str(value))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let applications = value
+        .applications
+        .iter()
+        .map(|application| {
+            format!(
+                "{{\"name\":{},\"module_path\":{},\"semantic_identity\":{},\"span\":{}}}",
+                json_str(&application.name),
+                json_str(&application.module_path),
+                json_str(&application.semantic_identity),
+                json_span(application.span)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let members = value
+        .exported_members
+        .iter()
+        .map(|value| json_str(value))
+        .collect::<Vec<_>>()
+        .join(",");
     format!("{{\"name\":{},\"module_path\":{},\"fingerprint\":{},\"full_key\":{},\"template_definition_id\":{},\"template_span\":{},\"arguments\":[{}],\"argument_values\":[{}],\"argument_provenance\":[{}],\"applications\":[{}],\"exported_members\":[{}]}}",
         json_str(&value.name), json_str(&value.module_path), json_str(&value.fingerprint), json_str(&value.full_key_hex), json_str(&value.template_definition_id), json_span(value.template_span), arguments, argument_values, argument_provenance, applications, members)
 }
 
 fn json_output(value: &OutputFact) -> String {
-    let params = value.entry.params.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
-    let effects = value.entry.effects.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",");
-    let return_type = value.entry.return_type.as_ref().map_or_else(|| "null".to_string(), |value| json_str(value));
+    let params = value
+        .entry
+        .params
+        .iter()
+        .map(|value| json_str(value))
+        .collect::<Vec<_>>()
+        .join(",");
+    let effects = value
+        .entry
+        .effects
+        .iter()
+        .map(|value| json_str(value))
+        .collect::<Vec<_>>()
+        .join(",");
+    let return_type = value
+        .entry
+        .return_type
+        .as_ref()
+        .map_or_else(|| "null".to_string(), |value| json_str(value));
     format!(
         "{{\"binding\":{},\"kind\":{},\"name\":{},\"module_path\":{},\"span\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"authority\":{},\"effects\":[{}]}}}}",
         json_str(&value.binding), json_str(&value.kind), json_str(&value.name),
@@ -64,7 +120,11 @@ fn json_output_payload(value: &OutputPayload) -> String {
         OutputPayload::String(value) => json_str(value),
         OutputPayload::Array(values) => format!(
             "[{}]",
-            values.iter().map(json_output_payload).collect::<Vec<_>>().join(",")
+            values
+                .iter()
+                .map(json_output_payload)
+                .collect::<Vec<_>>()
+                .join(",")
         ),
         OutputPayload::Object(values) => format!(
             "{{{}}}",
@@ -139,10 +199,7 @@ fn json_environments(values: &BTreeMap<String, EnvironmentFact>) -> String {
         .join(",")
 }
 
-fn json_package_output(
-    value: &PackageOutputFact,
-    provenance: Option<&[String]>,
-) -> String {
+fn json_package_output(value: &PackageOutputFact, provenance: Option<&[String]>) -> String {
     let provenance = provenance
         .unwrap_or_default()
         .iter()
@@ -168,7 +225,9 @@ fn json_package_outputs(
         .iter()
         .map(|(name, value)| {
             let field = format!("outputs.{name}");
-            let origins = provenance.and_then(|all| all.get(&field)).map(Vec::as_slice);
+            let origins = provenance
+                .and_then(|all| all.get(&field))
+                .map(Vec::as_slice);
             json_package_output(value, origins)
         })
         .collect::<Vec<_>>()
@@ -227,7 +286,13 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
     let deps = facts
         .deps
         .iter()
-        .map(|(name, source)| format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(&dep_display(source))))
+        .map(|(name, source)| {
+            format!(
+                "{{\"name\":{},\"source\":{}}}",
+                json_str(name),
+                json_str(&dep_display(source))
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
     let outputs = json_package_outputs(&facts.outputs, Some(&facts.provenance));
@@ -238,12 +303,21 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
             format!(
                 "{}:[{}]",
                 json_str(field),
-                origins.iter().map(|origin| json_str(origin)).collect::<Vec<_>>().join(",")
+                origins
+                    .iter()
+                    .map(|origin| json_str(origin))
+                    .collect::<Vec<_>>()
+                    .join(",")
             )
         })
         .collect::<Vec<_>>()
         .join(",");
-    let configs = facts.configs.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(",");
+    let configs = facts
+        .configs
+        .iter()
+        .map(|name| json_str(name))
+        .collect::<Vec<_>>()
+        .join(",");
     let services = json_services(&facts.services);
     let environments = json_environments(&facts.environments);
     let defaults = json_string_map(&facts.defaults);
@@ -280,13 +354,21 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
 /// the policy application.
 pub fn workspace_overlay_policy_json(policy: &OverlayPolicy) -> String {
     let strings = |values: &[String]| {
-        values.iter().map(|value| json_str(value)).collect::<Vec<_>>().join(",")
+        values
+            .iter()
+            .map(|value| json_str(value))
+            .collect::<Vec<_>>()
+            .join(",")
     };
     let grants = policy
         .build_grants
         .iter()
         .map(|(package, effects)| {
-            format!("{{\"package\":{},\"effects\":[{}]}}", json_str(package), strings(effects))
+            format!(
+                "{{\"package\":{},\"effects\":[{}]}}",
+                json_str(package),
+                strings(effects)
+            )
         })
         .collect::<Vec<_>>()
         .join(",");
@@ -341,7 +423,10 @@ pub fn workspace_overlay_policy_json(policy: &OverlayPolicy) -> String {
         .join(",");
     format!(
         "{{\"allow_unfree\":[{}],\"build_deny\":[{}],\"build_grants\":[{}],\"overlays\":[{}]}}",
-        strings(&policy.allow_unfree), strings(&policy.build_deny), grants, overlays
+        strings(&policy.allow_unfree),
+        strings(&policy.build_deny),
+        grants,
+        overlays
     )
 }
 
@@ -467,7 +552,9 @@ fn json_kind(kind: &SymbolKind) -> String {
             };
             format!(
                 "{{\"kind\":\"function\",\"params\":[{}],\"call_contract\":[{}],\"ret\":{}}}",
-                ps.join(","), contract, ret_json
+                ps.join(","),
+                contract,
+                ret_json
             )
         }
         SymbolKind::Struct { fields } => {
@@ -553,7 +640,10 @@ fn json_ref(r: &SymbolRef) -> String {
             "{{\"module\":{},\"kind\":{},\"semantic_identity\":{},\"span\":{}}}",
             json_str(&target.module_path),
             json_str(&target.kind),
-            target.semantic_identity.as_ref().map_or_else(|| "null".to_string(), |identity| json_str(identity)),
+            target
+                .semantic_identity
+                .as_ref()
+                .map_or_else(|| "null".to_string(), |identity| json_str(identity)),
             json_span(target.def_span)
         ),
         None => "null".to_string(),
@@ -674,7 +764,11 @@ impl SemIndex {
         let calls: Vec<String> = self.call_edges().iter().map(json_call).collect();
         let effects: Vec<String> = self.effects().iter().map(json_effect).collect();
         let members: Vec<String> = self.members().iter().map(json_member).collect();
-        let definition_facts: Vec<String> = self.definition_facts().iter().map(json_definition_fact).collect();
+        let definition_facts: Vec<String> = self
+            .definition_facts()
+            .iter()
+            .map(json_definition_fact)
+            .collect();
         let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
         let outputs: Vec<String> = self.outputs().iter().map(json_output).collect();
         let package = self
@@ -956,15 +1050,17 @@ fn callable_signature(
         .map(|(index, (name, ty))| {
             let (label, zone) = param_contract
                 .get(index)
-                .map(|(_, label, zone)| (
-                    label.clone(),
-                    match zone {
-                        ParamZone::PositionalOnly => "positional_only",
-                        ParamZone::Either => "either",
-                        ParamZone::LabelOnly => "label_only",
-                    }
-                    .to_string(),
-                ))
+                .map(|(_, label, zone)| {
+                    (
+                        label.clone(),
+                        match zone {
+                            ParamZone::PositionalOnly => "positional_only",
+                            ParamZone::Either => "either",
+                            ParamZone::LabelOnly => "label_only",
+                        }
+                        .to_string(),
+                    )
+                })
                 .unwrap_or_else(|| (String::new(), "either".to_string()));
             let access = match param_access
                 .get(index)
@@ -989,7 +1085,11 @@ fn callable_signature(
     let effects = effect_via
         .as_ref()
         .map(|(name, _)| vec![format!("via {name}")])
-        .or_else(|| effects.as_ref().map(|row| row.iter().map(|(name, _)| name.clone()).collect()))
+        .or_else(|| {
+            effects
+                .as_ref()
+                .map(|row| row.iter().map(|(name, _)| name.clone()).collect())
+        })
         .unwrap_or_default();
     let errors = match ret {
         Some(Type::Result { err, .. }) => vec![err.name()],

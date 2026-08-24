@@ -5,15 +5,15 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet_foundation::Facts::BuildStamp;
 use jet::AST::Item;
+use jet_foundation::Facts::BuildStamp;
 use std::fs;
 use std::process::Command;
 
 const FIXTURE: &str = include_str!("../examples/features/reflection/fact_reads.jet");
-const FIXTURE_EXPECTED: &str = include_str!("../examples/features/expected/reflection/fact_reads.out");
-const AGGREGATE_FIXTURE: &str =
-    include_str!("../examples/features/reflection/reflect-value.jet");
+const FIXTURE_EXPECTED: &str =
+    include_str!("../examples/features/expected/reflection/fact_reads.out");
+const AGGREGATE_FIXTURE: &str = include_str!("../examples/features/reflection/reflect-value.jet");
 const AGGREGATE_EXPECTED: &str =
     include_str!("../examples/features/expected/reflection/reflect-value.out");
 
@@ -49,7 +49,9 @@ fn web_stdout(name: &str, source: &str, source_path: &str) -> Option<String> {
     let scratch = common::Scratch::new(name);
     let output = jet::compile_web_with_path(source, source_path)
         .unwrap_or_else(|diags| panic!("web fact fixture was rejected: {diags:#?}"));
-    let web = output.web.expect("web fact fixture must produce web artifacts");
+    let web = output
+        .web
+        .expect("web fact fixture must produce web artifacts");
     fs::write(scratch.join("app.js"), web.js_app).unwrap();
     fs::write(scratch.join("app_wasm.rs"), web.wasm_rust).unwrap();
     fs::write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
@@ -75,7 +77,10 @@ fn web_stdout(name: &str, source: &str, source_path: &str) -> Option<String> {
         "rustc rejected web fact fixture: {}",
         String::from_utf8_lossy(&wasm.stderr)
     );
-    assert!(scratch.join("app.wasm").is_file(), "web fact fixture did not produce app.wasm");
+    assert!(
+        scratch.join("app.wasm").is_file(),
+        "web fact fixture did not produce app.wasm"
+    );
     let node = Command::new("node")
         .current_dir(&scratch.path)
         .arg("app.js")
@@ -99,8 +104,14 @@ fn runtime_fact_reads_are_refused_before_codegen() {
         .iter()
         .find(|diagnostic| diagnostic.code == "E0302")
         .expect("runtime fact read should have a registered diagnostic");
-    assert!(diagnostic.what.contains("compile-time only"), "{diagnostic:?}");
-    assert!(diagnostic.why.contains("never selects runtime behavior"), "{diagnostic:?}");
+    assert!(
+        diagnostic.what.contains("compile-time only"),
+        "{diagnostic:?}"
+    );
+    assert!(
+        diagnostic.why.contains("never selects runtime behavior"),
+        "{diagnostic:?}"
+    );
     assert!(diagnostic.fix.contains("binding"), "{diagnostic:?}");
 }
 
@@ -114,7 +125,10 @@ fn fact_reads_do_not_enter_type_position() {
         .find(|diagnostic| diagnostic.code == "E0119")
         .expect("a fact in type position should have a registered diagnostic");
     assert!(diagnostic.what.contains("fact value"), "{diagnostic:?}");
-    assert!(diagnostic.why.contains("do not mint or select types"), "{diagnostic:?}");
+    assert!(
+        diagnostic.why.contains("do not mint or select types"),
+        "{diagnostic:?}"
+    );
 }
 
 #[test]
@@ -123,8 +137,14 @@ fn folded_fact_reads_emit_values_without_runtime_dispatch() {
         "#Numeric Severity :: distinct Int(0..10)\n\n@range :: Severity.@range\n\nfn run() {\n    print(@range.start)\n}\n",
     )
     .expect("a comptime fact read should compile");
-    assert!(output.rust.contains("JetRange"), "the typed fact carrier is missing");
-    assert!(!has_runtime_fact_dispatch(&output.rust), "a folded fact must not emit a runtime reader or dispatch path");
+    assert!(
+        output.rust.contains("JetRange"),
+        "the typed fact carrier is missing"
+    );
+    assert!(
+        !has_runtime_fact_dispatch(&output.rust),
+        "a folded fact must not emit a runtime reader or dispatch path"
+    );
 }
 
 #[test]
@@ -158,11 +178,7 @@ fn every_registered_plane_has_a_source_fact_read() {
 #[test]
 fn registry_derived_plane_reads_are_typed_and_folded() {
     let source = "@flow :: Flow.@flow\n@taint :: Taint.@taint\n@duty :: Duty.@duty\n\nfn run() {\n    print(@flow.kind == .Flow)\n    print(@taint.kind == .Taint)\n    print(@duty.kind == .Duty)\n}\n";
-    tir_support::assert_tiers_agree(
-        "registry-derived-plane-reads",
-        source,
-        "true\ntrue\ntrue\n",
-    );
+    tir_support::assert_tiers_agree("registry-derived-plane-reads", source, "true\ntrue\ntrue\n");
     let output = jet::compile(source).expect("registry-derived plane reads should compile");
     assert!(!has_runtime_fact_dispatch(&output.rust));
 }
@@ -180,14 +196,20 @@ fn parser_preserves_the_typed_fact_fixture() {
     let (tokens, lexer_diagnostics) = jet::Lexer::lex(FIXTURE);
     assert!(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}");
     let program = jet::Parser::parse(&tokens).expect("typed fact fixture must parse");
-    assert!(program.items.iter().any(|item| matches!(item, Item::Const(binding) if binding.is_comptime)));
+    assert!(program
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Const(binding) if binding.is_comptime)));
 }
 
 #[test]
 fn typed_fact_fixture_folds_all_planes_without_runtime_dispatch() {
     let output = jet::compile(FIXTURE).expect("typed fact fixture must compile");
     for value in ["report"] {
-        assert!(output.rust.contains(value), "folded fact value missing: {value}");
+        assert!(
+            output.rust.contains(value),
+            "folded fact value missing: {value}"
+        );
     }
     assert!(!has_runtime_fact_dispatch(&output.rust));
 }
@@ -196,7 +218,10 @@ fn typed_fact_fixture_folds_all_planes_without_runtime_dispatch() {
 fn aggregate_reflection_reads_typed_facts_without_runtime_dispatch() {
     let output = jet::compile(AGGREGATE_FIXTURE).expect("aggregate fact fixture must compile");
     for value in ["Range"] {
-        assert!(output.rust.contains(value), "aggregate fact value missing: {value}");
+        assert!(
+            output.rust.contains(value),
+            "aggregate fact value missing: {value}"
+        );
     }
     assert!(!has_runtime_fact_dispatch(&output.rust));
 }
@@ -224,7 +249,10 @@ fn typed_fact_fixture_is_accepted_by_comptime_repl_and_web() {
         &["@answer :: report.@attribution.source", "print(@answer)"],
         None,
     );
-    assert!(transcript.contains("report"), "REPL fact read failed: {transcript}");
+    assert!(
+        transcript.contains("report"),
+        "REPL fact read failed: {transcript}"
+    );
 
     let web = jet::compile_web_with_path(FIXTURE, "examples/features/reflection/fact_reads.jet")
         .expect("web fact fixture must compile")
@@ -255,9 +283,18 @@ fn registered_build_facts_are_folded_in_value_position() {
         "fn run() {\n    print(@build.package.name)\n    print(@build.package.version)\n    print(@build.profile)\n}\n",
     )
     .expect("registered build facts are values, not runtime readers");
-    assert!(output.rust.contains("input"), "filename identity was not folded");
-    assert!(output.rust.contains("0.0.0"), "script version was not folded");
-    assert!(output.rust.contains("dev"), "default profile was not folded");
+    assert!(
+        output.rust.contains("input"),
+        "filename identity was not folded"
+    );
+    assert!(
+        output.rust.contains("0.0.0"),
+        "script version was not folded"
+    );
+    assert!(
+        output.rust.contains("dev"),
+        "default profile was not folded"
+    );
     assert!(
         !output.rust.contains("@build") && !has_runtime_fact_dispatch(&output.rust),
         "a build fact must not reach generated runtime code"
@@ -272,7 +309,10 @@ fn build_fact_reads_do_not_enter_type_position() {
         .find(|diagnostic| diagnostic.code == "E0119")
         .expect("a build fact in type position should have a registered diagnostic");
     assert!(diagnostic.what.contains("fact value"), "{diagnostic:?}");
-    assert!(diagnostic.why.contains("do not mint or select types"), "{diagnostic:?}");
+    assert!(
+        diagnostic.why.contains("do not mint or select types"),
+        "{diagnostic:?}"
+    );
 }
 
 #[test]
@@ -332,7 +372,13 @@ fn aot_default_and_interpreter_fold_the_same_build_facts() {
         "interpreter",
     );
     assert_eq!(jit, interpreter);
-    assert_eq!(jit, format!("main\n0.0.0\n{}\ndev\n", jet_foundation::OSTarget::OSTarget::host().name()));
+    assert_eq!(
+        jit,
+        format!(
+            "main\n0.0.0\n{}\ndev\n",
+            jet_foundation::OSTarget::OSTarget::host().name()
+        )
+    );
 }
 
 #[test]
@@ -373,7 +419,10 @@ fn registered_build_stamp_facts_fold_from_the_lock() {
         "1.0.0",
         "2026-08-13T12:34:56.000000000Z",
     ] {
-        assert!(output.rust.contains(value), "folded stamp is missing {value}");
+        assert!(
+            output.rust.contains(value),
+            "folded stamp is missing {value}"
+        );
     }
     assert!(!output.rust.contains("@build"));
 
@@ -421,6 +470,7 @@ fn lock_stamp_is_captured_once_and_replayed_without_a_clock() {
     let hostile_lock = hostile.join(".jet/lock");
     fs::create_dir_all(hostile_lock.parent().unwrap()).unwrap();
     fs::write(&hostile_lock, "version = 1\n").unwrap();
-    let error = jet::Lock::build_stamp(&hostile.path, true).expect_err("missing stamp must fail locked");
+    let error =
+        jet::Lock::build_stamp(&hostile.path, true).expect_err("missing stamp must fail locked");
     assert!(error.contains("[build.stamp]"), "{error}");
 }

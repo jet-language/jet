@@ -1,7 +1,5 @@
 use super::*;
-use crate::AST::{
-    BinOp, BindPattern, Binding, Expr, ForKind, LValue, Stmt, StrPart, SwitchArm,
-};
+use crate::AST::{BinOp, BindPattern, Binding, Expr, ForKind, LValue, Stmt, StrPart, SwitchArm};
 
 fn is_loop_exit_stmt(stmt: &Stmt) -> bool {
     matches!(
@@ -18,26 +16,17 @@ fn is_loop_exit_stmt(stmt: &Stmt) -> bool {
 fn is_loop_break_stmt(stmt: &Stmt) -> bool {
     matches!(
         stmt,
-        Stmt::Break(_)
-            | Stmt::BreakValue(..)
-            | Stmt::BreakLabel(..)
-            | Stmt::BreakLabelValue(..)
+        Stmt::Break(_) | Stmt::BreakValue(..) | Stmt::BreakLabel(..) | Stmt::BreakLabelValue(..)
     )
 }
 
 impl<'a> Fmt<'a> {
-    fn fmt_statement_switch_attr(
-        &mut self,
-        marker: &crate::AST::Marker,
-        body: &[Stmt],
-    ) {
+    fn fmt_statement_switch_attr(&mut self, marker: &crate::AST::Marker, body: &[Stmt]) {
         let body_start = body.first().map(stmt_start).unwrap_or(marker.span.end);
         let body_is_block = self
             .source_toks
             .iter()
-            .filter(|token| {
-                token.span.start >= marker.span.end && token.span.start < body_start
-            })
+            .filter(|token| token.span.start >= marker.span.end && token.span.start < body_start)
             .find(|token| {
                 !matches!(
                     token.kind,
@@ -105,10 +94,9 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_fenced_statement(&mut self, fact: &crate::AST::FencedStatement) {
-        let preserve_layout = self
-            .comments
-            .iter()
-            .any(|comment| fact.span.start <= comment.span.start && comment.span.start < fact.span.end);
+        let preserve_layout = self.comments.iter().any(|comment| {
+            fact.span.start <= comment.span.start && comment.span.start < fact.span.end
+        });
         let mut cursor = fact.span.start;
         for fence in &fact.fences {
             self.write_fence_fragment(cursor, fence.span.start, preserve_layout);
@@ -240,7 +228,10 @@ impl<'a> Fmt<'a> {
 
     fn write_normalized_source_fragment(&mut self, fragment: &str) {
         let starts_with_space = fragment.chars().next().is_some_and(char::is_whitespace);
-        let ends_with_space = fragment.chars().next_back().is_some_and(char::is_whitespace);
+        let ends_with_space = fragment
+            .chars()
+            .next_back()
+            .is_some_and(char::is_whitespace);
         let words = fragment.split_whitespace().collect::<Vec<_>>();
         if words.is_empty() {
             if starts_with_space {
@@ -378,7 +369,9 @@ impl<'a> Fmt<'a> {
                             }
                             self.write(declaration.key.name());
                             match declaration.value {
-                                crate::Policy::PolicyValue::Limit(limit) => self.write(&format!("({limit})")),
+                                crate::Policy::PolicyValue::Limit(limit) => {
+                                    self.write(&format!("({limit})"))
+                                }
                                 crate::Policy::PolicyValue::On
                                 | crate::Policy::PolicyValue::Off
                                 | crate::Policy::PolicyValue::Explicit => {
@@ -415,7 +408,9 @@ impl<'a> Fmt<'a> {
                 self.write(Syntax::KW_ASSERT);
                 for (index, arg) in call.args.iter().enumerate() {
                     self.write(if index == 0 { " " } else { ", " });
-                    if let Expr::Ident(name, _) = &arg.expr { self.write(name); }
+                    if let Expr::Ident(name, _) = &arg.expr {
+                        self.write(name);
+                    }
                 }
             }
             Stmt::Expr(e) => {
@@ -494,15 +489,23 @@ impl<'a> Fmt<'a> {
                     }
                 }
                 let clause_width = match kind {
-                    ForKind::Range { start, end, step, exclusive } => {
-                        start.span().end - start.span().start
-                            + end.span().end - end.span().start
-                            + step.as_ref().map_or(0, |step| step.span().end - step.span().start + 2)
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive,
+                    } => {
+                        start.span().end - start.span().start + end.span().end - end.span().start
+                            + step
+                                .as_ref()
+                                .map_or(0, |step| step.span().end - step.span().start + 2)
                             + if *exclusive { 6 } else { 5 }
                     }
                     ForKind::In { collection, step } => {
                         collection.span().end - collection.span().start
-                            + step.as_ref().map_or(0, |step| step.span().end - step.span().start + 2)
+                            + step
+                                .as_ref()
+                                .map_or(0, |step| step.span().end - step.span().start + 2)
                             + 3
                     }
                 };
@@ -517,7 +520,12 @@ impl<'a> Fmt<'a> {
                     self.loop_source_separator(first_clause_start, wrap);
                 }
                 match kind {
-                    ForKind::Range { start, end, step, exclusive } => {
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive,
+                    } => {
                         self.fmt_expr(start, Prec::OrFallback);
                         self.write(if *exclusive { "..<" } else { ".." });
                         self.fmt_expr(end, Prec::OrFallback);
@@ -535,9 +543,9 @@ impl<'a> Fmt<'a> {
                     }
                 }
                 let header_end = match kind {
-                    ForKind::Range { end, step, .. } => {
-                        step.as_ref().map_or(end.span().end, |value| value.span().end)
-                    }
+                    ForKind::Range { end, step, .. } => step
+                        .as_ref()
+                        .map_or(end.span().end, |value| value.span().end),
                     ForKind::In { collection, step } => step
                         .as_ref()
                         .map_or(collection.span().end, |value| value.span().end),
@@ -576,15 +584,9 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(value, Prec::OrFallback);
             }
             Stmt::Continue(_) => self.write(Syntax::KW_NEXT),
-            Stmt::BreakLabel(name, _)
-                if super::is_generated_label(name) =>
-            {
-                self.write("break")
-            }
+            Stmt::BreakLabel(name, _) if super::is_generated_label(name) => self.write("break"),
             Stmt::BreakLabel(name, _) => self.write(&format!("break({})", name)),
-            Stmt::BreakLabelValue(name, _, value, _)
-                if super::is_generated_label(name) =>
-            {
+            Stmt::BreakLabelValue(name, _, value, _) if super::is_generated_label(name) => {
                 self.write("break ");
                 self.fmt_expr(value, Prec::OrFallback);
             }
@@ -593,9 +595,7 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(value, Prec::OrFallback);
                 self.write(")");
             }
-            Stmt::ContinueLabel(name, _)
-                if super::is_generated_label(name) =>
-            {
+            Stmt::ContinueLabel(name, _) if super::is_generated_label(name) => {
                 self.write(Syntax::KW_NEXT)
             }
             Stmt::ContinueLabel(name, _) => self.write(&format!("next({})", name)),
@@ -615,7 +615,9 @@ impl<'a> Fmt<'a> {
                 self.write("loop ");
                 let header_width = init.init.span().end.saturating_sub(init.name_span.start)
                     + cond.span().end.saturating_sub(cond.span().start)
-                    + step.as_ref().map_or(0, |step| stmt_end(step).saturating_sub(stmt_start(step)) + 2)
+                    + step.as_ref().map_or(0, |step| {
+                        stmt_end(step).saturating_sub(stmt_start(step)) + 2
+                    })
                     + 5;
                 let wrap = self.col + header_width > MAX_WIDTH;
                 self.fmt_binding(init);
@@ -651,9 +653,7 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            Stmt::Switched { marker, body, .. } => {
-                self.fmt_statement_switch_attr(marker, body)
-            }
+            Stmt::Switched { marker, body, .. } => self.fmt_statement_switch_attr(marker, body),
             // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -674,7 +674,9 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-CONC-SPAWN1=D: `task.group g(limit: n) { … }`.
-            Stmt::TaskGroup { name, limit, body, .. } => {
+            Stmt::TaskGroup {
+                name, limit, body, ..
+            } => {
                 self.write(&format!("{}.group {}", Syntax::KW_CONC_TASK, name));
                 if let Some(limit) = limit {
                     self.write("(limit: ");
@@ -780,7 +782,11 @@ impl<'a> Fmt<'a> {
             // D-DOTSCOPE1 / D-META-DSL1: a scope-member statement `.name { … }` /
             // `.name(args) { … }`, or a declared `#Name { … }` block.
             Stmt::ScopeMember {
-                name, args, body, dsl, ..
+                name,
+                args,
+                body,
+                dsl,
+                ..
             } => {
                 if *dsl {
                     self.write(&format!("#{}", name));
@@ -869,9 +875,7 @@ impl<'a> Fmt<'a> {
             self.pending_blank = saved_pending_blank;
             self.comment_i = saved_comment_i;
         }
-        let force_braces = !arrow_body
-            && body.len() == 1
-            && is_loop_exit_stmt(&body[0]);
+        let force_braces = !arrow_body && body.len() == 1 && is_loop_exit_stmt(&body[0]);
         self.fmt_control_body_after_header(body, force_braces);
     }
 
@@ -1269,9 +1273,7 @@ impl<'a> Fmt<'a> {
             }
             // Only strip the table's distributed marker — predicate arms like
             // `code >= 500` under `if code == { … }` must print in full.
-            Expr::Binary(op, lhs, rhs, _)
-                if *op == table_op && self.same_subject(lhs, subject) =>
-            {
+            Expr::Binary(op, lhs, rhs, _) if *op == table_op && self.same_subject(lhs, subject) => {
                 self.fmt_expr(rhs, Prec::Cmp);
             }
             Expr::PatternTest {
@@ -1536,7 +1538,9 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
             }
-            BindPattern::Refutable { .. } => unreachable!("refutable bindings use statement syntax"),
+            BindPattern::Refutable { .. } => {
+                unreachable!("refutable bindings use statement syntax")
+            }
         }
     }
 

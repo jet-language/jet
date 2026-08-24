@@ -75,10 +75,7 @@ impl ReverdictReceipt {
                 "elapsed_us".into(),
                 CanonicalJson::Integer(self.elapsed_us.to_string()),
             ),
-            (
-                "evidence".into(),
-                CanonicalJson::String("observed".into()),
-            ),
+            ("evidence".into(), CanonicalJson::String("observed".into())),
             (
                 "item_hits".into(),
                 CanonicalJson::Integer(self.item_hits.to_string()),
@@ -91,14 +88,14 @@ impl ReverdictReceipt {
                 "program_items".into(),
                 CanonicalJson::Integer(self.program_items.to_string()),
             ),
-            (
-                "reverified_items".into(),
-                items.clone(),
-            ),
+            ("reverified_items".into(), items.clone()),
             (
                 "blast_radius".into(),
                 CanonicalJson::object([
-                    ("count".into(), CanonicalJson::Integer(self.blast_radius().to_string())),
+                    (
+                        "count".into(),
+                        CanonicalJson::Integer(self.blast_radius().to_string()),
+                    ),
                     ("items".into(), items),
                 ])
                 .expect("fixed receipt fields"),
@@ -160,11 +157,7 @@ impl CompilerQueries {
             .or_insert_with(|| default_external_files(&root));
         self.engine.set_input(
             external.clone(),
-            external_fingerprint(
-                &root,
-                self.external_files.get(&root),
-                &self.overlays,
-            ),
+            external_fingerprint(&root, self.external_files.get(&root), &self.overlays),
         );
         let mut overlays = self
             .overlays
@@ -173,10 +166,8 @@ impl CompilerQueries {
             .collect::<Vec<_>>();
         overlays.sort_by(|left, right| left.0.cmp(&right.0));
         let frontend_sources = self.frontend_sources(&root);
-        let query = QueryKey::for_file(
-            if is_lsp { "checked.lsp" } else { "checked" },
-            file.clone(),
-        );
+        let query =
+            QueryKey::for_file(if is_lsp { "checked.lsp" } else { "checked" }, file.clone());
         if self.volatile_roots.contains(&root) {
             self.engine.invalidate(&query);
         }
@@ -251,9 +242,7 @@ impl CompilerQueries {
             elapsed_us,
             query_recomputes: after.recomputes.saturating_sub(before.recomputes),
             item_hits: after.item_hits.saturating_sub(before.item_hits),
-            item_recomputes: after
-                .item_recomputes
-                .saturating_sub(before.item_recomputes),
+            item_recomputes: after.item_recomputes.saturating_sub(before.item_recomputes),
         };
         (checked, receipt)
     }
@@ -294,10 +283,7 @@ impl CompilerQueries {
         let root = canonical_path(Path::new(path));
         self.overlays.remove(&root);
         let file = FileKey::new(root.to_string_lossy());
-        if self
-            .engine
-            .remove_input(&InputKey::file(file.clone()))
-        {
+        if self.engine.remove_input(&InputKey::file(file.clone())) {
             self.invalidate_file(&file);
             self.engine.remove_input(&external_input(&root));
             self.sema.remove(&root);
@@ -344,8 +330,10 @@ impl CompilerQueries {
 
     fn set_document_path(&mut self, path: PathBuf, text: &str) {
         self.overlays.insert(path.clone(), text.to_string());
-        self.engine
-            .set_input(InputKey::file(FileKey::new(path.to_string_lossy())), text.to_string());
+        self.engine.set_input(
+            InputKey::file(FileKey::new(path.to_string_lossy())),
+            text.to_string(),
+        );
     }
 
     fn frontend_sources(&self, root: &Path) -> Vec<(PathBuf, String)> {
@@ -410,13 +398,7 @@ impl CompilerQueries {
                 self.volatile_roots.remove(root);
             }
         } else {
-            files.extend(
-                self.external_files
-                    .get(root)
-                    .into_iter()
-                    .flatten()
-                    .cloned(),
-            );
+            files.extend(self.external_files.get(root).into_iter().flatten().cloned());
         }
         files.retain(|path| path != root);
         files.extend(default_external_files(root));
@@ -521,7 +503,13 @@ mod tests {
 
     fn diagnostic_summary(
         diagnostics: &[crate::Diagnostics::Diagnostic],
-    ) -> Vec<(String, String, String, String, Option<crate::Diagnostics::Span>)> {
+    ) -> Vec<(
+        String,
+        String,
+        String,
+        String,
+        Option<crate::Diagnostics::Span>,
+    )> {
         diagnostics
             .iter()
             .map(|diagnostic| {
@@ -548,19 +536,13 @@ mod tests {
             diagnostic_summary(&lsp.diagnostics)
         );
         assert!(!check.diagnostics.is_empty());
-        assert_eq!(
-            service.recompute_count(&checked_key("shared.jet")),
-            1
-        );
+        assert_eq!(service.recompute_count(&checked_key("shared.jet")), 1);
         assert_eq!(service.stats().hits, 1);
     }
 
     #[test]
     fn changed_import_invalidates_cached_importer() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-query-import-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("jet-query-import-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
@@ -582,19 +564,14 @@ mod tests {
             !changed.diagnostics.is_empty(),
             "changed dependency must not leave importer diagnostics cached"
         );
-        assert_eq!(
-            service.recompute_count(&checked_key(&main)),
-            2
-        );
+        assert_eq!(service.recompute_count(&checked_key(&main)), 2);
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn batch_disk_interface_change_keeps_unrelated_module_warm() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-query-batch-interface-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-query-batch-interface-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
@@ -676,13 +653,19 @@ mod tests {
         let before = "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 2 }\n";
         let after = "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 3 }\n";
 
-        assert!(service.check_text("items.jet", before, true).diagnostics.is_empty());
+        assert!(service
+            .check_text("items.jet", before, true)
+            .diagnostics
+            .is_empty());
         let cold = service.stats();
         assert_eq!(cold.item_hits, 0);
         assert_eq!(cold.item_recomputes, 2);
         assert_eq!(cold.live_items, 2);
 
-        assert!(service.check_text("items.jet", after, true).diagnostics.is_empty());
+        assert!(service
+            .check_text("items.jet", after, true)
+            .diagnostics
+            .is_empty());
         let warm = service.stats();
         assert_eq!(warm.item_hits, 1, "unchanged alpha must reuse checked body");
         assert_eq!(warm.item_recomputes, 3, "only changed beta may recheck");
@@ -693,7 +676,8 @@ mod tests {
     #[test]
     fn cached_caller_observes_changed_callee_effects() {
         let before = "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { return 2 }\n";
-        let after = "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { print(\"x\"); return 2 }\n";
+        let after =
+            "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { print(\"x\"); return 2 }\n";
         let mut incremental = CompilerQueries::new();
         assert!(incremental
             .check_text("effects.jet", before, true)
@@ -707,9 +691,15 @@ mod tests {
             diagnostic_summary(&fresh.diagnostics),
             "incremental diagnostics must be byte-for-byte equivalent to a fresh check"
         );
-        assert!(changed.diagnostics.iter().any(|diagnostic| diagnostic.code == "E3401"));
+        assert!(changed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E3401"));
         let stats = incremental.stats();
-        assert_eq!(stats.item_hits, 1, "unchanged alpha must reuse its checked body");
+        assert_eq!(
+            stats.item_hits, 1,
+            "unchanged alpha must reuse its checked body"
+        );
         assert_eq!(stats.item_recomputes, 3, "changed beta alone must recheck");
     }
 
@@ -878,11 +868,7 @@ fn run() {{}}
             .diagnostics
             .is_empty());
 
-        std::fs::write(
-            &dependency,
-            "pub fn value() Int -> { return 1 }\n::\n",
-        )
-        .unwrap();
+        std::fs::write(&dependency, "pub fn value() Int -> { return 1 }\n::\n").unwrap();
         let broken = service.check_text(&main.to_string_lossy(), source, true);
         assert!(broken
             .diagnostics
@@ -907,27 +893,25 @@ fn run() {{}}
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "E0003"));
-        assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
+        assert!(
+            repaired.diagnostics.is_empty(),
+            "{:#?}",
+            repaired.diagnostics
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
     fn first_load_failure_tracks_import_for_repair() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-query-first-repair-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-query-first-repair-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
         let source = "module b;\nfn run() Int -> { return b.value() }\n";
         let dependency_source = "pub fn value() Int -> { return 1 }\n";
-        std::fs::write(
-            &dependency,
-            "pub fn value() Int -> { return 1 }\n::\n",
-        )
-        .unwrap();
+        std::fs::write(&dependency, "pub fn value() Int -> { return 1 }\n::\n").unwrap();
         let mut service = CompilerQueries::new();
         let broken = service.check_text(&main.to_string_lossy(), source, true);
         assert!(broken
@@ -942,7 +926,11 @@ fn run() {{}}
             diagnostic_summary(&repaired.diagnostics),
             diagnostic_summary(&fresh.diagnostics)
         );
-        assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
+        assert!(
+            repaired.diagnostics.is_empty(),
+            "{:#?}",
+            repaired.diagnostics
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -978,7 +966,11 @@ fn run() {{}}
                 diagnostic_summary(&repaired.diagnostics),
                 diagnostic_summary(&fresh.diagnostics)
             );
-            assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
+            assert!(
+                repaired.diagnostics.is_empty(),
+                "{:#?}",
+                repaired.diagnostics
+            );
             let _ = std::fs::remove_dir_all(root);
         }
     }
@@ -987,8 +979,14 @@ fn run() {{}}
     fn comptime_local_disables_replay() {
         let mut service = CompilerQueries::new();
         let source = "fn run() {\n    @value :: 1\n    print(\"{value}\")\n}\n";
-        assert!(service.check_text("comptime.jet", source, true).diagnostics.is_empty());
-        assert!(service.check_text("comptime.jet", source, true).diagnostics.is_empty());
+        assert!(service
+            .check_text("comptime.jet", source, true)
+            .diagnostics
+            .is_empty());
+        assert!(service
+            .check_text("comptime.jet", source, true)
+            .diagnostics
+            .is_empty());
         assert_eq!(service.recompute_count(&checked_key("comptime.jet")), 2);
         assert_eq!(service.stats().item_hits, 0);
         assert_eq!(service.stats().live_items, 0);
@@ -1068,7 +1066,9 @@ fn run() {{}}
         assert_eq!(receipt.edit_bytes, 2);
 
         let json = receipt.to_json();
-        let CanonicalJson::Object(envelope) = CanonicalJson::parse_canonical(json.as_bytes()).unwrap() else {
+        let CanonicalJson::Object(envelope) =
+            CanonicalJson::parse_canonical(json.as_bytes()).unwrap()
+        else {
             panic!("re-verdict receipt envelope")
         };
         assert_eq!(
@@ -1083,7 +1083,10 @@ fn run() {{}}
             panic!("re-verdict blast radius")
         };
         assert_eq!(blast_radius["count"], CanonicalJson::Integer("1".into()));
-        assert_eq!(content["claim"], CanonicalJson::String("D-DEVR-CONE1=A".into()));
+        assert_eq!(
+            content["claim"],
+            CanonicalJson::String("D-DEVR-CONE1=A".into())
+        );
     }
 
     #[test]

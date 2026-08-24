@@ -10,8 +10,8 @@ use jet_codegen::Codegen::TIR::{
     JitProgram, SerdeCodec, TExpr, TExprKind, TFnValueKind, TFunc, TFuncKind, THandleOp,
     TMethodRef, TNumericOp, TPlace, TStmt,
 };
-use jet_foundation::AST::{Item, ProgramBundle, Type};
 use jet_foundation::Names::{mangle, mangle_path};
+use jet_foundation::AST::{Item, ProgramBundle, Type};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -21,9 +21,8 @@ mod prelude_enum_meta {
 }
 
 pub(crate) use prelude_enum_meta::{
-    PRELUDE_DATATREE_ARRAY, PRELUDE_DATATREE_BOOL, PRELUDE_DATATREE_BYTES,
-    PRELUDE_DATATREE_FLOAT, PRELUDE_DATATREE_INT, PRELUDE_DATATREE_NULL,
-    PRELUDE_DATATREE_OBJECT, PRELUDE_DATATREE_TEXT,
+    PRELUDE_DATATREE_ARRAY, PRELUDE_DATATREE_BOOL, PRELUDE_DATATREE_BYTES, PRELUDE_DATATREE_FLOAT,
+    PRELUDE_DATATREE_INT, PRELUDE_DATATREE_NULL, PRELUDE_DATATREE_OBJECT, PRELUDE_DATATREE_TEXT,
 };
 
 static HOOK_INT_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::Int]);
@@ -43,7 +42,10 @@ static PRELUDE_ENUM_VARIANTS: LazyLock<HashMap<String, Vec<String>>> = LazyLock:
         .map(|(name, variants)| {
             (
                 (*name).to_string(),
-                variants.iter().map(|variant| (*variant).to_string()).collect(),
+                variants
+                    .iter()
+                    .map(|variant| (*variant).to_string())
+                    .collect(),
             )
         })
         .collect()
@@ -96,10 +98,7 @@ pub(crate) fn install_struct_redact(bundle: &ProgramBundle) {
     for module in &bundle.modules {
         for item in &module.items {
             if let Item::Struct(s) = item {
-                map.insert(
-                    s.name.clone(),
-                    s.fields.iter().map(|f| f.redact).collect(),
-                );
+                map.insert(s.name.clone(), s.fields.iter().map(|f| f.redact).collect());
             }
         }
     }
@@ -121,8 +120,8 @@ pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool>
 
 use super::safety::{
     jit_concurrency_type, jit_enum_type, jit_list_iter_elem_type, jit_list_native_type,
-    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_type,
-    jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
+    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_type, jit_optional_scalar_type,
+    jit_result_payload_type, jit_struct_type, jit_tuple_type,
 };
 
 pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
@@ -162,7 +161,13 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
             _ => {}
         }
     }
-    if let TExprKind::CoreCall { module, method, args, .. } = &init.kind {
+    if let TExprKind::CoreCall {
+        module,
+        method,
+        args,
+        ..
+    } = &init.kind
+    {
         if module == "core.math.random" {
             match method.as_str() {
                 "float_range" | "normal" | "exponential" => return Ok(types::F64),
@@ -178,8 +183,8 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
                     return Ok(types::I8);
                 }
                 "byte_count" | "scalar_count" | "display_width" | "graphemes" | "words"
-                | "sentences" | "inspect" | "char_indices" | "lower" | "upper" | "nfc" | "nfkc" | "nfd"
-                | "nfkd" | "pad_start" | "center" | "trim" => {
+                | "sentences" | "inspect" | "char_indices" | "lower" | "upper" | "nfc" | "nfkc"
+                | "nfd" | "nfkd" | "pad_start" | "center" | "trim" => {
                     // Int / String / List / Result handles all use I64 ABI.
                     let _ = args;
                     return Ok(types::I64);
@@ -200,9 +205,7 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
             return Ok(types::I64);
         }
         return match op {
-            TNumericOp::CastAs { dst_rust }
-                if matches!(dst_rust.as_str(), "f32" | "f64") =>
-            {
+            TNumericOp::CastAs { dst_rust } if matches!(dst_rust.as_str(), "f32" | "f64") => {
                 Ok(types::F64)
             }
             TNumericOp::CastAs { .. } => init_clif_ty(arg, meta),
@@ -251,7 +254,8 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n) if n == "Unit") {
         return None;
     }
-    if matches!(&ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT) {
+    if matches!(&ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT)
+    {
         return Some(types::I64);
     }
     // D-RANGE-VALUE1: Range uses a lossless three-value resident ABI
@@ -261,14 +265,14 @@ pub(crate) fn clif_ty_with_distinct(
         return None;
     }
     if matches!(&ty, Type::Named(n)
-        if matches!(
-            n.as_str(),
-            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | jet_foundation::Syntax::TYPE_BITS | jet_foundation::Syntax::TYPE_BYTES | "Mod" | "ModGrant" | "Hasher" | "TestSuite"
-        ))
-    {
+    if matches!(
+        n.as_str(),
+        "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | jet_foundation::Syntax::TYPE_BITS | jet_foundation::Syntax::TYPE_BYTES | "Mod" | "ModGrant" | "Hasher" | "TestSuite"
+    )) {
         return Some(types::I64);
     }
-    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "IOContext" | "IOOperation" | "IOError" | "ProcessResourceLimit")) {
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "IOContext" | "IOOperation" | "IOError" | "ProcessResourceLimit"))
+    {
         return Some(types::I64);
     }
     if matches!(&ty, Type::Shared(_))
@@ -288,7 +292,8 @@ pub(crate) fn clif_ty_with_distinct(
     {
         return Some(types::I64);
     }
-    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError")) {
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError"))
+    {
         return Some(types::I64);
     }
     if jit_concurrency_type(&ty) {
@@ -314,12 +319,7 @@ pub(crate) fn clif_ty_with_distinct(
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
         || jit_tuple_type(&ty)
         || jit_enum_type(&ty)
-        || matches!(
-            &ty,
-            Type::Union(_)
-                | Type::Fn { .. }
-                | Type::TraitObject(_)
-        )
+        || matches!(&ty, Type::Union(_) | Type::Fn { .. } | Type::TraitObject(_))
     {
         return Some(types::I64);
     }
@@ -365,8 +365,7 @@ pub(crate) fn func_signature(
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
     if func_has_receiver(tir) {
-        sig.params
-            .push(AbiParam::new(receiver_clif_ty(tir, meta)));
+        sig.params.push(AbiParam::new(receiver_clif_ty(tir, meta)));
     }
     for (_, ty, convention) in &tir.params {
         if matches!(ty, Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
@@ -389,10 +388,10 @@ pub(crate) fn func_signature(
         {
             sig.params.push(AbiParam::new(types::I64));
         } else {
-            sig.params.push(AbiParam::new(
-                meta.clif_ty(ty)
-                    .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
-            ));
+            sig.params
+                .push(AbiParam::new(meta.clif_ty(ty).ok_or_else(|| {
+                    format!("jit param type unsupported: {ty:?}")
+                })?));
         }
     }
     if let Some(ret) = &tir.ret {
@@ -417,10 +416,10 @@ pub(crate) fn fn_value_signature(
     };
     let mut sig = Signature::new(module.target_config().default_call_conv);
     for param in params {
-        sig.params.push(AbiParam::new(
-            meta.clif_ty(param)
-                .ok_or_else(|| format!("jit callable param unsupported: {param:?}"))?,
-        ));
+        sig.params
+            .push(AbiParam::new(meta.clif_ty(param).ok_or_else(|| {
+                format!("jit callable param unsupported: {param:?}")
+            })?));
     }
     if let Some(ret) = ret {
         if matches!(ret.as_ref(), Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
@@ -520,9 +519,8 @@ fn result_option_field(expr: &TExpr) -> bool {
     let TExprKind::Field { recv, field, .. } = &expr.kind else {
         return false;
     };
-    nominal_type_name(&recv.ty).is_some_and(|name| {
-        core_struct_field_uses_result_option_abi(name, field)
-    })
+    nominal_type_name(&recv.ty)
+        .is_some_and(|name| core_struct_field_uses_result_option_abi(name, field))
 }
 
 fn named_fn_target(expr: &TExpr) -> Option<&str> {
@@ -530,16 +528,14 @@ fn named_fn_target(expr: &TExpr) -> Option<&str> {
         return None;
     };
     match kind {
-        TFnValueKind::NamedFn { name: Some(name), .. } => Some(name),
+        TFnValueKind::NamedFn {
+            name: Some(name), ..
+        } => Some(name),
         _ => None,
     }
 }
 
-fn result_option_expr(
-    expr: &TExpr,
-    locals: &HashSet<String>,
-    targets: &HashSet<String>,
-) -> bool {
+fn result_option_expr(expr: &TExpr, locals: &HashSet<String>, targets: &HashSet<String>) -> bool {
     if !is_i64_option(&expr.ty) {
         return false;
     }
@@ -558,8 +554,9 @@ fn result_option_expr(
             method,
             type_args,
             ..
-        } => method_target_key(&recv.ty, method, type_args)
-            .is_some_and(|key| targets.contains(&key)),
+        } => {
+            method_target_key(&recv.ty, method, type_args).is_some_and(|key| targets.contains(&key))
+        }
         TExprKind::FnValue {
             kind: TFnValueKind::Call { callee, .. },
         } => named_fn_target(callee).is_some_and(|name| targets.contains(name)),
@@ -682,19 +679,11 @@ fn analyze_result_option_stmts(
             } => {
                 let mut then_locals = locals.clone();
                 let mut else_locals = locals.clone();
-                returns_result_option |= analyze_result_option_stmts(
-                    then_body,
-                    &mut then_locals,
-                    targets,
-                    params,
-                );
+                returns_result_option |=
+                    analyze_result_option_stmts(then_body, &mut then_locals, targets, params);
                 if let Some(else_body) = else_body {
-                    returns_result_option |= analyze_result_option_stmts(
-                        else_body,
-                        &mut else_locals,
-                        targets,
-                        params,
-                    );
+                    returns_result_option |=
+                        analyze_result_option_stmts(else_body, &mut else_locals, targets, params);
                 }
             }
             TStmt::Inline(body)
@@ -703,8 +692,7 @@ fn analyze_result_option_stmts(
             | TStmt::SentryPolicy { body, .. }
             | TStmt::Impure(body)
             | TStmt::Region(body) => {
-                returns_result_option |=
-                    analyze_result_option_stmts(body, locals, targets, params);
+                returns_result_option |= analyze_result_option_stmts(body, locals, targets, params);
             }
             _ => {}
         }
@@ -712,9 +700,7 @@ fn analyze_result_option_stmts(
     returns_result_option
 }
 
-fn result_option_facts(
-    program: &JitProgram,
-) -> (HashSet<String>, HashSet<(String, usize)>) {
+fn result_option_facts(program: &JitProgram) -> (HashSet<String>, HashSet<(String, usize)>) {
     let mut targets = HashSet::new();
     let mut params = HashSet::new();
     loop {
@@ -727,12 +713,8 @@ fn result_option_facts(
                     locals.insert(name.clone());
                 }
             }
-            let returns_result_option = analyze_result_option_stmts(
-                &function.body,
-                &mut locals,
-                &targets,
-                &mut params,
-            );
+            let returns_result_option =
+                analyze_result_option_stmts(&function.body, &mut locals, &targets, &mut params);
             if function.ret.as_ref().is_some_and(is_i64_option) && returns_result_option {
                 targets.insert(function.name.clone());
             }
@@ -750,16 +732,12 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 }
 
 pub(crate) struct JitMeta<'a> {
-    trait_method_owners:
-        &'a HashMap<(String, String), Vec<String>>,
-    iterable_item_types:
-        &'a HashMap<(String, String), Type>,
+    trait_method_owners: &'a HashMap<(String, String), Vec<String>>,
+    iterable_item_types: &'a HashMap<(String, String), Type>,
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
-    memo_dependencies:
-        &'a HashMap<String, HashMap<String, Vec<String>>>,
-    reflection_fields:
-        &'a HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
+    memo_dependencies: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    reflection_fields: &'a HashMap<String, Vec<jet_foundation::Reflection::ReflectionField>>,
     struct_type_params: &'a HashMap<String, Vec<String>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
     enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
@@ -803,9 +781,7 @@ impl<'a> JitMeta<'a> {
             memo_bounds: program
                 .funcs
                 .iter()
-                .filter_map(|func| {
-                    func.memo_bound.map(|bound| (func.name.clone(), bound))
-                })
+                .filter_map(|func| func.memo_bound.map(|bound| (func.name.clone(), bound)))
                 .collect(),
         }
     }
@@ -848,11 +824,7 @@ impl<'a> JitMeta<'a> {
         }
     }
 
-    pub(crate) fn trait_method_owners(
-        &self,
-        trait_name: &str,
-        method_name: &str,
-    ) -> Vec<&str> {
+    pub(crate) fn trait_method_owners(&self, trait_name: &str, method_name: &str) -> Vec<&str> {
         self.trait_method_owners
             .get(&(trait_name.to_string(), method_name.to_string()))
             .into_iter()
@@ -861,11 +833,7 @@ impl<'a> JitMeta<'a> {
             .collect()
     }
 
-    pub(crate) fn iterable_item_type(
-        &self,
-        collection: &str,
-        iterator: &str,
-    ) -> Option<&Type> {
+    pub(crate) fn iterable_item_type(&self, collection: &str, iterator: &str) -> Option<&Type> {
         self.iterable_item_types
             .get(&(collection.to_string(), iterator.to_string()))
     }
@@ -909,7 +877,10 @@ impl<'a> JitMeta<'a> {
         if enum_name == "TaskStatus" {
             return Some(EMPTY_PAYLOAD.as_slice());
         }
-        if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust" | "EmailError") {
+        if matches!(
+            enum_name,
+            "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust" | "EmailError"
+        ) {
             return Some(email_payload(variant));
         }
         if enum_name == "IOError" {
@@ -975,7 +946,9 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn raw_bag_key_type(&self, ty: &Type) -> bool {
         match ty {
             Type::Tagged { inner, .. } => self.raw_bag_key_type(inner),
-            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Bool | Type::Char => true,
+            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } | Type::Bool | Type::Char => {
+                true
+            }
             Type::Named(name) => {
                 if let Some(base) = self.distinct_base(name) {
                     return self.raw_bag_key_type(base);
@@ -990,7 +963,9 @@ impl<'a> JitMeta<'a> {
                     self.enum_variant_payload_types(name, variant)
                         .is_some_and(|payloads| {
                             payloads.is_empty()
-                                || payloads.iter().all(|payload| self.raw_bag_key_type(payload))
+                                || payloads
+                                    .iter()
+                                    .all(|payload| self.raw_bag_key_type(payload))
                         })
                 })
             }
@@ -1007,18 +982,16 @@ impl<'a> JitMeta<'a> {
             )
             .copied()
     }
-    pub(crate) fn constant(
-        &self,
-        rust_name: &str,
-    ) -> Option<&jet_foundation::AST::CtValue> {
-        self.constants
-            .get(
-                rust_name
-                    .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-                    .unwrap_or(rust_name),
-            )
+    pub(crate) fn constant(&self, rust_name: &str) -> Option<&jet_foundation::AST::CtValue> {
+        self.constants.get(
+            rust_name
+                .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
+                .unwrap_or(rust_name),
+        )
     }
-    pub(crate) fn has_generic_instances(&self) -> bool { self.has_generic_instances }
+    pub(crate) fn has_generic_instances(&self) -> bool {
+        self.has_generic_instances
+    }
     pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
         self.distinct_bases.get(name)
     }
@@ -1039,8 +1012,7 @@ impl<'a> JitMeta<'a> {
             if let Some(i) = fields.iter().position(|f| {
                 f == field
                     || f == &mangled
-                    || f.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-                        == Some(field)
+                    || f.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX) == Some(field)
             }) {
                 return Some(i);
             }
@@ -1129,7 +1101,7 @@ impl<'a> JitMeta<'a> {
                         .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
                         .unwrap_or(candidate)
                         .starts_with(&source_prefix))
-                    .then_some(index as i64)
+                .then_some(index as i64)
             })
             .collect()
     }
@@ -1239,7 +1211,10 @@ impl<'a> JitMeta<'a> {
             return self.variant_uses_record(enum_name, variant);
         };
         declared.iter().any(|candidate| {
-            self.variant_uses_record(enum_name, jet_foundation::Syntax::generated_suffix(candidate))
+            self.variant_uses_record(
+                enum_name,
+                jet_foundation::Syntax::generated_suffix(candidate),
+            )
         })
     }
 
@@ -1257,15 +1232,20 @@ impl<'a> JitMeta<'a> {
         PRELUDE_ENUM_VARIANTS
             .get(name)
             .map(|variants| variants.as_slice())
-            .or_else(|| self.enum_variants.get(name).map(|variants| variants.as_slice()))
+            .or_else(|| {
+                self.enum_variants
+                    .get(name)
+                    .map(|variants| variants.as_slice())
+            })
     }
 
     pub(crate) fn enum_names(&self) -> impl Iterator<Item = &String> {
-        self.enum_variants
-            .keys()
-            .chain(PRELUDE_ENUM_VARIANTS.keys().filter(|name| !self.enum_variants.contains_key(*name)))
+        self.enum_variants.keys().chain(
+            PRELUDE_ENUM_VARIANTS
+                .keys()
+                .filter(|name| !self.enum_variants.contains_key(*name)),
+        )
     }
-
 }
 
 #[cfg(test)]
@@ -1393,7 +1373,9 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     ),
     (
         &["UiNode"],
-        &["kind", "role", "label", "width", "height", "color", "children"],
+        &[
+            "kind", "role", "label", "width", "height", "color", "children",
+        ],
     ),
     // `Path` is one slot holding its text, the shape `CoreHost::path_record`
     // allocates and `path_string_from_record` reads back, and the same single
@@ -1575,7 +1557,14 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     (
         &["DataLineOptions"],
         &[
-            "title", "x_label", "y_label", "markers", "reference", "style", "color", "legend",
+            "title",
+            "x_label",
+            "y_label",
+            "markers",
+            "reference",
+            "style",
+            "color",
+            "legend",
         ],
     ),
     (
@@ -1593,14 +1582,7 @@ static CORE_STRUCT_FIELDS: &[(&[&str], &[&str])] = &[
     (
         &["DataSummary"],
         &[
-            "count",
-            "sum",
-            "mean",
-            "min",
-            "max",
-            "median",
-            "variance",
-            "stddev",
+            "count", "sum", "mean", "min", "max", "median", "variance", "stddev",
         ],
     ),
     (
@@ -1835,8 +1817,12 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
     static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
     static FLOAT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Float]);
     static TEXT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::String]);
-    static BYTES: LazyLock<[Type; 1]> =
-        LazyLock::new(|| [Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]);
+    static BYTES: LazyLock<[Type; 1]> = LazyLock::new(|| {
+        [Type::List(Box::new(Type::IntN {
+            signed: false,
+            bits: 8,
+        }))]
+    });
     static ARRAY: LazyLock<[Type; 1]> =
         LazyLock::new(|| [Type::List(Box::new(Type::Named("DataTree".into())))]);
     static OBJECT: LazyLock<[Type; 1]> = LazyLock::new(|| {
@@ -1877,17 +1863,8 @@ fn email_payload(variant: &str) -> &'static [Type] {
     match variant {
         "Password" => PASSWORD.as_slice(),
         "SystemPlusCa" => PEM.as_slice(),
-        "Configuration"
-        | "DNS"
-        | "Connect"
-        | "TLS"
-        | "Auth"
-        | "Protocol"
-        | "Rejected"
-        | "Transient"
-        | "TimedOut"
-        | "Cancelled"
-        | "DeliveryUnknown" => ERROR.as_slice(),
+        "Configuration" | "DNS" | "Connect" | "TLS" | "Auth" | "Protocol" | "Rejected"
+        | "Transient" | "TimedOut" | "Cancelled" | "DeliveryUnknown" => ERROR.as_slice(),
         _ => &[],
     }
 }
@@ -1909,9 +1886,7 @@ fn data_event_payload(variant: &str) -> &'static [Type] {
     static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
     static FLOAT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Float]);
     static STRING: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::String]);
-    static BYTES: LazyLock<[Type; 1]> = LazyLock::new(|| {
-        [Type::List(Box::new(Type::Int))]
-    });
+    static BYTES: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::List(Box::new(Type::Int))]);
     match variant {
         "Bool" => BOOL.as_slice(),
         "Int" => INT.as_slice(),

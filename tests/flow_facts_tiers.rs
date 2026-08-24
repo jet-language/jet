@@ -7,9 +7,9 @@
 //! last-walked. One test per tier: parser, sema, TIR, AOT, `jet run` (Cranelift
 //! and the interpreter behind it), comptime, REPL, and web.
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 use std::fs;
 use std::process::Command;
@@ -59,7 +59,11 @@ fn parser_reads_the_fixture() {
 #[test]
 fn sema_proves_the_fixture() {
     let out = jet::compile(SOURCE);
-    assert!(out.is_ok(), "sema must accept the fixture: {:#?}", out.err());
+    assert!(
+        out.is_ok(),
+        "sema must accept the fixture: {:#?}",
+        out.err()
+    );
 }
 
 /// Tier 3 — TIR: the proven presence test reaches lowering as a proven unwrap,
@@ -85,9 +89,8 @@ fn aot_and_jet_run_agree() {
 /// at build time, answer the same way.
 #[test]
 fn comptime_folds_the_same_answer() {
-    let source = format!(
-        "{SOURCE}\n@folded :: score(true)\n\nfn show() {{\n    print(@folded)\n}}\n"
-    );
+    let source =
+        format!("{SOURCE}\n@folded :: score(true)\n\nfn show() {{\n    print(@folded)\n}}\n");
     let out = jet::compile(&source);
     assert!(
         out.is_ok(),

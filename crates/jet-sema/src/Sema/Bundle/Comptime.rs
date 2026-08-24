@@ -73,12 +73,10 @@ fn derive_body_has_comptime_evaluation(body: &[DeriveBodyItem]) -> bool {
 
 pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
     stmts.iter().any(|stmt| match stmt {
-        Stmt::Expr(value)
-        | Stmt::Yield(value, _)
-        | Stmt::DeferClose { close: value, .. } => expr_has_comptime_evaluation(value),
-        Stmt::Val(binding) => {
-            binding.is_comptime || expr_has_comptime_evaluation(&binding.init)
+        Stmt::Expr(value) | Stmt::Yield(value, _) | Stmt::DeferClose { close: value, .. } => {
+            expr_has_comptime_evaluation(value)
         }
+        Stmt::Val(binding) => binding.is_comptime || expr_has_comptime_evaluation(&binding.init),
         Stmt::Assign { value, .. } => expr_has_comptime_evaluation(value),
         Stmt::Return(Some(value), _) => expr_has_comptime_evaluation(value),
         Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
@@ -90,7 +88,12 @@ pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
         }
         Stmt::For { kind, body, .. } => {
             let iterable = match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => {
+                ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     expr_has_comptime_evaluation(start)
                         || expr_has_comptime_evaluation(end)
                         || step.as_ref().is_some_and(expr_has_comptime_evaluation)
@@ -129,9 +132,7 @@ pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
                 || expr_has_comptime_evaluation(cond)
                 || step
                     .as_deref()
-                    .is_some_and(|step| {
-                        stmts_have_comptime_evaluation(std::slice::from_ref(step))
-                    })
+                    .is_some_and(|step| stmts_have_comptime_evaluation(std::slice::from_ref(step)))
                 || stmts_have_comptime_evaluation(body)
         }
         Stmt::Loop { body, .. }
@@ -155,13 +156,10 @@ pub(super) fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
                 .any(|(_, value, _)| expr_has_comptime_evaluation(value))
                 || stmts_have_comptime_evaluation(body)
         }
-        Stmt::ComptimeIf { .. }
-        | Stmt::ComptimeSwitch { .. }
-        | Stmt::ComptimeBlock { .. } => true,
-        Stmt::Break(_)
-        | Stmt::Continue(_)
-        | Stmt::BreakLabel(..)
-        | Stmt::ContinueLabel(..) => false,
+        Stmt::ComptimeIf { .. } | Stmt::ComptimeSwitch { .. } | Stmt::ComptimeBlock { .. } => true,
+        Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
+            false
+        }
     })
 }
 
@@ -190,9 +188,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         | Expr::PtrFromAddr { addr: value, .. } => expr_has_comptime_evaluation(value),
         Expr::Try(value, _, _, note) => {
             expr_has_comptime_evaluation(value)
-                || note
-                    .as_deref()
-                    .is_some_and(expr_has_comptime_evaluation)
+                || note.as_deref().is_some_and(expr_has_comptime_evaluation)
         }
         Expr::MapLit(entries, _) => entries.iter().any(|(key, value)| {
             expr_has_comptime_evaluation(key) || expr_has_comptime_evaluation(value)
@@ -201,14 +197,15 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
             expr_has_comptime_evaluation(base) || expr_has_comptime_evaluation(index)
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             expr_has_comptime_evaluation(base)
                 || range.as_deref().map_or_else(
-                    || {
-                        expr_has_comptime_evaluation(start)
-                            || expr_has_comptime_evaluation(end)
-                    },
+                    || expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end),
                     expr_has_comptime_evaluation,
                 )
         }
@@ -219,9 +216,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         Expr::Binary(_, left, right, _) => {
             expr_has_comptime_evaluation(left) || expr_has_comptime_evaluation(right)
         }
-        Expr::CompareChain { operands, .. } => {
-            operands.iter().any(expr_has_comptime_evaluation)
-        }
+        Expr::CompareChain { operands, .. } => operands.iter().any(expr_has_comptime_evaluation),
         Expr::OptField { base, .. } => expr_has_comptime_evaluation(base),
         Expr::MethodCall { receiver, args, .. } => {
             expr_has_comptime_evaluation(receiver) || args.iter().any(argument)
@@ -249,9 +244,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
             expr_has_comptime_evaluation(subject)
                 || match pattern {
                     Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
-                        StructPatField::Value { value, .. } => {
-                            expr_has_comptime_evaluation(value)
-                        }
+                        StructPatField::Value { value, .. } => expr_has_comptime_evaluation(value),
                         StructPatField::Bind { .. } => false,
                     }),
                     _ => false,
@@ -267,7 +260,9 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
                     }
                     OrFallback::Block { body, value, .. } => {
                         stmts_have_comptime_evaluation(body)
-                            || value.as_ref().is_some_and(|value| expr_has_comptime_evaluation(value))
+                            || value
+                                .as_ref()
+                                .is_some_and(|value| expr_has_comptime_evaluation(value))
                     }
                     _ => false,
                 }

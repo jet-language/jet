@@ -1,13 +1,13 @@
 //! Evaluate one notebook cell against a live REPL [`Session`].
 
+use crate::Comptime::{self, CtValue, DevSink, REPL_FUEL_BUDGET};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::AST::{Func, StructDef};
 use crate::{
     classify, collect_moved_names, e1802, normalize_repl_input, rebuild_funcs,
-    repl_executable_stmts, type_check_item, type_check_stmts,
-    update_core_imports_from_ledger, InputKind, Session, ReplTurnStatus,
+    repl_executable_stmts, type_check_item, type_check_stmts, update_core_imports_from_ledger,
+    InputKind, ReplTurnStatus, Session,
 };
-use crate::Comptime::{self, CtValue, DevSink, REPL_FUEL_BUDGET};
-use crate::AST::{Func, StructDef};
-use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -17,10 +17,18 @@ struct TrackingAuthorizer<'a> {
 }
 
 impl Comptime::ReplAuthorizer for TrackingAuthorizer<'_> {
-    fn preflight(&mut self, request: &Comptime::ReplEffectRequest, span: Span) -> Result<(), Diagnostic> {
+    fn preflight(
+        &mut self,
+        request: &Comptime::ReplEffectRequest,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
         self.inner.preflight(request, span)
     }
-    fn authorize(&mut self, request: &Comptime::ReplEffectRequest, span: Span) -> Result<(), Diagnostic> {
+    fn authorize(
+        &mut self,
+        request: &Comptime::ReplEffectRequest,
+        span: Span,
+    ) -> Result<(), Diagnostic> {
         let result = self.inner.authorize(request, span);
         if result.is_ok() {
             self.observed = true;
@@ -175,33 +183,31 @@ pub(crate) fn evaluate_step_with_items(
         }
 
         InputKind::Item(src) => {
-            let bundle = match type_check_item(
-                session,
-                if notebook_items_preloaded { "" } else { &src },
-            ) {
-                Ok(bundle) => bundle,
-                Err(errors) => {
-                    for d in &errors {
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+            let bundle =
+                match type_check_item(session, if notebook_items_preloaded { "" } else { &src }) {
+                    Ok(bundle) => bundle,
+                    Err(errors) => {
+                        for d in &errors {
+                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        }
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            errors
+                                .iter()
+                                .map(|d| format!("{}: {}", d.code, d.what))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        return EvalResult {
+                            text: out,
+                            status: ReplTurnStatus::Error,
+                            had_effect: false,
+                            quit: false,
+                            value: None,
+                        };
                     }
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    return EvalResult {
-                        text: out,
-                        status: ReplTurnStatus::Error,
-                        had_effect: false,
-                        quit: false,
-                        value: None,
-                    };
-                }
-            };
+                };
             if !notebook_items_preloaded {
                 session.item_srcs.push(src);
             }
@@ -261,35 +267,31 @@ pub(crate) fn evaluate_step_with_items(
         }
 
         InputKind::Stmts(stmts, suppress, check_src) => {
-            let (checked_stmts, checked_core_imports) = match type_check_stmts(
-                session,
-                &stmts,
-                session.step,
-                &check_src,
-            ) {
-                Ok(checked) => checked,
-                Err(errors) => {
-                    for d in &errors {
-                        out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+            let (checked_stmts, checked_core_imports) =
+                match type_check_stmts(session, &stmts, session.step, &check_src) {
+                    Ok(checked) => checked,
+                    Err(errors) => {
+                        for d in &errors {
+                            out.push_str(&format!("error [{}]: {}\n", d.code, d.what));
+                        }
+                        session.record_turn(
+                            trimmed,
+                            ReplTurnStatus::Error,
+                            errors
+                                .iter()
+                                .map(|d| format!("{}: {}", d.code, d.what))
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
+                        return EvalResult {
+                            text: out,
+                            status: ReplTurnStatus::Error,
+                            had_effect: false,
+                            quit: false,
+                            value: None,
+                        };
                     }
-                    session.record_turn(
-                        trimmed,
-                        ReplTurnStatus::Error,
-                        errors
-                            .iter()
-                            .map(|d| format!("{}: {}", d.code, d.what))
-                            .collect::<Vec<_>>()
-                            .join("; "),
-                    );
-                    return EvalResult {
-                        text: out,
-                        status: ReplTurnStatus::Error,
-                        had_effect: false,
-                        quit: false,
-                        value: None,
-                    };
-                }
-            };
+                };
 
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
             let newly_moved = collect_moved_names(&stmts, &session_binding_names, &session.scope);
@@ -303,10 +305,16 @@ pub(crate) fn evaluate_step_with_items(
             let mut core_imports = session.core_imports.clone();
             core_imports.extend(checked_core_imports);
             let before_keys: HashSet<String> = session.scope.keys().cloned().collect();
-            let funcs: HashMap<String, &Func> =
-                session.func_defs.iter().map(|(k, v)| (k.clone(), v)).collect();
-            let structs: HashMap<String, &StructDef> =
-                session.struct_defs.iter().map(|(k, v)| (k.clone(), v)).collect();
+            let funcs: HashMap<String, &Func> = session
+                .func_defs
+                .iter()
+                .map(|(k, v)| (k.clone(), v))
+                .collect();
+            let structs: HashMap<String, &StructDef> = session
+                .struct_defs
+                .iter()
+                .map(|(k, v)| (k.clone(), v))
+                .collect();
 
             let mut trial_scope = session.scope.clone();
             let mut sink = DevSink::new();
@@ -407,7 +415,9 @@ pub(crate) fn evaluate_step_with_items(
                 Err(Comptime::ReplStepError::Interrupted) => {
                     let had_effect =
                         tracking.observed || !sink.stdout.is_empty() || !sink.stderr.is_empty();
-                    out.push_str("Interrupted. External effects already performed were not rolled back.\n");
+                    out.push_str(
+                        "Interrupted. External effects already performed were not rolled back.\n",
+                    );
                     session.record_turn_ex(
                         trimmed,
                         ReplTurnStatus::Interrupted,

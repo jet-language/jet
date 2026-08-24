@@ -196,7 +196,8 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Namespace::Profile => {
-                        let (field, field_span) = self.expect_ident("for a package generation field")?;
+                        let (field, field_span) =
+                            self.expect_ident("for a package generation field")?;
                         self.expect(TokKind::Colon, "after a package generation field")?;
                         profile_fields.push((field, field_span, self.expr()?));
                         if matches!(self.peek().kind, TokKind::Comma) {
@@ -204,7 +205,8 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Namespace::Perf => {
-                        let (field, field_span) = self.expect_ident("for a performance policy field")?;
+                        let (field, field_span) =
+                            self.expect_ident("for a performance policy field")?;
                         self.expect(TokKind::Colon, "after a performance policy field")?;
                         if field == Syntax::PERF_FIELD_BUDGETS && perf_budgets.is_none() {
                             perf_budgets = Some((field_span, self.expr()?));
@@ -346,7 +348,10 @@ impl<'a> Parser<'a> {
                             Syntax::TYPE_BUDGET,
                             Type::List(inner).name()
                         ),
-                        format!("write `budgets: [{0}]{{ … }}` or `budgets: [{0}{{ … }}]`", Syntax::TYPE_BUDGET),
+                        format!(
+                            "write `budgets: [{0}]{{ … }}` or `budgets: [{0}{{ … }}]`",
+                            Syntax::TYPE_BUDGET
+                        ),
                         Some(span),
                     ));
                 }
@@ -464,7 +469,8 @@ impl<'a> Parser<'a> {
                     "E2903",
                     format!("performance workload `{name}` is not valid"),
                     format!("`{variant}` is not a compile edit workload"),
-                    "use `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`".to_string(),
+                    "use `CompilerWorkload.Edit{ target: \"cli\", patch: \"path/to.patch\" }`"
+                        .to_string(),
                     Some(span),
                 ));
             }
@@ -485,8 +491,11 @@ impl<'a> Parser<'a> {
                         if target.is_some() {
                             return Err(Diagnostic::error(
                                 "E2903",
-                                format!("performance workload `{name}` writes `target` more than once"),
-                                "`CompilerWorkload.Edit` has exactly one `target` field".to_string(),
+                                format!(
+                                    "performance workload `{name}` writes `target` more than once"
+                                ),
+                                "`CompilerWorkload.Edit` has exactly one `target` field"
+                                    .to_string(),
                                 "keep one constant target value".to_string(),
                                 Some(expr.span()),
                             ));
@@ -497,7 +506,9 @@ impl<'a> Parser<'a> {
                         if patch.is_some() {
                             return Err(Diagnostic::error(
                                 "E2903",
-                                format!("performance workload `{name}` writes `patch` more than once"),
+                                format!(
+                                    "performance workload `{name}` writes `patch` more than once"
+                                ),
                                 "`CompilerWorkload.Edit` has exactly one `patch` field".to_string(),
                                 "keep one constant patch path".to_string(),
                                 Some(expr.span()),
@@ -906,7 +917,10 @@ impl<'a> Parser<'a> {
                     });
                 }
             }
-            self.expect(TokKind::Gt, "to close the generic module type parameter list")?;
+            self.expect(
+                TokKind::Gt,
+                "to close the generic module type parameter list",
+            )?;
         }
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // consume `(`
@@ -917,7 +931,10 @@ impl<'a> Parser<'a> {
                 }
                 let (pname, pname_span) =
                     self.expect_ident("for a generic module value parameter name")?;
-                self.expect(TokKind::Colon, "after a generic module value parameter name")?;
+                self.expect(
+                    TokKind::Colon,
+                    "after a generic module value parameter name",
+                )?;
                 let (annotation, _) = self.type_()?;
                 params.push(GenericModuleParam::Value {
                     name: pname,
@@ -1006,7 +1023,10 @@ impl<'a> Parser<'a> {
                 let expr = self.module_arg_expr()?;
                 args.push(ModuleArg::Value(expr, arg_start));
             }
-            self.expect(TokKind::RParen, "to close the module alias value argument list")?;
+            self.expect(
+                TokKind::RParen,
+                "to close the module alias value argument list",
+            )?;
         }
         let end = self.peek().span.end;
         // Consume optional trailing `;`
@@ -1072,8 +1092,7 @@ impl<'a> Parser<'a> {
             }
             // D-SHAPE2: `#[RenameAll(camel)]` / `#[Codable]` / `#Codable`
             // type rules inside a module body.
-            TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() =>
-            {
+            TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() => {
                 self.type_def_with_any_markers()
             }
             TokKind::KwPriv => match self.peek2().kind {
@@ -1297,7 +1316,10 @@ impl<'a> Parser<'a> {
                     format!("performance budget role `{path}` is not valid"),
                     "performance budgets use the dedicated `module perf.<role>` declaration"
                         .to_string(),
-                    format!("write `module {}.{path} {{ budgets: [...] }}`", Syntax::NS_PERF),
+                    format!(
+                        "write `module {}.{path} {{ budgets: [...] }}`",
+                        Syntax::NS_PERF
+                    ),
                     Some(ns_span),
                 ));
             }

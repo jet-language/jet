@@ -80,6 +80,3 @@ host_fns! {
     failure_count: "jet_jit_solver_failure_count" => jet_jit_solver_failure_count: unary;
     status: "jet_jit_solver_status" => jet_jit_solver_status: unary;
 }
-
-
-

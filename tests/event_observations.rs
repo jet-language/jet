@@ -161,7 +161,10 @@ fn run() {
         "HOOK_FAILURE_SECRET",
         "HOOK_PAYLOAD_SECRET",
     ] {
-        assert!(!snapshot.contains(secret), "runtime snapshot leaked {secret}");
+        assert!(
+            !snapshot.contains(secret),
+            "runtime snapshot leaked {secret}"
+        );
         assert!(!rendered.contains(secret), "debugger leaked {secret}");
     }
     assert!(rendered.contains("source=Event"));
@@ -359,27 +362,33 @@ fn run() {
     ) else {
         return;
     };
-    let (_snapshot, rendered) =
-        debugger_events(running.child.id(), "\"lifecycle\":\"Removed\"");
+    let (_snapshot, rendered) = debugger_events(running.child.id(), "\"lifecycle\":\"Removed\"");
     let subscribed = rendered
         .lines()
-        .filter(|line| {
-            line.contains("source=AsyncEvent") && line.contains("lifecycle=Subscribed")
-        })
+        .filter(|line| line.contains("source=AsyncEvent") && line.contains("lifecycle=Subscribed"))
         .collect::<Vec<_>>();
     let removed = rendered
         .lines()
-        .filter(|line| {
-            line.contains("source=AsyncEvent") && line.contains("lifecycle=Removed")
-        })
+        .filter(|line| line.contains("source=AsyncEvent") && line.contains("lifecycle=Removed"))
         .collect::<Vec<_>>();
-    assert_eq!(subscribed.len(), 1, "pre-cancelled registration published: {rendered}");
-    assert_eq!(removed.len(), 1, "async once removal duplicated: {rendered}");
+    assert_eq!(
+        subscribed.len(),
+        1,
+        "pre-cancelled registration published: {rendered}"
+    );
+    assert_eq!(
+        removed.len(),
+        1,
+        "async once removal duplicated: {rendered}"
+    );
     let subscription = subscribed[0]
         .split_whitespace()
         .find(|field| field.starts_with("subscription="))
         .unwrap();
-    assert!(removed[0].contains(subscription), "removal did not match once subscription: {rendered}");
+    assert!(
+        removed[0].contains(subscription),
+        "removal did not match once subscription: {rendered}"
+    );
 }
 
 #[test]
@@ -407,7 +416,10 @@ fn run() {
     assert_eq!(rendered.lines().count(), 256);
     let first = rendered.lines().next().unwrap();
     let last = rendered.lines().last().unwrap();
-    assert!(!first.contains("sequence=1 "), "old records were not evicted: {first}");
+    assert!(
+        !first.contains("sequence=1 "),
+        "old records were not evicted: {first}"
+    );
     assert!(last.contains("terminal=Delivered"));
 }
 
@@ -432,8 +444,7 @@ fn run() {
     ) else {
         return;
     };
-    let (_snapshot, rendered) =
-        debugger_events(running.child.id(), "\"source\":\"AsyncEvent\"");
+    let (_snapshot, rendered) = debugger_events(running.child.id(), "\"source\":\"AsyncEvent\"");
     assert_eq!(rendered.lines().count(), 256);
     let sequences = rendered
         .lines()

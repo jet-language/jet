@@ -17,7 +17,13 @@ The two required operations are separate:
 
 Neither operation may invoke `nix` on the user's machine. The index producer may use upstream Hydra data and may run Nix off-device. That is build infrastructure, not a user dependency.
 
-Current cold-machine coverage is **0/20 packages in `env.jet`**, **0/22 direct nixpkgs selections in `devShells.default`**, and **0/48 Nix-derived selections in Linux `devShells.full`**. The two repo-local wrappers in each flake shell also need Jet-native translation. A verified, already-present Hangar object can be reused, but Jetpack has no cold path that discovers and downloads any of these nixpkgs outputs.
+Current cold-machine coverage is **0/28 selections in `env.jet`** (27 plain
+nixpkgs attrs plus nested `rPackages.jsonlite`), **0/22 direct nixpkgs
+selections in `devShells.default`**, and **0/48 Nix-derived selections in
+Linux `devShells.full`**. The two repo-local wrappers in each flake shell also
+need Jet-native translation. A verified, already-present Hangar object can be
+reused, but Jetpack has no cold path that discovers and downloads any of these
+nixpkgs outputs.
 
 ## What exists today
 
@@ -65,14 +71,19 @@ Tests named `bridge_flake_*_without_nix` therefore prove translation of supporte
 
 ### Real repository demand
 
-`env.jet:7-15` requests these 20 packages from `nixos-unstable`:
+The historical `env.jet` baseline requested 20 packages from `nixos-unstable`.
+Current `env.jet:8-18` requests 28 selections:
 
 ```text
-cargo sccache clippy rustc gcc clang lld nodejs_22 nixfmt ripgrep jq gh fd
-bashInteractive zsh fish util-linux wasm-tools tree-sitter pkg-config
+cargo sccache clippy rustc rustfmt gcc clang lld nodejs_22 python3 nixfmt
+ripgrep jq gh fd bashInteractive zsh fish util-linux wasm-tools tree-sitter
+pkg-config tzdata vulkan-loader ruby php rWrapper rPackages.jsonlite
 ```
 
-All 20 dispatch to `NixProvider`. There are no committed compatibility fixtures for them and no index/substitution path. On a cold no-Nix machine the honest count is **0/20**.
+All 28 dispatch to `NixProvider`. There are no committed compatibility
+fixtures or published index target for them. The index/provider substitution
+consumer exists, but it has no generated target proving these selections. On a
+cold no-Nix machine the honest count is **0/28**.
 
 `flake.nix:110-137` adds `rustfmt` and `python3`, for **22 direct nixpkgs selections**, plus the repo-local `jetDev` and `jetpackDev` wrapper derivations. It also carries a shell hook, `TZDIR`, and a Linux library path (`flake.nix:139-156`). The direct-package count is **0/22** on the target machine. The wrappers and hook are translation work, not index entries.
 
@@ -387,7 +398,11 @@ The estimates below use one engineer-month as one experienced Rust/Nix engineer 
 
 **Reach.** This reaches successful indexed channel jobs whose complete outputs remain in configured substituters. The current public data contains 214,696 Hydra build IDs and 306,392 channel closure paths, but neither is a count of nixpkgs attributes. Therefore a percentage would be fabricated. The first index must publish per-system counts for evaluated attrs, successful builds, cached outputs, exclusions, and misses.
 
-For this repository, the first acceptance target is 20/20 `env.jet` attrs, then 22/22 direct default-shell attrs, then every cacheable direct attr in the 48-item full shell. The audit does not assume those counts: the generator must prove them against the pinned revision.
+For this repository, the first acceptance target is 28/28 current `env.jet`
+selections (with the original 20-item list retained as a regression slice),
+then 22/22 direct default-shell attrs, then every cacheable direct attr in the
+48-item full shell. The audit does not assume those counts: the generator must
+prove them against the pinned revision.
 
 **Cannot do.** User overlays, overrides, arbitrary flake functions, local source inputs, unbuilt attrs, outputs evicted from all caches, and public-cache exclusions such as restricted artifacts. `jetR`, repo-local wrappers, shell hooks, and conditional environment composition are outside a plain attr index.
 
@@ -408,7 +423,11 @@ There are two distinct meanings:
 1. Translating evaluated outputs to a signed store-path index is strategy 2 and scales well for cached channel packages.
 2. Translating Nix source expressions into Jet-native recipes attempts to preserve functions, overlays, builders, and fetchers. At nixpkgs scale it converges on implementing a Nix evaluator plus a Nix-to-Jet semantic compiler.
 
-**Reach.** A curated translator can reach 20/20 of this repo's plain package list and selected common recipe families. It has no honest global percentage until every skipped construct is counted. General nixpkgs definitions use enough library indirection, overrides, platform policy, and generated derivations that coverage will plateau without evaluator semantics.
+**Reach.** A curated translator can target all 28 current `env.jet`
+selections and selected common recipe families. It has no honest global
+percentage until every skipped construct is counted. General nixpkgs
+definitions use enough library indirection, overrides, platform policy, and
+generated derivations that coverage will plateau without evaluator semantics.
 
 **Cannot do.** Unknown functions, dynamic imports, arbitrary overlays, import-from-derivation, impure evaluation, bespoke builders, and semantics added upstream after the translator's last revision. Generated definitions also cannot manufacture a restricted source or a cache-missing output.
 
@@ -456,7 +475,7 @@ The plan keeps the existing store and provider seams. Every proof uses a fresh w
 | 1. Native standard-cache closure admission | Deterministic NAR codec, Ed25519 dependency, HTTP endpoint concept, Hangar CAS, closure graph, receipts. | Parse standard `.narinfo`; canonical Nix signature fingerprint; base64/Ed25519; separate compressed `FileHash` from unpacked `NarHash`; streaming native HTTPS; zstd first, then codecs observed in supported caches; recursive `References`; bounded parallel fetch; atomic closure admission. 2-3 engineer-months, 3-8 MB stripped. | A recorded local HTTP cache fixture and a live `cache.nixos.org` ripgrep smoke both fetch the exact signed root plus all references with `PATH` containing no `nix` or `curl`. Wrong key, changed signed field, compressed corruption, NAR corruption, missing reference, traversal, duplicate reference, and interrupted transfer fail closed. A second offline execution passes. |
 | 2. Signed nixpkgs index producer and client | Flake/channel revision locks, trust keys, cache receipts, Hydra and channel public data. | Off-device join of exact channel revision, system, attrpath/job, version, named outputs, derivation and store paths; compare with Nix; availability check; deterministic format; Jet signature; immutable publication; rollback/expiry; delta or whole-index refresh; coverage report. 1-3 engineer-months, 15-40 MB compressed feed, under 2 MB client logic. | For revision `c8f90650…`, the generated record for `ripgrep.x86_64-linux` selects `/nix/store/axp6…-ripgrep-15.2.0`, and the output exists in the channel list and cache. Reordered input generates identical bytes. Forged, stale, cross-system, duplicate, ambiguous, and valid-signature/wrong-attr cases fail. Published metrics reconcile every Hydra build ID to indexed, failed, skipped, or missing-cache state. |
 | 3. Wire `NixProvider` to index plus substitution | Ref parsing, source table, producer records, named outputs, Hangar reuse, E1272, leases and Linux projection. | Resolve locked source/channel + attr + system through the index; substitute complete closure; populate `Realized.references`; record upstream and index proof; use only Hangar snapshots at runtime; make projection independent of an existing host store. 1-2 engineer-months. | `default.[ripgrep]` in a minimal `env.jet` enters from a cold root and runs `rg --version` with no Nix and no fixture. Delete network access and restart: it runs offline. Delete one transitive object: offline fails by exact reference; online repairs only that object. |
-| 4. Dogfood this repository's real `env.jet` | The 20-package typed manifest already exists and the provider can batch holes. The E1317 provider-name bug is owned separately. | Make sure all 20 attrs are indexed for the pinned system, fetch deduplicated closures, project loaders/libraries from the Hangar, preserve package order and PATH collision rules, and expose exact disk accounting. Add `rustfmt` and `python3` only when pursuing flake-default parity. 1-3 engineer-months plus transfer time; closure disk must be measured, not guessed. | In a clean user namespace with no Nix store, `jetpack enter -- cargo build` proves the real compiler build, then runs a targeted test and all 20 command/version probes. A fresh process repeats offline. `hangar du` reconciles unique/shared bytes with filesystem usage. No fixtures, hand pins, or host tools satisfy a package. |
+| 4. Dogfood this repository's real `env.jet` | The 28-selection typed manifest already exists and the provider can batch holes. The E1317 provider-name bug is owned separately. | Make sure all 28 selections are indexed for the pinned system, fetch deduplicated closures, project loaders/libraries from the Hangar, preserve package order and PATH collision rules, and expose exact disk accounting. 1-3 engineer-months plus transfer time; closure disk must be measured, not guessed. | In a clean user namespace with no Nix store, `jetpack enter -- cargo build` proves the real compiler build, then runs a targeted test and all 28 command/version probes. A fresh process repeats offline. `hangar du` reconciles unique/shared bytes with filesystem usage. No fixtures, hand pins, or host tools satisfy a package. |
 | 5. Reach `devShells.default` parity | `jetpack bridge flake` can project bounded package lists and record unsupported facts. Repo wrappers and hook behavior are explicit in `flake.nix`. | Add Jet-native definitions for `jetDev`/`jetpackDev`; model `JET_ROOT`, `TZDIR`, `JET_ENV_DISABLE`, the Linux loader path, and the one-time cleanup behavior through ratified typed environment mechanisms. This may need an owner syntax decision; do not smuggle shell-hook execution back in. 1-2 engineer-months after decisions. | Compare a declared environment manifest against the Nix oracle in CI, then run the same build/test probes with Nix absent. Unsupported hook facts are zero or explicitly owner-ratified replacements. |
 | 6. Dogfood `.#full` | Index substitution can cover ordinary cached attrs. The bounded bridge understands named dev-shell outputs, simple overlays, `getBin`, and derivation identities as projections. | Cover all 48 Nix-derived selections; translate `jetR`, `getBin`, Linux conditionals, `makeLibraryPath`, wrappers, and hook state into canonical Jet mechanisms. Generate, do not hand-pin, store paths. Restricted/cache-missing items need a declared native-source or builder path. 2-4 engineer-months after step 4; closure size likely dominates and must be measured per system. | On Linux with no Nix/store, enter the full environment, enumerate every expected executable/library, and run the existing full FFI/browser/graphics/VM targeted sweep. Restart offline. Compare command inventory, environment, and selected output identities against `nix develop .#full` in an off-device oracle job. Unsupported platforms fail with named exclusions, never silent skips. |
 | 7. Expand toward full evaluator fidelity | Bounded lazy evaluator, derivation path calculus, project import authority, differential fixtures, Snix/Nix prior art. | Owner/legal decision on Snix GPL reuse; full grammar and value semantics; builtins and string contexts; real nixpkgs source graph; fetch/store effects; derivation graph; whole-corpus differential harness; later native builder for uncached outputs. 12-24 engineer-months narrow, 36-72 broad, builder extra; 15-40 MB stripped evaluator budget. | Publish per-revision differential counts. Every indexed repo attr evaluates to the same derivation and output identities as Nix. Overlays and custom flakes enter only when their evaluated graph and closure agree. Remove index-only limitation claims only when the measured corpus supports it. |
@@ -471,7 +490,7 @@ Do not mint these from this report. Proposed order and one-line scopes:
 2. **Signed nixpkgs channel index pipeline** — Generate, differentially verify, measure, sign, publish, refresh, and retain immutable attr/system/version/output-to-store-path indexes from channel and Hydra data.
 3. **Index-backed NixProvider realization** — Resolve locked nixpkgs refs through the signed index, substitute into Hangar, record closure/provenance, and reuse offline through the existing provider contract.
 4. **Host-store-independent Nix closure projection** — Run Hangar-backed Nix outputs with their exact loaders and libraries when `/nix/store` is absent, with Linux proof and explicit unsupported-platform behavior.
-5. **Jet repository `env.jet` no-Nix dogfood gate** — Cold-realize all 20 declared tools, build/test Jet, restart offline, and reconcile exact closure disk use on a machine with no Nix.
+5. **Jet repository `env.jet` no-Nix dogfood gate** — Cold-realize all 28 current selections, build/test Jet, restart offline, and reconcile exact closure disk use on a machine with no Nix.
 6. **Jet default/full shell semantic translation** — Replace repo-local wrappers, `jetR`, hooks, output selection, platform conditionals, and library-path composition with ratified Jet-native environment mechanisms; prove default then `.#full` parity.
 7. **Native Nix evaluator conformance program** — Decide Snix reuse/licence posture, expand the bounded evaluator against a whole-nixpkgs differential corpus, and publish measured coverage and unsupported semantics.
 8. **Native Nix derivation builder** — After evaluator demand is measured, realize uncached derivations and overlays inside Jet's sandbox with the same Hangar identity, receipts, and diagnostics.

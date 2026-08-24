@@ -145,7 +145,9 @@ fn jet_fix_apply_writes_replay_log_and_undo_restores_source() {
     assert!(log_text.contains("\"operation\": \"fix\""));
     assert!(log_text.contains("\"kind\":\"rewrite\""), "{log_text}");
     assert!(log_text.contains("\"rule_id\":\"jet-fix\""), "{log_text}");
-    assert!(fs::read_to_string(&file).unwrap().contains("io.print(\"line\")"));
+    assert!(fs::read_to_string(&file)
+        .unwrap()
+        .contains("io.print(\"line\")"));
 
     let undone = Command::new(jet())
         .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
@@ -182,9 +184,9 @@ fn perf_and_structural_merge_never_raw_exit() {
                 && all_digits(trimmed[5..].trim_end_matches(';').trim_end_matches(')'));
             let is_raw_outcome_exit = trimmed.starts_with("Outcome::Exit(")
                 && all_digits(trimmed[14..].trim_end_matches(';').trim_end_matches(')'));
-            let is_raw_return = trimmed.strip_prefix("return ").is_some_and(|rest| {
-                all_digits(rest.trim_end_matches(';'))
-            });
+            let is_raw_return = trimmed
+                .strip_prefix("return ")
+                .is_some_and(|rest| all_digits(rest.trim_end_matches(';')));
             assert!(
                 !is_raw_exit_call && !is_raw_outcome_exit && !is_raw_return,
                 "{relative}:{}: raw exit-code literal `{trimmed}` — use jet_foundation::ExitCodes",
@@ -203,7 +205,10 @@ fn uncoded_errors() {
             continue;
         }
         let source = fs::read_to_string(&path).unwrap();
-        let compact = source.chars().filter(|ch| !ch.is_whitespace()).collect::<String>();
+        let compact = source
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>();
         let mut rest = compact.as_str();
         while let Some(at) = rest.find("eprintln!(") {
             let after_macro = &rest[at + "eprintln!(".len()..];
@@ -270,12 +275,21 @@ fn inspect_reserved_lists_keywords_teaching_words_and_sigils() {
     assert!(text.status.success(), "{:?}", text);
     let text = String::from_utf8_lossy(&text.stdout);
     for word in ["copy", "mut", "take", "const", "unsafe"] {
-        assert!(text.contains(word), "reserved report missing teaching-reserved word `{word}`: {text}");
+        assert!(
+            text.contains(word),
+            "reserved report missing teaching-reserved word `{word}`: {text}"
+        );
     }
     for sigil in ["::", ":=", "&", "^", "~", "@"] {
-        assert!(text.contains(sigil), "reserved report missing sigil `{sigil}`: {text}");
+        assert!(
+            text.contains(sigil),
+            "reserved report missing sigil `{sigil}`: {text}"
+        );
     }
-    assert!(text.contains("fn"), "reserved report missing a real keyword: {text}");
+    assert!(
+        text.contains("fn"),
+        "reserved report missing a real keyword: {text}"
+    );
 
     let json = Command::new(jet())
         .args(["inspect", "reserved", "--json"])
@@ -303,21 +317,34 @@ fn quiet_suppresses_status_output_without_changing_behavior() {
     fs::create_dir_all(&loud).unwrap();
     fs::create_dir_all(&quiet).unwrap();
 
-    let loud_out = Command::new(jet()).arg("init").current_dir(&loud).env("NO_COLOR", "1").output().unwrap();
+    let loud_out = Command::new(jet())
+        .arg("init")
+        .current_dir(&loud)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
     assert!(loud_out.status.success(), "{:?}", loud_out);
     assert!(
         !String::from_utf8_lossy(&loud_out.stdout).trim().is_empty(),
         "jet init without --quiet should print a confirmation"
     );
 
-    let quiet_out = Command::new(jet()).args(["init", "--quiet"]).current_dir(&quiet).env("NO_COLOR", "1").output().unwrap();
+    let quiet_out = Command::new(jet())
+        .args(["init", "--quiet"])
+        .current_dir(&quiet)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
     assert!(quiet_out.status.success(), "{:?}", quiet_out);
     assert!(
         String::from_utf8_lossy(&quiet_out.stdout).trim().is_empty(),
         "jet init --quiet must suppress its non-error status line, got: {}",
         String::from_utf8_lossy(&quiet_out.stdout)
     );
-    assert!(quiet.join(jet::Syntax::PACKAGE_FILE).is_file(), "--quiet must not change what init creates");
+    assert!(
+        quiet.join(jet::Syntax::PACKAGE_FILE).is_file(),
+        "--quiet must not change what init creates"
+    );
 
     let _ = fs::remove_dir_all(&loud);
     let _ = fs::remove_dir_all(&quiet);
@@ -327,8 +354,14 @@ fn quiet_suppresses_status_output_without_changing_behavior() {
 /// one-spelling law for the CLI surface).
 #[test]
 fn quiet_flag_declared_once_in_the_shared_table() {
-    let count = jet::CLI::FLAGS.iter().filter(|f| f.long == "--quiet").count();
-    assert_eq!(count, 1, "--quiet must have exactly one spelling in jet::CLI::FLAGS");
+    let count = jet::CLI::FLAGS
+        .iter()
+        .filter(|f| f.long == "--quiet")
+        .count();
+    assert_eq!(
+        count, 1,
+        "--quiet must have exactly one spelling in jet::CLI::FLAGS"
+    );
 }
 
 #[test]
@@ -351,20 +384,38 @@ fn dry_run_flag_declared_once_for_rewriters() {
 /// completions mention them.
 #[test]
 fn formerly_prose_only_flags_are_real_flag_rows() {
-    let flags = ["--ar", "--clang", "--facts", "--from", "--no-sign", "--pkg", "--registry", "--to"];
+    let flags = [
+        "--ar",
+        "--clang",
+        "--facts",
+        "--from",
+        "--no-sign",
+        "--pkg",
+        "--registry",
+        "--to",
+    ];
     let man = jet::CLI::man_page("0.0.0");
     let bash = jet::CLI::completions_bash();
     let zsh = jet::CLI::completions_zsh();
     let fish = jet::CLI::completions_fish();
     let powershell = jet::CLI::completions_powershell();
     for flag in flags {
-        assert!(jet::CLI::is_known_flag(flag), "`{flag}` must be a known flag");
+        assert!(
+            jet::CLI::is_known_flag(flag),
+            "`{flag}` must be a known flag"
+        );
         assert!(man.contains(flag), "man page missing `{flag}`");
         assert!(bash.contains(flag), "bash completions missing `{flag}`");
         assert!(zsh.contains(flag), "zsh completions missing `{flag}`");
-        assert!(powershell.contains(flag), "powershell completions missing `{flag}`");
+        assert!(
+            powershell.contains(flag),
+            "powershell completions missing `{flag}`"
+        );
         // fish completions drop the leading `--` (`complete -l <name>`, not `--<name>`).
-        assert!(fish.contains(flag.trim_start_matches("--")), "fish completions missing `{flag}`");
+        assert!(
+            fish.contains(flag.trim_start_matches("--")),
+            "fish completions missing `{flag}`"
+        );
     }
     // E2102 "did you mean" now finds the real flag on a one-character typo.
     assert_eq!(jet::CLI::closest_flag("--pk"), Some("--pkg"));
@@ -377,13 +428,29 @@ fn formerly_prose_only_flags_are_real_flag_rows() {
 #[test]
 fn top_level_help_flag_prints_full_usage() {
     for flag in ["--help", "-h"] {
-        let out = Command::new(jet()).arg(flag).env("NO_COLOR", "1").output().unwrap();
+        let out = Command::new(jet())
+            .arg(flag)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(out.status.success(), "{flag}: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains("usage:"), "{flag} did not print full usage: {stdout}");
-        assert!(stdout.contains("build"), "{flag} usage missing a real command: {stdout}");
-        assert!(stdout.contains("inspect commands:"), "{flag} usage missing the inspect group: {stdout}");
-        assert!(stdout.contains("shared-store"), "{flag} usage missing the live shared-store command: {stdout}");
+        assert!(
+            stdout.contains("usage:"),
+            "{flag} did not print full usage: {stdout}"
+        );
+        assert!(
+            stdout.contains("build"),
+            "{flag} usage missing a real command: {stdout}"
+        );
+        assert!(
+            stdout.contains("inspect commands:"),
+            "{flag} usage missing the inspect group: {stdout}"
+        );
+        assert!(
+            stdout.contains("shared-store"),
+            "{flag} usage missing the live shared-store command: {stdout}"
+        );
     }
 }
 
@@ -396,10 +463,22 @@ fn env_help_lists_shipped_actions() {
         .unwrap();
     assert!(out.status.success(), "env help failed: {:?}", out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("env test [-- command]"), "env help omitted `env test`: {stdout}");
-    assert!(stdout.contains("env hook <bash|zsh|fish>"), "env help omitted `env hook`: {stdout}");
-    assert!(stdout.contains("env sync"), "env help omitted `env sync`: {stdout}");
-    assert!(stdout.contains("env info"), "env help omitted `env info`: {stdout}");
+    assert!(
+        stdout.contains("env test [-- command]"),
+        "env help omitted `env test`: {stdout}"
+    );
+    assert!(
+        stdout.contains("env hook <bash|zsh|fish>"),
+        "env help omitted `env hook`: {stdout}"
+    );
+    assert!(
+        stdout.contains("env sync"),
+        "env help omitted `env sync`: {stdout}"
+    );
+    assert!(
+        stdout.contains("env info"),
+        "env help omitted `env info`: {stdout}"
+    );
 }
 
 #[test]
@@ -411,25 +490,35 @@ fn top_level_help_lists_job_vocabulary_only() {
         .unwrap();
     assert!(out.status.success(), "help failed: {:?}", out);
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("jet jobs"), "help must list `jet jobs`: {stdout}");
+    assert!(
+        stdout.contains("jet jobs"),
+        "help must list `jet jobs`: {stdout}"
+    );
     assert!(stdout.contains("#Job"), "help must list `#Job`: {stdout}");
-    assert!(stdout.contains("<file.jet> --"), "help must show job subcommands: {stdout}");
+    assert!(
+        stdout.contains("<file.jet> --"),
+        "help must show job subcommands: {stdout}"
+    );
     assert!(
         stdout.contains("<file.jet> -- <job>"),
         "help must show named-job argv, not a dedicated flag: {stdout}"
     );
-    assert!(!stdout.contains("tasks"), "retired task CLI vocabulary leaked: {stdout}");
+    assert!(
+        !stdout.contains("tasks"),
+        "retired task CLI vocabulary leaked: {stdout}"
+    );
     let retired_flag = format!("--{}", "task");
-    assert!(!stdout.contains(&retired_flag), "retired job flag leaked: {stdout}");
+    assert!(
+        !stdout.contains(&retired_flag),
+        "retired job flag leaked: {stdout}"
+    );
     for golden in [
         "tests/cli/completions_fish.txt",
         "tests/cli/completions_zsh.txt",
         "tests/cli/man.txt",
     ] {
-        let snapshot = fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(golden),
-        )
-        .unwrap_or_else(|error| panic!("read {golden}: {error}"));
+        let snapshot = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(golden))
+            .unwrap_or_else(|error| panic!("read {golden}: {error}"));
         assert!(
             snapshot.contains("jobs") && snapshot.contains("#Job"),
             "{golden} must list job discovery"
@@ -476,9 +565,16 @@ fn run() {}
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(override_run.status.success(), "override failed: {:?}", override_run);
+    assert!(
+        override_run.status.success(),
+        "override failed: {:?}",
+        override_run
+    );
     let override_stdout = String::from_utf8_lossy(&override_run.stdout);
-    assert!(override_stdout.contains("jet test: using fn test override"), "{override_stdout}");
+    assert!(
+        override_stdout.contains("jet test: using fn test override"),
+        "{override_stdout}"
+    );
     assert!(override_stdout.contains("override"), "{override_stdout}");
     assert!(override_stdout.contains("stock: pass"), "{override_stdout}");
 
@@ -490,7 +586,10 @@ fn run() {}
         .unwrap();
     assert!(stock_run.status.success(), "stock failed: {:?}", stock_run);
     let stock_stdout = String::from_utf8_lossy(&stock_run.stdout);
-    assert!(!stock_stdout.contains("using fn test override"), "{stock_stdout}");
+    assert!(
+        !stock_stdout.contains("using fn test override"),
+        "{stock_stdout}"
+    );
     assert!(!stock_stdout.contains("override\n"), "{stock_stdout}");
     assert!(stock_stdout.contains("stock"), "{stock_stdout}");
     assert!(stock_stdout.contains("stock: pass"), "{stock_stdout}");
@@ -514,11 +613,7 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     // the role home and an ordinary package override as a duplicate, not as
     // precedence. The stock-path proof below uses a separate package.
     fs::write(dir.join("run.jet"), "fn helper() {}\n").unwrap();
-    fs::write(
-        dir.join("@run.jet"),
-        "fn run() { print(\"role\") }\n",
-    )
-    .unwrap();
+    fs::write(dir.join("@run.jet"), "fn run() { print(\"role\") }\n").unwrap();
 
     let role = Command::new(jet())
         .arg("run")
@@ -540,9 +635,16 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(file_scope.status.success(), "file-scope command failed: {:?}", file_scope);
+    assert!(
+        file_scope.status.success(),
+        "file-scope command failed: {:?}",
+        file_scope
+    );
     let file_scope_stdout = String::from_utf8_lossy(&file_scope.stdout);
-    assert!(file_scope_stdout.contains("file scope"), "{file_scope_stdout}");
+    assert!(
+        file_scope_stdout.contains("file scope"),
+        "{file_scope_stdout}"
+    );
     assert!(!file_scope_stdout.contains("role\n"), "{file_scope_stdout}");
 
     let stock_dir = dir.join("stock");
@@ -553,11 +655,7 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     )
     .unwrap();
     fs::write(stock_dir.join("run.jet"), "fn run() { print(\"stock\") }\n").unwrap();
-    fs::write(
-        stock_dir.join("@run.jet"),
-        "fn run() { print(\"role\") }\n",
-    )
-    .unwrap();
+    fs::write(stock_dir.join("@run.jet"), "fn run() { print(\"role\") }\n").unwrap();
     let stock = Command::new(jet())
         .args(["run", "--show-default"])
         .current_dir(&stock_dir)
@@ -566,7 +664,10 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
         .unwrap();
     assert!(stock.status.success(), "stock command failed: {:?}", stock);
     let stock_stdout = String::from_utf8_lossy(&stock.stdout);
-    assert!(stock_stdout.contains("jet run: using stock default"), "{stock_stdout}");
+    assert!(
+        stock_stdout.contains("jet run: using stock default"),
+        "{stock_stdout}"
+    );
     assert!(stock_stdout.contains("stock"), "{stock_stdout}");
     assert!(!stock_stdout.contains("role\n"), "{stock_stdout}");
 
@@ -579,7 +680,10 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     assert!(scaffold.status.success(), "scaffold failed: {:?}", scaffold);
     for file in jet::Syntax::COMMAND_ROLE_FILES {
         let source = fs::read_to_string(dir.join("scaffold").join(file)).unwrap();
-        assert!(source.contains("jet ") && source.contains("--show-default"), "{file}: {source}");
+        assert!(
+            source.contains("jet ") && source.contains("--show-default"),
+            "{file}: {source}"
+        );
     }
 
     let duplicate = isolated_cwd("command_role_duplicate");
@@ -600,8 +704,14 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
         .unwrap();
     assert_eq!(duplicate.status.code(), Some(1), "{duplicate:?}");
     let duplicate_stderr = String::from_utf8_lossy(&duplicate.stderr);
-    assert!(duplicate_stderr.contains("Error [E3540]"), "{duplicate_stderr}");
-    assert!(duplicate_stderr.contains("Why:") && duplicate_stderr.contains("Fix:"), "{duplicate_stderr}");
+    assert!(
+        duplicate_stderr.contains("Error [E3540]"),
+        "{duplicate_stderr}"
+    );
+    assert!(
+        duplicate_stderr.contains("Why:") && duplicate_stderr.contains("Fix:"),
+        "{duplicate_stderr}"
+    );
 }
 
 /// #1659 criterion 2: `jet <cmd> --help`/`-h` works for a command that used
@@ -619,12 +729,21 @@ fn per_command_help_flag_works_without_running_the_command() {
             .unwrap();
         assert!(out.status.success(), "`{cmd} {flag}`: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains(cmd), "`{cmd} {flag}` help text missing the command name: {stdout}");
+        assert!(
+            stdout.contains(cmd),
+            "`{cmd} {flag}` help text missing the command name: {stdout}"
+        );
         // A real `jet build`/`jet check` with no file argument would fail
         // (E2xxx missing target); `--help` must short-circuit before that.
-        assert!(!stdout.contains("Error ["), "`{cmd} {flag}` ran the command instead of printing help: {stdout}");
+        assert!(
+            !stdout.contains("Error ["),
+            "`{cmd} {flag}` ran the command instead of printing help: {stdout}"
+        );
     }
-    assert!(!dir.join("new").exists(), "`jet new --help` must not create a project");
+    assert!(
+        !dir.join("new").exists(),
+        "`jet new --help` must not create a project"
+    );
 }
 
 /// #1659 criterion 2 (round 2): `--help`/`-h` also works for the
@@ -646,21 +765,38 @@ fn owns_flag_vocabulary_help_flag_prints_help_not_execute() {
         ("trust", "--help"),
         ("hangar", "--help"),
     ] {
-        assert!(jet::CLI::owns_flag_vocabulary(cmd), "test assumption: `{cmd}` should own a flag vocabulary");
+        assert!(
+            jet::CLI::owns_flag_vocabulary(cmd),
+            "test assumption: `{cmd}` should own a flag vocabulary"
+        );
         let out = Command::new(jet())
             .args([cmd, flag])
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
-        assert!(out.status.success(), "`{cmd} {flag}` must print help and exit 0: {:?}", out);
+        assert!(
+            out.status.success(),
+            "`{cmd} {flag}` must print help and exit 0: {:?}",
+            out
+        );
         let stdout = String::from_utf8_lossy(&out.stdout);
-        assert!(stdout.contains(cmd), "`{cmd} {flag}` help text missing the command name: {stdout}");
-        assert!(out.stderr.is_empty(), "`{cmd} {flag}` must not print to stderr: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            stdout.contains(cmd),
+            "`{cmd} {flag}` help text missing the command name: {stdout}"
+        );
+        assert!(
+            out.stderr.is_empty(),
+            "`{cmd} {flag}` must not print to stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
     // `clean`/`update`/`image`/`trust` would otherwise mutate the package
     // store, dependency pins, or trust grants — none of that happened.
-    assert!(!dir.join(".jet").exists(), "`--help` on an owns_flag_vocabulary command must not do real work");
+    assert!(
+        !dir.join(".jet").exists(),
+        "`--help` on an owns_flag_vocabulary command must not do real work"
+    );
 }
 
 /// #1659 criterion 2 (round 2): `jet self devtools --help` (bare, and with a
@@ -669,13 +805,28 @@ fn owns_flag_vocabulary_help_flag_prints_help_not_execute() {
 #[test]
 fn devtools_help_flag_prints_help_not_execute() {
     let dir = isolated_cwd("help_flag_devtools");
-    for args in [vec!["self", "devtools", "--help"], vec!["self", "devtools", "grammars", "--help"]] {
-        let out = Command::new(jet()).args(&args).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+    for args in [
+        vec!["self", "devtools", "--help"],
+        vec!["self", "devtools", "grammars", "--help"],
+    ] {
+        let out = Command::new(jet())
+            .args(&args)
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(out.status.success(), "`jet {}`: {:?}", args.join(" "), out);
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!stderr.contains("unknown"), "`jet {}` hit the unknown-subcommand path: {stderr}", args.join(" "));
+        assert!(
+            !stderr.contains("unknown"),
+            "`jet {}` hit the unknown-subcommand path: {stderr}",
+            args.join(" ")
+        );
     }
-    assert!(!dir.join("editors").exists(), "`devtools grammars --help` must not write any files");
+    assert!(
+        !dir.join("editors").exists(),
+        "`devtools grammars --help` must not write any files"
+    );
 }
 
 /// #1659 criterion 2: an exhaustive group's bare `--help`/`-h` (`jet hangar
@@ -683,14 +834,28 @@ fn devtools_help_flag_prints_help_not_execute() {
 /// the E2101 "isn't a jet hangar command" that `--help` used to trigger.
 #[test]
 fn exhaustive_group_help_flag_lists_actions_instead_of_e2101() {
-    for (group, flag) in [("hangar", "--help"), ("registry", "-h"), ("inspect", "--help")] {
-        let out = Command::new(jet()).args([group, flag]).env("NO_COLOR", "1").output().unwrap();
+    for (group, flag) in [
+        ("hangar", "--help"),
+        ("registry", "-h"),
+        ("inspect", "--help"),
+    ] {
+        let out = Command::new(jet())
+            .args([group, flag])
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(out.status.success(), "`{group} {flag}`: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!stderr.contains("E2101"), "`{group} {flag}` still hit E2101: {stderr}");
+        assert!(
+            !stderr.contains("E2101"),
+            "`{group} {flag}` still hit E2101: {stderr}"
+        );
         let expected_action = jet::CLI::command_group(group).unwrap().actions[0].name;
-        assert!(stdout.contains(expected_action), "`{group} {flag}` missing action `{expected_action}`: {stdout}");
+        assert!(
+            stdout.contains(expected_action),
+            "`{group} {flag}` missing action `{expected_action}`: {stdout}"
+        );
     }
 }
 
@@ -698,13 +863,30 @@ fn exhaustive_group_help_flag_lists_actions_instead_of_e2101() {
 /// group's action table instead of the E2101/E2102 they used to raise.
 #[test]
 fn perf_bare_and_help_flag_list_actions_instead_of_e2101_e2102() {
-    for args in [vec!["perf"], vec!["perf", "--help"], vec!["perf", "-h"], vec!["perf", "help"]] {
-        let out = Command::new(jet()).args(&args).env("NO_COLOR", "1").output().unwrap();
+    for args in [
+        vec!["perf"],
+        vec!["perf", "--help"],
+        vec!["perf", "-h"],
+        vec!["perf", "help"],
+    ] {
+        let out = Command::new(jet())
+            .args(&args)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(out.status.success(), "`jet {}`: {:?}", args.join(" "), out);
         let stdout = String::from_utf8_lossy(&out.stdout);
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!stderr.contains("E2101") && !stderr.contains("E2102"), "`jet {}`: {stderr}", args.join(" "));
-        assert!(stdout.contains("view") && stdout.contains("compare"), "`jet {}` missing perf actions: {stdout}", args.join(" "));
+        assert!(
+            !stderr.contains("E2101") && !stderr.contains("E2102"),
+            "`jet {}`: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            stdout.contains("view") && stdout.contains("compare"),
+            "`jet {}` missing perf actions: {stdout}",
+            args.join(" ")
+        );
     }
 }
 
@@ -725,7 +907,12 @@ fn quiet_suppresses_new_confirmation() {
         "jet new --quiet must suppress its confirmation, got: {}",
         String::from_utf8_lossy(&out.stdout)
     );
-    assert!(dir.join("quiet_project").join(jet::Syntax::PACKAGE_FILE).is_file(), "--quiet must not change what new creates");
+    assert!(
+        dir.join("quiet_project")
+            .join(jet::Syntax::PACKAGE_FILE)
+            .is_file(),
+        "--quiet must not change what new creates"
+    );
 }
 
 /// #1659 criterion 3: `jet build --sbom --quiet` still writes the SBOM file
@@ -747,7 +934,10 @@ fn quiet_suppresses_sbom_write_confirmation() {
         "jet build --sbom --quiet must suppress the sbom confirmation, got: {}",
         String::from_utf8_lossy(&out.stdout)
     );
-    assert!(dir.join("build/main.spdx").is_file(), "--quiet must not change what --sbom writes");
+    assert!(
+        dir.join("build/main.spdx").is_file(),
+        "--quiet must not change what --sbom writes"
+    );
 }
 
 /// #1659 criterion 3 (round 2): `jet self devtools grammars --quiet` still
@@ -786,7 +976,10 @@ fn quiet_suppresses_devtools_grammars_confirmation() {
     );
     for rel in files {
         let content = fs::read_to_string(dir.join(rel)).unwrap();
-        assert!(!content.contains("stale"), "--quiet must not change what devtools grammars writes ({rel}): {content}");
+        assert!(
+            !content.contains("stale"),
+            "--quiet must not change what devtools grammars writes ({rel}): {content}"
+        );
     }
 }
 
@@ -803,7 +996,12 @@ fn quiet_suppresses_devtools_grammars_confirmation() {
 fn quiet_suppresses_registry_publish_status_lines() {
     fn publish_project(tag: &str) -> PathBuf {
         let dir = isolated_cwd(tag);
-        let init = Command::new(jet()).arg("init").current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+        let init = Command::new(jet())
+            .arg("init")
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(init.status.success(), "{:?}", init);
         let keys = dir.join("keys");
         fs::create_dir_all(&keys).unwrap();
@@ -822,8 +1020,14 @@ fn quiet_suppresses_registry_publish_status_lines() {
         .unwrap();
     assert_eq!(loud.status.code(), Some(1), "{:?}", loud);
     let loud_stdout = String::from_utf8_lossy(&loud.stdout);
-    assert!(loud_stdout.contains("publishing"), "expected loud status narration, got: {loud_stdout}");
-    assert!(loud_stdout.contains("[1/3]"), "expected loud gate narration, got: {loud_stdout}");
+    assert!(
+        loud_stdout.contains("publishing"),
+        "expected loud status narration, got: {loud_stdout}"
+    );
+    assert!(
+        loud_stdout.contains("[1/3]"),
+        "expected loud gate narration, got: {loud_stdout}"
+    );
 
     let quiet_dir = publish_project("quiet_publish_quiet");
     let quiet = Command::new(jet())
@@ -833,14 +1037,22 @@ fn quiet_suppresses_registry_publish_status_lines() {
         .env("JET_KEYS_DIR", quiet_dir.join("keys"))
         .output()
         .unwrap();
-    assert_eq!(quiet.status.code(), Some(1), "--quiet must not change the exit code: {:?}", quiet);
+    assert_eq!(
+        quiet.status.code(),
+        Some(1),
+        "--quiet must not change the exit code: {:?}",
+        quiet
+    );
     assert!(
         String::from_utf8_lossy(&quiet.stdout).trim().is_empty(),
         "jet registry publish --quiet must suppress its status narration, got: {}",
         String::from_utf8_lossy(&quiet.stdout)
     );
     let quiet_stderr = String::from_utf8_lossy(&quiet.stderr);
-    assert!(quiet_stderr.contains("build: failed"), "--quiet must not suppress the real gate error: {quiet_stderr}");
+    assert!(
+        quiet_stderr.contains("build: failed"),
+        "--quiet must not suppress the real gate error: {quiet_stderr}"
+    );
 }
 
 /// #1659 criterion 3 (round 2): `jet budget check --quiet` is accepted (it
@@ -853,14 +1065,24 @@ fn quiet_suppresses_registry_publish_status_lines() {
 fn quiet_accepted_and_suppresses_budget_check_recap() {
     fn budget_dir(tag: &str) -> PathBuf {
         let dir = isolated_cwd(tag);
-        let init = Command::new(jet()).arg("init").current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+        let init = Command::new(jet())
+            .arg("init")
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
         assert!(init.status.success(), "{:?}", init);
         fs::write(dir.join("run.jet"), "fn run() {\n    print(\"hi\")\n}\n").unwrap();
         dir
     }
 
     let loud_dir = budget_dir("quiet_budget_loud");
-    let loud = Command::new(jet()).args(["budget", "check"]).current_dir(&loud_dir).env("NO_COLOR", "1").output().unwrap();
+    let loud = Command::new(jet())
+        .args(["budget", "check"])
+        .current_dir(&loud_dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
     assert!(loud.status.success(), "{:?}", loud);
     assert!(
         !String::from_utf8_lossy(&loud.stderr).trim().is_empty(),
@@ -868,9 +1090,22 @@ fn quiet_accepted_and_suppresses_budget_check_recap() {
     );
 
     let quiet_dir = budget_dir("quiet_budget_quiet");
-    let quiet = Command::new(jet()).args(["budget", "check", "--quiet"]).current_dir(&quiet_dir).env("NO_COLOR", "1").output().unwrap();
-    assert!(quiet.status.success(), "`jet budget check --quiet` must be accepted, not E2102: {:?}", quiet);
-    assert_eq!(quiet.status.code(), loud.status.code(), "--quiet must not change the exit code");
+    let quiet = Command::new(jet())
+        .args(["budget", "check", "--quiet"])
+        .current_dir(&quiet_dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        quiet.status.success(),
+        "`jet budget check --quiet` must be accepted, not E2102: {:?}",
+        quiet
+    );
+    assert_eq!(
+        quiet.status.code(),
+        loud.status.code(),
+        "--quiet must not change the exit code"
+    );
     assert!(
         String::from_utf8_lossy(&quiet.stderr).trim().is_empty(),
         "jet budget check --quiet must suppress its recap line, got: {}",
@@ -912,38 +1147,92 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(tests.status.success(), "test target failed: {}", String::from_utf8_lossy(&tests.stderr));
+    assert!(
+        tests.status.success(),
+        "test target failed: {}",
+        String::from_utf8_lossy(&tests.stderr)
+    );
     let test_stdout = String::from_utf8_lossy(&tests.stdout);
-    assert!(test_stdout.contains("needle"), "filtered test missing needle: {test_stdout}");
-    assert!(!test_stdout.contains("other: pass"), "filtered test ran other: {test_stdout}");
+    assert!(
+        test_stdout.contains("needle"),
+        "filtered test missing needle: {test_stdout}"
+    );
+    assert!(
+        !test_stdout.contains("other: pass"),
+        "filtered test ran other: {test_stdout}"
+    );
 
     let measured = Command::new(jet())
-        .args(["test", "--show-default", ".", "--measure", "--filter=measured-needle"])
+        .args([
+            "test",
+            "--show-default",
+            ".",
+            "--measure",
+            "--filter=measured-needle",
+        ])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(measured.status.success(), "measured test target failed:\nstdout:\n{}\nstderr:\n{}", String::from_utf8_lossy(&measured.stdout), String::from_utf8_lossy(&measured.stderr));
+    assert!(
+        measured.status.success(),
+        "measured test target failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&measured.stdout),
+        String::from_utf8_lossy(&measured.stderr)
+    );
     let measured_stdout = String::from_utf8_lossy(&measured.stdout);
-    assert_eq!(measured_stdout.matches("measured-needle").count(), 2, "directory measurement must run one selected claim per file: {measured_stdout}");
-    assert!(!measured_stdout.contains("measured-other"), "filtered measurement ran other: {measured_stdout}");
+    assert_eq!(
+        measured_stdout.matches("measured-needle").count(),
+        2,
+        "directory measurement must run one selected claim per file: {measured_stdout}"
+    );
+    assert!(
+        !measured_stdout.contains("measured-other"),
+        "filtered measurement ran other: {measured_stdout}"
+    );
 
     let json = Command::new(jet())
-        .args(["test", "--show-default", ".", "--measure", "--filter=measured-needle", "--json"])
+        .args([
+            "test",
+            "--show-default",
+            ".",
+            "--measure",
+            "--filter=measured-needle",
+            "--json",
+        ])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(json.status.success(), "measured test JSON target failed: {}", String::from_utf8_lossy(&json.stderr));
+    assert!(
+        json.status.success(),
+        "measured test JSON target failed: {}",
+        String::from_utf8_lossy(&json.stderr)
+    );
     let json_stdout = String::from_utf8_lossy(&json.stdout);
     let records: Vec<_> = json_stdout
         .lines()
-        .map(|line| parse_json(line).unwrap_or_else(|_| panic!("measurement JSON line does not parse: {line}")))
+        .map(|line| {
+            parse_json(line)
+                .unwrap_or_else(|_| panic!("measurement JSON line does not parse: {line}"))
+        })
         .collect();
-    assert_eq!(records.len(), 2, "JSON must contain one record per selected claim: {json_stdout}");
+    assert_eq!(
+        records.len(),
+        2,
+        "JSON must contain one record per selected claim: {json_stdout}"
+    );
     for record in records {
-        let JSONValue::Object(record) = record else { panic!("measurement JSON record is not an object") };
-        assert!(matches!(record.get("name"), Some(JSONValue::String(name)) if name == "measured-needle"), "JSON claim name is wrong: {record:?}");
-        assert!(record.contains_key("mean_ns"), "JSON measurement has no mean: {record:?}");
+        let JSONValue::Object(record) = record else {
+            panic!("measurement JSON record is not an object")
+        };
+        assert!(
+            matches!(record.get("name"), Some(JSONValue::String(name)) if name == "measured-needle"),
+            "JSON claim name is wrong: {record:?}"
+        );
+        assert!(
+            record.contains_key("mean_ns"),
+            "JSON measurement has no mean: {record:?}"
+        );
     }
 }

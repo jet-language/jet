@@ -3,9 +3,9 @@
 // marker application; this module does not own a deprecation registry.
 #![allow(dead_code)]
 
-use crate::AST::Deprecation;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Syntax;
+use crate::AST::Deprecation;
 
 pub(crate) fn with_package_edition<R>(edition: &str, f: impl FnOnce() -> R) -> R {
     jet_foundation::PackageEdition::with_package_edition(edition, f)
@@ -40,14 +40,11 @@ fn replacement_edit(dep: &Deprecation, span: Option<Span>) -> Option<TextEdit> {
     let span = span?;
     let replacement = dep.replacement.rsplit('.').next()?.trim();
     if replacement.is_empty()
-        || !replacement
-            .bytes()
-            .enumerate()
-            .all(|(index, byte)| {
-                byte == b'_'
-                    || (byte.is_ascii_alphanumeric()
-                        && (index > 0 || byte.is_ascii_alphabetic() || byte == b'_'))
-            })
+        || !replacement.bytes().enumerate().all(|(index, byte)| {
+            byte == b'_'
+                || (byte.is_ascii_alphanumeric()
+                    && (index > 0 || byte.is_ascii_alphabetic() || byte == b'_'))
+        })
     {
         return None;
     }
@@ -133,12 +130,7 @@ pub(crate) fn l2001(item: &str, dep: &Deprecation, span: Option<Span>) -> Diagno
 impl<'a> super::Checker<'a> {
     /// Emit the lifecycle result for one resolved item. Every user and Core
     /// call site enters here, so severity and copy cannot drift by caller.
-    pub(crate) fn check_deprecation(
-        &mut self,
-        item: &str,
-        dep: &Deprecation,
-        span: Span,
-    ) {
+    pub(crate) fn check_deprecation(&mut self, item: &str, dep: &Deprecation, span: Span) {
         let phase = deprecation_phase(dep);
         let status = match phase {
             DeprecationPhase::Active => "active",
@@ -152,8 +144,8 @@ impl<'a> super::Checker<'a> {
             ),
             None => format!("since {}; use `{}`", dep.since, dep.replacement),
         };
-        self.name_ledger.record_structure_fact(
-            jet_foundation::Names::StructureFact::new(
+        self.name_ledger
+            .record_structure_fact(jet_foundation::Names::StructureFact::new(
                 jet_foundation::Names::StructureFactKind::Lifecycle,
                 item,
                 self.module_path,
@@ -161,8 +153,7 @@ impl<'a> super::Checker<'a> {
                 status,
                 detail,
                 None,
-            ),
-        );
+            ));
         match phase {
             DeprecationPhase::Removed => self.diags.push(e2002(item, dep, Some(span))),
             DeprecationPhase::Deprecated => self.diags.push(l2001(item, dep, Some(span))),

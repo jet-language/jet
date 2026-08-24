@@ -1,18 +1,17 @@
 //! Raw scanning: `lex_raw` (no terminator insertion), the main `run` loop, and
 //! number/char/digit scanning.
 
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax;
 use super::Tokens::{TokKind, Token};
 use super::{keyword, Lexer};
+use crate::Diagnostics::{Diagnostic, Span};
+use crate::Syntax;
 
 fn describe_unrecognized_character(character: char) -> String {
     match character {
         '\0' => "\\0".to_string(),
         '\t' => "\\t".to_string(),
         character
-            if character.is_control()
-                || crate::Diagnostics::display_char_width(character) == 0 =>
+            if character.is_control() || crate::Diagnostics::display_char_width(character) == 0 =>
         {
             format!("U+{:04X}", character as u32)
         }
@@ -94,9 +93,7 @@ impl<'a> Lexer<'a> {
             && matches!(significant[significant.len() - 1].kind, TokKind::LBrace)
             && match &significant[significant.len() - 2].kind {
                 TokKind::Dot => true,
-                TokKind::Ident(name) => {
-                    name.starts_with(|first: char| first.is_ascii_uppercase())
-                }
+                TokKind::Ident(name) => name.starts_with(|first: char| first.is_ascii_uppercase()),
                 _ => false,
             }
     }
@@ -121,9 +118,7 @@ impl<'a> Lexer<'a> {
             })
             .collect::<Vec<_>>();
         let is_marker_name = |token: &&Token| matches!(token.kind, TokKind::Ident(_));
-        let is_ffi = |token: &&Token| {
-            matches!(&token.kind, TokKind::Ident(name) if jet_foundation::Registry::is_inline_foreign_marker(name))
-        };
+        let is_ffi = |token: &&Token| matches!(&token.kind, TokKind::Ident(name) if jet_foundation::Registry::is_inline_foreign_marker(name));
         let mut cursor = significant.len();
         let mut saw_ffi = false;
         loop {
@@ -380,7 +375,10 @@ impl<'a> Lexer<'a> {
                     } else {
                         self.i = j;
                         let span = Span::new(start, self.pos(self.i));
-                        toks.push(Token { kind: TokKind::Ident(name), span });
+                        toks.push(Token {
+                            kind: TokKind::Ident(name),
+                            span,
+                        });
                     }
                 }
                 '@' => toks.push(simple(self, TokKind::At, 1)),
@@ -396,9 +394,7 @@ impl<'a> Lexer<'a> {
                     toks.push(simple(self, TokKind::DotDotDot, 3))
                 }
                 // D-RANGE-EXCL1=C: `..<` before plain `..` (longest match).
-                '.' if next == '.' && next2 == '<' => {
-                    toks.push(simple(self, TokKind::DotDotLt, 3))
-                }
+                '.' if next == '.' && next2 == '<' => toks.push(simple(self, TokKind::DotDotLt, 3)),
                 '.' if next == '.' => toks.push(simple(self, TokKind::DotDot, 2)),
                 '.' => toks.push(simple(self, TokKind::Dot, 1)),
                 '=' if next == '=' => toks.push(simple(self, TokKind::EqEq, 2)),
@@ -454,9 +450,7 @@ impl<'a> Lexer<'a> {
                 '<' if next == '<' && next2 == '=' => toks.push(simple(self, TokKind::ShlEq, 3)),
                 '<' if next == '<' => toks.push(simple(self, TokKind::Shl, 2)),
                 // D-CMP3WAY1=B: `<=>` must win over `<=` (longest match).
-                '<' if next == '=' && next2 == '>' => {
-                    toks.push(simple(self, TokKind::Compare, 3))
-                }
+                '<' if next == '=' && next2 == '>' => toks.push(simple(self, TokKind::Compare, 3)),
                 '<' if next == '=' => toks.push(simple(self, TokKind::Le, 2)),
                 '<' => toks.push(simple(self, TokKind::Lt, 1)),
                 '>' if next == '>' && next2 == '=' => toks.push(simple(self, TokKind::ShrEq, 3)),
@@ -579,12 +573,10 @@ impl<'a> Lexer<'a> {
                         kind: TokKind::Int(n, self.src[span.start..span.end].to_string()),
                         span,
                     },
-                    Err(_) => {
-                        Token {
-                            kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
-                            span,
-                        }
-                    }
+                    Err(_) => Token {
+                        kind: TokKind::Int(0, self.src[span.start..span.end].to_string()),
+                        span,
+                    },
                 };
             }
         }
@@ -785,9 +777,12 @@ value={value}
             .collect::<Vec<_>>();
         assert_eq!(strings.len(), 2);
         assert!(matches!(strings[0].as_slice(), [StrTokPart::Lit(_)]));
-        assert!(strings[1]
-            .iter()
-            .any(|part| matches!(part, StrTokPart::Interp(_))), "{strings:?}");
+        assert!(
+            strings[1]
+                .iter()
+                .any(|part| matches!(part, StrTokPart::Interp(_))),
+            "{strings:?}"
+        );
     }
 
     #[test]

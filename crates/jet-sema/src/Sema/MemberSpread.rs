@@ -1,9 +1,9 @@
 //! D-SPREAD1=A: desugar `prefix.[a, b]` to field lists before inference.
 
+use crate::Diagnostics::Span;
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Item, LambdaBody, ProgramBundle, Stmt, StrPart, TypedLitBody,
 };
-use crate::Diagnostics::Span;
 
 /// Expand every `MemberSpread` in the bundle before registration/checking.
 pub fn desugar_member_spreads(bundle: &mut ProgramBundle) {
@@ -367,7 +367,9 @@ fn desugar_expr(expr: &mut Expr) {
             desugar_stmts(else_body);
             desugar_expr(else_value);
         }
-        Expr::OrFallback { value, fallback, .. } => {
+        Expr::OrFallback {
+            value, fallback, ..
+        } => {
             desugar_expr(value);
             match fallback {
                 crate::AST::OrFallback::Value(e) | crate::AST::OrFallback::Return(Some(e), _) => {

@@ -152,10 +152,7 @@ fn split_default(value: &str) -> Option<(&str, &str)> {
             let mut default_scan = Scan::new();
             for (end, inner_byte) in bytes[index..].iter().enumerate() {
                 default_scan.step(*inner_byte);
-                if *inner_byte == b'}'
-                    && default_scan.depth == 0
-                    && !default_scan.in_string
-                {
+                if *inner_byte == b'}' && default_scan.depth == 0 && !default_scan.in_string {
                     let end = index + end;
                     if value[end + 1..].trim().is_empty() {
                         return Some((value[..index].trim(), value[index + 1..end].trim()));

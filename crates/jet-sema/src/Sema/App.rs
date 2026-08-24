@@ -2,11 +2,9 @@
 //! application graph and diagnose undeclared dynamic edges, stray convention
 //! files, and builder/file collisions.
 
-use crate::AST::{Expr, Item, ProgramBundle, Stmt, StrPart};
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::App::{
-    AppAction, AppGraph, AppMount, AppRoute, AppRoutesFrom, AppRenderMode,
-};
+use crate::AST::{Expr, Item, ProgramBundle, Stmt, StrPart};
+use jet_foundation::App::{AppAction, AppGraph, AppMount, AppRenderMode, AppRoute, AppRoutesFrom};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -248,7 +246,8 @@ fn apply_method(
                 diags.push(Diagnostic::error(
                     "E2806",
                     "`.routes(from:)` needs a directory path".to_string(),
-                    "file routing activates only through an explicit builder opt-in (D-WEBAUTHOR1)".to_string(),
+                    "file routing activates only through an explicit builder opt-in (D-WEBAUTHOR1)"
+                        .to_string(),
                     "write `.routes(from: \"routes\")` with the convention root".to_string(),
                     Some(method_span),
                 ));

@@ -20,10 +20,12 @@ fn script_top_level_recovery_always_consumes_a_token() {
 #[test]
 fn script_statements_use_one_fallible_run_and_keep_declarations_legal() {
     let source = "message :: \"script entry\"\nprint(message)\nprint(helper())\nfn helper() Int { return 42 }\n";
-    let output = jet::compile(source)
-        .expect("script statements should lower through the normal entry path");
+    let output =
+        jet::compile(source).expect("script statements should lower through the normal entry path");
     assert!(
-        output.rust.contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
+        output
+            .rust
+            .contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
         "implicit script entry must use the fallible unit boundary:\n{}",
         output.rust
     );
@@ -69,7 +71,10 @@ fn odd(n: Int) Bool {
             "interpreter",
             jet::Interpreter::run_interpreter_once_with_args(path, &[]),
         ),
-        ("dev-jit", jet::Interpreter::dev_iteration(path, false, false)),
+        (
+            "dev-jit",
+            jet::Interpreter::dev_iteration(path, false, false),
+        ),
         (
             "dev-interpreter",
             jet::Interpreter::dev_iteration(path, false, true),
@@ -113,8 +118,7 @@ fn odd(n: Int) Bool {
     let _ = std::fs::remove_dir_all(&dir);
 
     if common::have_rustc() {
-        let (code, stdout, stderr) =
-            common::build_and_run("jet_script_order_aot", "main", source);
+        let (code, stdout, stderr) = common::build_and_run("jet_script_order_aot", "main", source);
         assert_eq!(code, 0, "AOT exit code: {stderr}");
         assert_eq!(stdout, expected, "AOT stdout");
         assert!(stderr.is_empty(), "AOT stderr: {stderr}");
@@ -127,7 +131,9 @@ fn script_bindings_are_ordered_locals_not_file_wide_declarations() {
     let diagnostics = jet::compile(before_binding)
         .expect_err("a loose binding must not be visible before its statement");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0107"),
         "expected an unknown-name diagnostic before the binding, got {diagnostics:?}"
     );
 
@@ -135,7 +141,9 @@ fn script_bindings_are_ordered_locals_not_file_wide_declarations() {
     let diagnostics = jet::compile(inside_declaration)
         .expect_err("a loose binding must stay local to the implicit run body");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0107"),
         "expected an unknown-name diagnostic inside the helper, got {diagnostics:?}"
     );
 }
@@ -154,7 +162,8 @@ fn run() {
 "#;
     let out = jet::compile(source).expect("an unannotated run may use ?");
     assert!(
-        out.rust.contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
+        out.rust
+            .contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
         "unannotated run should default to a fallible unit boundary:\n{}",
         out.rust
     );
@@ -177,8 +186,14 @@ fn run() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("boom"), "entry report should contain the source error: {stderr}");
-    assert!(stderr.contains("Error"), "entry report should contain its error frame: {stderr}");
+    assert!(
+        stderr.contains("boom"),
+        "entry report should contain the source error: {stderr}"
+    );
+    assert!(
+        stderr.contains("Error"),
+        "entry report should contain its error frame: {stderr}"
+    );
 }
 
 #[test]
@@ -208,7 +223,10 @@ fn script_entry_uses_the_same_front_end_for_check_and_build() {
     let path = file.to_str().unwrap();
 
     let diagnostics = jet::check_with_path(path);
-    assert!(diagnostics.is_empty(), "check rejected the script: {diagnostics:?}");
+    assert!(
+        diagnostics.is_empty(),
+        "check rejected the script: {diagnostics:?}"
+    );
     let output = jet::compile_programmable_build(path, &[])
         .expect("build should use the same implicit run entry");
     assert!(
@@ -223,8 +241,8 @@ fn script_entry_uses_the_same_front_end_for_check_and_build() {
 #[test]
 fn explicit_run_conflict_has_a_compilable_auto_wrap_fix() {
     let source = "print(\"before\")\nfn run() { print(\"middle\") }\nprint(\"after\")\n";
-    let diagnostics = jet::compile(source)
-        .expect_err("loose statements and explicit run must conflict");
+    let diagnostics =
+        jet::compile(source).expect_err("loose statements and explicit run must conflict");
     let diagnostic = diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E0621")
@@ -235,8 +253,7 @@ fn explicit_run_conflict_has_a_compilable_auto_wrap_fix() {
         !fixed.contains("print(\"before\")\nfn run"),
         "loose statement stayed outside run:\n{fixed}"
     );
-    jet::compile(&fixed)
-        .expect("the explicit-run auto-wrap must compile");
+    jet::compile(&fixed).expect("the explicit-run auto-wrap must compile");
 }
 
 #[test]
@@ -304,10 +321,7 @@ fn script_dev_verb_uses_the_single_file_implicit_run_entry() {
 
 #[test]
 fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_script_test_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_script_test_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
@@ -319,7 +333,10 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     let path = file.to_str().unwrap();
     let (harness, _) = jet::compile_tests_with_path("", path)
         .expect("jet test should accept a script with a #Test block");
-    assert!(harness.contains("script test"), "test name missing from harness");
+    assert!(
+        harness.contains("script test"),
+        "test name missing from harness"
+    );
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["test", "--show-default", path, "--serial"])
         .output()
@@ -332,32 +349,39 @@ fn script_test_verb_keeps_test_blocks_and_does_not_run_script_body() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("script test: pass"), "stdout: {stdout}");
-    assert!(!stdout.contains("script body"), "jet test ran the script body: {stdout}");
+    assert!(
+        !stdout.contains("script body"),
+        "jet test ran the script body: {stdout}"
+    );
 }
 
 #[test]
 fn script_dev_entry_can_select_declared_dev_without_running_implicit_run() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_script_dev_entry_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_script_dev_entry_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
-    std::fs::write(&file, "print(\"script body\")\nfn dev() { print(\"dev body\") }\n").unwrap();
+    std::fs::write(
+        &file,
+        "print(\"script body\")\nfn dev() { print(\"dev body\") }\n",
+    )
+    .unwrap();
     let output = jet::compile_with_entry(file.to_str().unwrap(), "dev")
         .expect("jet dev entry swap should accept scripts");
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(output.rust.contains("dev body"), "dev body missing from AOT output");
-    assert!(output.rust.contains("script body"), "implicit run should remain a normal function");
+    assert!(
+        output.rust.contains("dev body"),
+        "dev body missing from AOT output"
+    );
+    assert!(
+        output.rust.contains("script body"),
+        "implicit run should remain a normal function"
+    );
 }
 
 #[test]
 fn imported_scripts_are_rejected_before_their_body_can_run() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_imported_script_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_imported_script_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let tools = dir.join("tools.jet");
@@ -368,7 +392,9 @@ fn imported_scripts_are_rejected_before_their_body_can_run() {
         .expect_err("imported scripts must be rejected");
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0620"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0620"),
         "expected E0620, got {diagnostics:?}"
     );
 }
@@ -382,13 +408,13 @@ fn run() ! {
 "#;
     let out = jet::compile(src).expect("fallible unit run should compile");
     assert!(
-        out.rust.contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
+        out.rust
+            .contains("pub fn __jet_run() -> JetOutcome<(), JetErr>"),
         "unit-fallible run should lower to JetOutcome<(), JetErr>:\n{}",
         out.rust
     );
     assert!(
-        out.rust
-            .contains("jet_runtime_boundary(|| {")
+        out.rust.contains("jet_runtime_boundary(|| {")
             && out.rust.contains("jet_entry_error_exit("),
         "fallible run wrapper must handle returned errors:\n{}",
         out.rust
@@ -417,7 +443,8 @@ fn run() CryptoError! {
         .expect("core.crypto must prepare its hidden bridge");
     let return_type = format!("JetOutcome<(), {}::JetCryptoError>", ffi.crate_name);
     assert!(
-        out.rust.contains(&format!("pub fn __jet_run() -> {return_type}")),
+        out.rust
+            .contains(&format!("pub fn __jet_run() -> {return_type}")),
         "CryptoError run should retain its error type:\n{}",
         out.rust
     );
@@ -446,10 +473,7 @@ fn run() CryptoError! {
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
 "#;
-    let dir = std::env::temp_dir().join(format!(
-        "jet_crypto_entry_error_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_crypto_entry_error_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("unhandled_crypto_error.jet"), src).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -463,8 +487,14 @@ fn run() CryptoError! {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(code, 1, "stderr:\n{stderr}");
     assert!(stdout.is_empty(), "stdout must stay empty: {stdout:?}");
-    assert!(stderr.contains("hkdf_sha256"), "stderr should carry the error report: {stderr}");
-    assert!(!stderr.contains("unhandled cryptographic error"), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("hkdf_sha256"),
+        "stderr should carry the error report: {stderr}"
+    );
+    assert!(
+        !stderr.contains("unhandled cryptographic error"),
+        "stderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -523,11 +553,8 @@ fn run() StoreErr! {
     std::fs::create_dir_all(&interpreter_dir).unwrap();
     let interpreter_path = interpreter_dir.join("main.jet");
     std::fs::write(&interpreter_path, src).unwrap();
-    let interpreter = jet::Interpreter::dev_iteration(
-        interpreter_path.to_str().unwrap(),
-        false,
-        true,
-    );
+    let interpreter =
+        jet::Interpreter::dev_iteration(interpreter_path.to_str().unwrap(), false, true);
     let _ = std::fs::remove_dir_all(&interpreter_dir);
     match interpreter {
         jet::Interpreter::RunOutcome::Ran {
@@ -562,7 +589,8 @@ fn run() CryptoError! {
     let rest = &out.rust[start..];
     let end = rest.find("\n    });").expect("generated boundary close") + "\n    });".len();
     let invocation = &rest[..end];
-    let rust = format!(r#"
+    let rust = format!(
+        r#"
 mod {ffi_name} {{
     #[derive(Debug)]
     pub enum JetCryptoError {{ Internal {{ incident_id: &'static str }} }}
@@ -583,8 +611,11 @@ fn __jet_run() -> Result<(), {ffi_name}::JetCryptoError> {{
 fn main() {{
     {invocation}
 }}
-"#, ffi_name = ffi.crate_name);
-    let dir = std::env::temp_dir().join(format!("jet_crypto_internal_entry_{}", std::process::id()));
+"#,
+        ffi_name = ffi.crate_name
+    );
+    let dir =
+        std::env::temp_dir().join(format!("jet_crypto_internal_entry_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let source = dir.join("main.rs");
@@ -597,7 +628,11 @@ fn main() {{
         .arg(&binary)
         .output()
         .unwrap();
-    assert!(built.status.success(), "rustc stderr: {}", String::from_utf8_lossy(&built.stderr));
+    assert!(
+        built.status.success(),
+        "rustc stderr: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     let output = std::process::Command::new(&binary).output().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(output.status.code(), Some(1));
@@ -670,8 +705,7 @@ fn run() {}
         );
     }
     assert!(
-        out.rust.contains("pub fn __jet_load")
-            && out.rust.contains("JetOutcome<__jet_Config"),
+        out.rust.contains("pub fn __jet_load") && out.rust.contains("JetOutcome<__jet_Config"),
         "value-returning fallible signature lost its value type:\n{}",
         out.rust
     );

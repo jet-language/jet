@@ -10,8 +10,8 @@ use jetpack::SemanticLock::{
     self, locked_variant_domains, record_selected_variant, SemanticLockFile,
 };
 use jetpack::Variant::{
-    select_variant, ArtifactKind, PackageVariant, VariantCandidate, VariantLibc, VariantLinkage,
-    VariantOs, VariantArch, VariantRole, VariantSelectError,
+    select_variant, ArtifactKind, PackageVariant, VariantArch, VariantCandidate, VariantLibc,
+    VariantLinkage, VariantOs, VariantRole, VariantSelectError,
 };
 
 mod common;
@@ -41,12 +41,9 @@ fn closed_axes_defaults_and_identity_key() {
 
 #[test]
 fn select_exact_cross_static_musl() {
-    let need = PackageVariant::cross_target(
-        VariantOs::Linux,
-        VariantArch::Aarch64,
-        VariantLibc::Musl,
-    )
-    .with_linkage(VariantLinkage::Static);
+    let need =
+        PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl)
+            .with_linkage(VariantLinkage::Static);
 
     let winner = VariantCandidate::new("openssl-static-musl", need.clone());
     let other = VariantCandidate::new(
@@ -60,12 +57,9 @@ fn select_exact_cross_static_musl() {
 
 #[test]
 fn ambiguous_variant_is_e1316_with_snapshot() {
-    let need = PackageVariant::cross_target(
-        VariantOs::Linux,
-        VariantArch::Aarch64,
-        VariantLibc::Musl,
-    )
-    .with_linkage(VariantLinkage::Static);
+    let need =
+        PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl)
+            .with_linkage(VariantLinkage::Static);
 
     let a = VariantCandidate::new("openssl-a", need.clone())
         .with_provider_fact("conan.compiler.runtime", "libstdc++11");
@@ -87,12 +81,7 @@ fn ambiguous_variant_is_e1316_with_snapshot() {
 
 #[test]
 fn action_key_includes_variant_sysroot_sdk_linker_signing() {
-    fn key(
-        variant: &str,
-        sysroot_digest: &str,
-        target_triple: &str,
-        signer: &str,
-    ) -> String {
+    fn key(variant: &str, sysroot_digest: &str, target_triple: &str, signer: &str) -> String {
         let mut b = BuildContext::new();
         let toolchain = b
             .toolchain(
@@ -217,12 +206,9 @@ fn action_key_includes_variant_sysroot_sdk_linker_signing() {
 
 #[test]
 fn semantic_lock_covers_declared_variant_domains() {
-    let need = PackageVariant::cross_target(
-        VariantOs::Linux,
-        VariantArch::Aarch64,
-        VariantLibc::Musl,
-    )
-    .with_linkage(VariantLinkage::Static);
+    let need =
+        PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl)
+            .with_linkage(VariantLinkage::Static);
     let native = PackageVariant::defaults_for_context(&PlatformKey {
         arch: "x86_64".into(),
         os: "linux".into(),
@@ -254,7 +240,11 @@ fn semantic_lock_covers_declared_variant_domains() {
     let missing2 = jetpack::Variant::missing_lock_domains(
         &[
             need,
-            PackageVariant::cross_target(VariantOs::Windows, VariantArch::X86_64, VariantLibc::Msvc),
+            PackageVariant::cross_target(
+                VariantOs::Windows,
+                VariantArch::X86_64,
+                VariantLibc::Msvc,
+            ),
         ],
         &domains,
     );
@@ -275,26 +265,17 @@ fn semantic_lock_covers_declared_variant_domains() {
 fn native_cross_toolchain_building_remote_and_emulator_domains() {
     // Measurable JP15 coverage: five declared domains all lockable.
     let native = PackageVariant::host_defaults().with_role(VariantRole::Host);
-    let cross = PackageVariant::cross_target(
-        VariantOs::Linux,
-        VariantArch::Aarch64,
-        VariantLibc::Musl,
-    );
+    let cross =
+        PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl);
     let toolchain_building = PackageVariant::host_defaults()
         .with_role(VariantRole::Build)
         .with_artifact(ArtifactKind::DevTool);
-    let remote_target = PackageVariant::cross_target(
-        VariantOs::Linux,
-        VariantArch::X86_64,
-        VariantLibc::Gnu,
-    )
-    .with_feature("remote-builder");
-    let emulator = PackageVariant::cross_target(
-        VariantOs::Linux,
-        VariantArch::Aarch64,
-        VariantLibc::Gnu,
-    )
-    .with_feature("emulator");
+    let remote_target =
+        PackageVariant::cross_target(VariantOs::Linux, VariantArch::X86_64, VariantLibc::Gnu)
+            .with_feature("remote-builder");
+    let emulator =
+        PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Gnu)
+            .with_feature("emulator");
 
     let declared = [
         native.clone(),

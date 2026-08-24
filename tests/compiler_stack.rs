@@ -143,8 +143,7 @@ fn compile_on_two_mib_stack(
 
 #[test]
 fn compile_owns_enough_stack_for_a_two_mib_embedder_thread() {
-    compile_on_two_mib_stack(SHARED_SOURCE)
-        .expect("the Shared control program must compile");
+    compile_on_two_mib_stack(SHARED_SOURCE).expect("the Shared control program must compile");
 }
 
 #[test]
@@ -281,8 +280,8 @@ fn parenthesized_source(levels: usize) -> String {
 fn public_compile_accepts_depth_256_and_reports_depth_257() {
     jet::compile(&parenthesized_source(254)).expect("source nesting at the limit must compile");
 
-    let diagnostics =
-        jet::compile(&parenthesized_source(255)).expect_err("source nesting past the limit must fail");
+    let diagnostics = jet::compile(&parenthesized_source(255))
+        .expect_err("source nesting past the limit must fail");
     let diagnostic = diagnostics
         .iter()
         .find(|diagnostic| diagnostic.code == "E1403")

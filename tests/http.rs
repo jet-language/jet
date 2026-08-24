@@ -56,7 +56,10 @@ fn jit_http_readiness_uses_shared_scheduler_poller() {
         "jet_scheduler_tcp_stream_ready_wait",
         "jet_scheduler_udp_io_wait",
     ] {
-        assert!(runtime.contains(symbol), "JIT runtime does not import {symbol}");
+        assert!(
+            runtime.contains(symbol),
+            "JIT runtime does not import {symbol}"
+        );
         assert!(
             scheduler.contains(&format!("pub fn {symbol}")),
             "Prelude scheduler does not define {symbol}"
@@ -107,9 +110,18 @@ fn assert_http_example_matches_all_tiers(name: &str) {
     assert_eq!(default.stdout, expected, "{name} default stdout");
     assert_eq!(default.stderr, "", "{name} default stderr");
     assert_eq!(default.exit_code, 0, "{name} default exit code");
-    assert!(jet_jit::jit_executed_for_test(), "{name} default run did not execute JIT");
-    assert!(!jet_jit::deopt_invoked_for_test(), "{name} default run deopted");
-    assert!(!jet_jit::fallback_invoked_for_test(), "{name} default run fell back");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "{name} default run did not execute JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "{name} default run deopted"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "{name} default run fell back"
+    );
 
     let (code, aot_stdout, aot_stderr) =
         common::build_and_run(&format!("jet_{name}"), name, &source);

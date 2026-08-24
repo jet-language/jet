@@ -7,9 +7,13 @@ use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::{HashMap, HashSet};
 
-use crate::JSON::{convert_defs, convert_effects, convert_refs};
-use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
 use crate::Symbols::{build_semantic_symbol_index, canonical_symbol_name, SemanticSymbolIndex};
+use crate::Types::{
+    BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact,
+    InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex,
+    StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind,
+};
+use crate::JSON::{convert_defs, convert_effects, convert_refs};
 
 /// The semantic kind of a defined symbol (LSP-facing; uses AST types internally).
 #[derive(Debug, Clone)]
@@ -142,7 +146,13 @@ impl SymbolDB {
     pub fn new() -> Self {
         SymbolDB {
             index: SemIndex::new(
-                Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
             ),
             defs: Vec::new(),
             refs: Vec::new(),
@@ -161,8 +171,12 @@ impl SymbolDB {
     fn finalize_index(&mut self, facts: &SemIndexEffectFacts, bundle: &ProgramBundle) {
         for module in &bundle.modules {
             for item in &module.items {
-                let Item::CodeModule(instance) = item else { continue };
-                let Some(identity) = &instance.instance_identity else { continue };
+                let Item::CodeModule(instance) = item else {
+                    continue;
+                };
+                let Some(identity) = &instance.instance_identity else {
+                    continue;
+                };
                 let semantic_identity = format!("instance:{}", identity.fingerprint);
                 for application in &identity.applications {
                     if self.defs.iter().any(|definition| {
@@ -198,74 +212,149 @@ impl SymbolDB {
             definition_facts,
         );
         self.index.set_bypasses(self.bypasses.clone());
-        self.index.set_instances(bundle.modules.iter().enumerate().flat_map(|(module_idx, module)| module.items.iter().filter_map(move |item| {
-            let Item::CodeModule(cm) = item else { return None };
-            let identity = cm.instance_identity.as_ref()?;
-            let member_name = |name: &str| jet_foundation::Names::member_name(&cm.name, name);
-            Some(InstanceFact {
-                name: cm.name.clone(), module_path: module.display.clone(),
-                fingerprint: identity.fingerprint.clone(),
-                full_key_hex: identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect(),
-                template_definition_id: identity.definition_id.clone(),
-                template_span: identity.template_span.into(),
-                arguments: identity.argument_keys.iter().map(|key| key.iter().map(|byte| format!("{byte:02x}")).collect()).collect(),
-                argument_values: identity.argument_values.clone(),
-                argument_provenance: identity.argument_provenance.clone(),
-                applications: identity.applications.iter().map(|application| InstanceApplicationFact {
-                    name: application.name.clone(),
-                    module_path: application.source_module.clone(),
-                    semantic_identity: application.semantic_identity.clone(),
-                    span: application.span.into(),
-                }).collect(),
-                exported_members: cm.body.as_deref().unwrap_or_default().iter().filter_map(|item| match item {
-                    Item::Func(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
-                    Item::Struct(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
-                    Item::Enum(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
-                    Item::Trait(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
-                    Item::Tag(def) if facts.name_ledger.exported(module_idx, &member_name(&def.name)) => Some(def.name.clone()),
-                    _ => None,
-                }).collect(),
-            })
-        })).collect());
-        self.index.set_outputs(bundle.modules.iter().flat_map(|module| {
-            module.items.iter().filter_map(|item| {
-                let Item::Const(value) = item else { return None };
-                let output = value.resolved_output.as_ref()?;
-                let target = &bundle.modules[output.module];
-                let identity = facts
-                    .name_ledger
-                    .semantic_identity(output.module, &output.semantic_name)
-                    .unwrap_or_else(|| format!("{}::{}", target.alias, output.semantic_name));
-                Some(OutputFact {
-                    binding: value.name.clone(),
-                    kind: output.kind.as_str().to_string(),
-                    name: output.output_name.clone(),
-                    module_path: module.display.clone(),
-                    span: value.span.into(),
-                    entry: OutputEntryFact {
-                        identity,
-                        name: output.source_name.clone(),
-                        module_path: output.source_path.clone(),
-                        definition_span: output.definition.into(),
-                        reference_span: output.reference.into(),
-                        params: output.params.iter().map(|(_, ty)| ty.name()).collect(),
-                        return_type: output.return_type.as_ref().map(AST::Type::name),
-                        authority: output.authority.as_str().to_string(),
-                        effects: output.effects.clone(),
-                    },
+        self.index.set_instances(
+            bundle
+                .modules
+                .iter()
+                .enumerate()
+                .flat_map(|(module_idx, module)| {
+                    module.items.iter().filter_map(move |item| {
+                        let Item::CodeModule(cm) = item else {
+                            return None;
+                        };
+                        let identity = cm.instance_identity.as_ref()?;
+                        let member_name =
+                            |name: &str| jet_foundation::Names::member_name(&cm.name, name);
+                        Some(InstanceFact {
+                            name: cm.name.clone(),
+                            module_path: module.display.clone(),
+                            fingerprint: identity.fingerprint.clone(),
+                            full_key_hex: identity
+                                .full_key
+                                .iter()
+                                .map(|byte| format!("{byte:02x}"))
+                                .collect(),
+                            template_definition_id: identity.definition_id.clone(),
+                            template_span: identity.template_span.into(),
+                            arguments: identity
+                                .argument_keys
+                                .iter()
+                                .map(|key| key.iter().map(|byte| format!("{byte:02x}")).collect())
+                                .collect(),
+                            argument_values: identity.argument_values.clone(),
+                            argument_provenance: identity.argument_provenance.clone(),
+                            applications: identity
+                                .applications
+                                .iter()
+                                .map(|application| InstanceApplicationFact {
+                                    name: application.name.clone(),
+                                    module_path: application.source_module.clone(),
+                                    semantic_identity: application.semantic_identity.clone(),
+                                    span: application.span.into(),
+                                })
+                                .collect(),
+                            exported_members: cm
+                                .body
+                                .as_deref()
+                                .unwrap_or_default()
+                                .iter()
+                                .filter_map(|item| match item {
+                                    Item::Func(def)
+                                        if facts
+                                            .name_ledger
+                                            .exported(module_idx, &member_name(&def.name)) =>
+                                    {
+                                        Some(def.name.clone())
+                                    }
+                                    Item::Struct(def)
+                                        if facts
+                                            .name_ledger
+                                            .exported(module_idx, &member_name(&def.name)) =>
+                                    {
+                                        Some(def.name.clone())
+                                    }
+                                    Item::Enum(def)
+                                        if facts
+                                            .name_ledger
+                                            .exported(module_idx, &member_name(&def.name)) =>
+                                    {
+                                        Some(def.name.clone())
+                                    }
+                                    Item::Trait(def)
+                                        if facts
+                                            .name_ledger
+                                            .exported(module_idx, &member_name(&def.name)) =>
+                                    {
+                                        Some(def.name.clone())
+                                    }
+                                    Item::Tag(def)
+                                        if facts
+                                            .name_ledger
+                                            .exported(module_idx, &member_name(&def.name)) =>
+                                    {
+                                        Some(def.name.clone())
+                                    }
+                                    _ => None,
+                                })
+                                .collect(),
+                        })
+                    })
                 })
-            })
-        }).collect());
+                .collect(),
+        );
+        self.index.set_outputs(
+            bundle
+                .modules
+                .iter()
+                .flat_map(|module| {
+                    module.items.iter().filter_map(|item| {
+                        let Item::Const(value) = item else {
+                            return None;
+                        };
+                        let output = value.resolved_output.as_ref()?;
+                        let target = &bundle.modules[output.module];
+                        let identity = facts
+                            .name_ledger
+                            .semantic_identity(output.module, &output.semantic_name)
+                            .unwrap_or_else(|| {
+                                format!("{}::{}", target.alias, output.semantic_name)
+                            });
+                        Some(OutputFact {
+                            binding: value.name.clone(),
+                            kind: output.kind.as_str().to_string(),
+                            name: output.output_name.clone(),
+                            module_path: module.display.clone(),
+                            span: value.span.into(),
+                            entry: OutputEntryFact {
+                                identity,
+                                name: output.source_name.clone(),
+                                module_path: output.source_path.clone(),
+                                definition_span: output.definition.into(),
+                                reference_span: output.reference.into(),
+                                params: output.params.iter().map(|(_, ty)| ty.name()).collect(),
+                                return_type: output.return_type.as_ref().map(AST::Type::name),
+                                authority: output.authority.as_str().to_string(),
+                                effects: output.effects.clone(),
+                            },
+                        })
+                    })
+                })
+                .collect(),
+        );
     }
 
     fn align_reference_targets(&mut self) {
         for reference in &mut self.refs {
-            let Some(target) = &mut reference.target else { continue };
+            let Some(target) = &mut reference.target else {
+                continue;
+            };
             let mut definitions = self
                 .defs
                 .iter()
                 .filter(|definition| definition_matches_target(definition, target));
-            let Some(definition) = definitions.next() else { continue };
+            let Some(definition) = definitions.next() else {
+                continue;
+            };
             if definitions.next().is_none() {
                 target.semantic_identity = Some(definition.identity.clone());
             }
@@ -449,7 +538,10 @@ fn fn_signature(
                 .collect()
         })
         .unwrap_or_default();
-    let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
+    let result = ret
+        .as_ref()
+        .map(|ty| format!(" {}", ty.name()))
+        .unwrap_or_default();
     let ceiling = if let Some((param, _)) = effect_via {
         format!(" -[via {param}]>")
     } else if shown.is_empty() {
@@ -523,7 +615,13 @@ fn callable_policies(f: &AST::Func) -> Vec<String> {
         .iter()
         .find(|marker| marker.name == Syntax::MARKER_POLICY)
         .and_then(|marker| AST::CallablePolicyChain::parse(&marker.args).ok())
-        .map(|chain| chain.policies.iter().map(|policy| policy.display()).collect())
+        .map(|chain| {
+            chain
+                .policies
+                .iter()
+                .map(|policy| policy.display())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -602,11 +700,15 @@ pub fn binder_active_parameter(
     }
     let mut consumed_slots = Vec::new();
     for label in consumed_labels {
-        if let Some((index, _)) = contract.iter().enumerate().find(|(index, (_, public, zone))| {
-            !consumed_slots.contains(index)
-                && *zone != AST::ParamZone::PositionalOnly
-                && public == label
-        }) {
+        if let Some((index, _)) = contract
+            .iter()
+            .enumerate()
+            .find(|(index, (_, public, zone))| {
+                !consumed_slots.contains(index)
+                    && *zone != AST::ParamZone::PositionalOnly
+                    && public == label
+            })
+        {
             consumed_slots.push(index);
         }
     }
@@ -697,7 +799,8 @@ fn scoped_local_identity(ctx: &WalkCtx<'_>, kind: &str, name: &str) -> String {
 }
 
 fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
-    let target = ctx.name_ledger
+    let target = ctx
+        .name_ledger
         .reference(mp, span.start, span.end)
         .map(|fact| DefinitionAnchor {
             module_path: fact.module_path.clone(),
@@ -714,7 +817,13 @@ fn scoped_ref(name: String, span: Span, mp: &str, ctx: &WalkCtx<'_>) -> SymRef {
     }
 }
 
-fn record_node(ctx: &mut WalkCtx<'_>, class: &str, shape: &str, mp: &str, span: Span) -> Option<usize> {
+fn record_node(
+    ctx: &mut WalkCtx<'_>,
+    class: &str,
+    shape: &str,
+    mp: &str,
+    span: Span,
+) -> Option<usize> {
     if span.end >= span.start {
         let id = ctx.db.nodes.len();
         let parent = ctx.structural_parents.last().copied();
@@ -722,9 +831,12 @@ fn record_node(ctx: &mut WalkCtx<'_>, class: &str, shape: &str, mp: &str, span: 
             parent.is_none() || ctx.structural_slot != "root",
             "compiler structural child missing explicit slot: {class}/{shape}"
         );
-        let ordinal = ctx.db.nodes.iter().filter(|node| {
-            node.parent == parent && node.slot == ctx.structural_slot
-        }).count();
+        let ordinal = ctx
+            .db
+            .nodes
+            .iter()
+            .filter(|node| node.parent == parent && node.slot == ctx.structural_slot)
+            .count();
         ctx.db.nodes.push(StructuralNode {
             id,
             parent,
@@ -863,7 +975,9 @@ fn item_span(item: &AST::Item) -> Span {
 
 fn record_func_type_nodes(f: &AST::Func, mp: &str, ctx: &mut WalkCtx<'_>) {
     structural_slot(ctx, "params", StructuralSlotKind::List, |ctx| {
-        for param in &f.params { record_node(ctx, "type", "type", mp, param.ty_span); }
+        for param in &f.params {
+            record_node(ctx, "type", "type", mp, param.ty_span);
+        }
     });
     if let Some(span) = f.return_type_span {
         structural_slot(ctx, "return_type", StructuralSlotKind::Scalar, |ctx| {
@@ -905,13 +1019,7 @@ fn record_call(ctx: &mut WalkCtx<'_>, mp: &str, callee: &str, span: Span) {
     }
 }
 
-fn with_caller<F>(
-    ctx: &mut WalkCtx<'_>,
-    frame: CallerFrame,
-    params: &[AST::Param],
-    mp: &str,
-    f: F,
-)
+fn with_caller<F>(ctx: &mut WalkCtx<'_>, frame: CallerFrame, params: &[AST::Param], mp: &str, f: F)
 where
     F: FnOnce(&mut WalkCtx<'_>),
 {
@@ -961,8 +1069,12 @@ fn apply_inferred_effect_rows(
 ) {
     let mut inline_keys = HashMap::new();
     for item in &module.items {
-        let Item::CodeModule(code_module) = item else { continue };
-        let Some(body) = &code_module.body else { continue };
+        let Item::CodeModule(code_module) = item else {
+            continue;
+        };
+        let Some(body) = &code_module.body else {
+            continue;
+        };
         for item in body {
             if let Item::Func(function) = item {
                 inline_keys.insert(
@@ -999,7 +1111,8 @@ fn apply_inferred_effect_rows(
         if effects.is_some() || effect_via.is_some() {
             continue;
         }
-        let local_key = if let Some(key) = inline_keys.get(&(def.def_span.start, def.def_span.end)) {
+        let local_key = if let Some(key) = inline_keys.get(&(def.def_span.start, def.def_span.end))
+        {
             key.clone()
         } else if def.identity.starts_with("method:") {
             def.identity
@@ -1033,9 +1146,11 @@ fn apply_inferred_effect_rows(
             param_defaults,
             policies,
         );
-        if let Some(hover) = db.hover.iter_mut().find(|hover| {
-            hover.module_path == def.module_path && hover.span == def.def_span
-        }) {
+        if let Some(hover) = db
+            .hover
+            .iter_mut()
+            .find(|hover| hover.module_path == def.module_path && hover.span == def.def_span)
+        {
             let tail = hover
                 .text
                 .split_once('\n')
@@ -1059,25 +1174,65 @@ fn build_definition_facts(
     bundle: &ProgramBundle,
 ) -> Vec<DefinitionFact> {
     let mut out = Vec::new();
-    for node in nodes.iter().filter(|node| node.parent.is_none() && node.class == "item") {
-        let Some(module) = bundle.modules.iter().find(|module| module.display == node.module_path) else { continue };
-        let Some(def) = defs.iter().filter(|def| {
-            def.module_path == node.module_path
-                && node.span.start <= def.def_span.start
-                && def.def_span.end <= node.span.end
-                && !matches!(def.kind, SymbolKind::Local { .. } | SymbolKind::Param { .. } | SymbolKind::Field { .. } | SymbolKind::EnumVariant { .. })
-        }).min_by_key(|def| def.def_span.start) else { continue };
+    for node in nodes
+        .iter()
+        .filter(|node| node.parent.is_none() && node.class == "item")
+    {
+        let Some(module) = bundle
+            .modules
+            .iter()
+            .find(|module| module.display == node.module_path)
+        else {
+            continue;
+        };
+        let Some(def) = defs
+            .iter()
+            .filter(|def| {
+                def.module_path == node.module_path
+                    && node.span.start <= def.def_span.start
+                    && def.def_span.end <= node.span.end
+                    && !matches!(
+                        def.kind,
+                        SymbolKind::Local { .. }
+                            | SymbolKind::Param { .. }
+                            | SymbolKind::Field { .. }
+                            | SymbolKind::EnumVariant { .. }
+                    )
+            })
+            .min_by_key(|def| def.def_span.start)
+        else {
+            continue;
+        };
         // Definition IDs identify a checked declaration, never merely its
         // ancestry class. `def.identity` is the compiler's semantic identity
         // (module scope + declared name), so same-kind siblings cannot collapse
         // onto one ID. Rename/move pairing remains a separate, explicit merge
         // operation; it must not be smuggled into the identity hash.
         let structural = format!("{}|{}", definition_kind(&def.kind), def.identity);
-        let source = module.source.get(node.span.start..node.span.end).unwrap_or("");
+        let source = module
+            .source
+            .get(node.span.start..node.span.end)
+            .unwrap_or("");
         out.push(DefinitionFact {
-            stable_id: format!("def:{}", &jet_foundation::SHA256::sha256_hex(structural.as_bytes())[..16]),
-            signature_id: format!("sig:{}", &jet_foundation::SHA256::sha256_hex(format!("{}|{}", definition_kind(&def.kind), definition_signature(def)).as_bytes())[..16]),
-            content_id: format!("sha256:{}", jet_foundation::SHA256::sha256_hex(normalize_definition(source).as_bytes())),
+            stable_id: format!(
+                "def:{}",
+                &jet_foundation::SHA256::sha256_hex(structural.as_bytes())[..16]
+            ),
+            signature_id: format!(
+                "sig:{}",
+                &jet_foundation::SHA256::sha256_hex(
+                    format!(
+                        "{}|{}",
+                        definition_kind(&def.kind),
+                        definition_signature(def)
+                    )
+                    .as_bytes()
+                )[..16]
+            ),
+            content_id: format!(
+                "sha256:{}",
+                jet_foundation::SHA256::sha256_hex(normalize_definition(source).as_bytes())
+            ),
             human_identity: def.identity.clone(),
             name: canonical_symbol_name(
                 bundle,
@@ -1091,7 +1246,11 @@ fn build_definition_facts(
             span: node.span,
         });
     }
-    out.sort_by(|a, b| a.stable_id.cmp(&b.stable_id).then(a.human_identity.cmp(&b.human_identity)));
+    out.sort_by(|a, b| {
+        a.stable_id
+            .cmp(&b.stable_id)
+            .then(a.human_identity.cmp(&b.human_identity))
+    });
     out
 }
 
@@ -1126,7 +1285,11 @@ fn definition_signature(def: &SymbolDef) -> String {
                 .join(",");
             format!(
                 "({})->{};call_contract=[{call_contract}];view_source={}",
-                params.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(","),
+                params
+                    .iter()
+                    .map(|(_, ty)| ty.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
                 ret.as_deref().unwrap_or("()"),
                 def.view_provenance
                     .iter()
@@ -1135,7 +1298,14 @@ fn definition_signature(def: &SymbolDef) -> String {
                     .join("|"),
             )
         }
-        SymbolKind::Struct { fields } => format!("{{{}}}", fields.iter().map(|(_, ty)| ty.as_str()).collect::<Vec<_>>().join(",")),
+        SymbolKind::Struct { fields } => format!(
+            "{{{}}}",
+            fields
+                .iter()
+                .map(|(_, ty)| ty.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
         SymbolKind::Enum { variants } => format!("variants:{}", variants.len()),
         _ => definition_kind(&def.kind).to_string(),
     }
@@ -1148,14 +1318,23 @@ fn normalize_definition(source: &str) -> String {
     while let Some(ch) = chars.next() {
         if string {
             out.push(ch);
-            if ch == '\\' { if let Some(next) = chars.next() { out.push(next); } }
-            else if ch == '"' { string = false; }
+            if ch == '\\' {
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+            } else if ch == '"' {
+                string = false;
+            }
         } else if ch == '"' {
             string = true;
             out.push(ch);
         } else if ch == '/' && chars.peek() == Some(&'/') {
             chars.next();
-            for next in chars.by_ref() { if next == '\n' { break; } }
+            for next in chars.by_ref() {
+                if next == '\n' {
+                    break;
+                }
+            }
         } else if !ch.is_whitespace() {
             out.push(ch);
         }
@@ -1243,14 +1422,10 @@ pub fn build_index(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> SemIn
 }
 
 fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
-    let structural_id = record_node(
-        ctx,
-        "item",
-        &item_shape(item),
-        mp,
-        item_span(item),
-    );
-    if let Some(id) = structural_id { ctx.structural_parents.push(id); }
+    let structural_id = record_node(ctx, "item", &item_shape(item), mp, item_span(item));
+    if let Some(id) = structural_id {
+        ctx.structural_parents.push(id);
+    }
     match item {
         Item::EffectDecl(_) => {}
         // D-META-USER1=A: marker and fact declarations are first-class
@@ -1262,7 +1437,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type { derives: Vec::new() },
+                kind: SymKind::Type {
+                    derives: Vec::new(),
+                },
             });
         }
         Item::FactDecl(value) => {
@@ -1271,7 +1448,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type { derives: Vec::new() },
+                kind: SymKind::Type {
+                    derives: Vec::new(),
+                },
             });
         }
         Item::Func(f) => {
@@ -1301,17 +1480,44 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 },
             };
             let mut hover_text = hover_for_fn(f);
-            for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_replayable, Syntax::MARKER_REPLAYABLE)] {
-                if active && jet_foundation::Policy::rule_allows(name, jet_foundation::Policy::RuleSite::Function) {
+            for (active, name) in [
+                (f.is_unsafe, Syntax::KW_UNSAFE),
+                (f.is_pure, Syntax::KW_PURE),
+                (f.is_replayable, Syntax::MARKER_REPLAYABLE),
+            ] {
+                if active
+                    && jet_foundation::Policy::rule_allows(
+                        name,
+                        jet_foundation::Policy::RuleSite::Function,
+                    )
+                {
                     hover_text.push_str(&format!("\nrule: #{name} (function, site-bound)"));
                 }
             }
             if let Some(tag) = &f.scrub_tag {
                 hover_text.push_str(&format!("\nrule: #Scrub({tag}) (function, site-bound)"));
             }
-            let declarations = module.policy_declarations.iter().filter(|d| matches!(d.scope, jet_foundation::Policy::PolicyScope::Organization | jet_foundation::Policy::PolicyScope::Package | jet_foundation::Policy::PolicyScope::Module) || (d.scope == jet_foundation::Policy::PolicyScope::Function && d.target == Some(f.span))).cloned().collect::<Vec<_>>();
-            for key in jet_foundation::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
-                if let Ok(Some(effective)) = jet_foundation::Policy::resolve(key, declarations.clone()) {
+            let declarations = module
+                .policy_declarations
+                .iter()
+                .filter(|d| {
+                    matches!(
+                        d.scope,
+                        jet_foundation::Policy::PolicyScope::Organization
+                            | jet_foundation::Policy::PolicyScope::Package
+                            | jet_foundation::Policy::PolicyScope::Module
+                    ) || (d.scope == jet_foundation::Policy::PolicyScope::Function
+                        && d.target == Some(f.span))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            for key in jet_foundation::Policy::POLICY_RULES
+                .iter()
+                .map(|rule| rule.key)
+            {
+                if let Ok(Some(effective)) =
+                    jet_foundation::Policy::resolve(key, declarations.clone())
+                {
                     hover_text.push_str("\npolicy: ");
                     hover_text.push_str(&jet_foundation::Policy::explain(&effective));
                 }
@@ -1352,11 +1558,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     // D-APILABEL1=A: name the public label when it differs, so
                     // hovering the local name still tells you what to type.
                     text: match &p.public_label {
-                        Some((label, _)) => format!(
-                            "`{}`: {} — callers write `{label}:`",
-                            p.name,
-                            p.ty.name()
-                        ),
+                        Some((label, _)) => {
+                            format!("`{}`: {} — callers write `{label}:`", p.name, p.ty.name())
+                        }
                         None => format!("`{}`: {}", p.name, p.ty.name()),
                     },
                 });
@@ -1371,13 +1575,17 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 &f.params,
                 mp,
                 |ctx| {
-                    structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&f.body, mp, module, ctx));
+                    structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+                        collect_stmts(&f.body, mp, module, ctx)
+                    });
                 },
             );
         }
         Item::Struct(s) => {
             structural_slot(ctx, "field_types", StructuralSlotKind::List, |ctx| {
-                for field in &s.fields { record_node(ctx, "type", "type", mp, field.ty_span); }
+                for field in &s.fields {
+                    record_node(ctx, "type", "type", mp, field.ty_span);
+                }
             });
             // D-LINTPOLICY1=A: `#[allow(lint)]` (D-DECIMAL1 and kin) is a
             // spelled source-level lint suppression — the struct itself, and
@@ -1388,7 +1596,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             }
             for field in &s.fields {
                 if let Some(computed) = &field.computed {
-                    structural_slot(ctx, "computed_fields", StructuralSlotKind::List, |ctx| collect_expr(computed, mp, ctx));
+                    structural_slot(ctx, "computed_fields", StructuralSlotKind::List, |ctx| {
+                        collect_expr(computed, mp, ctx)
+                    });
                 }
             }
             let fields: Vec<(String, AST::Type)> = s
@@ -1501,7 +1711,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     },
                     &meth.params,
                     mp,
-                    |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
+                    |ctx| {
+                        structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+                            collect_stmts(body, mp, module, ctx)
+                        })
+                    },
                 );
             }
             for tb in &s.trait_impls {
@@ -1545,7 +1759,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         },
                         &meth.params,
                         mp,
-                        |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
+                        |ctx| {
+                            structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+                                collect_stmts(&meth.body, mp, module, ctx)
+                            })
+                        },
                     );
                 }
             }
@@ -1555,11 +1773,15 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 match &variant.payload {
                     AST::VariantPayload::Unit => {}
                     AST::VariantPayload::Single(_, span) => {
-                        structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| { record_node(ctx, "type", "type", mp, *span); });
+                        structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| {
+                            record_node(ctx, "type", "type", mp, *span);
+                        });
                     }
                     AST::VariantPayload::Named(fields) => {
                         structural_slot(ctx, "variant_types", StructuralSlotKind::List, |ctx| {
-                            for field in fields { record_node(ctx, "type", "type", mp, field.ty_span); }
+                            for field in fields {
+                                record_node(ctx, "type", "type", mp, field.ty_span);
+                            }
                         });
                     }
                 }
@@ -1650,7 +1872,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     },
                     &meth.params,
                     mp,
-                    |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
+                    |ctx| {
+                        structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+                            collect_stmts(&meth.body, mp, module, ctx)
+                        })
+                    },
                 );
             }
             for tb in &e.trait_impls {
@@ -1694,7 +1920,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         },
                         &meth.params,
                         mp,
-                        |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
+                        |ctx| {
+                            structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+                                collect_stmts(&meth.body, mp, module, ctx)
+                            })
+                        },
                     );
                 }
             }
@@ -1731,8 +1961,26 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         ret: sig.return_type.clone(),
                         effects: sig.declared_effects.clone(),
                         effect_via: None,
-                        param_access: sig.params.iter().filter(|p| p.name != Syntax::KW_SELF).map(|p| p.convention).collect(),
-                        param_defaults: sig.params.iter().filter(|p| p.name != Syntax::KW_SELF).map(|p| p.default.as_ref().map(|default| module.source.get(default.span().start..default.span().end).unwrap_or("…").to_string())).collect(),
+                        param_access: sig
+                            .params
+                            .iter()
+                            .filter(|p| p.name != Syntax::KW_SELF)
+                            .map(|p| p.convention)
+                            .collect(),
+                        param_defaults: sig
+                            .params
+                            .iter()
+                            .filter(|p| p.name != Syntax::KW_SELF)
+                            .map(|p| {
+                                p.default.as_ref().map(|default| {
+                                    module
+                                        .source
+                                        .get(default.span().start..default.span().end)
+                                        .unwrap_or("…")
+                                        .to_string()
+                                })
+                            })
+                            .collect(),
                         policies: Vec::new(),
                     },
                 });
@@ -1753,14 +2001,12 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                         sig.declared_effects.as_ref(),
                         None,
                         None,
-                        &sig
-                            .params
+                        &sig.params
                             .iter()
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| p.convention)
                             .collect::<Vec<_>>(),
-                        &sig
-                            .params
+                        &sig.params
                             .iter()
                             .filter(|p| p.name != Syntax::KW_SELF)
                             .map(|p| {
@@ -1855,7 +2101,11 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     },
                     &meth.params,
                     mp,
-                    |ctx| structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| collect_stmts(&meth.body, mp, module, ctx)),
+                    |ctx| {
+                        structural_slot(ctx, "method_bodies", StructuralSlotKind::List, |ctx| {
+                            collect_stmts(&meth.body, mp, module, ctx)
+                        })
+                    },
                 );
             }
         }
@@ -1872,10 +2122,14 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 module_path: mp.to_string(),
                 text: format!("const `{}`", c.name),
             });
-            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(&c.value, mp, ctx));
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(&c.value, mp, ctx)
+            });
         }
         Item::Test(t) => {
-            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(&t.body, mp, module, ctx));
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+                collect_stmts(&t.body, mp, module, ctx)
+            });
         }
         Item::ExternRust(_) => {}
         Item::Module(m) => {
@@ -1890,7 +2144,10 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
         // S59: C FFI boundary modules aren't yet indexed for symbols/hover.
         Item::CModule(_) => {}
         Item::CodeModule(m) => {
-            let identity = m.instance_identity.as_ref().map(|instance| format!("instance:{}", instance.fingerprint))
+            let identity = m
+                .instance_identity
+                .as_ref()
+                .map(|instance| format!("instance:{}", instance.fingerprint))
                 .unwrap_or_else(|| module_identity(&ctx.scope_identity, &m.name));
             ctx.db.defs.push(SymDef {
                 identity: identity.clone(),
@@ -1902,7 +2159,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             if let Some(body) = &m.body {
                 let prev = std::mem::replace(&mut ctx.scope_identity, identity);
                 structural_slot(ctx, "items", StructuralSlotKind::List, |ctx| {
-                    for item in body { collect_item(item, mp, module, ctx); }
+                    for item in body {
+                        collect_item(item, mp, module, ctx);
+                    }
                 });
                 ctx.scope_identity = prev;
             }
@@ -1917,7 +2176,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     derives: value.derives.iter().map(|(name, _)| name.clone()).collect(),
                 },
             });
-            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| { record_node(ctx, "type", "type", mp, value.base_span); });
+            structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| {
+                record_node(ctx, "type", "type", mp, value.base_span);
+            });
         }
         Item::TypeAlias(value) => {
             ctx.db.defs.push(SymDef {
@@ -1925,7 +2186,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type { derives: Vec::new() },
+                kind: SymKind::Type {
+                    derives: Vec::new(),
+                },
             });
             structural_slot(ctx, "target", StructuralSlotKind::Scalar, |ctx| {
                 record_node(ctx, "type", "type", mp, value.target_span);
@@ -1937,7 +2200,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.family.clone(),
                 def_span: value.family_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type { derives: Vec::new() },
+                kind: SymKind::Type {
+                    derives: Vec::new(),
+                },
             });
             for def in value.distinct_defs() {
                 ctx.db.defs.push(SymDef {
@@ -1970,7 +2235,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.type_name.clone(),
                 def_span: value.type_name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type { derives: Vec::new() },
+                kind: SymKind::Type {
+                    derives: Vec::new(),
+                },
             });
             for (name, span) in &value.states {
                 ctx.db.defs.push(SymDef {
@@ -1978,7 +2245,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     name: name.clone(),
                     def_span: *span,
                     module_path: mp.to_string(),
-                    kind: SymKind::EnumVariant { parent: value.type_name.clone() },
+                    kind: SymKind::EnumVariant {
+                        parent: value.type_name.clone(),
+                    },
                 });
             }
         }
@@ -1988,7 +2257,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 name: value.name.clone(),
                 def_span: value.name_span,
                 module_path: mp.to_string(),
-                kind: SymKind::Type { derives: Vec::new() },
+                kind: SymKind::Type {
+                    derives: Vec::new(),
+                },
             });
             for message in &value.messages {
                 ctx.db.defs.push(SymDef {
@@ -1996,12 +2267,19 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                     name: message.name.clone(),
                     def_span: message.name_span,
                     module_path: mp.to_string(),
-                    kind: SymKind::EnumVariant { parent: value.name.clone() },
+                    kind: SymKind::EnumVariant {
+                        parent: value.name.clone(),
+                    },
                 });
             }
         }
         Item::UserDerive(value) => {
-            ctx.db.refs.push(scoped_ref(value.trait_name.clone(), value.trait_span, mp, ctx));
+            ctx.db.refs.push(scoped_ref(
+                value.trait_name.clone(),
+                value.trait_span,
+                mp,
+                ctx,
+            ));
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
                 for body_item in &value.body {
                     match body_item {
@@ -2011,9 +2289,15 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                             collect_expr(source, mp, ctx);
                             for nested in body {
                                 match nested {
-                                    AST::DeriveBodyItem::Item(item) => collect_item(item, mp, module, ctx),
-                                    AST::DeriveBodyItem::Stmt(stmt) => collect_stmt(stmt, mp, module, ctx),
-                                    AST::DeriveBodyItem::Loop { source, .. } => collect_expr(source, mp, ctx),
+                                    AST::DeriveBodyItem::Item(item) => {
+                                        collect_item(item, mp, module, ctx)
+                                    }
+                                    AST::DeriveBodyItem::Stmt(stmt) => {
+                                        collect_stmt(stmt, mp, module, ctx)
+                                    }
+                                    AST::DeriveBodyItem::Loop { source, .. } => {
+                                        collect_expr(source, mp, ctx)
+                                    }
                                 }
                             }
                         }
@@ -2054,7 +2338,9 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             });
         }
     }
-    if structural_id.is_some() { ctx.structural_parents.pop(); }
+    if structural_id.is_some() {
+        ctx.structural_parents.pop();
+    }
 }
 
 fn hover_for_fn(f: &AST::Func) -> String {
@@ -2104,10 +2390,22 @@ fn hover_for_fn(f: &AST::Func) -> String {
     } else {
         f.declared_effects.as_ref().map_or_else(
             || String::new(),
-            |row| format!(" -[{}]>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+            |row| {
+                format!(
+                    " -[{}]>",
+                    row.iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            },
         )
     };
-    let ret = f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default();
+    let ret = f
+        .return_type
+        .as_ref()
+        .map(|t| format!(" {}", t.name()))
+        .unwrap_or_default();
     let policies = f
         .markers
         .iter()
@@ -2158,7 +2456,9 @@ fn collect_loop_label_ref(name: &str, span: Span, mp: &str, ctx: &mut WalkCtx<'_
 fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
     let span = stmt.span();
     let structural_id = record_node(ctx, "stmt", &stmt_shape(stmt), mp, span);
-    if let Some(id) = structural_id { ctx.structural_parents.push(id); }
+    if let Some(id) = structural_id {
+        ctx.structural_parents.push(id);
+    }
     match stmt {
         AST::Stmt::Val(b) => {
             collect_binding(b, mp, ctx);
@@ -2373,7 +2673,9 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
     }
-    if structural_id.is_some() { ctx.structural_parents.pop(); }
+    if structural_id.is_some() {
+        ctx.structural_parents.pop();
+    }
 }
 
 fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {
@@ -2384,21 +2686,33 @@ fn collect_lvalue(lv: &AST::LValue, mp: &str, ctx: &mut WalkCtx<'_>) {
                 .push(scoped_ref(name.clone(), *name_span, mp, ctx));
         }
         AST::LValue::Index { base, index, .. } => {
-            structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
-            structural_slot(ctx, "target_index", StructuralSlotKind::Scalar, |ctx| collect_expr(index, mp, ctx));
+            structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(base, mp, ctx)
+            });
+            structural_slot(ctx, "target_index", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(index, mp, ctx)
+            });
         }
         // D-MUTSELF1: `place.field = v` — record references in the base place.
-        AST::LValue::Field { base, .. } => structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx)),
+        AST::LValue::Field { base, .. } => {
+            structural_slot(ctx, "target_base", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(base, mp, ctx)
+            })
+        }
     }
 }
 
 fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
     if let Some(span) = b.ty_span {
-        structural_slot(ctx, "type", StructuralSlotKind::Scalar, |ctx| { record_node(ctx, "type", "type", mp, span); });
+        structural_slot(ctx, "type", StructuralSlotKind::Scalar, |ctx| {
+            record_node(ctx, "type", "type", mp, span);
+        });
     }
     // S74: a destructuring binding brings each named field/element into scope.
     if let Some(pat) = &b.pattern {
-        structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&b.init, mp, ctx));
+        structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| {
+            collect_expr(&b.init, mp, ctx)
+        });
         for n in pat.names() {
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", &n.name),
@@ -2447,7 +2761,9 @@ fn collect_binding(b: &AST::Binding, mp: &str, ctx: &mut WalkCtx<'_>) {
             });
         }
     }
-    structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| collect_expr(&b.init, mp, ctx));
+    structural_slot(ctx, "initializer", StructuralSlotKind::Scalar, |ctx| {
+        collect_expr(&b.init, mp, ctx)
+    });
 }
 
 /// D-CALLPOS1=A / D-REF3: the binder records the public label on each supplied
@@ -2496,7 +2812,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         }
     }
     let structural_id = record_node(ctx, "expr", &expr_shape(e), mp, structural_expr_span(e));
-    if let Some(id) = structural_id { ctx.structural_parents.push(id); }
+    if let Some(id) = structural_id {
+        ctx.structural_parents.push(id);
+    }
     match e {
         AST::Expr::PtrFromAddr { addr, .. } => {
             structural_slot(ctx, "address", StructuralSlotKind::Scalar, |ctx| collect_expr(addr, mp, ctx));
@@ -2798,7 +3116,9 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::BinMatchLit(_, _) => {}
         AST::Expr::Paren(inner, _) => structural_slot(ctx, "inner", StructuralSlotKind::Scalar, |ctx| collect_expr(inner, mp, ctx)),
     }
-    if structural_id.is_some() { ctx.structural_parents.pop(); }
+    if structural_id.is_some() {
+        ctx.structural_parents.pop();
+    }
 }
 
 fn collect_expr_stmt(stmt: &AST::Stmt, mp: &str, ctx: &mut WalkCtx<'_>) {

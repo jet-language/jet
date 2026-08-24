@@ -1,8 +1,8 @@
-use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::{missing_arms_text, missing_pattern_coverage, pattern_variant_name};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
+use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
 use std::collections::{HashMap, HashSet};
 
 fn leading_guard_pattern_subject(expr: &Expr) -> Option<&Expr> {
@@ -24,7 +24,10 @@ fn expr_is_absent_none(expr: &Expr) -> bool {
             ..
         } if type_name.is_empty()
             && matches!(contextual_literal(variant), Some(ContextualLiteral::Null))
-            && args.is_empty() => true,
+            && args.is_empty() =>
+        {
+            true
+        }
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => expr_is_absent_none(inner),
         _ => false,
     }
@@ -48,8 +51,10 @@ pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Spa
                 Pattern::Absent(_) => true,
                 Pattern::Variant {
                     variant, bindings, ..
-                } => matches!(contextual_literal(variant), Some(ContextualLiteral::Null))
-                    && bindings.is_empty(),
+                } => {
+                    matches!(contextual_literal(variant), Some(ContextualLiteral::Null))
+                        && bindings.is_empty()
+                }
                 _ => false,
             };
             if !is_absent {
@@ -81,9 +86,7 @@ pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Spa
 fn guard_subject_path(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Ident(name, _) => Some(name.clone()),
-        Expr::Field(base, member, _) => {
-            Some(format!("{}.{}", guard_subject_path(base)?, member))
-        }
+        Expr::Field(base, member, _) => Some(format!("{}.{}", guard_subject_path(base)?, member)),
         Expr::Copy(inner, _) | Expr::Paren(inner, _) => guard_subject_path(inner),
         _ => None,
     }
@@ -124,16 +127,14 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
         return;
     };
     let binding = || {
-        bindings
-            .first()
-            .map(|slot| {
-                (
-                    slot.as_bind()
-                        .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
-                        .to_string(),
-                    slot.binding_span().unwrap_or(*span),
-                )
-            })
+        bindings.first().map(|slot| {
+            (
+                slot.as_bind()
+                    .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
+                    .to_string(),
+                slot.binding_span().unwrap_or(*span),
+            )
+        })
     };
     let replacement = match (
         subject_ty,
@@ -142,9 +143,7 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
         bindings.len(),
     ) {
         (_, Some(ContextualLiteral::Null), false, 0)
-        | (Type::Option(_), Some(ContextualLiteral::Null), true, 0) => {
-            Some(Pattern::Absent(*span))
-        }
+        | (Type::Option(_), Some(ContextualLiteral::Null), true, 0) => Some(Pattern::Absent(*span)),
         (_, Some(ContextualLiteral::Value), false, 1)
         | (Type::Option(_), Some(ContextualLiteral::Value), true, 1) => {
             let (binding, binding_span) = binding().unwrap();
@@ -178,71 +177,98 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
 }
 
 impl<'a> Checker<'a> {
-        /// D-FLOWTYPE1=A: immutable local/param of type `T?` may refine to `T`.
-        pub(crate) fn flow_narrowable_optional_inner(&self, name: &str) -> Option<Type> {
-            let info = self.lookup(name)?;
-            if info.mutable {
-                return None;
-            }
-            match &info.ty {
-                Type::Option(inner) => Some((**inner).clone()),
-                _ => None,
-            }
+    /// D-FLOWTYPE1=A: immutable local/param of type `T?` may refine to `T`.
+    pub(crate) fn flow_narrowable_optional_inner(&self, name: &str) -> Option<Type> {
+        let info = self.lookup(name)?;
+        if info.mutable {
+            return None;
         }
-
-        /// D-FLOWTYPE1=A: `Present` binding that refines the same stable Optional name.
-        pub(crate) fn is_optional_flow_refine(&self, name: &str, binding_ty: &Type) -> bool {
-            let Some(info) = self.lookup(name) else {
-                return false;
-            };
-            if info.mutable {
-                return false;
-            }
-            matches!(&info.ty, Type::Option(inner) if inner.as_ref() == binding_ty)
+        match &info.ty {
+            Type::Option(inner) => Some((**inner).clone()),
+            _ => None,
         }
+    }
 
-        /// D-FLOWTYPE1=A: refine a stable Optional name in the current scope (no E0118).
-        pub(crate) fn declare_optional_flow_narrow(
-            &mut self,
-            name: &str,
-            name_span: Span,
-            inner: Type,
-        ) {
-            if name == "_" {
-                return;
-            }
-            let depth = self.scope_depth();
-            if self.flow.bindings.get_at(name, depth).is_some()
-                || self.flow.narrow.get_at(name, depth).is_some()
-            {
-                self.diags
-                    .push(crate::Sema::Registration::already_defined(name, name_span));
-            }
-            self.record_optional_flow_narrow(name, name_span, inner);
+    /// D-FLOWTYPE1=A: `Present` binding that refines the same stable Optional name.
+    pub(crate) fn is_optional_flow_refine(&self, name: &str, binding_ty: &Type) -> bool {
+        let Some(info) = self.lookup(name) else {
+            return false;
+        };
+        if info.mutable {
+            return false;
         }
+        matches!(&info.ty, Type::Option(inner) if inner.as_ref() == binding_ty)
+    }
 
-        /// Carry a proven Optional complement on the path that continues at
-        /// the current scope depth. Unlike a condition binding, this fact is
-        /// not a child-scope declaration and therefore survives the guard's
-        /// join until a later branch proves that it is no longer common.
-        pub(crate) fn record_optional_flow_narrow(
-            &mut self,
-            name: &str,
-            name_span: Span,
-            inner: Type,
-        ) {
-            if name == "_" {
-                return;
-            }
-            let depth = self.scope_depth();
-            let sendable = self.sendability_for(name);
-            self.flow.narrow.set_at(
+    /// D-FLOWTYPE1=A: refine a stable Optional name in the current scope (no E0118).
+    pub(crate) fn declare_optional_flow_narrow(
+        &mut self,
+        name: &str,
+        name_span: Span,
+        inner: Type,
+    ) {
+        if name == "_" {
+            return;
+        }
+        let depth = self.scope_depth();
+        if self.flow.bindings.get_at(name, depth).is_some()
+            || self.flow.narrow.get_at(name, depth).is_some()
+        {
+            self.diags
+                .push(crate::Sema::Registration::already_defined(name, name_span));
+        }
+        self.record_optional_flow_narrow(name, name_span, inner);
+    }
+
+    /// Carry a proven Optional complement on the path that continues at
+    /// the current scope depth. Unlike a condition binding, this fact is
+    /// not a child-scope declaration and therefore survives the guard's
+    /// join until a later branch proves that it is no longer common.
+    pub(crate) fn record_optional_flow_narrow(&mut self, name: &str, name_span: Span, inner: Type) {
+        if name == "_" {
+            return;
+        }
+        let depth = self.scope_depth();
+        let sendable = self.sendability_for(name);
+        self.flow.narrow.set_at(
+            name,
+            depth,
+            LocalInfo {
+                def_span: name_span,
+                binding_sigil_span: None,
+                ty: inner,
+                mutable: false,
+                param_conv: None,
+                decl_loop_depth: self.loop_depth,
+                interrupt_sendable: false,
+                reactive_local: false,
+                reactive_shared: false,
+                single_use_span: None,
+                constant_value: None,
+                invalid: false,
+            },
+        );
+        self.flow.sendability.set_at(name, depth, sendable);
+    }
+
+    pub(crate) fn declare_condition_binding(
+        &mut self,
+        name: &str,
+        span: Span,
+        ty: Type,
+    ) -> Option<(String, Span)> {
+        let restore = if self.is_optional_flow_refine(name, &ty) {
+            let moved_at = self.flow.moved.remove(name);
+            self.declare_optional_flow_narrow(name, span, ty);
+            moved_at.map(|at| (name.to_string(), at))
+        } else {
+            self.declare(
                 name,
-                depth,
+                span,
                 LocalInfo {
-                    def_span: name_span,
+                    def_span: span,
                     binding_sigil_span: None,
-                    ty: inner,
+                    ty,
                     mutable: false,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
@@ -254,27 +280,437 @@ impl<'a> Checker<'a> {
                     invalid: false,
                 },
             );
-            self.flow.sendability.set_at(name, depth, sendable);
-        }
+            None
+        };
+        restore
+    }
 
-        pub(crate) fn declare_condition_binding(
-            &mut self,
-            name: &str,
-            span: Span,
-            ty: Type,
-        ) -> Option<(String, Span)> {
-            let restore = if self.is_optional_flow_refine(name, &ty) {
-                let moved_at = self.flow.moved.remove(name);
-                self.declare_optional_flow_narrow(name, span, ty);
-                moved_at.map(|at| (name.to_string(), at))
+    /// D-FLOWTYPE1=A: rewrite stable `x != None` into S31 `x == Val(x)` so TIR
+    /// records a proven unwrap (`IfLet`) and codegen stays mechanical.
+    pub(crate) fn rewrite_optional_flow_ne_none(&self, cond: &mut Expr) {
+        match cond {
+            Expr::Binary(BinOp::Ne, left, right, span) => {
+                let Expr::Ident(name, name_span) = left.as_ref() else {
+                    return;
+                };
+                if !expr_is_absent_none(right) {
+                    return;
+                }
+                if self.flow_narrowable_optional_inner(name).is_none() {
+                    return;
+                }
+                *cond = Expr::PatternTest {
+                    subject: Box::new(Expr::Ident(name.clone(), *name_span)),
+                    pattern: Pattern::Present {
+                        binding: name.clone(),
+                        binding_span: *name_span,
+                        span: *span,
+                    },
+                    span: *span,
+                };
+            }
+            Expr::Binary(BinOp::And, left, right, _) => {
+                self.rewrite_optional_flow_ne_none(left);
+                self.rewrite_optional_flow_ne_none(right);
+            }
+            Expr::Paren(inner, _) => self.rewrite_optional_flow_ne_none(inner),
+            _ => {}
+        }
+    }
+
+    pub(crate) fn check_condition_with_bindings(
+        &mut self,
+        cond: &mut Expr,
+    ) -> HashMap<String, Type> {
+        self.rewrite_optional_flow_ne_none(cond);
+        match cond {
+            Expr::PatternTest {
+                subject,
+                pattern,
+                span,
+            } => self.check_pattern_test(subject, pattern, *span),
+            Expr::Binary(BinOp::Eq, l, r, span) => {
+                let subj_name = match l.as_ref() {
+                    Expr::Ident(n, _) => Some(n.clone()),
+                    _ => None,
+                };
+                if let Some(lt) = self.infer(l) {
+                    if let Some(pattern) =
+                        self.eq_unit_variant_pattern(l, r, subj_name.as_deref(), &lt)
+                    {
+                        return self.validate_pattern(&lt, &pattern, *span);
+                    }
+                }
+                self.require_bool(cond, "a condition");
+                HashMap::new()
+            }
+            Expr::Binary(BinOp::And, l, r, _) => {
+                let left_bindings = self.check_condition_with_bindings(l);
+                self.push_scope();
+                let mut restore_moved = Vec::new();
+                for (name, ty) in &left_bindings {
+                    if let Some(restored) =
+                        self.declare_condition_binding(name, l.span(), ty.clone())
+                    {
+                        restore_moved.push(restored);
+                    }
+                }
+                self.record_condition_view_bindings(l);
+                let mut right_bindings = self.check_condition_with_bindings(r);
+                self.pop_scope();
+                for (name, at) in restore_moved {
+                    self.flow.moved.set(&name, at);
+                }
+                left_bindings.into_iter().for_each(|(k, v)| {
+                    right_bindings.entry(k).or_insert(v);
+                });
+                right_bindings
+            }
+            _ => {
+                self.require_bool(cond, "a condition");
+                HashMap::new()
+            }
+        }
+    }
+
+    /// D-FLOWTYPE1: facts for the path on which a single guard is false.
+    /// The caller joins this path with the arm paths through `FlowFacts`, so
+    /// the rule is about control flow, not about a particular statement
+    /// spelling. Complex boolean complements stay unknown unless their
+    /// fact can be proved without inventing an unsafe narrowing.
+    pub(crate) fn complement_condition_bindings(
+        &self,
+        conditions: &[Expr],
+    ) -> HashMap<String, Type> {
+        let mut bindings = HashMap::new();
+        for condition in conditions {
+            let Some((name, _, _)) = atomic_absent_optional_subject(condition) else {
+                continue;
+            };
+            let Some(inner) = self.flow_narrowable_optional_inner(&name) else {
+                continue;
+            };
+            bindings.insert(name, inner);
+        }
+        bindings
+    }
+
+    /// One pattern arm's contribution to the covered set — shared by the
+    /// statement table and the else-less value-dispatch chain (card #1440),
+    /// so unreachable-arm policy (or-patterns, D-TAG1 subtree
+    /// ancestors, E0365 vs L0301) lives in exactly one place.
+    pub(crate) fn note_pattern_coverage(
+        &mut self,
+        pattern: &Pattern,
+        st: &Type,
+        covered: &mut HashSet<String>,
+        multi_head: bool,
+    ) {
+        let pspan = pattern.span();
+        // Or-patterns cover multiple variants; insert all of them.
+        let covered_names: Vec<String> = if let Pattern::Or(alts, _) = pattern {
+            alts.iter().filter_map(pattern_variant_name).collect()
+        } else if let Some(v) = pattern_variant_name(pattern) {
+            vec![v]
+        } else {
+            Vec::new()
+        };
+        for variant in covered_names {
+            // D-TAG1: an earlier group arm already covers every leaf in
+            // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
+            // unreachable (ancestor-or-equal test on the dotted path).
+            let already = covered
+                .iter()
+                .any(|c| jet_foundation::Facts::fact_covers(c, &variant));
+            if already {
+                let what = if multi_head {
+                    format!(
+                        "head `{}` is unreachable — an earlier head already handles it",
+                        variant
+                    )
+                } else {
+                    format!(
+                        "arm `{}` is unreachable — that case is already handled",
+                        variant
+                    )
+                };
+                let why = if multi_head {
+                    "multi-head declaration order selects the first matching head".to_string()
+                } else {
+                    "every earlier arm already covers this pattern".to_string()
+                };
+                let fix = if multi_head {
+                    "remove this head or merge it with the earlier head".to_string()
+                } else {
+                    "remove this arm or merge it with the one above".to_string()
+                };
+                if matches!(st, Type::Union(_)) {
+                    self.diags
+                        .push(Diagnostic::error("E0365", what, why, fix, Some(pspan)));
+                } else {
+                    self.diags
+                        .push(Diagnostic::lint("L0301", what, why, fix, Some(pspan)));
+                }
             } else {
-                self.declare(
-                    name,
-                    span,
+                covered.insert(variant);
+            }
+        }
+    }
+
+    /// The completion half of the shared policy: an else-less all-pattern
+    /// table must cover the subject's whole type (E0307); open
+    /// scalars and inline ranges without interval-aware coverage can
+    /// never prove totality.
+    pub(crate) fn check_pattern_coverage_complete(
+        &mut self,
+        st: &Type,
+        covered: &HashSet<String>,
+        has_else: bool,
+        span: Span,
+        insert_at: Option<Span>,
+        subj_name: Option<&str>,
+    ) {
+        if has_else {
+            return;
+        }
+        let multi_head = subj_name == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT);
+        // Int/Char are open scalar types, and an inline range is
+        // finite but has no interval-aware coverage proof yet — range
+        // arms can never prove totality here, so an `else` (or wildcard)
+        // is always required. `missing_pattern_coverage` returns None for
+        // these scalar cases, so we detect them separately.
+        if matches!(st, Type::Int | Type::InlineRange { .. } | Type::Char) {
+            let domain_note = if matches!(st, Type::InlineRange { .. }) {
+                format!(
+                    "`{}` is an inline range; range arms are not proven to cover its full interval",
+                    st.show()
+                )
+            } else {
+                format!(
+                    "`{}` has infinitely many values; range arms only cover a subset",
+                    st.show()
+                )
+            };
+            self.diags.push(Diagnostic::error(
+                "E0307",
+                format!(
+                    "this `{}` over `{}` has no `{}` arm — range arms can't cover every value",
+                    Syntax::KW_IF,
+                    st.show(),
+                    Syntax::KW_ELSE,
+                ),
+                domain_note,
+                format!(
+                    "add `{} {} {{ … }}` to handle values not matched by any range",
+                    Syntax::KW_ELSE,
+                    Syntax::OP_UNIFIED_ARROW
+                ),
+                Some(span),
+            ));
+            return;
+        }
+        if let Some(missing) = missing_pattern_coverage(st, covered, self.registry) {
+            let mut diag = Diagnostic::error(
+                "E0307",
+                if multi_head {
+                    format!(
+                        "this multi-head function doesn't cover every case — missing: {}",
+                        missing.join(", ")
+                    )
+                } else {
+                    format!(
+                        "this `{}` doesn't cover every case — missing: {}",
+                        Syntax::KW_IF,
+                        missing.join(", ")
+                    )
+                },
+                if multi_head {
+                    "each multi-head head covers one argument shape, so every variant must appear once"
+                            .to_string()
+                } else {
+                    "every arm here is a pattern test, so each variant must appear once".to_string()
+                },
+                if multi_head {
+                    format!("add a head for: {}", missing.join(", "))
+                } else {
+                    format!("add an arm for: {}", missing.join(", "))
+                },
+                Some(span),
+            );
+            // Attach a structured insert so LSP/CLI can add compilable arms.
+            if !multi_head {
+                if let Some(at) = insert_at {
+                    diag.set_structured_edit(TextEdit {
+                        span: at,
+                        new_text: missing_arms_text(st, &missing, subj_name),
+                    });
+                }
+            }
+            self.diags.push(diag);
+        }
+    }
+
+    /// Card #1440: an else-less all-pattern value dispatch arrives from the
+    /// parser as a nested `Expr::If` chain terminated by `Expr::NoElse`.
+    /// Prove the pattern arms cover the subject's whole type with the same
+    /// policy the statement table uses above. Runs once per chain (every
+    /// level shares one span; the outermost caller wins the dedup insert).
+    pub(crate) fn check_noelse_dispatch_chain(&mut self, expr: &mut Expr) {
+        let Expr::If { span, .. } = expr else { return };
+        let span = *span;
+        if !self.noelse_chains_checked.insert(span.start) {
+            return;
+        }
+        // Pass 1: collect the subject and the raw arm patterns.
+        let mut subject_clone: Option<Expr> = None;
+        let mut raw: Vec<Pattern> = Vec::new();
+        let mut last_arm_end: Option<usize> = None;
+        {
+            let mut cur: &mut Expr = expr;
+            loop {
+                let Expr::If {
+                    cond,
+                    then_value,
+                    else_value,
+                    ..
+                } = cur
+                else {
+                    break;
+                };
+                if let Expr::PatternTest {
+                    subject, pattern, ..
+                } = cond.as_mut()
+                {
+                    if subject_clone.is_none() {
+                        subject_clone = Some((**subject).clone());
+                    }
+                    raw.push(pattern.clone());
+                    last_arm_end = Some(then_value.span().end);
+                }
+                match else_value.as_mut() {
+                    Expr::If { .. } => cur = else_value,
+                    _ => break,
+                }
+            }
+        }
+        let Some(mut subj) = subject_clone else {
+            return;
+        };
+        let Some(st) = self.infer(&mut subj) else {
+            return;
+        };
+        let subj_name = match &subj {
+            Expr::Ident(n, _) => Some(n.clone()),
+            _ => None,
+        };
+        // Probe without retaining recovery diagnostics — the ordinary
+        // per-level inference reports each arm's own errors once.
+        let diag_len = self.diags.len();
+        let mut resolved: Vec<Pattern> = Vec::new();
+        let mut all_pattern = !raw.is_empty();
+        for mut p in raw {
+            normalize_contextual_pattern(&mut p, &st);
+            let pspan = p.span();
+            let cond = Expr::PatternTest {
+                subject: Box::new(subj.clone()),
+                pattern: p,
+                span: pspan,
+            };
+            match self.switch_arm_pattern(&cond, subj_name.as_deref(), &st) {
+                Some(rp) => resolved.push(rp),
+                None => all_pattern = false,
+            }
+        }
+        self.diags.truncate(diag_len);
+        if !all_pattern {
+            return;
+        }
+        let mut covered = HashSet::new();
+        for p in &resolved {
+            self.note_pattern_coverage(p, &st, &mut covered, false);
+        }
+        let insert_at = last_arm_end.map(|e| Span::new(e, e));
+        self.check_pattern_coverage_complete(
+            &st,
+            &covered,
+            false,
+            span,
+            insert_at,
+            subj_name.as_deref(),
+        );
+    }
+
+    pub(crate) fn check_switch(
+        &mut self,
+        subject: &mut Expr,
+        arms: &mut [crate::AST::SwitchArm],
+        else_body: &mut Option<Vec<Stmt>>,
+        span: Span,
+    ) {
+        let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
+        if subjectless_guard
+            && arms
+                .iter()
+                .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
+        {
+            self.check_readiness_switch(arms, else_body, span);
+            return;
+        }
+        let original_conditions = arms.iter().map(|arm| arm.cond.clone()).collect::<Vec<_>>();
+        let mut reordered_optional_guard = false;
+        // Normalize a single optional absence guard to the equivalent
+        // Present test so TIR carries the same proven value that sema
+        // checks. The branch swap preserves source evaluation order: only
+        // the mutually exclusive bodies change places, while the guard is
+        // evaluated once at the same point.
+        if subjectless_guard && arms.len() == 1 && else_body.is_some() {
+            self.rewrite_optional_flow_ne_none(&mut arms[0].cond);
+            if let Some((name, name_span, cond_span)) =
+                atomic_absent_optional_subject(&arms[0].cond)
+            {
+                if self.flow_narrowable_optional_inner(&name).is_some() {
+                    let body = else_body
+                        .as_mut()
+                        .expect("else body checked as present above");
+                    std::mem::swap(&mut arms[0].body, body);
+                    arms[0].cond = Expr::PatternTest {
+                        subject: Box::new(Expr::Ident(name.clone(), name_span)),
+                        pattern: Pattern::Present {
+                            binding: name,
+                            binding_span: name_span,
+                            span: cond_span,
+                        },
+                        span: cond_span,
+                    };
+                    reordered_optional_guard = true;
+                }
+            }
+        } else {
+            for arm in arms.iter_mut() {
+                self.rewrite_optional_flow_ne_none(&mut arm.cond);
+            }
+        }
+        let subj_ty = self.infer(subject);
+        let subj_name = match &*subject {
+            Expr::Ident(n, _) => Some(n.clone()),
+            _ if !subjectless_guard && !matches!(&*subject, Expr::PatternTest { .. }) => {
+                Some(Syntax::KW_IT.to_string())
+            }
+            _ if subj_ty.as_ref().is_some_and(|t| t.is_fallible()) => {
+                Some(Syntax::KW_IT.to_string())
+            }
+            _ => None,
+        };
+        let it_scope = subj_name.as_deref() == Some(Syntax::KW_IT);
+        if it_scope {
+            self.push_scope();
+            if let Some(st) = subj_ty.clone() {
+                self.declare_in_scope(
+                    Syntax::KW_IT,
                     LocalInfo {
                         def_span: span,
                         binding_sigil_span: None,
-                        ty,
+                        ty: st,
                         mutable: false,
                         param_conv: None,
                         decl_loop_depth: self.loop_depth,
@@ -286,595 +722,150 @@ impl<'a> Checker<'a> {
                         invalid: false,
                     },
                 );
-                None
-            };
-            restore
-        }
-
-        /// D-FLOWTYPE1=A: rewrite stable `x != None` into S31 `x == Val(x)` so TIR
-        /// records a proven unwrap (`IfLet`) and codegen stays mechanical.
-        pub(crate) fn rewrite_optional_flow_ne_none(&self, cond: &mut Expr) {
-            match cond {
-                Expr::Binary(BinOp::Ne, left, right, span) => {
-                    let Expr::Ident(name, name_span) = left.as_ref() else {
-                        return;
-                    };
-                    if !expr_is_absent_none(right) {
-                        return;
-                    }
-                    if self.flow_narrowable_optional_inner(name).is_none() {
-                        return;
-                    }
-                    *cond = Expr::PatternTest {
-                        subject: Box::new(Expr::Ident(name.clone(), *name_span)),
-                        pattern: Pattern::Present {
-                            binding: name.clone(),
-                            binding_span: *name_span,
-                            span: *span,
-                        },
-                        span: *span,
-                    };
-                }
-                Expr::Binary(BinOp::And, left, right, _) => {
-                    self.rewrite_optional_flow_ne_none(left);
-                    self.rewrite_optional_flow_ne_none(right);
-                }
-                Expr::Paren(inner, _) => self.rewrite_optional_flow_ne_none(inner),
-                _ => {}
             }
         }
-
-        pub(crate) fn check_condition_with_bindings(
-            &mut self,
-            cond: &mut Expr,
-        ) -> HashMap<String, Type> {
-            self.rewrite_optional_flow_ne_none(cond);
-            match cond {
-                Expr::PatternTest {
-                    subject,
-                    pattern,
-                    span,
-                } => self.check_pattern_test(subject, pattern, *span),
-                Expr::Binary(BinOp::Eq, l, r, span) => {
-                    let subj_name = match l.as_ref() {
-                        Expr::Ident(n, _) => Some(n.clone()),
-                        _ => None,
-                    };
-                    if let Some(lt) = self.infer(l) {
-                        if let Some(pattern) =
-                            self.eq_unit_variant_pattern(l, r, subj_name.as_deref(), &lt)
-                        {
-                            return self.validate_pattern(&lt, &pattern, *span);
-                        }
-                    }
-                    self.require_bool(cond, "a condition");
-                    HashMap::new()
-                }
-                Expr::Binary(BinOp::And, l, r, _) => {
-                    let left_bindings = self.check_condition_with_bindings(l);
-                    self.push_scope();
-                    let mut restore_moved = Vec::new();
-                    for (name, ty) in &left_bindings {
-                        if let Some(restored) =
-                            self.declare_condition_binding(name, l.span(), ty.clone())
-                        {
-                            restore_moved.push(restored);
-                        }
-                    }
-                    self.record_condition_view_bindings(l);
-                    let mut right_bindings = self.check_condition_with_bindings(r);
-                    self.pop_scope();
-                    for (name, at) in restore_moved {
-                        self.flow.moved.set(&name, at);
-                    }
-                    left_bindings.into_iter().for_each(|(k, v)| {
-                        right_bindings.entry(k).or_insert(v);
-                    });
-                    right_bindings
-                }
-                _ => {
-                    self.require_bool(cond, "a condition");
-                    HashMap::new()
-                }
-            }
-        }
-
-        /// D-FLOWTYPE1: facts for the path on which a single guard is false.
-        /// The caller joins this path with the arm paths through `FlowFacts`, so
-        /// the rule is about control flow, not about a particular statement
-        /// spelling. Complex boolean complements stay unknown unless their
-        /// fact can be proved without inventing an unsafe narrowing.
-        pub(crate) fn complement_condition_bindings(
-            &self,
-            conditions: &[Expr],
-        ) -> HashMap<String, Type> {
-            let mut bindings = HashMap::new();
-            for condition in conditions {
-                let Some((name, _, _)) = atomic_absent_optional_subject(condition) else {
-                    continue;
-                };
-                let Some(inner) = self.flow_narrowable_optional_inner(&name) else {
-                    continue;
-                };
-                bindings.insert(name, inner);
-            }
-            bindings
-        }
-    
-        /// One pattern arm's contribution to the covered set — shared by the
-        /// statement table and the else-less value-dispatch chain (card #1440),
-        /// so unreachable-arm policy (or-patterns, D-TAG1 subtree
-        /// ancestors, E0365 vs L0301) lives in exactly one place.
-        pub(crate) fn note_pattern_coverage(
-            &mut self,
-            pattern: &Pattern,
-            st: &Type,
-            covered: &mut HashSet<String>,
-            multi_head: bool,
-        ) {
-            let pspan = pattern.span();
-            // Or-patterns cover multiple variants; insert all of them.
-            let covered_names: Vec<String> = if let Pattern::Or(alts, _) = pattern {
-                alts.iter().filter_map(pattern_variant_name).collect()
-            } else if let Some(v) = pattern_variant_name(pattern) {
-                vec![v]
-            } else {
-                Vec::new()
-            };
-            for variant in covered_names {
-                // D-TAG1: an earlier group arm already covers every leaf in
-                // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
-                // unreachable (ancestor-or-equal test on the dotted path).
-                let already = covered
-                    .iter()
-                    .any(|c| jet_foundation::Facts::fact_covers(c, &variant));
-                if already {
-                    let what = if multi_head {
-                        format!(
-                            "head `{}` is unreachable — an earlier head already handles it",
-                            variant
-                        )
-                    } else {
-                        format!(
-                            "arm `{}` is unreachable — that case is already handled",
-                            variant
-                        )
-                    };
-                    let why = if multi_head {
-                        "multi-head declaration order selects the first matching head".to_string()
-                    } else {
-                        "every earlier arm already covers this pattern".to_string()
-                    };
-                    let fix = if multi_head {
-                        "remove this head or merge it with the earlier head".to_string()
-                    } else {
-                        "remove this arm or merge it with the one above".to_string()
-                    };
-                    if matches!(st, Type::Union(_)) {
-                        self.diags.push(Diagnostic::error("E0365", what, why, fix, Some(pspan)));
-                    } else {
-                        self.diags.push(Diagnostic::lint("L0301", what, why, fix, Some(pspan)));
-                    }
-                } else {
-                    covered.insert(variant);
-                }
-            }
-        }
-
-        /// The completion half of the shared policy: an else-less all-pattern
-        /// table must cover the subject's whole type (E0307); open
-        /// scalars and inline ranges without interval-aware coverage can
-        /// never prove totality.
-        pub(crate) fn check_pattern_coverage_complete(
-            &mut self,
-            st: &Type,
-            covered: &HashSet<String>,
-            has_else: bool,
-            span: Span,
-            insert_at: Option<Span>,
-            subj_name: Option<&str>,
-        ) {
-            if has_else {
-                return;
-            }
-            let multi_head = subj_name == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT);
-            // Int/Char are open scalar types, and an inline range is
-            // finite but has no interval-aware coverage proof yet — range
-            // arms can never prove totality here, so an `else` (or wildcard)
-            // is always required. `missing_pattern_coverage` returns None for
-            // these scalar cases, so we detect them separately.
-            if matches!(st, Type::Int | Type::InlineRange { .. } | Type::Char) {
-                let domain_note = if matches!(st, Type::InlineRange { .. }) {
-                    format!(
-                        "`{}` is an inline range; range arms are not proven to cover its full interval",
-                        st.show()
-                    )
-                } else {
-                    format!(
-                        "`{}` has infinitely many values; range arms only cover a subset",
-                        st.show()
-                    )
-                };
-                self.diags.push(Diagnostic::error(
-                    "E0307",
-                    format!(
-                        "this `{}` over `{}` has no `{}` arm — range arms can't cover every value",
-                        Syntax::KW_IF,
-                        st.show(),
-                        Syntax::KW_ELSE,
-                    ),
-                    domain_note,
-                    format!(
-                        "add `{} {} {{ … }}` to handle values not matched by any range",
-                        Syntax::KW_ELSE,
-                        Syntax::OP_UNIFIED_ARROW
-                    ),
-                    Some(span),
-                ));
-                return;
-            }
-            if let Some(missing) = missing_pattern_coverage(st, covered, self.registry) {
-                let mut diag = Diagnostic::error(
-                    "E0307",
-                    if multi_head {
-                        format!(
-                            "this multi-head function doesn't cover every case — missing: {}",
-                            missing.join(", ")
-                        )
-                    } else {
-                        format!(
-                            "this `{}` doesn't cover every case — missing: {}",
-                            Syntax::KW_IF,
-                            missing.join(", ")
-                        )
-                    },
-                    if multi_head {
-                        "each multi-head head covers one argument shape, so every variant must appear once"
-                            .to_string()
-                    } else {
-                        "every arm here is a pattern test, so each variant must appear once"
-                            .to_string()
-                    },
-                    if multi_head {
-                        format!("add a head for: {}", missing.join(", "))
-                    } else {
-                        format!("add an arm for: {}", missing.join(", "))
-                    },
-                    Some(span),
-                );
-                // Attach a structured insert so LSP/CLI can add compilable arms.
-                if !multi_head {
-                    if let Some(at) = insert_at {
-                        diag.set_structured_edit(TextEdit {
-                            span: at,
-                            new_text: missing_arms_text(st, &missing, subj_name),
-                        });
-                    }
-                }
-                self.diags.push(diag);
-            }
-        }
-
-        /// Card #1440: an else-less all-pattern value dispatch arrives from the
-        /// parser as a nested `Expr::If` chain terminated by `Expr::NoElse`.
-        /// Prove the pattern arms cover the subject's whole type with the same
-        /// policy the statement table uses above. Runs once per chain (every
-        /// level shares one span; the outermost caller wins the dedup insert).
-        pub(crate) fn check_noelse_dispatch_chain(&mut self, expr: &mut Expr) {
-            let Expr::If { span, .. } = expr else { return };
-            let span = *span;
-            if !self.noelse_chains_checked.insert(span.start) {
-                return;
-            }
-            // Pass 1: collect the subject and the raw arm patterns.
-            let mut subject_clone: Option<Expr> = None;
-            let mut raw: Vec<Pattern> = Vec::new();
-            let mut last_arm_end: Option<usize> = None;
-            {
-                let mut cur: &mut Expr = expr;
-                loop {
-                    let Expr::If {
-                        cond,
-                        then_value,
-                        else_value,
-                        ..
-                    } = cur
-                    else {
-                        break;
-                    };
-                    if let Expr::PatternTest {
-                        subject, pattern, ..
-                    } = cond.as_mut()
-                    {
-                        if subject_clone.is_none() {
-                            subject_clone = Some((**subject).clone());
-                        }
-                        raw.push(pattern.clone());
-                        last_arm_end = Some(then_value.span().end);
-                    }
-                    match else_value.as_mut() {
-                        Expr::If { .. } => cur = else_value,
-                        _ => break,
-                    }
-                }
-            }
-            let Some(mut subj) = subject_clone else { return };
-            let Some(st) = self.infer(&mut subj) else { return };
-            let subj_name = match &subj {
-                Expr::Ident(n, _) => Some(n.clone()),
-                _ => None,
-            };
-            // Probe without retaining recovery diagnostics — the ordinary
-            // per-level inference reports each arm's own errors once.
-            let diag_len = self.diags.len();
-            let mut resolved: Vec<Pattern> = Vec::new();
-            let mut all_pattern = !raw.is_empty();
-            for mut p in raw {
-                normalize_contextual_pattern(&mut p, &st);
-                let pspan = p.span();
-                let cond = Expr::PatternTest {
-                    subject: Box::new(subj.clone()),
-                    pattern: p,
-                    span: pspan,
-                };
-                match self.switch_arm_pattern(&cond, subj_name.as_deref(), &st) {
-                    Some(rp) => resolved.push(rp),
-                    None => all_pattern = false,
-                }
-            }
-            self.diags.truncate(diag_len);
-            if !all_pattern {
-                return;
-            }
-            let mut covered = HashSet::new();
-            for p in &resolved {
-                self.note_pattern_coverage(p, &st, &mut covered, false);
-            }
-            let insert_at = last_arm_end.map(|e| Span::new(e, e));
-            self.check_pattern_coverage_complete(
-                &st,
-                &covered,
-                false,
-                span,
-                insert_at,
-                subj_name.as_deref(),
-            );
-        }
-
-        pub(crate) fn check_switch(
-            &mut self,
-            subject: &mut Expr,
-            arms: &mut [crate::AST::SwitchArm],
-            else_body: &mut Option<Vec<Stmt>>,
-            span: Span,
-        ) {
-            let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
-            if subjectless_guard
-                && arms
-                    .iter()
-                    .any(|arm| crate::AST::readiness_head(&arm.cond).is_some())
-            {
-                self.check_readiness_switch(arms, else_body, span);
-                return;
-            }
-            let original_conditions = arms
-                .iter()
-                .map(|arm| arm.cond.clone())
-                .collect::<Vec<_>>();
-            let mut reordered_optional_guard = false;
-            // Normalize a single optional absence guard to the equivalent
-            // Present test so TIR carries the same proven value that sema
-            // checks. The branch swap preserves source evaluation order: only
-            // the mutually exclusive bodies change places, while the guard is
-            // evaluated once at the same point.
-            if subjectless_guard && arms.len() == 1 && else_body.is_some() {
-                self.rewrite_optional_flow_ne_none(&mut arms[0].cond);
-                if let Some((name, name_span, cond_span)) =
-                    atomic_absent_optional_subject(&arms[0].cond)
-                {
-                    if self.flow_narrowable_optional_inner(&name).is_some() {
-                        let body = else_body
-                            .as_mut()
-                            .expect("else body checked as present above");
-                        std::mem::swap(&mut arms[0].body, body);
-                        arms[0].cond = Expr::PatternTest {
-                            subject: Box::new(Expr::Ident(name.clone(), name_span)),
-                            pattern: Pattern::Present {
-                                binding: name,
-                                binding_span: name_span,
-                                span: cond_span,
-                            },
-                            span: cond_span,
-                        };
-                        reordered_optional_guard = true;
-                    }
-                }
-            } else {
-                for arm in arms.iter_mut() {
-                    self.rewrite_optional_flow_ne_none(&mut arm.cond);
-                }
-            }
-            let subj_ty = self.infer(subject);
-            let subj_name = match &*subject {
-                Expr::Ident(n, _) => Some(n.clone()),
-                _ if !subjectless_guard
-                    && !matches!(&*subject, Expr::PatternTest { .. }) =>
-                {
-                    Some(Syntax::KW_IT.to_string())
-                }
-                _ if subj_ty.as_ref().is_some_and(|t| t.is_fallible()) => {
-                    Some(Syntax::KW_IT.to_string())
-                }
-                _ => None,
-            };
-            let it_scope = subj_name.as_deref() == Some(Syntax::KW_IT);
-            if it_scope {
-                self.push_scope();
-                if let Some(st) = subj_ty.clone() {
-                    self.declare_in_scope(
-                        Syntax::KW_IT,
-                        LocalInfo {
-                            def_span: span,
-                            binding_sigil_span: None,
-                            ty: st,
-                            mutable: false,
-                            param_conv: None,
-                            decl_loop_depth: self.loop_depth,
-                            interrupt_sendable: false,
-                            reactive_local: false,
-                            reactive_shared: false,
-                            single_use_span: None,
-                            constant_value: None,
-                            invalid: false,
-                        },
-                    );
-                }
-            }
-            if let Some(st) = &subj_ty {
-                for arm in arms.iter_mut() {
-                    if let Expr::PatternTest { pattern, .. } = &mut arm.cond {
-                        normalize_contextual_pattern(pattern, st);
-                    }
-                }
-            }
-            let all_pattern = if let Some(st) = subj_ty.as_ref() {
-                // Probe without retaining E0367 from bare-variant recovery —
-                // those fire once when each arm is checked below.
-                let diag_len = self.diags.len();
-                let ok = !arms.is_empty()
-                    && arms.iter().all(|a| {
-                        self.switch_arm_pattern(&a.cond, subj_name.as_deref(), st)
-                            .is_some()
-                    });
-                self.diags.truncate(diag_len);
-                ok
-            } else {
-                false
-            };
-            let mut covered = HashSet::new();
-            // D-FACT-FLOW1: one snapshot before the table, one store per arm,
-            // and one shared join at the end. No plane keeps the last-walked arm.
-            let before = self.flow.clone();
-            let mut paths: Vec<crate::Sema::FlowFacts::FlowFacts> = Vec::new();
+        if let Some(st) = &subj_ty {
             for arm in arms.iter_mut() {
-                self.flow = before.clone();
-                if all_pattern {
-                    if let Some(ref st) = subj_ty {
-                        let Some(pattern) =
-                            self.switch_arm_pattern(&arm.cond, subj_name.as_deref(), st)
-                        else {
-                            continue;
-                        };
-                        let pspan = pattern.span();
-                        self.note_pattern_coverage(
-                            &pattern,
-                            st,
-                            &mut covered,
-                            subj_name.as_deref() == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT),
-                        );
-                        let bindings = self.validate_pattern(st, &pattern, pspan);
-                        self.mark_pattern_subject_moved(subject, &bindings);
-                        self.push_scope();
-                        let mut restore_moved = Vec::new();
-                        for (name, ty) in bindings {
-                            if let Some(restored) =
-                                self.declare_condition_binding(&name, pspan, ty)
-                            {
-                                restore_moved.push(restored);
-                            }
-                        }
-                        self.record_pattern_view_bindings(subject, &pattern);
-                        self.check_block(&mut arm.body, false);
-                        self.pop_scope();
-                        for (name, at) in restore_moved {
-                            self.flow.moved.set(&name, at);
-                        }
-                        paths.push(self.flow.clone());
-                        continue;
-                    }
+                if let Expr::PatternTest { pattern, .. } = &mut arm.cond {
+                    normalize_contextual_pattern(pattern, st);
                 }
-                let bindings = self.check_condition_with_bindings(&mut arm.cond);
-                if bindings.is_empty() {
-                    self.check_block(&mut arm.body, true);
-                } else {
+            }
+        }
+        let all_pattern = if let Some(st) = subj_ty.as_ref() {
+            // Probe without retaining E0367 from bare-variant recovery —
+            // those fire once when each arm is checked below.
+            let diag_len = self.diags.len();
+            let ok = !arms.is_empty()
+                && arms.iter().all(|a| {
+                    self.switch_arm_pattern(&a.cond, subj_name.as_deref(), st)
+                        .is_some()
+                });
+            self.diags.truncate(diag_len);
+            ok
+        } else {
+            false
+        };
+        let mut covered = HashSet::new();
+        // D-FACT-FLOW1: one snapshot before the table, one store per arm,
+        // and one shared join at the end. No plane keeps the last-walked arm.
+        let before = self.flow.clone();
+        let mut paths: Vec<crate::Sema::FlowFacts::FlowFacts> = Vec::new();
+        for arm in arms.iter_mut() {
+            self.flow = before.clone();
+            if all_pattern {
+                if let Some(ref st) = subj_ty {
+                    let Some(pattern) =
+                        self.switch_arm_pattern(&arm.cond, subj_name.as_deref(), st)
+                    else {
+                        continue;
+                    };
+                    let pspan = pattern.span();
+                    self.note_pattern_coverage(
+                        &pattern,
+                        st,
+                        &mut covered,
+                        subj_name.as_deref() == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT),
+                    );
+                    let bindings = self.validate_pattern(st, &pattern, pspan);
+                    self.mark_pattern_subject_moved(subject, &bindings);
                     self.push_scope();
                     let mut restore_moved = Vec::new();
                     for (name, ty) in bindings {
-                        if let Some(restored) =
-                            self.declare_condition_binding(&name, arm.cond.span(), ty)
-                        {
+                        if let Some(restored) = self.declare_condition_binding(&name, pspan, ty) {
                             restore_moved.push(restored);
                         }
                     }
-                    self.record_condition_view_bindings(&arm.cond);
+                    self.record_pattern_view_bindings(subject, &pattern);
                     self.check_block(&mut arm.body, false);
                     self.pop_scope();
                     for (name, at) in restore_moved {
                         self.flow.moved.set(&name, at);
                     }
-                }
-                paths.push(self.flow.clone());
-            }
-            self.flow = before.clone();
-            if it_scope {
-                self.pop_scope();
-                for path in &mut paths {
-                    path.leave_scope();
+                    paths.push(self.flow.clone());
+                    continue;
                 }
             }
-            // The store as it stands outside the table, at the depth the merge
-            // happens. The lint probes below may walk expressions, so the merge
-            // reads this copy rather than whatever they touched.
-            let outside_table = self.flow.clone();
-            // True when some path can reach the code after the table without
-            // running any arm. That path carries the pre-table facts into the
-            // merge; a table that covers every case has no such path.
-            let mut can_skip_every_arm = else_body.is_none();
-            if all_pattern {
-                if let Some(st) = subj_ty {
-                    let insert_at = if subj_name.as_deref()
-                        == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT)
+            let bindings = self.check_condition_with_bindings(&mut arm.cond);
+            if bindings.is_empty() {
+                self.check_block(&mut arm.body, true);
+            } else {
+                self.push_scope();
+                let mut restore_moved = Vec::new();
+                for (name, ty) in bindings {
+                    if let Some(restored) =
+                        self.declare_condition_binding(&name, arm.cond.span(), ty)
                     {
-                        None
-                    } else {
-                        arms.last().map(|a| Span::new(a.span.end, a.span.end))
-                    };
-                    let reported = self.diags.len();
-                    self.check_pattern_coverage_complete(
-                        &st,
-                        &covered,
-                        else_body.is_some(),
-                        span,
-                        insert_at,
-                        subj_name.as_deref(),
-                    );
-                    can_skip_every_arm = else_body.is_none() && self.diags.len() > reported;
+                        restore_moved.push(restored);
+                    }
                 }
-            } else if else_body.is_none() && !subjectless_guard {
-                // D-PARSESTR1: a str-match pattern arm is always refutable — the
-                // literal text might not match, and a typed hole's read can fail
-                // — so it gets its own E0148 instead of the generic E0003.
-                let has_str_match_arm = arms.iter().any(|a| {
-                    matches!(
-                        &a.cond,
-                        Expr::PatternTest {
-                            pattern: Pattern::StrMatch { .. },
-                            ..
-                        }
-                    )
-                });
-                // D-BINPAT1: a binary pattern arm is refutable the same way.
-                let has_bin_match_arm = arms.iter().any(|a| {
-                    matches!(
-                        &a.cond,
-                        Expr::PatternTest {
-                            pattern: Pattern::BinMatch { .. },
-                            ..
-                        }
-                    )
-                });
-                if has_bin_match_arm && !has_str_match_arm {
-                    self.diags.push(Diagnostic::error(
+                self.record_condition_view_bindings(&arm.cond);
+                self.check_block(&mut arm.body, false);
+                self.pop_scope();
+                for (name, at) in restore_moved {
+                    self.flow.moved.set(&name, at);
+                }
+            }
+            paths.push(self.flow.clone());
+        }
+        self.flow = before.clone();
+        if it_scope {
+            self.pop_scope();
+            for path in &mut paths {
+                path.leave_scope();
+            }
+        }
+        // The store as it stands outside the table, at the depth the merge
+        // happens. The lint probes below may walk expressions, so the merge
+        // reads this copy rather than whatever they touched.
+        let outside_table = self.flow.clone();
+        // True when some path can reach the code after the table without
+        // running any arm. That path carries the pre-table facts into the
+        // merge; a table that covers every case has no such path.
+        let mut can_skip_every_arm = else_body.is_none();
+        if all_pattern {
+            if let Some(st) = subj_ty {
+                let insert_at = if subj_name.as_deref() == Some(Syntax::INTERNAL_MULTI_HEAD_SUBJECT)
+                {
+                    None
+                } else {
+                    arms.last().map(|a| Span::new(a.span.end, a.span.end))
+                };
+                let reported = self.diags.len();
+                self.check_pattern_coverage_complete(
+                    &st,
+                    &covered,
+                    else_body.is_some(),
+                    span,
+                    insert_at,
+                    subj_name.as_deref(),
+                );
+                can_skip_every_arm = else_body.is_none() && self.diags.len() > reported;
+            }
+        } else if else_body.is_none() && !subjectless_guard {
+            // D-PARSESTR1: a str-match pattern arm is always refutable — the
+            // literal text might not match, and a typed hole's read can fail
+            // — so it gets its own E0148 instead of the generic E0003.
+            let has_str_match_arm = arms.iter().any(|a| {
+                matches!(
+                    &a.cond,
+                    Expr::PatternTest {
+                        pattern: Pattern::StrMatch { .. },
+                        ..
+                    }
+                )
+            });
+            // D-BINPAT1: a binary pattern arm is refutable the same way.
+            let has_bin_match_arm = arms.iter().any(|a| {
+                matches!(
+                    &a.cond,
+                    Expr::PatternTest {
+                        pattern: Pattern::BinMatch { .. },
+                        ..
+                    }
+                )
+            });
+            if has_bin_match_arm && !has_str_match_arm {
+                self.diags.push(Diagnostic::error(
                         "E0148",
                         format!(
                             "this `{}` matches bytes but has no `{}` arm",
@@ -889,8 +880,8 @@ impl<'a> Checker<'a> {
                         ),
                         Some(span),
                     ));
-                } else if has_str_match_arm {
-                    self.diags.push(Diagnostic::error(
+            } else if has_str_match_arm {
+                self.diags.push(Diagnostic::error(
                         "E0148",
                         format!(
                             "this `{}` matches text but has no `{}` arm",
@@ -905,8 +896,8 @@ impl<'a> Checker<'a> {
                         ),
                         Some(span),
                     ));
-                } else {
-                    self.diags.push(Diagnostic::error(
+            } else {
+                self.diags.push(Diagnostic::error(
                         "E0003",
                         format!(
                             "this `{}` needs an `{}` arm",
@@ -922,34 +913,32 @@ impl<'a> Checker<'a> {
                         ),
                         Some(span),
                     ));
-                }
             }
-            if subjectless_guard && arms.len() > 1 {
-                let subjects = arms
+        }
+        if subjectless_guard && arms.len() > 1 {
+            let subjects = arms
+                .iter()
+                .filter_map(|arm| leading_guard_pattern_subject(&arm.cond))
+                .collect::<Vec<_>>();
+            let subject_paths = subjects
+                .iter()
+                .filter_map(|subject| guard_subject_path(subject))
+                .collect::<Vec<_>>();
+            if subjects.len() == arms.len()
+                && subject_paths.len() == arms.len()
+                && subject_paths[1..]
                     .iter()
-                    .filter_map(|arm| leading_guard_pattern_subject(&arm.cond))
-                    .collect::<Vec<_>>();
-                let subject_paths = subjects
-                    .iter()
-                    .filter_map(|subject| guard_subject_path(subject))
-                    .collect::<Vec<_>>();
-                if subjects.len() == arms.len()
-                    && subject_paths.len() == arms.len()
-                    && subject_paths[1..]
-                        .iter()
-                        .all(|subject| subject == &subject_paths[0])
-                {
-                    let mut first = subjects[0].clone();
-                    self.borrow_ctx = true;
-                    let enum_name = self.infer(&mut first).and_then(|ty| match ty {
-                        Type::Named(name) if self.registry.enum_variants(&name).is_some() => {
-                            Some(name)
-                        }
-                        _ => None,
-                    });
-                    if let Some(enum_name) = enum_name {
-                        let first = &subject_paths[0];
-                        self.diags.push(Diagnostic::lint(
+                    .all(|subject| subject == &subject_paths[0])
+            {
+                let mut first = subjects[0].clone();
+                self.borrow_ctx = true;
+                let enum_name = self.infer(&mut first).and_then(|ty| match ty {
+                    Type::Named(name) if self.registry.enum_variants(&name).is_some() => Some(name),
+                    _ => None,
+                });
+                if let Some(enum_name) = enum_name {
+                    let first = &subject_paths[0];
+                    self.diags.push(Diagnostic::lint(
                             "L0302",
                             format!("these arm heads all dispatch on `{enum_name}`"),
                             "naming the subject makes one closed enum's cases explicit and exhaustively checked"
@@ -959,198 +948,194 @@ impl<'a> Checker<'a> {
                             ),
                             Some(span),
                         ));
-                    }
                 }
             }
-            if let Some(body) = else_body {
-                self.flow = outside_table.clone();
-                let complement = if reordered_optional_guard {
+        }
+        if let Some(body) = else_body {
+            self.flow = outside_table.clone();
+            let complement = if reordered_optional_guard {
+                HashMap::new()
+            } else {
+                self.complement_condition_bindings(&original_conditions)
+            };
+            if !complement.is_empty() {
+                self.push_scope();
+                let mut restore_moved = Vec::new();
+                let fact_span = original_conditions
+                    .iter()
+                    .find(|condition| atomic_absent_optional_subject(condition).is_some())
+                    .map(|condition| condition.span())
+                    .unwrap_or(span);
+                for (name, ty) in complement {
+                    if let Some(restored) = self.declare_condition_binding(&name, fact_span, ty) {
+                        restore_moved.push(restored);
+                    }
+                }
+                self.check_block(body, true);
+                self.pop_scope();
+                for (name, at) in restore_moved {
+                    self.flow.moved.set(&name, at);
+                }
+            } else {
+                self.check_block(body, true);
+            }
+            paths.push(self.flow.clone());
+        } else if can_skip_every_arm {
+            // Skipping every arm is itself a path through here.
+            let all_arm_paths_exit = !paths.is_empty() && paths.iter().all(|path| !path.reachable);
+            let mut fallthrough = outside_table.clone();
+            if all_arm_paths_exit {
+                // Keep the optional wrapper for a following explicit
+                // `.Val(...)` test after an early `== .None` return. The
+                // runtime value is still an Option; the payload-only flow
+                // fact is useful for arithmetic, but it must not erase the
+                // constructor spelling from the next condition.
+                let early_absent_return = original_conditions.len() == 1
+                    && atomic_absent_optional_subject(&original_conditions[0]).is_some();
+                let complement = if early_absent_return {
                     HashMap::new()
                 } else {
                     self.complement_condition_bindings(&original_conditions)
                 };
                 if !complement.is_empty() {
-                    self.push_scope();
-                    let mut restore_moved = Vec::new();
+                    self.flow = fallthrough;
                     let fact_span = original_conditions
                         .iter()
                         .find(|condition| atomic_absent_optional_subject(condition).is_some())
                         .map(|condition| condition.span())
                         .unwrap_or(span);
                     for (name, ty) in complement {
-                        if let Some(restored) =
-                            self.declare_condition_binding(&name, fact_span, ty)
-                        {
-                            restore_moved.push(restored);
-                        }
+                        self.record_optional_flow_narrow(&name, fact_span, ty);
                     }
-                    self.check_block(body, true);
-                    self.pop_scope();
-                    for (name, at) in restore_moved {
-                        self.flow.moved.set(&name, at);
-                    }
+                    fallthrough = self.flow.clone();
+                }
+            }
+            paths.push(fallthrough);
+        }
+        // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
+        // on one arm and not another. `Moved::join` is a union (keeps
+        // either arm's move), so the merged store alone would call this
+        // value consumed and E0140 would never see the gap; check every
+        // pre-merge path directly for exactly one side moving it, over
+        // the bindings live at this scope before the table.
+        let scope_depth = self.scope_depth();
+        let mut divergent_single_use: Vec<(String, Span)> = outside_table
+            .bindings
+            .iter_at(scope_depth)
+            .filter_map(|(name, info)| {
+                let use_span = info.single_use_span?;
+                if outside_table.moved.contains(name) {
+                    return None;
+                }
+                let moved_paths = paths
+                    .iter()
+                    .filter(|path| path.reachable)
+                    .map(|path| path.moved.contains(name))
+                    .collect::<Vec<_>>();
+                if moved_paths.iter().any(|moved| *moved) && moved_paths.iter().any(|moved| !*moved)
+                {
+                    Some((name.to_string(), use_span))
                 } else {
-                    self.check_block(body, true);
+                    None
                 }
-                paths.push(self.flow.clone());
-            } else if can_skip_every_arm {
-                // Skipping every arm is itself a path through here.
-                let all_arm_paths_exit = !paths.is_empty()
-                    && paths.iter().all(|path| !path.reachable);
-                let mut fallthrough = outside_table.clone();
-                if all_arm_paths_exit {
-                    // Keep the optional wrapper for a following explicit
-                    // `.Val(...)` test after an early `== .None` return. The
-                    // runtime value is still an Option; the payload-only flow
-                    // fact is useful for arithmetic, but it must not erase the
-                    // constructor spelling from the next condition.
-                    let early_absent_return = original_conditions.len() == 1
-                        && atomic_absent_optional_subject(&original_conditions[0]).is_some();
-                    let complement = if early_absent_return {
-                        HashMap::new()
-                    } else {
-                        self.complement_condition_bindings(&original_conditions)
-                    };
-                    if !complement.is_empty() {
-                        self.flow = fallthrough;
-                        let fact_span = original_conditions
-                            .iter()
-                            .find(|condition| {
-                                atomic_absent_optional_subject(condition).is_some()
-                            })
-                            .map(|condition| condition.span())
-                            .unwrap_or(span);
-                        for (name, ty) in complement {
-                            self.record_optional_flow_narrow(&name, fact_span, ty);
-                        }
-                        fallthrough = self.flow.clone();
-                    }
-                }
-                paths.push(fallthrough);
-            }
-            // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
-            // on one arm and not another. `Moved::join` is a union (keeps
-            // either arm's move), so the merged store alone would call this
-            // value consumed and E0140 would never see the gap; check every
-            // pre-merge path directly for exactly one side moving it, over
-            // the bindings live at this scope before the table.
-            let scope_depth = self.scope_depth();
-            let mut divergent_single_use: Vec<(String, Span)> = outside_table
-                .bindings
-                .iter_at(scope_depth)
-                .filter_map(|(name, info)| {
-                    let use_span = info.single_use_span?;
-                    if outside_table.moved.contains(name) {
-                        return None;
-                    }
-                    let moved_paths = paths
-                        .iter()
-                        .filter(|path| path.reachable)
-                        .map(|path| path.moved.contains(name))
-                        .collect::<Vec<_>>();
-                    if moved_paths.iter().any(|moved| *moved)
-                        && moved_paths.iter().any(|moved| !*moved)
-                    {
-                        Some((name.to_string(), use_span))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
-            for (name, use_span) in divergent_single_use {
-                self.diags.push(
-                    crate::Sema::CheckerOwnership::e0141_unconsumed_branch(&name, use_span),
-                );
-            }
-            self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&outside_table, &paths);
+            })
+            .collect();
+        divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
+        for (name, use_span) in divergent_single_use {
+            self.diags
+                .push(crate::Sema::CheckerOwnership::e0141_unconsumed_branch(
+                    &name, use_span,
+                ));
+        }
+        self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&outside_table, &paths);
+    }
+
+    /// D-CONC-CHAN2=D: readiness tables are not Boolean guards. Each arm
+    /// validates one plain `Receiver<T>` or one `Duration`, then checks its
+    /// body in the scope containing the receive binding.
+    fn check_readiness_switch(
+        &mut self,
+        arms: &mut [crate::AST::SwitchArm],
+        else_body: &mut Option<Vec<Stmt>>,
+        _span: Span,
+    ) {
+        enum ReadinessArm {
+            Receive { binding: String, source: Expr },
+            After { duration: Expr },
         }
 
-        /// D-CONC-CHAN2=D: readiness tables are not Boolean guards. Each arm
-        /// validates one plain `Receiver<T>` or one `Duration`, then checks its
-        /// body in the scope containing the receive binding.
-        fn check_readiness_switch(
-            &mut self,
-            arms: &mut [crate::AST::SwitchArm],
-            else_body: &mut Option<Vec<Stmt>>,
-            _span: Span,
-        ) {
-            enum ReadinessArm {
-                Receive { binding: String, source: Expr },
-                After { duration: Expr },
-            }
+        let before = self.flow.clone();
+        let mut paths = Vec::with_capacity(arms.len() + usize::from(else_body.is_some()));
+        let mut element_ty: Option<Type> = None;
+        let mut has_receive = false;
+        let mut has_after = false;
 
-            let before = self.flow.clone();
-            let mut paths = Vec::with_capacity(arms.len() + usize::from(else_body.is_some()));
-            let mut element_ty: Option<Type> = None;
-            let mut has_receive = false;
-            let mut has_after = false;
-
-            for arm in arms.iter_mut() {
-                self.flow = before.clone();
-                let head = match crate::AST::readiness_head(&arm.cond) {
-                    Some(crate::AST::ReadinessHead::Receive { binding, source }) => {
-                        ReadinessArm::Receive {
-                            binding: binding.to_string(),
-                            source: source.clone(),
-                        }
+        for arm in arms.iter_mut() {
+            self.flow = before.clone();
+            let head = match crate::AST::readiness_head(&arm.cond) {
+                Some(crate::AST::ReadinessHead::Receive { binding, source }) => {
+                    ReadinessArm::Receive {
+                        binding: binding.to_string(),
+                        source: source.clone(),
                     }
-                    Some(crate::AST::ReadinessHead::After { duration }) => {
-                        ReadinessArm::After {
-                            duration: duration.clone(),
-                        }
-                    }
-                    None => {
-                        self.diags.push(Diagnostic::error(
+                }
+                Some(crate::AST::ReadinessHead::After { duration }) => ReadinessArm::After {
+                    duration: duration.clone(),
+                },
+                None => {
+                    self.diags.push(Diagnostic::error(
                             "E0112",
                             "a readiness table cannot mix channel arms with Boolean guards".to_string(),
                             "every arm in one readiness table waits on a Receiver<T> or a Duration".to_string(),
                             "write `value, receiver -> ...` or move the Boolean guard to a separate `if`".to_string(),
                             Some(arm.cond.span()),
                         ));
-                        self.check_block(&mut arm.body, true);
-                        paths.push(self.flow.clone());
-                        continue;
-                    }
-                };
-                match head {
-                    ReadinessArm::Receive { binding, source } => {
-                        has_receive = true;
-                        // `readiness_head` borrows the compiler-private tuple carrier. Infer
-                        // a private copy, then put the elaborated expression back into the
-                        // carrier. In particular, `100ms` must become the checked Duration
-                        // constructor before TIR coverage is decided; leaving the raw
-                        // `UnitLit` behind makes every task containing a timer arm disappear
-                        // from the interpreter program and makes AOT report an I2 ICE.
-                        let mut source_expr = source;
-                        let source_ty = self.infer(&mut source_expr);
-                        let source_span = source_expr.span();
-                        if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
-                            if let Some((_, value)) = fields.first_mut() {
-                                *value = source_expr;
-                            }
+                    self.check_block(&mut arm.body, true);
+                    paths.push(self.flow.clone());
+                    continue;
+                }
+            };
+            match head {
+                ReadinessArm::Receive { binding, source } => {
+                    has_receive = true;
+                    // `readiness_head` borrows the compiler-private tuple carrier. Infer
+                    // a private copy, then put the elaborated expression back into the
+                    // carrier. In particular, `100ms` must become the checked Duration
+                    // constructor before TIR coverage is decided; leaving the raw
+                    // `UnitLit` behind makes every task containing a timer arm disappear
+                    // from the interpreter program and makes AOT report an I2 ICE.
+                    let mut source_expr = source;
+                    let source_ty = self.infer(&mut source_expr);
+                    let source_span = source_expr.span();
+                    if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
+                        if let Some((_, value)) = fields.first_mut() {
+                            *value = source_expr;
                         }
-                        let payload = match source_ty {
-                            Some(Type::Apply { name, args })
-                                if name == Syntax::TYPE_RECEIVER && args.len() == 1 =>
-                            {
-                                args[0].clone()
-                            }
-                            Some(other) => {
-                                self.diags.push(Diagnostic::error(
-                                    "E0112",
-                                    format!("a readiness receive arm needs Receiver<T>, not {}", other.show()),
-                                    "a receive arm waits on one plain channel endpoint".to_string(),
-                                    "use the receiver returned by `channel<T>()`".to_string(),
-                                    Some(source_span),
-                                ));
-                                Type::Named("Unit".to_string())
-                            }
-                            None => Type::Named("Unit".to_string()),
-                        };
-                        if let Some(previous) = &element_ty {
-                            if previous != &payload {
-                                self.diags.push(Diagnostic::error(
+                    }
+                    let payload = match source_ty {
+                        Some(Type::Apply { name, args })
+                            if name == Syntax::TYPE_RECEIVER && args.len() == 1 =>
+                        {
+                            args[0].clone()
+                        }
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "a readiness receive arm needs Receiver<T>, not {}",
+                                    other.show()
+                                ),
+                                "a receive arm waits on one plain channel endpoint".to_string(),
+                                "use the receiver returned by `channel<T>()`".to_string(),
+                                Some(source_span),
+                            ));
+                            Type::Named("Unit".to_string())
+                        }
+                        None => Type::Named("Unit".to_string()),
+                    };
+                    if let Some(previous) = &element_ty {
+                        if previous != &payload {
+                            self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!(
                                         "readiness receive arms must share one element type, got {} and {}",
@@ -1161,68 +1146,72 @@ impl<'a> Checker<'a> {
                                     "use receivers with the same T, or split the table".to_string(),
                                     Some(source_span),
                                 ));
-                            }
-                        } else {
-                            element_ty = Some(payload.clone());
                         }
-                        self.push_scope();
-                        let mut restore_moved = Vec::new();
-                        if let Some(restored) =
-                            self.declare_condition_binding(&binding, arm.cond.span(), payload)
-                        {
-                            restore_moved.push(restored);
-                        }
-                        self.check_block(&mut arm.body, false);
-                        self.pop_scope();
-                        for (name, at) in restore_moved {
-                            self.flow.moved.set(&name, at);
-                        }
+                    } else {
+                        element_ty = Some(payload.clone());
                     }
-                    ReadinessArm::After { duration } => {
-                        has_after = true;
-                        let mut duration_expr = duration;
-                        let duration_ty = self.infer(&mut duration_expr);
-                        let duration_span = duration_expr.span();
-                        if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
-                            if let Some((_, value)) = fields.first_mut() {
-                                *value = duration_expr;
-                            }
-                        }
-                        if !matches!(duration_ty, Some(Type::Named(ref name)) if name == Syntax::DURATION_TYPE) {
-                            let shown = duration_ty
-                                .as_ref()
-                                .map(Type::show)
-                                .unwrap_or_else(|| "this value".to_string());
-                            self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`after` needs a Duration, not {shown}"),
-                                "a readiness timeout is one canonical Duration delta".to_string(),
-                                "write `after 100ms` or pass a Duration binding".to_string(),
-                                Some(duration_span),
-                            ));
-                        }
-                        self.record_effect(crate::Sema::Effects::Effect::Time.name(), arm.cond.span());
-                        self.check_block(&mut arm.body, false);
+                    self.push_scope();
+                    let mut restore_moved = Vec::new();
+                    if let Some(restored) =
+                        self.declare_condition_binding(&binding, arm.cond.span(), payload)
+                    {
+                        restore_moved.push(restored);
+                    }
+                    self.check_block(&mut arm.body, false);
+                    self.pop_scope();
+                    for (name, at) in restore_moved {
+                        self.flow.moved.set(&name, at);
                     }
                 }
-                paths.push(self.flow.clone());
+                ReadinessArm::After { duration } => {
+                    has_after = true;
+                    let mut duration_expr = duration;
+                    let duration_ty = self.infer(&mut duration_expr);
+                    let duration_span = duration_expr.span();
+                    if let crate::AST::Expr::TupleLit(fields, ..) = &mut arm.cond {
+                        if let Some((_, value)) = fields.first_mut() {
+                            *value = duration_expr;
+                        }
+                    }
+                    if !matches!(duration_ty, Some(Type::Named(ref name)) if name == Syntax::DURATION_TYPE)
+                    {
+                        let shown = duration_ty
+                            .as_ref()
+                            .map(Type::show)
+                            .unwrap_or_else(|| "this value".to_string());
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`after` needs a Duration, not {shown}"),
+                            "a readiness timeout is one canonical Duration delta".to_string(),
+                            "write `after 100ms` or pass a Duration binding".to_string(),
+                            Some(duration_span),
+                        ));
+                    }
+                    self.record_effect(crate::Sema::Effects::Effect::Time.name(), arm.cond.span());
+                    self.check_block(&mut arm.body, false);
+                }
             }
-
-            if let Some(body) = else_body {
-                self.flow = before.clone();
-                self.check_block(body, true);
-                paths.push(self.flow.clone());
-            }
-            if !has_receive && !has_after {
-                self.diags.push(Diagnostic::error(
-                    "E0112",
-                    "a readiness table has no usable wait arm".to_string(),
-                    "a table must wait on a Receiver<T> or a Duration".to_string(),
-                    "add `value, receiver -> ...` or `after 100ms -> ...`".to_string(),
-                    Some(arms.first().map(|arm| arm.cond.span()).unwrap_or(Span::new(0, 0))),
-                ));
-            }
-            self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&before, &paths);
+            paths.push(self.flow.clone());
         }
-    
+
+        if let Some(body) = else_body {
+            self.flow = before.clone();
+            self.check_block(body, true);
+            paths.push(self.flow.clone());
+        }
+        if !has_receive && !has_after {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                "a readiness table has no usable wait arm".to_string(),
+                "a table must wait on a Receiver<T> or a Duration".to_string(),
+                "add `value, receiver -> ...` or `after 100ms -> ...`".to_string(),
+                Some(
+                    arms.first()
+                        .map(|arm| arm.cond.span())
+                        .unwrap_or(Span::new(0, 0)),
+                ),
+            ));
+        }
+        self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&before, &paths);
+    }
 }

@@ -25,8 +25,8 @@ mod tests {
 
     #[test]
     fn report_envelope_owns_the_versioned_schema_identity() {
-        let envelope = ReportEnvelope::status_record("tool", "ok", true, "facts")
-            .with_fields(",\"facts\":[]");
+        let envelope =
+            ReportEnvelope::status_record("tool", "ok", true, "facts").with_fields(",\"facts\":[]");
         assert_eq!(envelope.schema_name, REPORT_NAME);
         assert_eq!(envelope.schema_version, REPORT_VERSION);
         assert_eq!(REPORT_NAME, "jet.report");
@@ -45,7 +45,6 @@ mod tests {
             "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"plan\",\"ok\":true,\"action\":\"a\\\"ction\",\"applied\":false}"
         );
     }
-
 }
 
 /// D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.
@@ -305,9 +304,7 @@ impl ReportEnvelope {
         out.push_str(&report_json_string(&schema));
         out.push_str(",\"moment\":");
         out.push_str(&report_json_string(&self.moment));
-        if let (Some(status), Some(ok), Some(action)) =
-            (&self.status, self.ok, &self.action)
-        {
+        if let (Some(status), Some(ok), Some(action)) = (&self.status, self.ok, &self.action) {
             out.push_str(",\"status\":");
             out.push_str(&report_json_string(status));
             out.push_str(",\"ok\":");

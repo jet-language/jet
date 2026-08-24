@@ -316,14 +316,14 @@ fn native_bridge_removes_ureq_from_generated_dependency_graph() {
 
 #[test]
 fn vendored_public_suffix_snapshot_is_compact_and_keeps_rule_kinds() {
-    let data = std::fs::read_to_string(
-        "crates/jet-pkg-model/src/Prelude/public_suffix_list.dat",
-    )
-    .unwrap();
+    let data =
+        std::fs::read_to_string("crates/jet-pkg-model/src/Prelude/public_suffix_list.dat").unwrap();
     assert_eq!(data.len(), 144_039);
     assert_eq!(data.lines().count(), 1);
     assert!(data.is_ascii());
-    let rules = data.split_whitespace().collect::<std::collections::HashSet<_>>();
+    let rules = data
+        .split_whitespace()
+        .collect::<std::collections::HashSet<_>>();
     for required in [
         "com",
         "co.uk",
@@ -515,7 +515,10 @@ fn cookie_jar_uses_schemeful_registrable_sites_and_rejects_public_suffixes() {
         for (index, (target, cookie)) in expected.into_iter().enumerate() {
             let (mut stream, _) = proxy.accept().unwrap();
             let head = String::from_utf8(request_head(&mut stream)).unwrap();
-            assert!(head.starts_with(&format!("GET {target} HTTP/1.1\r\n")), "request {index}: {head}");
+            assert!(
+                head.starts_with(&format!("GET {target} HTTP/1.1\r\n")),
+                "request {index}: {head}"
+            );
             let lower = head.to_ascii_lowercase();
             match cookie {
                 Some(cookie) => assert!(lower.contains(cookie), "request {index}: {head}"),
@@ -592,7 +595,10 @@ fn cookie_jar_rejects_domain_attributes_on_ip_hosts() {
                 .unwrap()
                 .to_ascii_lowercase();
             if request == 0 {
-                assert!(!head.contains("\r\ncookie:"), "unexpected seed cookie: {head}");
+                assert!(
+                    !head.contains("\r\ncookie:"),
+                    "unexpected seed cookie: {head}"
+                );
                 stream
                     .write_all(
                         concat!(
@@ -614,9 +620,9 @@ fn cookie_jar_rejects_domain_attributes_on_ip_hosts() {
                     !head.contains("suffix=") && !head.contains("exact="),
                     "IP Domain cookie escaped: {head}"
                 );
-                stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                ).unwrap();
+                stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .unwrap();
             }
         }
     });
@@ -658,7 +664,11 @@ fn cookie_jar_enforces_per_domain_and_global_count_bounds() {
         let head = String::from_utf8(request_head(&mut stream)).unwrap();
         let cookies = head
             .lines()
-            .find_map(|line| line.to_ascii_lowercase().strip_prefix("cookie: ").map(str::to_string))
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("cookie: ")
+                    .map(str::to_string)
+            })
             .expect("bounded jar must retain newest d0 cookies");
         assert_eq!(cookies.split("; ").count(), 136, "{cookies}");
         assert!(!cookies.contains("c0_44=v"), "{cookies}");
@@ -729,7 +739,10 @@ fn explicit_h2c_negotiates_hpack_and_reuses_one_session() {
             }
         }
         requests.sort_by_key(|frame| frame.2);
-        assert_eq!(requests.iter().map(|frame| frame.2).collect::<Vec<_>>(), [3, 5]);
+        assert_eq!(
+            requests.iter().map(|frame| frame.2).collect::<Vec<_>>(),
+            [3, 5]
+        );
         write_h2_frame(&mut stream, 1, 4, 5, &response);
         write_h2_frame(&mut stream, 1, 4, 3, &response);
         write_h2_frame(&mut stream, 0, 1, 5, b"b2");
@@ -1258,7 +1271,8 @@ fn run() {{
 }}
 "#
     );
-    let (code, stdout, stderr) = common::build_and_run("jet_http_client_law", "upload_stream", &src);
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "upload_stream", &src);
     let got = server.join().unwrap();
     writer.join().unwrap();
     assert_eq!(code, 0, "stderr:\n{stderr}");
@@ -1277,10 +1291,7 @@ fn post_307_replays_streamed_body_under_redirect_tee_cap() {
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
-    let dir = std::env::temp_dir().join(format!(
-        "jet_http_client_post_307_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_http_client_post_307_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("upload.fifo");
@@ -1447,9 +1458,13 @@ fn unknown_length_upload_uses_h1_chunked_transfer_encoding() {
                 pending.drain(..line_end + 2);
                 let size = usize::from_str_radix(line.trim(), 16).expect("chunk size");
                 if size == 0 {
-                    assert!(pending.starts_with(b"\r\n") || pending.is_empty() || pending == b"\r\n");
+                    assert!(
+                        pending.starts_with(b"\r\n") || pending.is_empty() || pending == b"\r\n"
+                    );
                     stream
-                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
                         .unwrap();
                     return got;
                 }
@@ -1524,10 +1539,8 @@ fn h2_upload_streams_data_frames_before_body_eof() {
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
-    let dir = std::env::temp_dir().join(format!(
-        "jet_http_client_upload_h2_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet_http_client_upload_h2_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let fifo = dir.join("upload.fifo");
@@ -1793,7 +1806,12 @@ fn run() {{
     origin_server.join().unwrap();
     proxy_server.join().unwrap();
     let _ = fs::remove_dir_all(&dir);
-    assert_eq!(run.status.code().unwrap_or(0), 0, "stderr:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        run.status.code().unwrap_or(0),
+        0,
+        "stderr:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "direct\n");
 }
 
@@ -1930,10 +1948,8 @@ fn run() {{
 fn public_client_tls_identity_and_version_bounds() {
     use std::process::{Command, Stdio};
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_http_client_tls_policy_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet_http_client_tls_policy_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
 
@@ -1957,7 +1973,11 @@ fn public_client_tls_identity_and_version_bounds() {
         .arg(&ca_cert)
         .output()
         .expect("openssl ca");
-    assert!(ca.status.success(), "{}", String::from_utf8_lossy(&ca.stderr));
+    assert!(
+        ca.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ca.stderr)
+    );
 
     let make_cert = |name: &str, usage: &str| {
         let key = dir.join(format!("{name}.key.pem"));
@@ -1992,14 +2012,7 @@ fn public_client_tls_identity_and_version_bounds() {
             String::from_utf8_lossy(&req.stderr)
         );
         let sign = Command::new("openssl")
-            .args([
-                "x509",
-                "-req",
-                "-days",
-                "1",
-                "-CAcreateserial",
-                "-CAserial",
-            ])
+            .args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"])
             .arg(&serial)
             .arg("-CA")
             .arg(&ca_cert)
@@ -2135,8 +2148,11 @@ fn run() {{
         key = client_key.display(),
         port = mtls_port
     );
-    let (mtls_code, mtls_out, mtls_err) =
-        common::build_and_run("jet_http_client_law", "public_tls_client_identity", &mtls_src);
+    let (mtls_code, mtls_out, mtls_err) = common::build_and_run(
+        "jet_http_client_law",
+        "public_tls_client_identity",
+        &mtls_src,
+    );
     let _ = mtls_server.kill();
     let _ = mtls_server.wait();
     let _ = fs::remove_dir_all(&dir);
@@ -2409,9 +2425,8 @@ fn ambient_context_deadline_upper_bounds_client_total_timeout() {
         let (mut stream, _) = listener.accept().unwrap();
         let _ = request_head(&mut stream);
         std::thread::sleep(Duration::from_millis(250));
-        let _ = stream.write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate",
-        );
+        let _ = stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate");
     });
     let src = format!(
         r#"
@@ -2452,9 +2467,8 @@ fn http_get_expired_ambient_deadline_fails_closed() {
         // Only count a real dial that sent at least one request byte.
         if stream.read(&mut buf).ok().filter(|n| *n > 0).is_some() {
             server_hits.fetch_add(1, Ordering::SeqCst);
-            let _ = stream.write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-            );
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
         }
     });
     let src = format!(
@@ -2500,9 +2514,8 @@ fn http_post_expired_ambient_deadline_fails_closed() {
         let mut buf = [0; 1];
         if stream.read(&mut buf).ok().filter(|n| *n > 0).is_some() {
             server_hits.fetch_add(1, Ordering::SeqCst);
-            let _ = stream.write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-            );
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
         }
     });
     let src = format!(
@@ -2766,8 +2779,11 @@ fn run() {{
 }}
 "#
         );
-        let (code, stdout, stderr) =
-            common::build_and_run("jet_http_client_law", &format!("follow_creds_{label}"), &src);
+        let (code, stdout, stderr) = common::build_and_run(
+            "jet_http_client_law",
+            &format!("follow_creds_{label}"),
+            &src,
+        );
         assert_eq!(code, 0, "{label} stderr:\n{stderr}");
         assert_eq!(stdout, "ok\n1\n", "{label}");
     }
@@ -2782,9 +2798,8 @@ fn request_first_byte_timeout_overrides_client_phase_budget() {
         let (mut stream, _) = listener.accept().unwrap();
         let _ = request_head(&mut stream);
         std::thread::sleep(Duration::from_millis(250));
-        let _ = stream.write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate",
-        );
+        let _ = stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate");
     });
     let src = format!(
         r#"
@@ -3176,7 +3191,11 @@ fn main() {
         String::from_utf8_lossy(&output.stderr)
     );
     server.join().unwrap();
-    assert_eq!(puts.load(Ordering::Relaxed), 1, "only Idempotent PUT should dial");
+    assert_eq!(
+        puts.load(Ordering::Relaxed),
+        1,
+        "only Idempotent PUT should dial"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -3191,7 +3210,6 @@ fn run() {
         .retries(.None)
 }
 "#;
-    let (code, _stdout, stderr) =
-        common::build_and_run("jet_http_client_law", "retries_type", src);
+    let (code, _stdout, stderr) = common::build_and_run("jet_http_client_law", "retries_type", src);
     assert_eq!(code, 0, "stderr:\n{stderr}");
 }

@@ -2405,10 +2405,52 @@ export const scenarios = {
     await ctx.type("abs");
     await ctx.expectMenu("abs");
     await expectPaletteDescriptor(ctx, "abs", "function_pure", "insert_call");
+    const action = await ctx.driver.evaluate(`(() => {
+      const entries = window.__jetCanvasTest.actionEntries();
+      return entries.find((entry) => entry.kind === "canvas.core_catalog"
+        && entry.module_path === "core.math"
+        && String(entry.title || "").startsWith("abs ·")) || null;
+    })()`);
+    if (!action || action.node_descriptor_id !== "function_pure" || action.insert_callee !== "math.abs") {
+      throw new Error(`core menu action lost its checked insertion callee: ${JSON.stringify(action)}`);
+    }
     await ctx.pickEntry("abs");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasLastTxResult !== null"), "core menu success receipt");
+    const receipt = await ctx.driver.evaluate(`({
+      tx: window.__jetCanvasLastTx || null,
+      result: window.__jetCanvasLastTxResult || null
+    })`);
+    if (receipt.tx?.op !== "insert_call"
+      || receipt.tx?.callee !== action.insert_callee
+      || receipt.result?.changed !== true) {
+      throw new Error(`core menu insertion bypassed the descriptor callee source transaction: ${JSON.stringify(receipt)}`);
+    }
     await ctx.expectSourceContains("use core.math as math");
     await ctx.expectSourceContains("math.abs");
     await ctx.screenshot("core-abs-inserted");
+
+    const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+    await ctx.openPinActionMenu("limit", "limit");
+    await ctx.type("abs");
+    await ctx.expectMenu("abs · core.math");
+    const staleSource = await ctx.source();
+    const externallyChanged = `${staleSource}\n// external stale edit\n`;
+    await writeFile(join(project.project_root, "main.jet"), externallyChanged);
+    await ctx.driver.evaluate("window.__jetCanvasLastTx = null; window.__jetCanvasLastTxResult = null;");
+    await ctx.pickEntry("abs · core.math");
+    await ctx.waitFor(async () => await ctx.driver.evaluate("window.__jetCanvasLastTxResult !== null"), "stale core menu insertion refusal");
+    const staleReceipt = await ctx.driver.evaluate(`({
+      tx: window.__jetCanvasLastTx || null,
+      result: window.__jetCanvasLastTxResult || null,
+      state: window.__jetCanvasCanvasState || null
+    })`);
+    if (staleReceipt.tx?.op !== "insert_call"
+      || staleReceipt.tx?.callee !== action.insert_callee
+      || staleReceipt.result?.kind !== "conflict"
+      || staleReceipt.state?.kind !== "stale"
+      || await ctx.source() !== externallyChanged) {
+      throw new Error(`stale core menu insertion bypassed the checked refusal: ${JSON.stringify(staleReceipt)}`);
+    }
   },
 
   "palette-insert-imported-alias-function": async (ctx) => {

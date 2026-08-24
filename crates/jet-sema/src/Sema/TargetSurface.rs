@@ -35,10 +35,7 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
     } else {
         BTreeSet::new()
     };
-    if socket_target
-        && wasip2_unsupported.is_empty()
-        && wasip2_unsupported_surfaces.is_empty()
-    {
+    if socket_target && wasip2_unsupported.is_empty() && wasip2_unsupported_surfaces.is_empty() {
         return Vec::new();
     }
 

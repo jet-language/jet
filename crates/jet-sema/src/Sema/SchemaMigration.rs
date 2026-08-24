@@ -28,10 +28,10 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Schema::load_snapshot;
 use crate::Traits::TraitRegistry;
-use jet_foundation::Names::mangle;
 use crate::AST::{
     AccessConvention, Expr, Func, Item, LambdaBody, MigrationOp, Param, ProgramBundle, Stmt, Type,
 };
+use jet_foundation::Names::mangle;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -151,21 +151,21 @@ fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func
         name: name.to_string(),
         name_span: span,
         meta: None,
-                    type_params: Vec::new(),
+        type_params: Vec::new(),
         head_pattern: None,
         params: Vec::new(),
         return_type: Some(ty.clone()),
         return_type_span: Some(span),
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,
@@ -238,7 +238,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
         name: name.to_string(),
         name_span: span,
         meta: None,
-                    type_params: Vec::new(),
+        type_params: Vec::new(),
         head_pattern: None,
         params: vec![Param {
             name: param_name,
@@ -249,20 +249,23 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
             root: false,
             default: None,
             variadic: false,
-            variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+            variadic_bound_list: None,
+            declared_view_from_names: None,
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
         }],
         return_type: Some(new_ty.clone()),
         return_type_span: Some(span),
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,

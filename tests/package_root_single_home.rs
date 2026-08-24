@@ -88,7 +88,8 @@ fn every_root_resolver_entry_point_calls_loader() {
 
 #[test]
 fn nested_entry_points_share_root_and_stale_diagnostic() {
-    let fixture = std::env::temp_dir().join(format!("jet-package-root-test-{}", std::process::id()));
+    let fixture =
+        std::env::temp_dir().join(format!("jet-package-root-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&fixture);
     fs::create_dir_all(fixture.join("src/nested")).unwrap();
     fs::write(
@@ -110,17 +111,18 @@ fn nested_entry_points_share_root_and_stale_diagnostic() {
     assert_eq!(facts.name, "root");
 
     let graph = jet_devserver::WatchGraph::from_entry(&entry, &[]).unwrap();
-    assert!(graph.watched_paths().contains(&expected.join("package.jet")));
+    assert!(graph
+        .watched_paths()
+        .contains(&expected.join("package.jet")));
 
     let project = jet_devserver::Canvas::project_json_for_entry(&entry);
-    assert!(project.contains(&format!(
-        "\"project_root\":\"{}\"",
-        expected.display()
-    )));
+    assert!(project.contains(&format!("\"project_root\":\"{}\"", expected.display())));
 
     let clean_lsp = jet::LSP::check_document(&entry.display().to_string(), "fn run() {}\n");
     assert!(
-        clean_lsp.iter().all(|diagnostic| diagnostic.code != "E1226"),
+        clean_lsp
+            .iter()
+            .all(|diagnostic| diagnostic.code != "E1226"),
         "canonical package must not emit stale-manifest diagnostic: {clean_lsp:?}"
     );
 
@@ -132,27 +134,35 @@ fn nested_entry_points_share_root_and_stale_diagnostic() {
 
     let stale_lsp = jet::LSP::check_document(&entry.display().to_string(), "fn run() {}\n");
     assert!(
-        stale_lsp.iter().any(|diagnostic| diagnostic.code == "E1226"),
+        stale_lsp
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E1226"),
         "LSP must receive Loader's stale-manifest diagnostic: {stale_lsp:?}"
     );
-    let stale_watch = match jet::Interpreter::dev_iteration(&entry.display().to_string(), false, true)
-    {
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => diagnostics,
-        outcome => panic!("watch entrypoint unexpectedly ran: {outcome:?}"),
-    };
+    let stale_watch =
+        match jet::Interpreter::dev_iteration(&entry.display().to_string(), false, true) {
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => diagnostics,
+            outcome => panic!("watch entrypoint unexpectedly ran: {outcome:?}"),
+        };
     assert!(
-        stale_watch.iter().any(|diagnostic| diagnostic.code == "E1226"),
+        stale_watch
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E1226"),
         "watch entrypoint must receive Loader's stale-manifest diagnostic: {stale_watch:?}"
     );
     let stale_canvas = jet_devserver::Canvas::graph_json_for_file(&entry).unwrap_err();
     assert!(
-        stale_canvas.iter().any(|diagnostic| diagnostic.code == "E1226"),
+        stale_canvas
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E1226"),
         "Canvas must receive Loader's stale-manifest diagnostic: {stale_canvas:?}"
     );
     let stale_build = jet::compile_programmable_build(&entry.display().to_string(), &[])
         .expect_err("policy defaults must reject a retired manifest name");
     assert!(
-        stale_build.iter().any(|diagnostic| diagnostic.code == "E1226"),
+        stale_build
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E1226"),
         "policy defaults must receive Loader's stale-manifest diagnostic: {stale_build:?}"
     );
 

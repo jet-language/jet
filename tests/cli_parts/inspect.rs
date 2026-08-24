@@ -7,11 +7,7 @@ fn inspect_env_lists_typed_environment_reads() {
         ("env.jet", "inspect_env_reads.json"),
         ("config.jet", "inspect_config_reads.json"),
     ] {
-        fs::write(
-            dir.join(file),
-            "module env.dev {\n    prompt: $HOME\n}\n",
-        )
-        .unwrap();
+        fs::write(dir.join(file), "module env.dev {\n    prompt: $HOME\n}\n").unwrap();
         let output = Command::new(jet())
             .args(["inspect", "env", file, "--json"])
             .current_dir(&dir)
@@ -26,7 +22,10 @@ fn inspect_env_lists_typed_environment_reads() {
             String::from_utf8_lossy(&output.stderr)
         );
         let json = String::from_utf8(output.stdout).unwrap();
-        assert!(parse_json(&json).is_ok(), "inspect env JSON must parse: {json}");
+        assert!(
+            parse_json(&json).is_ok(),
+            "inspect env JSON must parse: {json}"
+        );
         assert!(json.contains("\"name\":\"$HOME\""), "{json}");
         assert!(json.contains("\"type\":\"String\""), "{json}");
         check_snapshot(snapshot, &json);
@@ -53,9 +52,20 @@ fn inspect_guarantees_reports_mixed_components_and_json() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(human.status.code(), Some(0), "{}", String::from_utf8_lossy(&human.stderr));
+    assert_eq!(
+        human.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
     let human = String::from_utf8(human.stdout).unwrap();
-    assert!(human.contains("proven") && human.contains("watched") && human.contains("fenced") && human.contains("TRUSTED"), "{human}");
+    assert!(
+        human.contains("proven")
+            && human.contains("watched")
+            && human.contains("fenced")
+            && human.contains("TRUSTED"),
+        "{human}"
+    );
     check_snapshot("inspect_guarantees_mixed.txt", &human);
 
     let json = Command::new(jet())
@@ -64,9 +74,17 @@ fn inspect_guarantees_reports_mixed_components_and_json() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(json.status.code(), Some(0), "{}", String::from_utf8_lossy(&json.stderr));
+    assert_eq!(
+        json.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
     let json = String::from_utf8(json.stdout).unwrap();
-    assert!(parse_json(&json).is_ok(), "guarantee report JSON must parse: {json}");
+    assert!(
+        parse_json(&json).is_ok(),
+        "guarantee report JSON must parse: {json}"
+    );
     assert!(json.contains("\"guarantee\":\"TRUSTED\""), "{json}");
     check_snapshot("inspect_guarantees_mixed.json", &json);
 }
@@ -86,10 +104,21 @@ fn inspect_guarantees_harden_contains_every_dependency() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("profile: release") && stdout.contains("libxml") && stdout.contains("libz"), "{stdout}");
-    assert!(!stdout.contains("TRUSTED"), "hardened dependencies must not report TRUSTED: {stdout}");
+    assert!(
+        stdout.contains("profile: release") && stdout.contains("libxml") && stdout.contains("libz"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("TRUSTED"),
+        "hardened dependencies must not report TRUSTED: {stdout}"
+    );
     check_snapshot("inspect_guarantees_hardened.txt", &stdout);
 }
 
@@ -128,9 +157,18 @@ fn hardened_release_sentry_reaches_a_foreign_dependency() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success(), "invalid dependency access must stop: {stderr}");
-    assert!(stderr.contains("R0801"), "hardened dependency sentry was not active: {stderr}");
-    assert!(stderr.contains("intentionally invalid address"), "dependency gate was not named: {stderr}");
+    assert!(
+        !output.status.success(),
+        "invalid dependency access must stop: {stderr}"
+    );
+    assert!(
+        stderr.contains("R0801"),
+        "hardened dependency sentry was not active: {stderr}"
+    );
+    assert!(
+        stderr.contains("intentionally invalid address"),
+        "dependency gate was not named: {stderr}"
+    );
 }
 
 #[test]
@@ -144,9 +182,19 @@ fn inspect_guarantees_is_honest_for_single_file_and_freestanding() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(single.status.code(), Some(0), "{}", String::from_utf8_lossy(&single.stderr));
+    assert_eq!(
+        single.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&single.stderr)
+    );
     let single = String::from_utf8(single.stdout).unwrap();
-    assert!(single.contains("scope: single-file") && single.contains("externs") && single.contains("TRUSTED"), "{single}");
+    assert!(
+        single.contains("scope: single-file")
+            && single.contains("externs")
+            && single.contains("TRUSTED"),
+        "{single}"
+    );
     check_snapshot("inspect_guarantees_single_file.txt", &single);
 
     let freestanding = Command::new(jet())
@@ -155,9 +203,18 @@ fn inspect_guarantees_is_honest_for_single_file_and_freestanding() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(freestanding.status.code(), Some(0), "{}", String::from_utf8_lossy(&freestanding.stderr));
+    assert_eq!(
+        freestanding.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&freestanding.stderr)
+    );
     let freestanding = String::from_utf8(freestanding.stdout).unwrap();
-    assert!(freestanding.contains("target: freestanding") && freestanding.contains("prover + audit only"), "{freestanding}");
+    assert!(
+        freestanding.contains("target: freestanding")
+            && freestanding.contains("prover + audit only"),
+        "{freestanding}"
+    );
     check_snapshot("inspect_guarantees_freestanding.txt", &freestanding);
 }
 
@@ -185,13 +242,23 @@ fn source_policy_spelling_is_rejected_with_teaching_diagnostic() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("Error [E0355]") && stderr.contains("contain") && stderr.contains("not a scoped policy"), "{stderr}");
+    assert!(
+        stderr.contains("Error [E0355]")
+            && stderr.contains("contain")
+            && stderr.contains("not a scoped policy"),
+        "{stderr}"
+    );
     let teaching = stderr
         .lines()
-        .filter(|line| line.starts_with("Error [") || line.starts_with(" Why:") || line.starts_with(" Fix:"))
+        .filter(|line| {
+            line.starts_with("Error [") || line.starts_with(" Why:") || line.starts_with(" Fix:")
+        })
         .collect::<Vec<_>>()
         .join("\n");
-    check_snapshot("inspect_guarantees_source_policy.txt", &format!("{teaching}\n"));
+    check_snapshot(
+        "inspect_guarantees_source_policy.txt",
+        &format!("{teaching}\n"),
+    );
 }
 
 #[test]

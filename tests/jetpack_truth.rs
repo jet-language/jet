@@ -9,10 +9,10 @@ use std::process::Command;
 
 const MATRIX: &str = "docs/plans/epoch-4/truth-matrix.md";
 const AUDITED: &[u64] = &[
-    3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194,
-    195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215,
-    229, 231, 232, 233, 234, 242, 330, 359, 361, 393, 394, 418, 419, 421, 424, 426,
-    476, 477, 478, 479, 539, 540, 541, 578, 582, 586, 605, 608, 611, 615,
+    3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194, 195, 196, 197, 198,
+    199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215, 229, 231, 232, 233, 234, 242, 330,
+    359, 361, 393, 394, 418, 419, 421, 424, 426, 476, 477, 478, 479, 539, 540, 541, 578, 582, 586,
+    605, 608, 611, 615,
 ];
 
 #[test]
@@ -22,10 +22,8 @@ fn canonical_product_ownership_is_split() {
     let root_manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
     let driver_manifest =
         std::fs::read_to_string(root.join("crates/jet-driver/Cargo.toml")).unwrap();
-    let jetpack_manifest =
-        std::fs::read_to_string(root.join("crates/jetpack/Cargo.toml")).unwrap();
-    let jetos_manifest =
-        std::fs::read_to_string(root.join("crates/jetos/Cargo.toml")).unwrap();
+    let jetpack_manifest = std::fs::read_to_string(root.join("crates/jetpack/Cargo.toml")).unwrap();
+    let jetos_manifest = std::fs::read_to_string(root.join("crates/jetos/Cargo.toml")).unwrap();
 
     assert_eq!(root_manifest.matches("[[bin]]").count(), 1);
     assert!(root_manifest.contains("name = \"jet\""));
@@ -51,7 +49,10 @@ fn truth_matrix_covers_every_done_epoch4_card() {
     let audited = rows.keys().copied().collect::<BTreeSet<_>>();
     let expected = AUDITED.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(audited, expected, "truth matrix audited set drifted");
-    assert!(done.is_subset(&audited), "live E4 done cards missing from audit");
+    assert!(
+        done.is_subset(&audited),
+        "live E4 done cards missing from audit"
+    );
     for reopened in [6, 330] {
         assert_eq!(
             cards.get(&reopened).map(|card| card.phase.as_str()),
@@ -68,22 +69,42 @@ fn truth_matrix_covers_every_done_epoch4_card() {
         "fixture-only",
     ];
     for (num, (class, evidence, boundary)) in rows {
-        let card = cards.get(&num).unwrap_or_else(|| panic!("#{num}: card missing from Tower"));
-        assert!(allowed.contains(&class.as_str()), "#{num}: bad class {class}");
+        let card = cards
+            .get(&num)
+            .unwrap_or_else(|| panic!("#{num}: card missing from Tower"));
+        assert!(
+            allowed.contains(&class.as_str()),
+            "#{num}: bad class {class}"
+        );
         assert!(evidence.len() >= 8, "#{num}: evidence is not specific");
-        assert!(evidence_resolves(root, &evidence), "#{num}: evidence does not resolve: {evidence}");
-        assert!(!boundary.trim().is_empty(), "#{num}: empty completion boundary");
+        assert!(
+            evidence_resolves(root, &evidence),
+            "#{num}: evidence does not resolve: {evidence}"
+        );
+        assert!(
+            !boundary.trim().is_empty(),
+            "#{num}: empty completion boundary"
+        );
         if num != 418 {
-            assert!(!card.log_empty, "#{num}: done/reclassified claim has no Tower evidence log");
+            assert!(
+                !card.log_empty,
+                "#{num}: done/reclassified claim has no Tower evidence log"
+            );
         }
         if class != "live" {
             let successors = card_refs(&boundary);
-            assert!(!successors.is_empty(), "#{num}: non-live row needs successor");
-            assert!(successors.iter().any(|successor| {
-                cards.get(successor).is_some_and(|card| {
-                    card.phase != "done" && card.phase != "frozen"
-                })
-            }), "#{num}: named successors are absent, done, or frozen: {successors:?}");
+            assert!(
+                !successors.is_empty(),
+                "#{num}: non-live row needs successor"
+            );
+            assert!(
+                successors.iter().any(|successor| {
+                    cards
+                        .get(successor)
+                        .is_some_and(|card| card.phase != "done" && card.phase != "frozen")
+                }),
+                "#{num}: named successors are absent, done, or frozen: {successors:?}"
+            );
         }
     }
 }
@@ -107,7 +128,9 @@ fn collect_direct_provider_calls(dir: &Path, found: &mut Vec<String>) {
             collect_direct_provider_calls(&path, found);
         } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
             let source = std::fs::read_to_string(&path).unwrap();
-            if source.contains("Provider::realize(") || source.contains("Provider::realize_adapter(") {
+            if source.contains("Provider::realize(")
+                || source.contains("Provider::realize_adapter(")
+            {
                 found.push(
                     path.strip_prefix(Path::new(env!("CARGO_MANIFEST_DIR")))
                         .unwrap()
@@ -128,9 +151,7 @@ fn live_repo_root(root: &Path) -> std::path::PathBuf {
         .output()
         .unwrap();
     assert!(output.status.success(), "cannot locate live Git common dir");
-    let common = std::path::PathBuf::from(
-        String::from_utf8(output.stdout).unwrap().trim(),
-    );
+    let common = std::path::PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
     common.parent().unwrap().to_path_buf()
 }
 
@@ -162,7 +183,7 @@ fn matrix_rows(raw: &str) -> BTreeMap<u64, (String, String, String)> {
                     cells[3].to_string(),
                 ),
             )
-                .is_none(),
+            .is_none(),
             "duplicate truth row for #{num}"
         );
     }

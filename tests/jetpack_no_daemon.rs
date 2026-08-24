@@ -64,8 +64,14 @@ fn sandbox_default_never_allows_unsandboxed_build_and_require_mode_errors() {
         .output()
         .unwrap();
     let warn_json_err = String::from_utf8_lossy(&warn_json.stderr);
-    assert!(!warn_json_err.contains("\"code\": \"L0205\""), "stderr: {warn_json_err}");
-    assert!(!warn_json_err.contains("unsandboxed"), "stderr: {warn_json_err}");
+    assert!(
+        !warn_json_err.contains("\"code\": \"L0205\""),
+        "stderr: {warn_json_err}"
+    );
+    assert!(
+        !warn_json_err.contains("unsandboxed"),
+        "stderr: {warn_json_err}"
+    );
 
     let require = jetpack()
         .args(["config", "sandbox", "require", "--no-color"])

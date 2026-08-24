@@ -334,15 +334,9 @@ pub enum RefError {
     /// An empty source or package half, e.g. `@nixpkgs` or `fastfetch@`.
     EmptyHalf(String),
     /// A retired provider-first ref that must be flipped, never reinterpreted.
-    ProviderFirst {
-        raw: String,
-        replacement: String,
-    },
+    ProviderFirst { raw: String, replacement: String },
     /// The `path` provider word retired; local paths are bare.
-    PathProviderRetired {
-        raw: String,
-        path: String,
-    },
+    PathProviderRetired { raw: String, path: String },
     /// The source suffix is neither a built-in nor a declared named source.
     /// `declared` lists the pack's named sources so the message can help.
     UnknownSource {
@@ -373,9 +367,7 @@ impl RefError {
     /// The registered diagnostic code for the errors that carry one.
     pub fn code(&self) -> Option<&'static str> {
         match self {
-            RefError::ProviderFirst { .. } | RefError::PathProviderRetired { .. } => {
-                Some("E1317")
-            }
+            RefError::ProviderFirst { .. } | RefError::PathProviderRetired { .. } => Some("E1317"),
             RefError::AmbiguousMember { .. } => Some("E1230"),
             RefError::UnknownMember { .. } => Some("E1231"),
             _ => None,
@@ -794,21 +786,11 @@ pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
             })
         }
     };
-    let auto_suffix = format!(
-        "{}{}",
-        Syntax::REF_CHANNEL_MARKER,
-        Syntax::REF_CHANNEL_AUTO
-    );
-    let (target, suffix_policy) = if let Some(base) = target.strip_suffix(&auto_suffix) {
-        (base, ChannelPolicy::Automatic)
-    } else {
-        (target, ChannelPolicy::Manual)
-    };
     let (target, channel) = split_channel_ref(target);
     let policy = if prefix_policy != ChannelPolicy::Pinned {
         prefix_policy
-    } else if suffix_policy != ChannelPolicy::Manual || channel.is_some() {
-        suffix_policy
+    } else if channel.is_some() {
+        ChannelPolicy::Manual
     } else {
         ChannelPolicy::Pinned
     };
@@ -920,11 +902,11 @@ mod tests {
 
     #[test]
     fn rejects_empty_halves() {
+        assert!(matches!(classify("@nixpkgs"), Err(RefError::EmptyHalf(_))));
         assert!(matches!(
-            classify("@nixpkgs"),
+            classify("fastfetch@"),
             Err(RefError::EmptyHalf(_))
         ));
-        assert!(matches!(classify("fastfetch@"), Err(RefError::EmptyHalf(_))));
     }
 
     #[test]
@@ -1162,6 +1144,10 @@ mod tests {
         assert_eq!(automatic.policy, ChannelPolicy::Automatic);
         assert_eq!(automatic.target, "omp");
         assert_eq!(automatic.channel, Some(ChannelRef::Latest));
+
+        let suffix = classify_provider_ref("omp#auto@nixpkgs").unwrap();
+        assert_eq!(suffix.policy, ChannelPolicy::Pinned);
+        assert_eq!(suffix.channel, None);
     }
 
     #[test]

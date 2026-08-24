@@ -151,7 +151,10 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
         .filter(|line| !line.starts_with("inserted:") && !line.starts_with("fixed:"))
         .collect::<Vec<_>>();
     assert_eq!(actual, expected, "full REPL output:\n{out}");
-    assert!(!out.contains("E0956"), "sequence method fell through: {out}");
+    assert!(
+        !out.contains("E0956"),
+        "sequence method fell through: {out}"
+    );
 }
 
 /// D-CORE-EAGER1=A / D-LOOPMAP1=B: the public REPL exposes eager concrete
@@ -173,11 +176,7 @@ fn repl_eager_collection_adapters_and_lazy_opt_in_are_exact() {
         .collect::<Vec<_>>();
     assert_eq!(
         actual,
-        [
-            "[2, 4, 6] : List",
-            "[2, 3] : List",
-            "[10, 20, 30] : List",
-        ],
+        ["[2, 4, 6] : List", "[2, 3] : List", "[10, 20, 30] : List",],
         "REPL eager/lazy output:\n{out}"
     );
 }
@@ -213,18 +212,30 @@ fn repl_view_and_view_mut_sequence_methods_are_exact() {
     let actual = out
         .lines()
         .filter(|line| {
-            !line.starts_with("values:")
-                && !line.starts_with("view:")
-                && !line.starts_with("edit:")
+            !line.starts_with("values:") && !line.starts_with("view:") && !line.starts_with("edit:")
         })
         .collect::<Vec<_>>();
     assert_eq!(
         actual,
         [
-            "3 : Int", "false : Bool", "30 : Option", "20 : Option", "40 : Option",
-            "true : Bool", "2 : Option", "90 : Int", "[2, 3, 4] : List",
-            "2 : Int", "false : Bool", "20 : Option", "10 : Option", "20 : Option",
-            "true : Bool", "1 : Option", "30 : Int", "[1, 2] : List",
+            "3 : Int",
+            "false : Bool",
+            "30 : Option",
+            "20 : Option",
+            "40 : Option",
+            "true : Bool",
+            "2 : Option",
+            "90 : Int",
+            "[2, 3, 4] : List",
+            "2 : Int",
+            "false : Bool",
+            "20 : Option",
+            "10 : Option",
+            "20 : Option",
+            "true : Bool",
+            "1 : Option",
+            "30 : Int",
+            "[1, 2] : List",
         ],
         "full REPL output:\n{out}"
     );
@@ -233,11 +244,11 @@ fn repl_view_and_view_mut_sequence_methods_are_exact() {
 
 #[test]
 fn repl_non_slice_write_place_is_not_silently_copied() {
-    let out = run_transcript(
-        &["values := [1, 2]", "edit :: &values", "edit.len()"],
-        None,
+    let out = run_transcript(&["values := [1, 2]", "edit :: &values", "edit.len()"], None);
+    assert!(
+        out.contains("E0956"),
+        "non-slice write place was copied: {out}"
     );
-    assert!(out.contains("E0956"), "non-slice write place was copied: {out}");
 }
 
 #[test]

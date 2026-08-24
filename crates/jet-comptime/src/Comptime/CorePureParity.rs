@@ -679,6 +679,11 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             .ok()
             .map(|fraction| fraction.to_string_rep());
     }
+    if core_type == crate::Syntax::TYPE_DECIMAL {
+        return crate::Numeric::CtDecimal::from_value(value)
+            .ok()
+            .map(|decimal| decimal.to_string_rep());
+    }
     if core_type == "DateTime" {
         return datetime_string(value, Span::new(0, 0)).ok();
     }

@@ -11,10 +11,10 @@ mod runtime {
     pub use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 }
 
-pub(crate) use runtime::*;
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet_foundation::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
+pub(crate) use runtime::*;
 use std::fs;
 use std::sync::{Arc, Barrier};
 
@@ -95,8 +95,16 @@ fn crypto_error_display_contract_is_exact_and_redacted() {
     for (error, expected) in cases {
         assert_eq!(error.to_string(), expected);
         let rendered = format!("{error:?} {error}");
-        for forbidden in ["hunter2", "plaintext sentinel", "ciphertext sentinel", "/home/nate"] {
-            assert!(!rendered.contains(forbidden), "error leaked `{forbidden}`: {rendered}");
+        for forbidden in [
+            "hunter2",
+            "plaintext sentinel",
+            "ciphertext sentinel",
+            "/home/nate",
+        ] {
+            assert!(
+                !rendered.contains(forbidden),
+                "error leaked `{forbidden}`: {rendered}"
+            );
         }
     }
 }
@@ -104,10 +112,8 @@ fn crypto_error_display_contract_is_exact_and_redacted() {
 #[test]
 fn actual_bridge_fixture_compiles_and_runs() {
     let root = std::env::current_dir().unwrap();
-    let dir = std::env::temp_dir().join(format!(
-        "jet-crypto-bridge-entropy-{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet-crypto-bridge-entropy-{}", std::process::id()));
     match std::fs::remove_dir_all(&dir) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -187,7 +193,10 @@ fn scripted_provider_fills_suffix_and_retries_interruption() {
 
 #[test]
 fn failure_and_zero_fill_clear_the_entire_attempt() {
-    for terminal in [JetCryptoEntropyStep::Filled(0), JetCryptoEntropyStep::Failed] {
+    for terminal in [
+        JetCryptoEntropyStep::Filled(0),
+        JetCryptoEntropyStep::Failed,
+    ] {
         let mut out = [0xa5; 32];
         let err = jet_crypto_entropy_fill_with(&mut out, |suffix| {
             suffix[..8].fill(0x5a);
@@ -326,11 +335,21 @@ fn live_provider_obeys_bounds_zero_and_concurrency() {
     assert_ne!(filled, [0; 32]);
     assert_eq!(
         jet_crypto_entropy_bytes(-1),
-        Err(JetCryptoEntropyError::InvalidLength { operation: "core.crypto.random.bytes", parameter: "count", expected: "non-negative", actual: 1 })
+        Err(JetCryptoEntropyError::InvalidLength {
+            operation: "core.crypto.random.bytes",
+            parameter: "count",
+            expected: "non-negative",
+            actual: 1
+        })
     );
     assert_eq!(
         jet_crypto_entropy_bytes(1_048_577),
-        Err(JetCryptoEntropyError::OutputLength { operation: "core.crypto.random.bytes", minimum: 0, maximum: 1_048_576, actual: 1_048_577 })
+        Err(JetCryptoEntropyError::OutputLength {
+            operation: "core.crypto.random.bytes",
+            minimum: 0,
+            maximum: 1_048_576,
+            actual: 1_048_577
+        })
     );
 
     let workers = 8;
@@ -391,7 +410,12 @@ fn live_provider_remains_independent_across_process_exec() {
     };
     assert!(status.success(), "entropy subprocess failed: {status}");
     let mut stdout = String::new();
-    child.stdout.take().unwrap().read_to_string(&mut stdout).unwrap();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
     let encoded = stdout
         .lines()
         .find_map(|line| line.strip_prefix("JET_CRYPTO_ENTROPY="))
@@ -605,11 +629,9 @@ fn rust_fn_body<'a>(source: &'a str, name: &str) -> (&'a str, usize) {
 
 #[test]
 fn crypto_runtime_sources_contain_no_predictable_fallback() {
-    let delivered_base = include_str!(
-        "../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs"
-    );
-    let (random_shim_body, shim_end) =
-        rust_fn_body(delivered_base, "jet_std_crypto_random_bytes");
+    let delivered_base =
+        include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+    let (random_shim_body, shim_end) = rust_fn_body(delivered_base, "jet_std_crypto_random_bytes");
     let random_shim_code = rust_code_text(random_shim_body);
     assert!(
         random_shim_body.ends_with('}'),
@@ -624,9 +646,7 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
         1,
         "Prelude must contain one random-bytes shim"
     );
-    let retired_process = include_str!(
-        "../crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs"
-    );
+    let retired_process = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs");
     assert_eq!(
         rust_fn_definition_starts(retired_process, "jet_std_crypto_random_bytes").len(),
         0,
@@ -721,14 +741,8 @@ fn uuid_entropy_shared_seam_is_live_and_fail_closed() {
     let v7 = runtime::jet_crypto_uuid_v7_result(1_700_000_000_000);
     jet_crypto_entropy_clear_test_provider();
 
-    assert!(matches!(
-        v4,
-        Err(JetCryptoEntropyError::EntropyUnavailable)
-    ));
-    assert!(matches!(
-        v7,
-        Err(JetCryptoEntropyError::EntropyUnavailable)
-    ));
+    assert!(matches!(v4, Err(JetCryptoEntropyError::EntropyUnavailable)));
+    assert!(matches!(v7, Err(JetCryptoEntropyError::EntropyUnavailable)));
 }
 
 #[test]
@@ -770,9 +784,10 @@ fn run() {
         let mut bundle = jet::Loader::load_entry(&shown).expect("parity bundle should load");
         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
         assert!(
-            diagnostics
-                .iter()
-                .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+            diagnostics.iter().all(|diagnostic| !matches!(
+                diagnostic.severity,
+                jet::Diagnostics::Severity::Error
+            )),
             "parity source must type-check: {diagnostics:?}"
         );
         assert!(
@@ -798,16 +813,17 @@ fn run() {
 
         jet_jit::reset_jit_trace_for_test();
         let mut backend = CraneliftBackend::new();
-        let jit = jet_jit::with_program_args(&[shown.clone()], || match backend.run(&bundle, false) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => (stdout, stderr, exit_code),
-            RunOutcome::Problems(diagnostics) => {
-                panic!("resident JIT entropy/UUID parity failed: {diagnostics:?}")
-            }
-        });
+        let jit =
+            jet_jit::with_program_args(&[shown.clone()], || match backend.run(&bundle, false) {
+                RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => (stdout, stderr, exit_code),
+                RunOutcome::Problems(diagnostics) => {
+                    panic!("resident JIT entropy/UUID parity failed: {diagnostics:?}")
+                }
+            });
         assert!(jet_jit::jit_executed_for_test());
         assert!(!jet_jit::deopt_invoked_for_test());
         assert!(!jet_jit::fallback_invoked_for_test());
@@ -840,9 +856,7 @@ fn run() {
 
 #[test]
 fn golden_i1_scan_strips_only_the_vetted_entropy_module() {
-    let provider = include_str!(
-        "../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs"
-    );
+    let provider = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
     assert!(provider.contains("mod jet_crypto_entropy {"));
     let golden = include_str!("golden.rs");
     assert!(golden.contains("strip_mod(&s, \"jet_crypto_entropy\")"));

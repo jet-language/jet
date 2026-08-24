@@ -111,8 +111,7 @@ fn run() {
 }
 "#;
 
-const EXPECTED: &str =
-    "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\ntrue\ntrue\n";
+const EXPECTED: &str = "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\ntrue\ntrue\n";
 
 const GENERIC_SOURCE: &str = r#"
 struct Box<T> {
@@ -210,10 +209,8 @@ fn local_cell_full_surface_runs_through_default_tier() {
     std::thread::Builder::new()
         .stack_size(2 * 1024 * 1024)
         .spawn(|| {
-            let dir = std::env::temp_dir().join(format!(
-                "jet_local_cell_parity_{}",
-                std::process::id()
-            ));
+            let dir =
+                std::env::temp_dir().join(format!("jet_local_cell_parity_{}", std::process::id()));
             fs::create_dir_all(&dir).unwrap();
             let path = dir.join("main.jet");
             fs::write(&path, SOURCE).unwrap();
@@ -316,10 +313,8 @@ fn local_cell_non_string_map_uses_default_evaluator() {
     std::thread::Builder::new()
         .stack_size(2 * 1024 * 1024)
         .spawn(|| {
-            let dir = std::env::temp_dir().join(format!(
-                "jet_local_cell_int_map_{}",
-                std::process::id()
-            ));
+            let dir =
+                std::env::temp_dir().join(format!("jet_local_cell_int_map_{}", std::process::id()));
             fs::create_dir_all(&dir).unwrap();
             let path = dir.join("main.jet");
             fs::write(&path, INT_MAP_SOURCE).unwrap();

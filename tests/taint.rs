@@ -21,7 +21,9 @@ fn run() ! {
 }
 "#;
     assert!(
-        codes(rejected_before_decode).iter().any(|code| code == "E0721"),
+        codes(rejected_before_decode)
+            .iter()
+            .any(|code| code == "E0721"),
         "external text must stay origin-marked before validation: {:?}",
         codes(rejected_before_decode)
     );
@@ -42,7 +44,9 @@ fn run() ! {
 }
 "#;
     assert!(
-        !codes(accepted_after_decode).iter().any(|code| code == "E0721"),
+        !codes(accepted_after_decode)
+            .iter()
+            .any(|code| code == "E0721"),
         "successful typed decode must clear origin facts: {:?}",
         codes(accepted_after_decode)
     );
@@ -162,10 +166,7 @@ fn run() ! {
     process.run(["echo", value]) ?? return Err("test")
 }
 "#;
-    assert_eq!(
-        codes(src).iter().filter(|code| *code == "E0721").count(),
-        1
-    );
+    assert_eq!(codes(src).iter().filter(|code| *code == "E0721").count(), 1);
 }
 
 #[test]
@@ -178,10 +179,7 @@ fn run() ! {
     process.run(["echo", account_name()]) ?? return Err("test")
 }
 "#;
-    assert_eq!(
-        codes(src).iter().filter(|code| *code == "E0721").count(),
-        1
-    );
+    assert_eq!(codes(src).iter().filter(|code| *code == "E0721").count(), 1);
 }
 
 #[test]
@@ -197,10 +195,7 @@ fn run() ! {
     process.run(["echo", row.secret]) ?? return Err("test")
 }
 "#;
-    assert_eq!(
-        codes(src).iter().filter(|code| *code == "E0721").count(),
-        1
-    );
+    assert_eq!(codes(src).iter().filter(|code| *code == "E0721").count(), 1);
 }
 
 #[test]
@@ -217,10 +212,7 @@ fn run() ! {
     process.run(["echo", store.read()]) ?? return Err("test")
 }
 "#;
-    assert_eq!(
-        codes(src).iter().filter(|code| *code == "E0721").count(),
-        1
-    );
+    assert_eq!(codes(src).iter().filter(|code| *code == "E0721").count(), 1);
 }
 
 #[test]

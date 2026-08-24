@@ -39,7 +39,12 @@ fn homes_for(needle: &str) -> Vec<String> {
     for file in &files {
         let text = fs::read_to_string(file).unwrap_or_default();
         if text.contains(needle) {
-            homes.push(file.strip_prefix(&root).unwrap_or(file).display().to_string());
+            homes.push(
+                file.strip_prefix(&root)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string(),
+            );
         }
     }
     homes

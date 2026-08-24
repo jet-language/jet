@@ -358,14 +358,7 @@ impl PackageVariant {
 
     /// Axis-name order used for tie-break / ambiguity diagnostics.
     pub const AXIS_ORDER: &'static [&'static str] = &[
-        "role",
-        "os",
-        "arch",
-        "libc",
-        "linkage",
-        "abi",
-        "artifact",
-        "features",
+        "role", "os", "arch", "libc", "linkage", "abi", "artifact", "features",
     ];
 
     /// First axis where `a` and `b` differ under AXIS_ORDER.
@@ -413,11 +406,7 @@ impl VariantCandidate {
         }
     }
 
-    pub fn with_provider_fact(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<String>,
-    ) -> Self {
+    pub fn with_provider_fact(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.provider_facts.insert(key.into(), value.into());
         self
     }
@@ -433,10 +422,7 @@ pub struct VariantMapEntry {
 }
 
 /// Apply `variant_map` entries onto a candidate's typed axes before matching.
-pub fn apply_variant_map(
-    candidate: &VariantCandidate,
-    maps: &[VariantMapEntry],
-) -> PackageVariant {
+pub fn apply_variant_map(candidate: &VariantCandidate, maps: &[VariantMapEntry]) -> PackageVariant {
     let mut v = candidate.variant.clone();
     for entry in maps {
         let Some(raw) = candidate.provider_facts.get(&entry.provider_key) else {
@@ -538,11 +524,7 @@ impl VariantSelectError {
 }
 
 /// E1316 — ambiguous variant candidates after exact-then-compatible matching.
-pub fn e1316_ambiguous(
-    need: &PackageVariant,
-    axis: &str,
-    labels: &[String],
-) -> Diagnostic {
+pub fn e1316_ambiguous(need: &PackageVariant, axis: &str, labels: &[String]) -> Diagnostic {
     let listed = labels.join(", ");
     Diagnostic::error(
         "E1316",
@@ -591,21 +573,11 @@ pub fn select_variant(
         }),
         1 => Ok(candidates[pool[0]].clone()),
         _ => {
-            let mut labels: Vec<String> = pool
-                .iter()
-                .map(|&i| candidates[i].label.clone())
-                .collect();
+            let mut labels: Vec<String> =
+                pool.iter().map(|&i| candidates[i].label.clone()).collect();
             labels.sort();
-            let a = &mapped
-                .iter()
-                .find(|(i, _)| *i == pool[0])
-                .unwrap()
-                .1;
-            let b = &mapped
-                .iter()
-                .find(|(i, _)| *i == pool[1])
-                .unwrap()
-                .1;
+            let a = &mapped.iter().find(|(i, _)| *i == pool[0]).unwrap().1;
+            let b = &mapped.iter().find(|(i, _)| *i == pool[1]).unwrap().1;
             // If mapped variants are identical, distinguish via unmapped
             // provider facts that were not folded into axes — still ambiguous.
             let axis = if a == b {
@@ -658,17 +630,11 @@ mod tests {
 
     #[test]
     fn exact_beats_compatible_and_ambiguity_names_axis() {
-        let need = PackageVariant::cross_target(
-            VariantOs::Linux,
-            VariantArch::Aarch64,
-            VariantLibc::Musl,
-        )
-        .with_linkage(VariantLinkage::Static);
+        let need =
+            PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl)
+                .with_linkage(VariantLinkage::Static);
 
-        let a = VariantCandidate::new(
-            "openssl-static-musl",
-            need.clone(),
-        );
+        let a = VariantCandidate::new("openssl-static-musl", need.clone());
         let _b = VariantCandidate::new(
             "openssl-static-musl-alt",
             need.clone().with_feature("legacy"),
@@ -694,18 +660,11 @@ mod tests {
 
     #[test]
     fn variant_map_folds_provider_fact_into_libc() {
-        let need = PackageVariant::cross_target(
-            VariantOs::Linux,
-            VariantArch::Aarch64,
-            VariantLibc::Musl,
-        );
+        let need =
+            PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Musl);
         let cand = VariantCandidate::new(
             "openssl",
-            PackageVariant::cross_target(
-                VariantOs::Linux,
-                VariantArch::Aarch64,
-                VariantLibc::Gnu,
-            ),
+            PackageVariant::cross_target(VariantOs::Linux, VariantArch::Aarch64, VariantLibc::Gnu),
         )
         .with_provider_fact("conan.compiler.libc", "musl");
         let maps = [VariantMapEntry {

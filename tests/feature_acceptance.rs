@@ -165,8 +165,7 @@ fn derive_source_reentry() {
         );
     }
     assert!(
-        !codegen_items.contains("emit_struct_serde")
-            && !codegen_items.contains("emit_enum_serde"),
+        !codegen_items.contains("emit_struct_serde") && !codegen_items.contains("emit_enum_serde"),
         "direct Rust serde synthesis must stay deleted"
     );
 
@@ -221,10 +220,8 @@ fn run() {
     print(json.to_string(p))
 }
 "#;
-    let dir = std::env::temp_dir().join(format!(
-        "jet_feature_derive_reentry_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("jet_feature_derive_reentry_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("create derive acceptance dir");
     let path = dir.join("main.jet");
@@ -287,9 +284,7 @@ fn audited_discard() {
         "discard probe must detect active retired blocks across trivia"
     );
     assert!(
-        has_active_suppress(
-            "\"\"\"\nretired: {#Suppress(MustUse) { value }}\n\"\"\""
-        ),
+        has_active_suppress("\"\"\"\nretired: {#Suppress(MustUse) { value }}\n\"\"\""),
         "discard probe must inspect active marker syntax in string interpolations"
     );
     for fake in [
@@ -304,8 +299,7 @@ fn audited_discard() {
         );
     }
     assert!(
-        has_executable_drop_with_reason(&example)
-            && !has_active_suppress(&example),
+        has_executable_drop_with_reason(&example) && !has_active_suppress(&example),
         "I5 example must exercise the sole discard channel"
     );
     let expected = read("examples/features/expected/errors/discard_fallible.out");
@@ -344,7 +338,9 @@ fn prelude_opt_out() {
 
     let example = read("examples/features/io/no_prelude.jet");
     assert!(
-        example.starts_with("#NoPrelude") || example.contains("\n#NoPrelude\n") || example.lines().next() == Some("#NoPrelude"),
+        example.starts_with("#NoPrelude")
+            || example.contains("\n#NoPrelude\n")
+            || example.lines().next() == Some("#NoPrelude"),
         "I5 example must declare `#NoPrelude`"
     );
     assert!(
@@ -403,11 +399,7 @@ fn maturity_convention() {
     );
     let expected = read("examples/features/expected/syntax/maturity_tags.out");
     let got = run_example("examples/features/syntax/maturity_tags.jet");
-    assert_eq!(
-        got.trim(),
-        expected.trim(),
-        "maturity_tags golden mismatch"
-    );
+    assert_eq!(got.trim(), expected.trim(), "maturity_tags golden mismatch");
 
     // Zero sema effect: no diagnostic/codegen policy keyed on maturity.
     let retired_at = read("tests/ui/marker_experimental_at.stderr");
@@ -417,11 +409,7 @@ fn maturity_convention() {
     );
 
     let sema_hits = Command::new("rg")
-        .args([
-            "-n",
-            r"\.maturity\b|MaturityTag",
-            "crates/jet-sema/src",
-        ])
+        .args(["-n", r"\.maturity\b|MaturityTag", "crates/jet-sema/src"])
         .current_dir(root())
         .output();
     if let Ok(out) = sema_hits {
@@ -472,7 +460,9 @@ fn public_build_product() {
         "I2: rustc rejected programmable build codegen:\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
-    let run = Command::new(&bin).output().expect("run programmable build bin");
+    let run = Command::new(&bin)
+        .output()
+        .expect("run programmable build bin");
     assert!(
         run.status.success(),
         "programmable build binary failed:\n{}",
@@ -503,7 +493,13 @@ fn public_build_product() {
     );
 
     let query = Command::new(jet_bin())
-        .args(["inspect", "query", "build", entry.to_str().unwrap(), "--json"])
+        .args([
+            "inspect",
+            "query",
+            "build",
+            entry.to_str().unwrap(),
+            "--json",
+        ])
         .current_dir(root())
         .output()
         .expect("jet inspect query build");
@@ -571,8 +567,7 @@ fn public_build_product() {
     );
     let main = read("Source/main.rs");
     assert!(
-        main.contains("EngineDispatch::dispatch")
-            && main.contains("JETPACK_BINARY_NAME"),
+        main.contains("EngineDispatch::dispatch") && main.contains("JETPACK_BINARY_NAME"),
         "jet front door must dispatch package/env verbs to jetpack"
     );
 }
@@ -685,10 +680,7 @@ fn project_format_and_test() {
         "project formatter workflow must have dedicated tests"
     );
 
-    let dir = std::env::temp_dir().join(format!(
-        "jet_cap_format_test_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_cap_format_test_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("src")).expect("mkdir");
     // Unformatted project file — `jet fmt` must rewrite it.
@@ -706,7 +698,10 @@ fn project_format_and_test() {
         String::from_utf8_lossy(&fmt.stderr)
     );
     let formatted = fs::read_to_string(&main).expect("read formatted");
-    assert_ne!(formatted, unformatted, "project fmt must rewrite dirty files");
+    assert_ne!(
+        formatted, unformatted,
+        "project fmt must rewrite dirty files"
+    );
     let check = Command::new(jet_bin())
         .args(["fmt", "--check", "src"])
         .current_dir(&dir)

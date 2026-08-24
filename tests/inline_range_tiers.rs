@@ -4,9 +4,9 @@
 use std::fs;
 use std::process::Command;
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 const EXAMPLE: &str = include_str!("../examples/features/types/range_types.jet");
 const EXPECTED: &str = include_str!("../examples/features/expected/types/range_types.out");
@@ -24,7 +24,12 @@ fn have_tool(name: &str) -> bool {
 
 fn have_wasm_target() -> bool {
     Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
@@ -65,7 +70,9 @@ fn run() {
     let diagnostics = jet::compile_with_path(source, "tests/fixtures/large_range_literal.jet")
         .expect_err("an oversized exact literal must not enter a bounded range");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0135"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0135"),
         "expected E0135, got {diagnostics:#?}"
     );
 }
@@ -99,7 +106,9 @@ fn run() {
     );
 
     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
-        eprintln!("note: skipping inline-range web execution (need rustc, wasm32 target, and node)");
+        eprintln!(
+            "note: skipping inline-range web execution (need rustc, wasm32 target, and node)"
+        );
         return;
     }
 

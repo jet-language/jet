@@ -569,7 +569,10 @@ fn read_domain_contract() -> Vec<DomainContract> {
         .map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
             assert_eq!(fields.len(), 6, "bad domain contract row: {line}");
-            assert_eq!(fields[0], "1", "unsupported domain contract version: {line}");
+            assert_eq!(
+                fields[0], "1",
+                "unsupported domain contract version: {line}"
+            );
             assert_eq!(fields[5], DOMAIN_SCORING, "domain scoring drifted: {line}");
             DomainContract {
                 task_id: fields[1].into(),
@@ -585,7 +588,11 @@ fn read_domain_contract() -> Vec<DomainContract> {
 fn read_tasks() -> Vec<Task> {
     let manifest = fs::read_to_string(corpus_root().join("manifest.tsv")).unwrap();
     let mut lines = manifest.lines();
-    assert_eq!(lines.next(), Some(HEADER), "agent workload manifest schema drifted");
+    assert_eq!(
+        lines.next(),
+        Some(HEADER),
+        "agent workload manifest schema drifted"
+    );
     lines
         .filter(|line| !line.is_empty())
         .map(|line| {
@@ -653,10 +660,7 @@ fn read_jet_baseline() -> Vec<(String, String, String)> {
         .map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
             assert_eq!(fields.len(), 4, "bad Jet baseline row: {line}");
-            assert_eq!(
-                fields[0], "1",
-                "unsupported Jet baseline version: {line}"
-            );
+            assert_eq!(fields[0], "1", "unsupported Jet baseline version: {line}");
             (fields[1].into(), fields[2].into(), fields[3].into())
         })
         .collect()
@@ -936,7 +940,11 @@ impl BaselineCapture {
             && cold.output.stdout == expected
             && warm.output.stdout == expected
             && output_stable;
-        let expressibility = if supported { "supported" } else { "unsupported" };
+        let expressibility = if supported {
+            "supported"
+        } else {
+            "unsupported"
+        };
         let finding = if supported {
             "none".to_string()
         } else {
@@ -1013,7 +1021,10 @@ fn verify_checksum_closure(root: &Path, sums: &str) -> Result<usize, String> {
         if validate_corpus_relative_path(relative).is_err() {
             return Err(format!("invalid checksum path: {relative}"));
         }
-        if declared.insert(relative.to_string(), hash.to_string()).is_some() {
+        if declared
+            .insert(relative.to_string(), hash.to_string())
+            .is_some()
+        {
             return Err(format!("duplicate checksum path: {relative}"));
         }
     }
@@ -1037,17 +1048,10 @@ fn verify_checksum_closure(root: &Path, sums: &str) -> Result<usize, String> {
 }
 
 fn source_tokens(path: &Path) -> usize {
-    fs::read_to_string(path)
-        .unwrap()
-        .split_whitespace()
-        .count()
+    fs::read_to_string(path).unwrap().split_whitespace().count()
 }
 
-fn scratch_output_violations(
-    adapter: &str,
-    path: &Path,
-    jet_artifact_name: &str,
-) -> Vec<String> {
+fn scratch_output_violations(adapter: &str, path: &Path, jet_artifact_name: &str) -> Vec<String> {
     fn walk(root: &Path, dir: &Path, entries: &mut BTreeMap<String, &'static str>) {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
@@ -1119,7 +1123,11 @@ fn recorded_baselines_cover_frozen_tasks() {
     let root = corpus_root().join("baselines");
     let receipt = fs::read_to_string(root.join("receipt.tsv")).unwrap();
     let mut lines = receipt.lines();
-    assert_eq!(lines.next(), Some(BASELINE_HEADER), "baseline schema drifted");
+    assert_eq!(
+        lines.next(),
+        Some(BASELINE_HEADER),
+        "baseline schema drifted"
+    );
 
     let tasks = read_tasks();
     let mut seen = BTreeSet::new();
@@ -1128,8 +1136,14 @@ fn recorded_baselines_cover_frozen_tasks() {
     for line in lines.filter(|line| !line.is_empty()) {
         let fields = line.split('\t').collect::<Vec<_>>();
         assert_eq!(fields.len(), 23, "bad baseline receipt row: {line}");
-        assert_eq!(fields[0], "1", "unsupported baseline receipt version: {line}");
-        assert!(BASELINE_ADAPTERS.contains(&fields[3]), "unknown baseline adapter: {line}");
+        assert_eq!(
+            fields[0], "1",
+            "unsupported baseline receipt version: {line}"
+        );
+        assert!(
+            BASELINE_ADAPTERS.contains(&fields[3]),
+            "unknown baseline adapter: {line}"
+        );
         let task = tasks
             .iter()
             .find(|task| task.id == fields[4])
@@ -1150,7 +1164,11 @@ fn recorded_baselines_cover_frozen_tasks() {
         }
         assert!(!fields[1].is_empty() && !fields[2].is_empty());
         assert!(fields[21] != "" && fields[21] != "unknown");
-        assert_eq!(fields[22], policy_digest(), "baseline policy digest drifted: {line}");
+        assert_eq!(
+            fields[22],
+            policy_digest(),
+            "baseline policy digest drifted: {line}"
+        );
         assert_eq!(fields[7], input_digest(&corpus_root().join(&task.input)));
         let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
         assert_eq!(fields[8], jet::SHA256::sha256_hex(&expected));
@@ -1180,7 +1198,10 @@ fn recorded_baselines_cover_frozen_tasks() {
                 assert_eq!(fields[17], fields[12]);
             }
             "unsupported" => {
-                assert_ne!(fields[6], "none", "unsupported baseline lacks finding: {line}");
+                assert_ne!(
+                    fields[6], "none",
+                    "unsupported baseline lacks finding: {line}"
+                );
                 assert_eq!(fields[11], "-");
                 assert_eq!(fields[13], "-");
             }
@@ -1293,7 +1314,10 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(actual, EXPECTED_TASKS, "task removed, added, or reclassified");
+    assert_eq!(
+        actual, EXPECTED_TASKS,
+        "task removed, added, or reclassified"
+    );
 
     let mut ids = BTreeSet::new();
     let task_ids = tasks
@@ -1361,11 +1385,21 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
                 _ => {
                     let expected = fs::read_to_string(corpus_root().join(&task.expected)).unwrap();
                     let hostile = match task.id.as_str() {
-                        "desktop-interaction-focus" => expected.lines().any(|line| line == "event|Empty|observed"),
-                        "browser-automation-preflight" => expected.lines().any(|line| line.ends_with("|rejected")),
-                        "mcp-environment-denied" => expected.lines().any(|line| line == "error=-32002"),
-                        "interactive-terminal-closed" => expected.lines().any(|line| line == "closed=ok"),
-                        "service-lifecycle-readiness-timeout" => expected.lines().any(|line| line == "error=E1261"),
+                        "desktop-interaction-focus" => {
+                            expected.lines().any(|line| line == "event|Empty|observed")
+                        }
+                        "browser-automation-preflight" => {
+                            expected.lines().any(|line| line.ends_with("|rejected"))
+                        }
+                        "mcp-environment-denied" => {
+                            expected.lines().any(|line| line == "error=-32002")
+                        }
+                        "interactive-terminal-closed" => {
+                            expected.lines().any(|line| line == "closed=ok")
+                        }
+                        "service-lifecycle-readiness-timeout" => {
+                            expected.lines().any(|line| line == "error=E1261")
+                        }
                         _ => expected.lines().any(|line| line.starts_with("reject|")),
                     };
                     assert!(hostile, "target task {} lost its hostile variant", task.id);
@@ -1409,7 +1443,10 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 82, "all inputs and declared outputs must be frozen");
+    assert_eq!(
+        verified, 82,
+        "all inputs and declared outputs must be frozen"
+    );
 }
 
 #[test]
@@ -1578,14 +1615,7 @@ fn structured_data_database_http_production_paths_handle_success_and_hostile_inp
             .join("adapters")
             .join(format!("{}.jet", adapter_stem(&task.id)));
         let bounded = run_bounded(
-            adapter_command(
-                "jet",
-                &source,
-                &jet_cli,
-                &input,
-                &scratch.path,
-                &task.id,
-            ),
+            adapter_command("jet", &source, &jet_cli, &input, &scratch.path, &task.id),
             "#1167 production path",
             PROCESS_DEADLINE,
         );
@@ -1593,7 +1623,11 @@ fn structured_data_database_http_production_paths_handle_success_and_hostile_inp
         assert!(!bounded.timed_out, "{} timed out", task.id);
         assert!(!bounded.limit_exceeded, "{} hit output limit", task.id);
         assert_eq!(bounded.output.status.code(), Some(0), "{} failed", task.id);
-        assert_eq!(bounded.output.stdout, expected, "{} output drifted", task.id);
+        assert_eq!(
+            bounded.output.stdout, expected,
+            "{} output drifted",
+            task.id
+        );
         assert_eq!(input_hashes(&input), before, "{} changed input", task.id);
         assert_eq!(
             scratch_output_violations(
@@ -1627,8 +1661,7 @@ fn native_os_matrix_is_frozen_and_names_current_host() {
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        actual,
-        EXPECTED_NATIVE_OS_MATRIX,
+        actual, EXPECTED_NATIVE_OS_MATRIX,
         "native OS matrix changed without a frozen review"
     );
     assert!(
@@ -1688,7 +1721,10 @@ fn checksum_closure_rejects_drift_and_hostile_sums() {
     assert_eq!(verify_checksum_closure(&scratch.path, &sums), Ok(2));
     fs::write(scratch.path.join("inputs/unhashed.txt"), "extra").unwrap();
     let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
-    assert!(error.contains("unhashed") && error.contains("inputs/unhashed.txt"), "{error}");
+    assert!(
+        error.contains("unhashed") && error.contains("inputs/unhashed.txt"),
+        "{error}"
+    );
     fs::remove_file(scratch.path.join("inputs/unhashed.txt")).unwrap();
 
     let input_hash = jet::SHA256::sha256_hex(b"input");
@@ -1703,7 +1739,10 @@ fn checksum_closure_rejects_drift_and_hostile_sums() {
     // A removed declared fixture is reported as missing, never as a pass.
     fs::remove_file(scratch.path.join("expected/task.out")).unwrap();
     let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
-    assert!(error.contains("missing") && error.contains("expected/task.out"), "{error}");
+    assert!(
+        error.contains("missing") && error.contains("expected/task.out"),
+        "{error}"
+    );
     fs::write(scratch.path.join("expected/task.out"), "output").unwrap();
     assert_eq!(verify_checksum_closure(&scratch.path, &sums), Ok(2));
 
@@ -1774,7 +1813,10 @@ fn process_output_limit_fails_closed() {
     command.args(["-c", "import sys; sys.stdout.write('x' * 2000000)"]);
     command.current_dir(&scratch.path);
     let bounded = run_bounded(command, "output limit regression", PROCESS_DEADLINE);
-    assert!(bounded.limit_exceeded, "output limit did not stop the process");
+    assert!(
+        bounded.limit_exceeded,
+        "output limit did not stop the process"
+    );
     assert!(!bounded.timed_out, "output limit was reported as a timeout");
     assert!(
         bounded.elapsed < Duration::from_secs(2),
@@ -1795,7 +1837,10 @@ fn production_process_limits_authority_and_descendant_cleanup() {
         command.arg(source).current_dir(&scratch.path);
         let bounded = run_bounded(command, "process policy corpus", PROCESS_DEADLINE);
         assert!(!bounded.timed_out, "Jet process policy fixture timed out");
-        assert!(!bounded.limit_exceeded, "Jet process policy fixture hit output limit");
+        assert!(
+            !bounded.limit_exceeded,
+            "Jet process policy fixture hit output limit"
+        );
         assert_eq!(
             bounded.output.status.code(),
             Some(0),
@@ -1857,7 +1902,10 @@ fn run() {
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         while !process_is_gone_or_zombie(child_pid) {
-            assert!(Instant::now() < deadline, "timed-out process left descendant {child_pid}");
+            assert!(
+                Instant::now() < deadline,
+                "timed-out process left descendant {child_pid}"
+            );
             thread::sleep(Duration::from_millis(10));
         }
     }
@@ -1868,7 +1916,11 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
     fn valid_jet_scratch(prefix: &str) -> Scratch {
         let scratch = Scratch::new(prefix);
         fs::create_dir(scratch.path.join("build")).unwrap();
-        fs::write(scratch.path.join("build/process_batch"), "declared artifact").unwrap();
+        fs::write(
+            scratch.path.join("build/process_batch"),
+            "declared artifact",
+        )
+        .unwrap();
         scratch
     }
 
@@ -1930,7 +1982,11 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
         use std::os::unix::fs::symlink;
 
         let symlink_leak = valid_jet_scratch("jet_agent_scratch_symlink");
-        symlink("missing-target", symlink_leak.path.join("build/process_batch.rs")).unwrap();
+        symlink(
+            "missing-target",
+            symlink_leak.path.join("build/process_batch.rs"),
+        )
+        .unwrap();
         assert_eq!(
             scratch_output_violations("jet", &symlink_leak.path, "process_batch"),
             vec!["unexpected symlink: build/process_batch.rs".to_string()]
@@ -1948,12 +2004,18 @@ fn equivalent_adapters_complete_declared_tasks() {
     let jet_artifact = jet::SHA256::sha256_hex(&fs::read(&jet_cli).unwrap());
     let versions = BTreeMap::from([
         ("jet", command_version(&jet_cli, "--version", "jet")),
-        ("bash", command_version(Path::new("bash"), "--version", "bash")),
+        (
+            "bash",
+            command_version(Path::new("bash"), "--version", "bash"),
+        ),
         (
             "python",
             command_version(Path::new("python3"), "--version", "python3"),
         ),
-        ("node", command_version(Path::new("node"), "--version", "node")),
+        (
+            "node",
+            command_version(Path::new("node"), "--version", "node"),
+        ),
     ]);
     let git_version = command_version(Path::new("git"), "--version", "git");
     let mut baseline = BaselineCapture::from_env();
@@ -1978,33 +2040,27 @@ fn equivalent_adapters_complete_declared_tasks() {
                 .join("adapters")
                 .join(format!("{stem}.{extension}"));
             let cold = run_bounded(
-                adapter_command(
-                    adapter,
-                    &source,
-                    &jet_cli,
-                    &input,
-                    &scratch.path,
-                    &task.id,
-                ),
+                adapter_command(adapter, &source, &jet_cli, &input, &scratch.path, &task.id),
                 adapter,
                 PROCESS_DEADLINE,
             );
             let warm = run_bounded(
-                adapter_command(
-                    adapter,
-                    &source,
-                    &jet_cli,
-                    &input,
-                    &scratch.path,
-                    &task.id,
-                ),
+                adapter_command(adapter, &source, &jet_cli, &input, &scratch.path, &task.id),
                 adapter,
                 PROCESS_DEADLINE,
             );
             assert!(!cold.timed_out, "{} {adapter} cold run timed out", task.id);
             assert!(!warm.timed_out, "{} {adapter} warm run timed out", task.id);
-            assert!(!cold.limit_exceeded, "{} {adapter} cold output limit exceeded", task.id);
-            assert!(!warm.limit_exceeded, "{} {adapter} warm output limit exceeded", task.id);
+            assert!(
+                !cold.limit_exceeded,
+                "{} {adapter} cold output limit exceeded",
+                task.id
+            );
+            assert!(
+                !warm.limit_exceeded,
+                "{} {adapter} warm output limit exceeded",
+                task.id
+            );
             assert_eq!(
                 cold.output.status.code(),
                 Some(0),
@@ -2134,7 +2190,11 @@ fn llm_digest_first_program() {
                 .unwrap_or_else(|| panic!("bad llm digest fixture checksum row: {line}"))
         })
         .collect::<Vec<_>>();
-    assert_eq!(rows.len(), 2, "llm digest fixture checksum row count drifted");
+    assert_eq!(
+        rows.len(),
+        2,
+        "llm digest fixture checksum row count drifted"
+    );
     assert_eq!(
         rows.iter().map(|(_, path)| *path).collect::<BTreeSet<_>>(),
         BTreeSet::from(["first_program.jet", "transcript.txt"]),
@@ -2151,7 +2211,10 @@ fn llm_digest_first_program() {
         "print(greeting)",
         "No semicolons.",
     ] {
-        assert!(digest.contains(required), "digest lacks first-program context: {required}");
+        assert!(
+            digest.contains(required),
+            "digest lacks first-program context: {required}"
+        );
     }
 
     let scratch = Scratch::new("jet_llm_digest_first_program");
@@ -2162,11 +2225,17 @@ fn llm_digest_first_program() {
         .current_dir(&scratch.path);
     let bounded = run_bounded(command, "llm digest first program", PROCESS_DEADLINE);
     assert!(!bounded.timed_out, "llm digest first program timed out");
-    assert!(!bounded.limit_exceeded, "llm digest first program hit output limit");
+    assert!(
+        !bounded.limit_exceeded,
+        "llm digest first program hit output limit"
+    );
     assert!(
         bounded.output.status.success(),
         "llm digest first program failed: {}",
         stderr_receipt(&bounded.output)
     );
-    assert_eq!(bounded.output.stdout, expected, "first-program transcript drifted");
+    assert_eq!(
+        bounded.output.stdout, expected,
+        "first-program transcript drifted"
+    );
 }

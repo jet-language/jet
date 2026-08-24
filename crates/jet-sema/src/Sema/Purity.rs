@@ -15,8 +15,7 @@ pub fn e3401(
     let why = if path.is_empty() {
         format!(
             "`{}` is impure, but `{}` declares `-[]>`",
-            call_name,
-            pure_fn_name
+            call_name, pure_fn_name
         )
     } else {
         format!(
@@ -35,8 +34,7 @@ pub fn e3401(
         why,
         format!(
             "give `{}` an explicit `-[]>` bound, or remove the call from `{}`",
-            call_name,
-            pure_fn_name
+            call_name, pure_fn_name
         ),
         Some(span),
     )
@@ -90,9 +88,8 @@ pub fn check_pure_fn(f: &Func, funcs: &HashMap<String, FuncSig>) -> Vec<Diagnost
         return Vec::new();
     }
     let no_bodies: HashMap<String, &Func> = HashMap::new();
-    let is_leaf_impure = |name: &str| {
-        is_impure_builtin(name) || funcs.get(name).is_some_and(|sig| sig.is_extern)
-    };
+    let is_leaf_impure =
+        |name: &str| is_impure_builtin(name) || funcs.get(name).is_some_and(|sig| sig.is_extern);
     match crate::Comptime::walk_purity_stmts(
         &f.body,
         &no_bodies,
@@ -111,9 +108,8 @@ pub(crate) fn check_pure_expr(
     funcs: &HashMap<String, FuncSig>,
 ) -> Option<Diagnostic> {
     let no_bodies: HashMap<String, &Func> = HashMap::new();
-    let is_leaf_impure = |name: &str| {
-        is_impure_builtin(name) || funcs.get(name).is_some_and(|sig| sig.is_extern)
-    };
+    let is_leaf_impure =
+        |name: &str| is_impure_builtin(name) || funcs.get(name).is_some_and(|sig| sig.is_extern);
     crate::Comptime::walk_purity_expr(
         e,
         &no_bodies,

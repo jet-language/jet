@@ -1,4 +1,6 @@
-use self::TestCache::{base64_encode, remove_dir, signed_narinfo, unique_dir, TestCacheServer};
+use self::TestCache::{
+    base64_encode, remove_dir, signed_narinfo, signed_zstd_narinfo, unique_dir, TestCacheServer,
+};
 use super::*;
 use ed25519_dalek::SigningKey;
 use std::fs;
@@ -107,6 +109,11 @@ fn native_nix_cache_streams_without_process_tools() {
         super::bytes_to_hex(&streaming.finalize()),
         crate::SHA256::sha256_hex(&nar)
     );
+    let compressed = encode_zstd_deterministic(&nar).unwrap();
+    assert_eq!(
+        zstd::stream::decode_all(Cursor::new(&compressed)).unwrap(),
+        nar
+    );
     let destination = root.with_extension("decoded");
     let actual =
         super::super::read_nar_stream(Cursor::new(nar), &destination, expected.bytes).unwrap();
@@ -133,9 +140,9 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
     let leaf_path = "/nix/store/11111111111111111111111111111111-leaf";
     let signing_key = SigningKey::from_bytes(&[7; 32]);
     let key_id = "test-cache-1";
-    let root_info = signed_narinfo(
+    let root_info = signed_zstd_narinfo(
         root_path,
-        "root.nar",
+        "root.nar.zst",
         &root_nar,
         &[leaf_path],
         key_id,
@@ -153,7 +160,10 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
             "/00000000000000000000000000000000.narinfo".to_string(),
             root_info,
         ),
-        ("/nar/root.nar".to_string(), root_nar),
+        (
+            "/nar/root.nar.zst".to_string(),
+            encode_zstd_deterministic(&root_nar).unwrap(),
+        ),
     ]);
     let server = TestCacheServer::start(routes.clone());
     let jet_root = root.join("jetpack");
@@ -207,6 +217,251 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
     remove_dir(&root);
 }
 
+fn nar_with_directory_entries(names: &[&[u8]]) -> Vec<u8> {
+    fn put(output: &mut Vec<u8>, value: &[u8]) {
+        output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        output.extend_from_slice(value);
+        let padding = (8 - value.len() % 8) % 8;
+        output.resize(output.len() + padding, 0);
+    }
+
+    let mut output = Vec::new();
+    put(&mut output, b"nix-archive-1");
+    put(&mut output, b"(");
+    put(&mut output, b"(");
+    put(&mut output, b"type");
+    put(&mut output, b"directory");
+    for name in names {
+        put(&mut output, b"entry");
+        put(&mut output, b"(");
+        put(&mut output, b"name");
+        put(&mut output, name);
+        put(&mut output, b"node");
+        put(&mut output, b"(");
+        put(&mut output, b"type");
+        put(&mut output, b"regular");
+        put(&mut output, b"contents");
+        put(&mut output, b"");
+        put(&mut output, b")");
+        put(&mut output, b")");
+    }
+    put(&mut output, b")");
+    put(&mut output, b")");
+    output
+}
+
+fn assert_single_nix_cache_failure(
+    tag: &str,
+    store_path: &str,
+    narinfo: Vec<u8>,
+    object: Vec<u8>,
+    trusted_key: &SigningKey,
+    expected: NixCacheErrorKind,
+) {
+    let root = unique_dir(tag);
+    let narinfo_text = String::from_utf8(narinfo.clone()).unwrap();
+    let mut routes = BTreeMap::from([
+        (
+            "/nix-cache-info".to_string(),
+            b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+        ),
+        (
+            format!(
+                "/{}.narinfo",
+                store_path.rsplit('/').next().unwrap().get(..32).unwrap()
+            ),
+            narinfo,
+        ),
+    ]);
+    if let Ok(info) = NixNarInfo::parse(&narinfo_text) {
+        routes.insert(
+            format!(
+                "/{}",
+                info.url.split('?').next().unwrap_or(info.url.as_str())
+            ),
+            object,
+        );
+    }
+    let server = TestCacheServer::start(routes);
+    let jet_root = root.join("jetpack");
+    fs::create_dir_all(jet_root.join("config")).unwrap();
+    fs::create_dir_all(jet_root.join("trust")).unwrap();
+    fs::write(
+        jet_root.join("config/nix-cache-v1.endpoint"),
+        &server.endpoint,
+    )
+    .unwrap();
+    fs::write(
+        jet_root.join("trust/nix-cache-v1.ed25519.pub"),
+        format!(
+            "test-cache-1:{}\n",
+            base64_encode(&trusted_key.verifying_key().to_bytes())
+        ),
+    )
+    .unwrap();
+    let roots = Roots::at(jet_root);
+    let error = admit_nix_closure(
+        &roots,
+        &[NixOutputRequest {
+            name: "out".to_string(),
+            store_path: store_path.to_string(),
+        }],
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), expected);
+    assert_eq!(error.code(), "E1350");
+    assert!(crate::Store::list(&roots).is_empty());
+    for path in [
+        roots.hangar_dir().join("objects"),
+        roots.hangar_dir().join("receipts"),
+    ] {
+        if let Ok(entries) = fs::read_dir(path) {
+            assert!(entries.into_iter().next().is_none());
+        }
+    }
+    drop(server);
+    remove_dir(&root);
+}
+
+#[test]
+fn native_nix_cache_negative_inputs_fail_closed() {
+    let store_path = "/nix/store/22222222222222222222222222222222-negative";
+    let signing_key = SigningKey::from_bytes(&[9; 32]);
+    let wrong_key = SigningKey::from_bytes(&[10; 32]);
+    let key_id = "test-cache-1";
+    let valid_nar = nar_with_directory_entries(&[]);
+
+    assert_single_nix_cache_failure(
+        "wrong-key",
+        store_path,
+        signed_narinfo(
+            store_path,
+            "negative.nar",
+            &valid_nar,
+            &[],
+            key_id,
+            &signing_key,
+        ),
+        valid_nar.clone(),
+        &wrong_key,
+        NixCacheErrorKind::Signature,
+    );
+
+    let zstd_info = signed_zstd_narinfo(
+        store_path,
+        "negative.nar.zst",
+        &valid_nar,
+        &[],
+        key_id,
+        &signing_key,
+    );
+    let compressed = crate::Store::encode_zstd_deterministic(&valid_nar).unwrap();
+    let mut corrupted = compressed.clone();
+    let corruption_index = corrupted.len() - 1;
+    corrupted[corruption_index] ^= 1;
+    assert_single_nix_cache_failure(
+        "compressed-corruption",
+        store_path,
+        zstd_info,
+        corrupted,
+        &signing_key,
+        NixCacheErrorKind::CompressedCorruption,
+    );
+
+    assert_single_nix_cache_failure(
+        "nar-corruption",
+        store_path,
+        signed_narinfo(
+            store_path,
+            "negative.nar",
+            b"not-a-nar",
+            &[],
+            key_id,
+            &signing_key,
+        ),
+        b"not-a-nar".to_vec(),
+        &signing_key,
+        NixCacheErrorKind::NarCorruption,
+    );
+
+    let duplicate_nar = nar_with_directory_entries(&[b"A", b"a"]);
+    assert_single_nix_cache_failure(
+        "duplicate-entry",
+        store_path,
+        signed_narinfo(
+            store_path,
+            "duplicate.nar",
+            &duplicate_nar,
+            &[],
+            key_id,
+            &signing_key,
+        ),
+        duplicate_nar,
+        &signing_key,
+        NixCacheErrorKind::DuplicateEntry,
+    );
+
+    let traversal_nar = nar_with_directory_entries(&[b".."]);
+    assert_single_nix_cache_failure(
+        "path-traversal",
+        store_path,
+        signed_narinfo(
+            store_path,
+            "traversal.nar",
+            &traversal_nar,
+            &[],
+            key_id,
+            &signing_key,
+        ),
+        traversal_nar,
+        &signing_key,
+        NixCacheErrorKind::PathTraversal,
+    );
+
+    let url_traversal = String::from_utf8(signed_narinfo(
+        store_path,
+        "negative.nar",
+        &valid_nar,
+        &[],
+        key_id,
+        &signing_key,
+    ))
+    .unwrap()
+    .replace("URL: nar/negative.nar\n", "URL: ../negative.nar\n");
+    assert_single_nix_cache_failure(
+        "url-traversal",
+        store_path,
+        url_traversal.into_bytes(),
+        valid_nar.clone(),
+        &signing_key,
+        NixCacheErrorKind::PathTraversal,
+    );
+
+    let reference = "/nix/store/33333333333333333333333333333333-reference";
+    let duplicate_references = String::from_utf8(signed_narinfo(
+        store_path,
+        "negative.nar",
+        &valid_nar,
+        &[reference],
+        key_id,
+        &signing_key,
+    ))
+    .unwrap()
+    .replace(
+        "References: 33333333333333333333333333333333-reference\n",
+        "References: 33333333333333333333333333333333-reference 33333333333333333333333333333333-reference\n",
+    );
+    assert_single_nix_cache_failure(
+        "duplicate-reference",
+        store_path,
+        duplicate_references.into_bytes(),
+        valid_nar,
+        &signing_key,
+        NixCacheErrorKind::DuplicateEntry,
+    );
+}
+
 #[test]
 fn native_nix_cache_failures_are_e1350_and_snapshot_pinned() {
     let error = NixCacheError::new(NixCacheErrorKind::PathTraversal, "test");
@@ -239,5 +494,23 @@ fn native_nix_cache_failures_are_e1350_and_snapshot_pinned() {
         NixCacheErrorKind::Admission,
     ] {
         assert_eq!(NixCacheError::new(kind, "test").code(), "E1350");
+    }
+    for (detail, kind) in [
+        (
+            "NAR stream directory contains duplicate names",
+            NixCacheErrorKind::DuplicateEntry,
+        ),
+        (
+            "NAR name is not one safe path component",
+            NixCacheErrorKind::PathTraversal,
+        ),
+        (
+            "zstd data corruption detected",
+            NixCacheErrorKind::CompressedCorruption,
+        ),
+    ] {
+        let error = std::io::Error::new(std::io::ErrorKind::InvalidData, detail);
+        assert_eq!(super::classify_nar_error(&error), kind);
+        assert_eq!(NixCacheError::new(kind, detail).code(), "E1350");
     }
 }

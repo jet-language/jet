@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::Write as IOWrite;
 use std::marker::PhantomData;
-use std::path::PathBuf;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, TryLockError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -139,13 +139,19 @@ impl TraceState {
 
     fn record(&mut self, id: ObjectId, site: PromotionSite) -> Result<(), Fault> {
         if site.span_start > site.span_end
-            || [site.source, site.scope, site.policy_provenance, site.reason, site.type_name]
-                .iter()
-                .any(|value| {
-                    value.is_empty()
-                        || value.len() > MAX_TRACE_FIELD_BYTES
-                        || value.chars().any(char::is_control)
-                })
+            || [
+                site.source,
+                site.scope,
+                site.policy_provenance,
+                site.reason,
+                site.type_name,
+            ]
+            .iter()
+            .any(|value| {
+                value.is_empty()
+                    || value.len() > MAX_TRACE_FIELD_BYTES
+                    || value.chars().any(char::is_control)
+            })
         {
             self.drop_promotion();
             return self.persist();
@@ -218,7 +224,9 @@ impl TraceState {
         self.updated_unix_ms = unix_ms();
         let json = self.render();
         if json.len() > MAX_TRACE_BYTES {
-            return Err(Fault::TraceIo("GC trace exceeds its 4 MiB safety limit".to_string()));
+            return Err(Fault::TraceIo(
+                "GC trace exceeds its 4 MiB safety limit".to_string(),
+            ));
         }
         let parent = self
             .path
@@ -240,18 +248,22 @@ impl TraceState {
                     )));
                 }
             };
-            std::fs::create_dir_all(parent)
-                .map_err(|error| Fault::TraceIo(format!("cannot create GC trace directory: {error}")))?;
+            std::fs::create_dir_all(parent).map_err(|error| {
+                Fault::TraceIo(format!("cannot create GC trace directory: {error}"))
+            })?;
             #[cfg(unix)]
             if !_parent_existed {
                 use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
-                    .map_err(|error| Fault::TraceIo(format!("cannot secure GC trace directory: {error}")))?;
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).map_err(
+                    |error| Fault::TraceIo(format!("cannot secure GC trace directory: {error}")),
+                )?;
             }
         }
         let _existing_metadata = match std::fs::symlink_metadata(&self.path) {
             Ok(metadata) if !metadata.file_type().is_file() => {
-                return Err(Fault::TraceIo("GC trace path is not a regular file".to_string()));
+                return Err(Fault::TraceIo(
+                    "GC trace path is not a regular file".to_string(),
+                ));
             }
             Ok(metadata) => Some(metadata),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -259,9 +271,10 @@ impl TraceState {
                 return Err(Fault::TraceIo(format!("cannot inspect GC trace: {error}")));
             }
         };
-        let file_name = self.path.file_name().ok_or_else(|| {
-            Fault::TraceIo("GC trace path has no file name".to_string())
-        })?;
+        let file_name = self
+            .path
+            .file_name()
+            .ok_or_else(|| Fault::TraceIo("GC trace path has no file name".to_string()))?;
         let mut temp = None;
         for _ in 0..64 {
             let sequence = NEXT_TRACE_TEMP.fetch_add(1, Ordering::Relaxed);
@@ -350,7 +363,10 @@ impl TraceState {
             if index != 0 {
                 sites.push(',');
             }
-            let retained = identities.iter().filter(|identity| identity.retained).count();
+            let retained = identities
+                .iter()
+                .filter(|identity| identity.retained)
+                .count();
             let identity_json = identities
                 .iter()
                 .map(|identity| {
@@ -421,10 +437,7 @@ pub fn initialize_trace() -> Result<(), Fault> {
     else {
         return Ok(());
     };
-    trace
-        .lock()
-        .map_err(|_| Fault::TracePoisoned)?
-        .persist()
+    trace.lock().map_err(|_| Fault::TracePoisoned)?.persist()
 }
 
 /// Render every compiler-inserted collector failure as a stable Jet runtime
@@ -448,21 +461,19 @@ fn trace_promotion(id: ObjectId, site: PromotionSite) -> Result<(), Fault> {
         "represent identity-bearing links as Id<T>",
         "use Pool<T> when the lifetime is bounded",
     ];
-    let _ = super::jet_mem::jet_memory_ledger_record(
-        super::jet_mem::MemoryLedgerWitness {
-            kind: "gc",
-            code: "gc",
-            source: site.source,
-            span_start: site.span_start,
-            span_end: site.span_end,
-            byte_spans: !site.source.starts_with('<'),
-            scope: site.scope,
-            provenance: site.policy_provenance,
-            detail: site.reason,
-            expected: None,
-            repairs: &repairs,
-        },
-    );
+    let _ = super::jet_mem::jet_memory_ledger_record(super::jet_mem::MemoryLedgerWitness {
+        kind: "gc",
+        code: "gc",
+        source: site.source,
+        span_start: site.span_start,
+        span_end: site.span_end,
+        byte_spans: !site.source.starts_with('<'),
+        scope: site.scope,
+        provenance: site.policy_provenance,
+        detail: site.reason,
+        expected: None,
+        repairs: &repairs,
+    });
     let Some(trace) = TRACE
         .get_or_init(|| TraceState::from_env().map(Mutex::new))
         .as_ref()
@@ -657,9 +668,7 @@ impl Collector {
             .entries
             .iter()
             .filter_map(|(id, entry)| {
-                (entry.roots != 0
-                    || entry.pins != 0
-                    || Arc::strong_count(&entry.object) != 1)
+                (entry.roots != 0 || entry.pins != 0 || Arc::strong_count(&entry.object) != 1)
                     .then_some(*id)
             })
             .rev()
@@ -850,10 +859,7 @@ impl<T: Any + Send> AutomaticRoot<T> {
         Ok(result)
     }
 
-    pub fn edit_clearing_edges<R>(
-        &self,
-        edit: impl FnOnce(&mut T) -> R,
-    ) -> Result<R, Fault> {
+    pub fn edit_clearing_edges<R>(&self, edit: impl FnOnce(&mut T) -> R) -> Result<R, Fault> {
         self.edit_replacing_all_edges(&[], edit)
     }
 
@@ -865,7 +871,9 @@ impl<T: Any + Send> AutomaticRoot<T> {
     ) -> Result<R, Fault> {
         let mut slots = self.edge_slots.lock().map_err(|_| Fault::HeapPoisoned)?;
         let mut next = slots.clone();
-        next.entry(slot.to_string()).or_default().push(edges.to_vec());
+        next.entry(slot.to_string())
+            .or_default()
+            .push(edges.to_vec());
         let flattened = flatten_edge_slots(&next);
         let result = self.root.edit_with_edges(&flattened, edit)?;
         *slots = next;
@@ -1045,10 +1053,12 @@ impl<T: Any + Send> Drop for Root<T> {
         let collect = self.heap.collect_on_root_drop;
         drop(state);
         if collect {
-            runtime_or_exit(Collector {
-                heap: Arc::clone(&self.heap),
-            }
-            .safepoint());
+            runtime_or_exit(
+                Collector {
+                    heap: Arc::clone(&self.heap),
+                }
+                .safepoint(),
+            );
         }
     }
 }
@@ -1088,10 +1098,7 @@ impl<T: Any + Send> Edge<T> {
 fn replace_edges(heap: &Arc<Heap>, from: ObjectId, edges: &[ObjectId]) -> Result<(), Fault> {
     let normalized = normalize_edges(edges)?;
     let mut state = heap.state.lock().map_err(|_| Fault::HeapPoisoned)?;
-    let source = state
-        .entries
-        .get(&from)
-        .ok_or(Fault::UnknownObject(from))?;
+    let source = state.entries.get(&from).ok_or(Fault::UnknownObject(from))?;
     if source.reserved {
         return Err(Fault::MutationConflict(from));
     }
@@ -1200,10 +1207,7 @@ fn reserve_mutation(
 ) -> Result<MutationReservation, Fault> {
     let edges = normalize_edges(edges)?;
     let mut state = heap.state.lock().map_err(|_| Fault::HeapPoisoned)?;
-    let source = state
-        .entries
-        .get(&from)
-        .ok_or(Fault::UnknownObject(from))?;
+    let source = state.entries.get(&from).ok_or(Fault::UnknownObject(from))?;
     if source.reserved {
         return Err(Fault::MutationConflict(from));
     }
@@ -1220,7 +1224,11 @@ fn reserve_mutation(
         }
     }
     for id in &pinned {
-        state.entries.get_mut(id).expect("collector pin validated").pins += 1;
+        state
+            .entries
+            .get_mut(id)
+            .expect("collector pin validated")
+            .pins += 1;
     }
     state
         .entries
@@ -1247,11 +1255,7 @@ fn lookup(heap: &Arc<Heap>, id: ObjectId) -> Result<Arc<Object>, Fault> {
         .ok_or(Fault::UnknownObject(id))
 }
 
-fn access<T, R>(
-    heap: &Arc<Heap>,
-    id: ObjectId,
-    read: impl FnOnce(&T) -> R,
-) -> Result<R, Fault>
+fn access<T, R>(heap: &Arc<Heap>, id: ObjectId, read: impl FnOnce(&T) -> R) -> Result<R, Fault>
 where
     T: Any + Send,
 {

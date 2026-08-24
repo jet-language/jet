@@ -1,8 +1,8 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, CModuleKind, CodeModule, ConstAttr, ConstDef, EnumDef, EnumGroup, ExternFn,
-    DeriveBodyItem, ExternRustBlock, Field, Func, GenericModuleDef, GenericModuleParam, ImplDef,
-    ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StructDef,
+    AccessConvention, CModuleKind, CodeModule, ConstAttr, ConstDef, DeriveBodyItem, EnumDef,
+    EnumGroup, ExternFn, ExternRustBlock, Field, Func, GenericModuleDef, GenericModuleParam,
+    ImplDef, ImportDecl, ImportKind, Item, Marker, MetaAttr, MetaField, Param, Pattern, StructDef,
     TraitImplBlock, Type, TypeParam, Variant, VariantPayload,
 };
 
@@ -169,10 +169,11 @@ fn has_ambiguous_decode_union(items: &[Item], ty: &Type) -> bool {
         | Type::Option(inner)
         | Type::Tagged { inner, .. }
         | Type::FixedList { elem: inner, .. } => has_ambiguous_decode_union(items, inner),
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            has_ambiguous_decode_union(items, key)
-                || has_ambiguous_decode_union(items, value)
-        }
+        Type::Map { key, value, .. }
+        | Type::Result {
+            ok: key,
+            err: value,
+        } => has_ambiguous_decode_union(items, key) || has_ambiguous_decode_union(items, value),
         Type::Fn { params, ret, .. } => {
             params
                 .iter()
@@ -237,7 +238,10 @@ impl<'a> Fmt<'a> {
                 TokKind::LambdaArrow if effect_arrows.contains(&index) => Some(">"),
                 TokKind::LambdaArrow => Some(Syntax::OP_UNIFIED_ARROW),
                 TokKind::Dot
-                    if matches!(tokens.get(index + 1).map(|next| &next.kind), Some(TokKind::LBrace)) =>
+                    if matches!(
+                        tokens.get(index + 1).map(|next| &next.kind),
+                        Some(TokKind::LBrace)
+                    ) =>
                 {
                     Some("")
                 }
@@ -927,8 +931,7 @@ impl<'a> Fmt<'a> {
                 }
                 // D-LIB2: a trait method may carry a default body.
                 if let Some(body) = &m.default_body {
-                    if m
-                        .return_type
+                    if m.return_type
                         .as_ref()
                         .is_some_and(Self::return_type_has_value)
                         && m.declared_effects.is_none()
@@ -1045,7 +1048,11 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             self.write(" fn ");
-            self.write(t.name.as_deref().expect("property tests have a parsed name"));
+            self.write(
+                t.name
+                    .as_deref()
+                    .expect("property tests have a parsed name"),
+            );
             self.write("(");
             self.fmt_param_list(&t.params);
             self.write(")");
@@ -1338,9 +1345,7 @@ impl<'a> Fmt<'a> {
                 .src
                 .get(span.start..span.start.saturating_add(1))
                 .is_some_and(|source| source == "=");
-            let effect_body = f.declared_effects.is_some()
-                || f.effect_via.is_some()
-                || f.is_pure;
+            let effect_body = f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure;
             let effect_marker = effect_body
                 && self
                     .src
@@ -1373,8 +1378,7 @@ impl<'a> Fmt<'a> {
                 // ratified here is a body whose single statement the author
                 // wrote as the `return` keyword.
                 let after_keyword = span.start.saturating_add("return".len());
-                let is_authored_return = self.src.get(span.start..after_keyword)
-                    == Some("return")
+                let is_authored_return = self.src.get(span.start..after_keyword) == Some("return")
                     && self
                         .src
                         .get(after_keyword..)
@@ -1434,7 +1438,9 @@ impl<'a> Fmt<'a> {
                 .get(f.span.start..f.span.end)
                 .and_then(|source| source.rsplit_once('{'))
                 .and_then(|(_, body)| body.rsplit_once('}'))
-                .is_some_and(|(body, _)| !body.contains('\n') && !body.contains("//") && !body.contains("/*"))
+                .is_some_and(|(body, _)| {
+                    !body.contains('\n') && !body.contains("//") && !body.contains("/*")
+                })
         {
             self.write("}");
             self.expected_return_type = saved_return_type;
@@ -1445,7 +1451,10 @@ impl<'a> Fmt<'a> {
         self.expected_return_type = saved_return_type;
     }
 
-    pub(super) fn fmt_policy_declarations(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {
+    pub(super) fn fmt_policy_declarations(
+        &mut self,
+        declarations: &[crate::Policy::PolicyDeclaration],
+    ) {
         self.write("#");
         self.fmt_policy_rule(declarations);
     }
@@ -1453,7 +1462,9 @@ impl<'a> Fmt<'a> {
     fn fmt_policy_rule(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {
         self.write(&format!("{}(", Syntax::MARKER_POLICY));
         for (i, declaration) in declarations.iter().enumerate() {
-            if i > 0 { self.write(", "); }
+            if i > 0 {
+                self.write(", ");
+            }
             self.write(declaration.key.name());
             match declaration.value {
                 crate::Policy::PolicyValue::Limit(limit) => self.write(&format!("({limit})")),
@@ -1636,7 +1647,8 @@ impl<'a> Fmt<'a> {
                         self.write(".");
                         self.write(field);
                     }
-                    crate::AST::ViewSourceProjection::Index | crate::AST::ViewSourceProjection::Range => {}
+                    crate::AST::ViewSourceProjection::Index
+                    | crate::AST::ViewSourceProjection::Range => {}
                 }
             }
         }
@@ -1824,12 +1836,7 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_variant_name_and_payload(
-        &mut self,
-        v: &Variant,
-        name: &str,
-        derives_decode: bool,
-    ) {
+    fn fmt_variant_name_and_payload(&mut self, v: &Variant, name: &str, derives_decode: bool) {
         // D-SERDE5: per-variant `#[Rename("x")]` markers sit inline before the name.
         if !v.serde_markers.is_empty() {
             if v.serde_markers.len() == 1 {
@@ -2053,7 +2060,9 @@ impl<'a> Fmt<'a> {
                 // would both re-read as a module import.
                 let collapses = bindings.len() == 1
                     && first.alias.is_none()
-                    && first.original.is_some_and(|original| !original.contains('.'))
+                    && first
+                        .original
+                        .is_some_and(|original| !original.contains('.'))
                     && !first.module_alias.contains('.');
                 if collapses {
                     self.write(&first.path());

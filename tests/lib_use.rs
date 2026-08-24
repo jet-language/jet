@@ -33,17 +33,14 @@ fn write(path: &Path, body: &str) {
 
 #[test]
 fn ffi_selective_import_aliases_resolve() {
-    use jet::AST::{ForeignNamespace, ImportKind};
     use jet::Foreign::{BinderStatus, BinderSurface};
+    use jet::AST::{ForeignNamespace, ImportKind};
 
     for binder in jet::Foreign::BINDERS.iter().filter(|binder| {
         binder.status == BinderStatus::Active && binder.surface == BinderSurface::Namespace
     }) {
         let root = binder.language.root();
-        let source = format!(
-            "use {}.[lib1 as first, lib2]\nfn run() {{ }}\n",
-            root
-        );
+        let source = format!("use {}.[lib1 as first, lib2]\nfn run() {{ }}\n", root);
         let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
         assert!(lex_diagnostics.is_empty(), "{root}: {lex_diagnostics:?}");
         let program = jet::Parser::parse(&tokens)
@@ -84,26 +81,20 @@ fn ffi_selective_import_aliases_resolve() {
         assert_eq!(path, &format!("{root}.single"));
         assert_eq!(
             import.foreign_imports().unwrap(),
-            vec![
-                (
-                    ForeignNamespace {
-                        language: binder.language,
-                        lib: "single".to_string(),
-                    },
-                    "alias".to_string(),
-                ),
-            ]
+            vec![(
+                ForeignNamespace {
+                    language: binder.language,
+                    lib: "single".to_string(),
+                },
+                "alias".to_string(),
+            ),]
         );
     }
 }
 
 /// Realize a `core` package from a local `path:` source repo into `hangar`,
 /// recording it in the store exactly as `jetpack build` would. Offline; no Nix.
-fn realize_into_hangar(
-    roots: &Roots,
-    repo: &Path,
-    pkg: &str,
-) -> Store::VerifiedRealization {
+fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::VerifiedRealization {
     let store_dir = roots.hangar_dir();
     fs::create_dir_all(&store_dir).unwrap();
     let upstream = format!("path:{}", repo.to_string_lossy());

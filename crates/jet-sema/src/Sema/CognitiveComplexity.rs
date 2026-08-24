@@ -6,8 +6,8 @@
 //! - direct recursion: `+1` per function;
 //! - lambda bodies increase enclosing-structure depth, but add no score.
 
-use crate::AST::{BinOp, Expr, Func, Item, LambdaBody, Program, Stmt};
 use crate::Diagnostics::Span;
+use crate::AST::{BinOp, Expr, Func, Item, LambdaBody, Program, Stmt};
 
 #[derive(Debug, Clone)]
 pub struct CognitiveComplexityReport {
@@ -88,9 +88,7 @@ fn cognitive_complexity(function: &Func) -> u32 {
                 }
             }
             Expr::Call(call) if call.name == function.name => recursive = true,
-            Expr::Binary(BinOp::And | BinOp::Or, ..)
-                if is_mixed_boolean_sequence(expression) =>
-            {
+            Expr::Binary(BinOp::And | BinOp::Or, ..) if is_mixed_boolean_sequence(expression) => {
                 mixed_boolean_sequences += 1;
             }
             _ => {}

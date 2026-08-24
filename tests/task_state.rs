@@ -3,8 +3,15 @@
 
 fn diagnostic_codes(source: &str) -> Vec<String> {
     match jet::compile(source) {
-        Ok(output) => output.lints.into_iter().map(|diagnostic| diagnostic.code).collect(),
-        Err(diagnostics) => diagnostics.into_iter().map(|diagnostic| diagnostic.code).collect(),
+        Ok(output) => output
+            .lints
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect(),
+        Err(diagnostics) => diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect(),
     }
 }
 
@@ -47,9 +54,8 @@ fn run() {
     }
 }
 "#;
-    jet::compile(source).expect(
-        "a [Task<T>] list is not #SingleUse; popping and joining each handle must compile",
-    );
+    jet::compile(source)
+        .expect("a [Task<T>] list is not #SingleUse; popping and joining each handle must compile");
 }
 
 #[test]
@@ -65,12 +71,18 @@ fn run() {
 "#;
     let output = jet::compile(source).expect("both branches must discharge the task duty");
     assert!(
-        output.lints.iter().any(|diagnostic| diagnostic.code == "L0152"),
+        output
+            .lints
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L0152"),
         "joined task states must report the shared typestate divergence: {:?}",
         output.lints
     );
     assert!(
-        output.lints.iter().all(|diagnostic| diagnostic.code != "L1101"),
+        output
+            .lints
+            .iter()
+            .all(|diagnostic| diagnostic.code != "L1101"),
         "the shared D-LIN1 pass must not report a task consumed on both branches: {:?}",
         output.lints
     );

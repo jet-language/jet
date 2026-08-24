@@ -412,9 +412,7 @@ pub(crate) fn call_ctvalue(
         .collect::<Result<_, _>>()?;
     let int_arg = |index: usize| match args.get(index) {
         Some(CtValue::Int(value)) => Ok(*value),
-        Some(CtValue::BigInt(value)) => value.try_i64().ok_or_else(|| {
-            ffi_int_range_diag(span)
-        }),
+        Some(CtValue::BigInt(value)) => value.try_i64().ok_or_else(|| ffi_int_range_diag(span)),
         _ => Err(ffi_diag(
             wrapper,
             format!("argument {index} is not an Int"),
@@ -526,14 +524,8 @@ pub(crate) fn call_ctvalue(
                 .map_err(|_| ffi_diag(wrapper, "returned invalid UTF-8", span))
         }
         ([ParamAbi::Int, ParamAbi::String, ParamAbi::Int], RetAbi::String) => {
-            type FnIntStrInt = unsafe extern "C" fn(
-                i64,
-                *const u8,
-                usize,
-                i64,
-                *mut *mut u8,
-                *mut usize,
-            ) -> i32;
+            type FnIntStrInt =
+                unsafe extern "C" fn(i64, *const u8, usize, i64, *mut *mut u8, *mut usize) -> i32;
             let f: FnIntStrInt = unsafe { std::mem::transmute(entry.ptr) };
             let code = strings[1].as_deref().expect("String ABI argument");
             let mut out_ptr = std::ptr::null_mut();
@@ -677,9 +669,7 @@ fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
             ParamAbi::Int => crate::Encoding::json_rt::jet_int_to_i64(value)
                 .map(CtValue::Int)
                 .ok_or(()),
-            ParamAbi::Float => {
-                Ok(CtValue::Float(CtFloat::f64(f64::from_bits(value as u64))))
-            }
+            ParamAbi::Float => Ok(CtValue::Float(CtFloat::f64(f64::from_bits(value as u64)))),
             ParamAbi::Bool => Ok(CtValue::Bool(value != 0)),
             ParamAbi::String => Ok(CtValue::Str(clone_string(value))),
         })

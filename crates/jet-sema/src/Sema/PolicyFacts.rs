@@ -5,10 +5,10 @@
 //! the enforcers; this graph is the shared, queryable fact surface those
 //! passes feed and that acceptance / `jet prove` consume (I8).
 
-use crate::AST::{Func, Item, Program, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Lexer;
 use crate::Parser;
+use crate::AST::{Func, Item, Program, Type};
 use std::collections::BTreeSet;
 
 /// Domains that share the static-guarantees facts engine.
@@ -160,7 +160,8 @@ fn collect_memory_denials(graph: &mut PolicyFactGraph, item: &Item) {
         }
         Item::CodeModule(module) => {
             if let Some(body) = &module.body {
-                body.iter().for_each(|item| collect_memory_denials(graph, item));
+                body.iter()
+                    .for_each(|item| collect_memory_denials(graph, item));
             }
         }
         _ => {}

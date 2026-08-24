@@ -1,6 +1,6 @@
 use jet_foundation::{
-    AST::{Item, ProgramBundle},
     Diagnostics::{Diagnostic, Span},
+    AST::{Item, ProgramBundle},
 };
 
 /// A resident Cranelift gap discovered before or during JIT lowering/compile.

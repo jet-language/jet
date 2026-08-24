@@ -244,6 +244,9 @@ fn canonicalize_admitted_records(roots: &Roots, admitted: &AdmittedNixClosure) -
         if !admitted.objects.contains_key(&store_path) {
             continue;
         }
+        for (key, value) in crate::Provider::nix_build_facts_record() {
+            producer.facts.insert(key, value);
+        }
         producer.facts.insert("nix.output.out".into(), store_path);
         entry.producer_record = producer.encode();
         entry.receipt.clear();

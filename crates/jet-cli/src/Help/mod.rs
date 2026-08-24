@@ -36,8 +36,10 @@ pub mod Interactive;
 pub mod Render;
 
 const OBSERVATION_QUERY: &str = "why is my program slow";
-const OBSERVATION_GUIDE: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/spec/observability.md"));
+const OBSERVATION_GUIDE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/spec/observability.md"
+));
 
 /// One command in the help index.
 #[derive(Debug, Clone)]
@@ -53,7 +55,12 @@ pub struct Entry {
     pub keywords: Vec<&'static str>,
 }
 
-fn command_symbol(cmd: String, usage: String, summary: &str, example: Option<String>) -> jet_semindex::SemanticSymbol {
+fn command_symbol(
+    cmd: String,
+    usage: String,
+    summary: &str,
+    example: Option<String>,
+) -> jet_semindex::SemanticSymbol {
     jet_semindex::SemanticSymbol {
         identity: format!("command:{cmd}"),
         name: cmd.clone(),
@@ -84,9 +91,7 @@ pub const CATEGORIES: &[&str] = &[
 
 fn category_for(cmd: &str) -> &'static str {
     match cmd {
-        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" => {
-            "Build & Run"
-        }
+        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" => "Build & Run",
         "dev" => "Development Server",
         "devtools" => "Reference",
         "new" | "fmt" | "fix" | "lint" | "env" | "init" | "config" | "toolchain" => {
@@ -113,9 +118,7 @@ fn usage_for(cmd: &str) -> String {
 fn example_for(cmd: &str) -> Option<String> {
     match cmd {
         "run" => Some("jet run".to_string()),
-        "check" | "build" => {
-            Some(format!("jet {} examples/features/basics/hello.jet", cmd))
-        }
+        "check" | "build" => Some(format!("jet {} examples/features/basics/hello.jet", cmd)),
         "dev" => Some("jet dev run.jet".to_string()),
         "notebook" => Some("jet notebook analysis.jetnb".to_string()),
         "explain" => Some("jet explain E0102".to_string()),
@@ -300,7 +303,12 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
         let haystacks: Vec<String> = std::iter::once(format!("jet {}", entry.symbol.name))
             .chain(std::iter::once(entry.symbol.signature.clone()))
             .chain(std::iter::once(entry.symbol.summary.clone()))
-            .chain(entry.flags.iter().map(|(flag, help)| format!("{} {}", flag, help)))
+            .chain(
+                entry
+                    .flags
+                    .iter()
+                    .map(|(flag, help)| format!("{} {}", flag, help)),
+            )
             .chain(entry.symbol.examples.iter().cloned())
             .chain(entry.see_also.iter().map(|name| name.to_string()))
             .chain(entry.keywords.iter().map(|k| k.to_string()))
@@ -314,7 +322,12 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
             }
         }
         if let Some((score, haystack, positions)) = best {
-            let score = score + if entry.symbol.name.eq_ignore_ascii_case(query) { 1000 } else { 0 };
+            let score = score
+                + if entry.symbol.name.eq_ignore_ascii_case(query) {
+                    1000
+                } else {
+                    0
+                };
             hits.push(Hit::Command {
                 entry: entry.clone(),
                 score,
@@ -324,9 +337,18 @@ pub fn search(index: &[Entry], query: &str) -> Vec<Hit> {
         }
     }
     hits.sort_by(|a, b| match (a, b) {
-        (Hit::Command { score: sa, entry: ea, .. }, Hit::Command { score: sb, entry: eb, .. }) => {
-            sb.cmp(sa).then_with(|| ea.symbol.name.cmp(&eb.symbol.name))
-        }
+        (
+            Hit::Command {
+                score: sa,
+                entry: ea,
+                ..
+            },
+            Hit::Command {
+                score: sb,
+                entry: eb,
+                ..
+            },
+        ) => sb.cmp(sa).then_with(|| ea.symbol.name.cmp(&eb.symbol.name)),
         _ => std::cmp::Ordering::Equal,
     });
     hits
@@ -370,16 +392,31 @@ mod tests {
     #[test]
     fn index_covers_every_cli_command() {
         let index = build_index();
-        let expected = CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)).count()
-            + CLI::command_groups().map(|g| g.actions.len()).sum::<usize>();
+        let expected = CLI::COMMANDS
+            .iter()
+            .filter(|c| CLI::is_canonical_top_level(c.name))
+            .count()
+            + CLI::command_groups()
+                .map(|g| g.actions.len())
+                .sum::<usize>();
         assert_eq!(index.len(), expected);
-        for c in CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)) {
-            assert!(index.iter().any(|e| e.symbol.name == c.name), "missing {}", c.name);
+        for c in CLI::COMMANDS
+            .iter()
+            .filter(|c| CLI::is_canonical_top_level(c.name))
+        {
+            assert!(
+                index.iter().any(|e| e.symbol.name == c.name),
+                "missing {}",
+                c.name
+            );
         }
         for group in CLI::command_groups() {
             for action in group.actions {
                 let route = format!("{} {}", group.name, action.name);
-                assert!(index.iter().any(|e| e.symbol.name == route), "missing {route}");
+                assert!(
+                    index.iter().any(|e| e.symbol.name == route),
+                    "missing {route}"
+                );
             }
         }
     }
@@ -387,7 +424,11 @@ mod tests {
     #[test]
     fn every_entry_has_a_real_category() {
         for e in build_index() {
-            assert!(CATEGORIES.contains(&e.category), "bad category for {}", e.symbol.name);
+            assert!(
+                CATEGORIES.contains(&e.category),
+                "bad category for {}",
+                e.symbol.name
+            );
         }
     }
 
@@ -438,8 +479,18 @@ mod tests {
         let symbols = symbol_index(&entries);
         let run = symbols.lookup_qualified("run").expect("run command fact");
         assert_eq!(run.signature, usage_for("run"));
-        assert_eq!(run.summary, CLI::COMMANDS.iter().find(|c| c.name == "run").unwrap().summary);
-        assert!(matches!(run.provenance, jet_semindex::SemanticProvenance::CommandRegistry));
+        assert_eq!(
+            run.summary,
+            CLI::COMMANDS
+                .iter()
+                .find(|c| c.name == "run")
+                .unwrap()
+                .summary
+        );
+        assert!(matches!(
+            run.provenance,
+            jet_semindex::SemanticProvenance::CommandRegistry
+        ));
     }
 
     #[test]
@@ -484,7 +535,12 @@ mod tests {
     fn fuzzy_ranks_exact_prefix_above_loose_subsequence() {
         let (exact, _) = fuzzy_match("run", "jet run").unwrap();
         let (loose, _) = fuzzy_match("run", "jet self devtools — run checked generators").unwrap();
-        assert!(exact > loose, "exact {} should outrank loose {}", exact, loose);
+        assert!(
+            exact > loose,
+            "exact {} should outrank loose {}",
+            exact,
+            loose
+        );
     }
 
     #[test]
@@ -527,7 +583,12 @@ mod tests {
     fn slow_program_query_renders_the_single_observation_guide() {
         let out = run_query("Why   is my program slow", false);
         assert_eq!(out, OBSERVATION_GUIDE);
-        for surface in ["Live scheduler", "GC promotions", "Wall-clock session", "Browser rows"] {
+        for surface in [
+            "Live scheduler",
+            "GC promotions",
+            "Wall-clock session",
+            "Browser rows",
+        ] {
             assert!(out.contains(surface), "guide missing {surface}: {out}");
         }
     }

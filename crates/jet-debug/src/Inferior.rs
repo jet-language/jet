@@ -963,26 +963,9 @@ impl Inferior {
         let safe = match type_name.trim() {
             "bool" | "Bool" => matches!(raw, "true" | "false"),
             "f32" | "f64" | "Float" => raw.parse::<f64>().is_ok(),
-            "int"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "isize"
-            | "i128"
-            | "long"
-            | "long long"
-            | "Int" => {
-                raw.parse::<i128>().is_ok()
-            }
-            "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "usize"
-            | "u128"
-            | "unsigned"
-            | "unsigned long"
+            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "long" | "long long"
+            | "Int" => raw.parse::<i128>().is_ok(),
+            "u8" | "u16" | "u32" | "u64" | "usize" | "u128" | "unsigned" | "unsigned long"
             | "unsigned long long" => raw.parse::<u128>().is_ok(),
             "alloc::string::String" | "std::string::String" | "String" | "&str" => {
                 complete_quoted_literal(raw).is_some_and(|value| value.len() == raw.len())
@@ -1001,23 +984,8 @@ impl Inferior {
         match raw.trim() {
             "bool" => Some("Bool"),
             "f32" | "f64" => Some("Float"),
-            "int"
-            | "i8"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "isize"
-            | "i128"
-            | "long"
-            | "long long"
-            | "u8"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "usize"
-            | "u128"
-            | "unsigned"
-            | "unsigned long"
+            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "long" | "long long"
+            | "u8" | "u16" | "u32" | "u64" | "usize" | "u128" | "unsigned" | "unsigned long"
             | "unsigned long long" => Some("Int"),
             "alloc::string::String" | "std::string::String" | "String" | "&str" => Some("String"),
             "()" => Some("Unit"),

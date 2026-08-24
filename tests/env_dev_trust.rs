@@ -128,14 +128,14 @@ fn typed_secret_map_captures_metadata_and_read_time_composition() {
         }
         module env.prod { }
     "#;
-    let plan = jet_env_model::ModuleEval::evaluate_env_with_environment(
-        source,
-        &project.path,
-        Some("ci"),
-    )
-    .expect("typed metadata and compose declarations must evaluate");
+    let plan =
+        jet_env_model::ModuleEval::evaluate_env_with_environment(source, &project.path, Some("ci"))
+            .expect("typed metadata and compose declarations must evaluate");
     assert_eq!(
-        plan.secrets.iter().map(|secret| secret.name.as_str()).collect::<Vec<_>>(),
+        plan.secrets
+            .iter()
+            .map(|secret| secret.name.as_str())
+            .collect::<Vec<_>>(),
         ["API_KEY", "DB_URL"]
     );
     assert!(plan.secrets[0].required);
@@ -147,14 +147,30 @@ fn typed_secret_map_captures_metadata_and_read_time_composition() {
         plan.secrets[1].declaration,
         jet_env_model::ModuleEval::SecretDeclaration::Compose {
             template: "postgres://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/app".to_string(),
-            from: vec!["DB_HOST".to_string(), "DB_PASSWORD".to_string(), "DB_USER".to_string()],
+            from: vec![
+                "DB_HOST".to_string(),
+                "DB_PASSWORD".to_string(),
+                "DB_USER".to_string()
+            ],
         }
     );
     let shown = format!("{plan:?}");
-    assert!(shown.contains("API_KEY"), "plan disclosure must retain names: {shown}");
-    assert!(shown.contains("DB_URL"), "plan disclosure must retain names: {shown}");
-    assert!(!shown.contains("CI credential"), "metadata text must not be disclosed: {shown}");
-    assert!(!shown.contains("postgres://"), "compose templates must not be disclosed: {shown}");
+    assert!(
+        shown.contains("API_KEY"),
+        "plan disclosure must retain names: {shown}"
+    );
+    assert!(
+        shown.contains("DB_URL"),
+        "plan disclosure must retain names: {shown}"
+    );
+    assert!(
+        !shown.contains("CI credential"),
+        "metadata text must not be disclosed: {shown}"
+    );
+    assert!(
+        !shown.contains("postgres://"),
+        "compose templates must not be disclosed: {shown}"
+    );
 }
 
 /// `jetpack enter` (`jet env`) realizes the declared env and drops into a

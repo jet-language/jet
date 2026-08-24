@@ -10,14 +10,16 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string, result_err_msg, result_ok};
+use crate::Time::TimeValue;
 use crate::{JetDebug, JetDisplay, JetShow};
 use jet_foundation::base_encoding_dispatch;
 use jet_foundation::PackageEdition;
-use jet_foundation::AST::{CtFloat, CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart};
+use jet_foundation::AST::{
+    CtFloat, CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
-use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
-use crate::Time::TimeValue;
 
 mod encoding_base_rt {
     include!("../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
@@ -453,11 +455,7 @@ fn clone_string_list(list: i64) -> Vec<String> {
     })
 }
 
-fn env_config_insert_tree(
-    tree: &mut json_rt::DataTree,
-    segments: &[String],
-    value: String,
-) {
+fn env_config_insert_tree(tree: &mut json_rt::DataTree, segments: &[String], value: String) {
     let json_rt::DataTree::Object(entries) = tree else {
         return;
     };
@@ -476,8 +474,7 @@ fn env_config_insert_tree(
         return;
     }
     if let Some((_, child)) = entries.iter_mut().find(|(name, child)| {
-        name.eq_ignore_ascii_case(segment)
-            && matches!(child, json_rt::DataTree::Object(_))
+        name.eq_ignore_ascii_case(segment) && matches!(child, json_rt::DataTree::Object(_))
     }) {
         env_config_insert_tree(child, &segments[1..], value);
     } else {
@@ -531,15 +528,11 @@ fn jet_jit_env_config(prefix: i64, file: i64, allow: i64) -> i64 {
     let process = crate::CoreHost::jit_env_snapshot_raw()
         .into_iter()
         .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)));
-    let entries = match env_config_rt::jet_env_config_entries(
-        &prefix,
-        dotenv.as_deref(),
-        &allow,
-        process,
-    ) {
-        Ok(entries) => entries,
-        Err(reason) => return result_err_decode("", &format!("E2416: {reason}")),
-    };
+    let entries =
+        match env_config_rt::jet_env_config_entries(&prefix, dotenv.as_deref(), &allow, process) {
+            Ok(entries) => entries,
+            Err(reason) => return result_err_decode("", &format!("E2416: {reason}")),
+        };
     let mut tree = json_rt::DataTree::Object(Vec::new());
     let mut origins = Vec::with_capacity(entries.len());
     for entry in entries {
@@ -643,8 +636,7 @@ fn jet_jit_b64_decode(text: i64) -> i64 {
 
 fn jet_jit_b64_decode_url(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
-    match base_encoding_dispatch::decode_base64url(&edition, &clone_string(text), false, false)
-    {
+    match base_encoding_dispatch::decode_base64url(&edition, &clone_string(text), false, false) {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
@@ -657,13 +649,8 @@ fn jet_jit_base32_encode(bytes: i64) -> i64 {
 
 fn jet_jit_base32_decode(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
-    match base_encoding_dispatch::decode_base32(
-        &edition,
-        &clone_string(text),
-        false,
-        false,
-        false,
-    ) {
+    match base_encoding_dispatch::decode_base32(&edition, &clone_string(text), false, false, false)
+    {
         Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
@@ -914,8 +901,22 @@ fn uuid_format(b: &[u8; 16]) -> String {
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-\
          {:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13],
-        b[14], b[15]
+        b[0],
+        b[1],
+        b[2],
+        b[3],
+        b[4],
+        b[5],
+        b[6],
+        b[7],
+        b[8],
+        b[9],
+        b[10],
+        b[11],
+        b[12],
+        b[13],
+        b[14],
+        b[15]
     )
 }
 
@@ -1225,7 +1226,9 @@ fn xml_value_to_datatree(value: jet_foundation::XmlPull::Value) -> json_rt::Data
         Value::Bool(b) => json_rt::DataTree::Bool(b),
         Value::Int(n) => json_rt::DataTree::Int(n),
         Value::Text(s) => json_rt::DataTree::Text(s),
-        Value::Array(xs) => json_rt::DataTree::Array(xs.into_iter().map(xml_value_to_datatree).collect()),
+        Value::Array(xs) => {
+            json_rt::DataTree::Array(xs.into_iter().map(xml_value_to_datatree).collect())
+        }
         Value::Object(es) => json_rt::DataTree::Object(
             es.into_iter()
                 .map(|(k, v)| (k, xml_value_to_datatree(v)))
@@ -1234,7 +1237,9 @@ fn xml_value_to_datatree(value: jet_foundation::XmlPull::Value) -> json_rt::Data
     }
 }
 
-fn datatree_to_xml_value(tree: &json_rt::DataTree) -> Result<jet_foundation::XmlPull::Value, String> {
+fn datatree_to_xml_value(
+    tree: &json_rt::DataTree,
+) -> Result<jet_foundation::XmlPull::Value, String> {
     use jet_foundation::XmlPull::Value;
     match tree {
         json_rt::DataTree::Null => Ok(Value::Null),
@@ -1261,7 +1266,11 @@ fn datatree_to_xml_value(tree: &json_rt::DataTree) -> Result<jet_foundation::Xml
 }
 
 fn xml_err_msg(e: jet_foundation::XmlPull::Error) -> String {
-    let path = if e.path.is_empty() { "$" } else { e.path.as_str() };
+    let path = if e.path.is_empty() {
+        "$"
+    } else {
+        e.path.as_str()
+    };
     format!("XML error at {path}: {}", e.reason)
 }
 
@@ -1284,9 +1293,7 @@ fn xml_decode_fields(error: jet_foundation::XmlPull::Error) -> Vec<json_rt::Fiel
 
 fn jet_jit_xml_parse(text: i64) -> i64 {
     match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
-        Ok(value) => {
-            result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64)
-        }
+        Ok(value) => result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64),
         Err(e) => result_err_msg(&xml_err_msg(e)),
     }
 }
@@ -1316,9 +1323,9 @@ fn pack_opt_string(opt: Option<String>) -> i64 {
 
 /// D-ENCXML-PROJECTION1: `xml.root` via the shared XML kernel.
 fn jet_jit_xml_root(tree: i64) -> i64 {
-    match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlKernel::document_root(&v).map_err(xml_err_msg)
-    }) {
+    match xml_tree_value(tree)
+        .and_then(|v| jet_foundation::XmlKernel::document_root(&v).map_err(xml_err_msg))
+    {
         Ok(root) => result_ok(alloc_datatree(&xml_value_to_datatree(root)) as u64),
         Err(e) => result_err_msg(&e),
     }
@@ -1326,9 +1333,9 @@ fn jet_jit_xml_root(tree: i64) -> i64 {
 
 /// `xml.expanded_name` → Result[(raw, prefix?, local, namespace_uri?), XMLError].
 fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
-    match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlKernel::expanded_name_parts(&v).map_err(xml_err_msg)
-    }) {
+    match xml_tree_value(tree)
+        .and_then(|v| jet_foundation::XmlKernel::expanded_name_parts(&v).map_err(xml_err_msg))
+    {
         Ok((raw, prefix, local, uri)) => {
             let handle = Concurrency::with_runtime_mut(|rt| {
                 let rec = rt.heap.alloc_record(4);
@@ -1357,9 +1364,9 @@ fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
 /// `xml.attribute` → Result[String?, XMLError] (Option packed as 0 / sid+1).
 fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
     let key = clone_string(name);
-    match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlKernel::lookup_attribute(&v, &key).map_err(xml_err_msg)
-    }) {
+    match xml_tree_value(tree)
+        .and_then(|v| jet_foundation::XmlKernel::lookup_attribute(&v, &key).map_err(xml_err_msg))
+    {
         Ok(opt) => result_ok(pack_opt_string(opt) as u64),
         Err(e) => result_err_msg(&e),
     }
@@ -1367,9 +1374,9 @@ fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
 
 /// `xml.content` → Result[[DataTree], XMLError].
 fn jet_jit_xml_content(tree: i64) -> i64 {
-    match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlKernel::element_content(&v).map_err(xml_err_msg)
-    }) {
+    match xml_tree_value(tree)
+        .and_then(|v| jet_foundation::XmlKernel::element_content(&v).map_err(xml_err_msg))
+    {
         Ok(nodes) => {
             let handles: Vec<i64> = nodes
                 .into_iter()
@@ -1406,14 +1413,10 @@ fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
 /// Parse + `project_document_for_decode` — front half of typed `xml.decode`.
 fn jet_jit_xml_project(text: i64) -> i64 {
     match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
-        Ok(value) => {
-            match jet_foundation::XmlKernel::project_document_for_decode(&value) {
-                Ok(projected) => {
-                    result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
-                }
-                Err(e) => result_err_fields(xml_decode_fields(e)),
-            }
-        }
+        Ok(value) => match jet_foundation::XmlKernel::project_document_for_decode(&value) {
+            Ok(projected) => result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64),
+            Err(e) => result_err_fields(xml_decode_fields(e)),
+        },
         Err(e) => result_err_fields(xml_decode_fields(e)),
     }
 }
@@ -1422,14 +1425,10 @@ fn jet_jit_xml_project(text: i64) -> i64 {
 fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
     let input = clone_bytes(bytes);
     match jet_foundation::XmlKernel::parse_document_bytes(&input) {
-        Ok(value) => {
-            match jet_foundation::XmlKernel::project_document_for_decode(&value) {
-                Ok(projected) => {
-                    result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
-                }
-                Err(e) => result_err_fields(xml_decode_fields(e)),
-            }
-        }
+        Ok(value) => match jet_foundation::XmlKernel::project_document_for_decode(&value) {
+            Ok(projected) => result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64),
+            Err(e) => result_err_fields(xml_decode_fields(e)),
+        },
         Err(e) => result_err_fields(xml_decode_fields(e)),
     }
 }
@@ -1509,16 +1508,12 @@ fn cbor_ct_datatree(value: &CtValue) -> Option<json_rt::DataTree> {
             let payload = args.first().map(|(_, value)| value);
             match (variant.as_str(), payload) {
                 ("Null", _) => Some(json_rt::DataTree::Null),
-                ("Bool", Some(CtValue::Bool(value))) => {
-                    Some(json_rt::DataTree::Bool(*value))
-                }
+                ("Bool", Some(CtValue::Bool(value))) => Some(json_rt::DataTree::Bool(*value)),
                 ("Int", Some(CtValue::Int(value))) => Some(json_rt::DataTree::Int(*value)),
                 ("Float", Some(CtValue::Float(value))) => {
                     Some(json_rt::DataTree::Float(value.as_f64()))
                 }
-                ("Text", Some(CtValue::Str(value))) => {
-                    Some(json_rt::DataTree::Text(value.clone()))
-                }
+                ("Text", Some(CtValue::Str(value))) => Some(json_rt::DataTree::Text(value.clone())),
                 ("Array", Some(CtValue::List(values))) => values
                     .iter()
                     .map(cbor_ct_datatree)
@@ -1534,17 +1529,15 @@ fn cbor_ct_datatree(value: &CtValue) -> Option<json_rt::DataTree> {
                     })
                     .collect::<Option<Vec<_>>>()
                     .map(json_rt::DataTree::Object),
-                (
-                    "Object",
-                    Some(CtValue::Struct {
-                        type_name,
-                        fields,
-                    }),
-                ) if type_name == "JSONObject" => fields
-                    .iter()
-                    .map(|(key, value)| Some((key.clone(), cbor_ct_datatree(value)?)))
-                    .collect::<Option<Vec<_>>>()
-                    .map(json_rt::DataTree::Object),
+                ("Object", Some(CtValue::Struct { type_name, fields }))
+                    if type_name == "JSONObject" =>
+                {
+                    fields
+                        .iter()
+                        .map(|(key, value)| Some((key.clone(), cbor_ct_datatree(value)?)))
+                        .collect::<Option<Vec<_>>>()
+                        .map(json_rt::DataTree::Object)
+                }
                 _ => None,
             }
         }
@@ -1554,12 +1547,7 @@ fn cbor_ct_datatree(value: &CtValue) -> Option<json_rt::DataTree> {
 
 fn cbor_error_parts(value: CtValue) -> (i64, i64, String, String) {
     let CtValue::Struct { fields, .. } = value else {
-        return (
-            2,
-            0,
-            "$".to_string(),
-            "CBOR parse failed".to_string(),
-        );
+        return (2, 0, "$".to_string(), "CBOR parse failed".to_string());
     };
     let mut kind = 2;
     let mut byte_offset = 0;
@@ -1567,14 +1555,7 @@ fn cbor_error_parts(value: CtValue) -> (i64, i64, String, String) {
     let mut reason = "CBOR parse failed".to_string();
     for (name, value) in fields {
         match (name.as_str(), value) {
-            (
-                "kind",
-                CtValue::Enum {
-                    variant,
-                    args,
-                    ..
-                },
-            ) if args.is_empty() => {
+            ("kind", CtValue::Enum { variant, args, .. }) if args.is_empty() => {
                 kind = match variant.as_str() {
                     "Syntax" => 0,
                     "Truncated" => 1,
@@ -1640,10 +1621,7 @@ fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) 
                 fields.push(("max_bytes".to_string(), CtValue::Int(value)));
             }
             if let Some(value) = rt.heap.record_get_bool(handle, 3) {
-                fields.push((
-                    "require_canonical".to_string(),
-                    CtValue::Bool(value),
-                ));
+                fields.push(("require_canonical".to_string(), CtValue::Bool(value)));
             }
             fields
         });
@@ -1763,12 +1741,7 @@ fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
     }
 }
 
-fn jet_jit_decode_int_range(
-    result: i64,
-    lo: i64,
-    hi: i64,
-    type_name: i64,
-) -> i64 {
+fn jet_jit_decode_int_range(result: i64, lo: i64, hi: i64, type_name: i64) -> i64 {
     let state = Concurrency::with_runtime_mut(|rt| {
         result
             .checked_sub(1)
@@ -1854,7 +1827,12 @@ fn jet_jit_decode_fixed_len(result: i64, expected: i64) -> i64 {
 
 fn jet_jit_datatree_decode_list_error(tree: i64) -> i64 {
     let reason = read_datatree(tree)
-        .map(|tree| format!("expected a list, found {}", json_rt::datatree_kind_for(&tree)))
+        .map(|tree| {
+            format!(
+                "expected a list, found {}",
+                json_rt::datatree_kind_for(&tree)
+            )
+        })
         .unwrap_or_else(|| "expected a list, found value".to_string());
     result_err_decode("", &reason)
 }
@@ -2133,18 +2111,18 @@ fn jit_codec_encode_tree(kind: i64, value: i64) -> Result<json_rt::DataTree, Str
         }
         CODEC_KIND_DATETIME => {
             let text = crate::Time::with_time(value, |value| match value {
-                TimeValue::DateTime(datetime) => {
-                    Some(codec_rt::jet_codec_datetime_encode(
-                        datetime.to_timestamp(),
-                        datetime.nanosecond() as u32,
-                    ))
-                }
+                TimeValue::DateTime(datetime) => Some(codec_rt::jet_codec_datetime_encode(
+                    datetime.to_timestamp(),
+                    datetime.nanosecond() as u32,
+                )),
                 _ => None,
             });
             text.map(json_rt::DataTree::Text)
                 .ok_or_else(|| "invalid DateTime codec value".to_string())
         }
-        CODEC_KIND_DURATION => Ok(json_rt::DataTree::Int(codec_rt::jet_codec_duration_encode(value))),
+        CODEC_KIND_DURATION => Ok(json_rt::DataTree::Int(codec_rt::jet_codec_duration_encode(
+            value,
+        ))),
         CODEC_KIND_DECIMAL => {
             let decimal = Concurrency::with_runtime_mut(|rt| {
                 let index = value.saturating_sub(1) as usize;
@@ -2172,7 +2150,6 @@ fn jet_jit_codec_encode(kind: i64, value: i64) -> i64 {
     };
     alloc_datatree(&tree)
 }
-
 
 fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
     let Some(tree) = read_datatree(tree) else {
@@ -2211,8 +2188,8 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         }
         (CODEC_KIND_DURATION, json_rt::DataTree::Number(text))
         | (CODEC_KIND_DURATION, json_rt::DataTree::Text(text)) => {
-            let decoded = jet_foundation::JSONNumber::json_exact_integer_text(&text)
-                .and_then(|value| {
+            let decoded =
+                jet_foundation::JSONNumber::json_exact_integer_text(&text).and_then(|value| {
                     value
                         .parse::<i64>()
                         .map_err(|_| "Duration is outside the I64 range".to_string())
@@ -2248,23 +2225,38 @@ fn jet_jit_codec_decode(kind: i64, tree: i64) -> i64 {
         }
         (CODEC_KIND_DATE | CODEC_KIND_LOCAL_DATE, other) => result_err_decode(
             "",
-            &format!("expected Date, found {}", json_rt::datatree_kind_for(&other)),
+            &format!(
+                "expected Date, found {}",
+                json_rt::datatree_kind_for(&other)
+            ),
         ),
         (CODEC_KIND_LOCAL_TIME, other) => result_err_decode(
             "",
-            &format!("expected LocalTime, found {}", json_rt::datatree_kind_for(&other)),
+            &format!(
+                "expected LocalTime, found {}",
+                json_rt::datatree_kind_for(&other)
+            ),
         ),
         (CODEC_KIND_DATETIME, other) => result_err_decode(
             "",
-            &format!("expected DateTime, found {}", json_rt::datatree_kind_for(&other)),
+            &format!(
+                "expected DateTime, found {}",
+                json_rt::datatree_kind_for(&other)
+            ),
         ),
         (CODEC_KIND_DURATION, other) => result_err_decode(
             "",
-            &format!("expected Duration, found {}", json_rt::datatree_kind_for(&other)),
+            &format!(
+                "expected Duration, found {}",
+                json_rt::datatree_kind_for(&other)
+            ),
         ),
         (CODEC_KIND_DECIMAL, other) => result_err_decode(
             "",
-            &format!("expected Decimal, found {}", json_rt::datatree_kind_for(&other)),
+            &format!(
+                "expected Decimal, found {}",
+                json_rt::datatree_kind_for(&other)
+            ),
         ),
         (_, _) => result_err_decode("", "unknown codec kind"),
     }
@@ -2378,9 +2370,6 @@ host_fns! {
     env_config_map: "jet_jit_env_config_map" => jet_jit_env_config_map: sig_binary;
 }
 
-
-
-
 fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
 }
@@ -2444,9 +2433,17 @@ fn jet_jit_object_entries_to_map(list: i64) -> i64 {
 
 #[derive(Clone)]
 enum MigrateStepOp {
-    Rename { from: String, to: String },
-    Remove { field: String },
-    Add { field: String, value: json_rt::DataTree },
+    Rename {
+        from: String,
+        to: String,
+    },
+    Remove {
+        field: String,
+    },
+    Add {
+        field: String,
+        value: json_rt::DataTree,
+    },
 }
 
 #[derive(Clone)]

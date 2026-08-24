@@ -11,8 +11,8 @@
 //! nothing reported it.
 
 use std::fs;
-use std::path::Path;
 use std::io::Write;
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
 mod common;
@@ -51,7 +51,10 @@ fn run() {
 
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(diagnostics.is_empty(), "#Root fixture diagnostics: {diagnostics:#?}");
+    assert!(
+        diagnostics.is_empty(),
+        "#Root fixture diagnostics: {diagnostics:#?}"
+    );
     assert!(
         jet_jit::tir_lowers_bundle(&bundle),
         "#Root fixture must lower to TIR: {}",
@@ -69,8 +72,14 @@ fn run() {
         RunOutcome::Problems(diags) => panic!("#Root fixture failed: {diags:?}"),
     };
     assert_eq!(stdout, "12\n12\n3.5\n3\n");
-    assert!(jet_jit::jit_executed_for_test(), "#Root fixture must execute in resident JIT");
-    assert!(!jet_jit::fallback_invoked_for_test(), "#Root fixture must not fall back to the interpreter");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "#Root fixture must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "#Root fixture must not fall back to the interpreter"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -145,7 +154,9 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
             stderr,
             exit_code,
         } => (stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default resident JIT rejected named_args: {diags:?}"),
+        RunOutcome::Problems(diags) => {
+            panic!("default resident JIT rejected named_args: {diags:?}")
+        }
     };
     assert!(
         jet_jit::jit_executed_for_test(),
@@ -157,7 +168,10 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
     );
 
     let expected = (expected, String::new(), 0);
-    assert_eq!(interpreted, expected, "forced interpreter named_args drifted");
+    assert_eq!(
+        interpreted, expected,
+        "forced interpreter named_args drifted"
+    );
     assert_eq!(resident, expected, "resident JIT named_args drifted");
     assert_eq!(resident, interpreted, "named_args tiers diverged");
 }
@@ -434,7 +448,12 @@ fn run() {
     .unwrap();
 
     let aot = run_jet(&file, true);
-    assert_eq!(aot.status.code(), Some(0), "AOT stderr: {}", String::from_utf8_lossy(&aot.stderr));
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "AOT stderr: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
     assert_eq!(aot.stdout, b"true\nfalse\n");
 
     jet_jit::reset_jit_trace_for_test();
@@ -443,7 +462,10 @@ fn run() {
         RunOutcome::Problems(diags) => panic!("resident capability query failed: {diags:#?}"),
     };
     assert_eq!(resident, "true\nfalse\n");
-    assert!(jet_jit::jit_executed_for_test(), "capability query must execute in resident JIT");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "capability query must execute in resident JIT"
+    );
     assert!(
         !jet_jit::deopt_invoked_for_test(),
         "capability query must not deopt"
@@ -456,10 +478,15 @@ fn run() {
     jet_jit::reset_jit_trace_for_test();
     let interpreted = match dev_iteration(file.to_str().unwrap(), true, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(diags) => panic!("forced interpreter capability query failed: {diags:#?}"),
+        RunOutcome::Problems(diags) => {
+            panic!("forced interpreter capability query failed: {diags:#?}")
+        }
     };
     assert_eq!(interpreted, "true\nfalse\n");
-    assert!(!jet_jit::jit_executed_for_test(), "forced proof must execute in tier-0 interpreter");
+    assert!(
+        !jet_jit::jit_executed_for_test(),
+        "forced proof must execute in tier-0 interpreter"
+    );
     assert!(
         !jet_jit::deopt_invoked_for_test(),
         "forced proof must not deopt"
@@ -589,8 +616,15 @@ fn run() {
     assert!(stdout.contains("code=7"), "{stdout}");
     assert!(stdout.contains("stderr=checked-stderr-start:"), "{stdout}");
     assert!(!stdout.contains("checked-stderr-end"), "{stdout}");
-    assert!(stdout.contains("code=-1, signal=15, stderr=signal-stderr"), "{stdout}");
-    assert!(stdout.len() < 5000, "checked stderr was not bounded: {}", stdout.len());
+    assert!(
+        stdout.contains("code=-1, signal=15, stderr=signal-stderr"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.len() < 5000,
+        "checked stderr was not bounded: {}",
+        stdout.len()
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -634,7 +668,9 @@ fn run() {
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).expect("prompt fixture loads");
     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
-        !diags.iter().any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+        !diags
+            .iter()
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
         "prompt fixture must check: {diags:?}"
     );
     let plan = jet_jit::plan_bundle_tiers(&bundle);
@@ -658,8 +694,8 @@ fn run() {
     // `examples/features/io/terminal_parity.jet`, so it needs the same answers
     // and reads them from their one home in `tests/common` (I8): the asserted
     // `false|production|non-tty` below is exactly what those answers produce.
-    let answers = common::example_stdin("io/terminal_parity")
-        .expect("io/terminal_parity has stdin answers");
+    let answers =
+        common::example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers");
     child
         .stdin
         .take()
@@ -670,9 +706,15 @@ fn run() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Continue? [y/N] "), "{stdout}");
-    assert!(stdout.contains("  1) staging\n  2) production\n"), "{stdout}");
+    assert!(
+        stdout.contains("  1) staging\n  2) production\n"),
+        "{stdout}"
+    );
     assert!(stdout.contains("Enter a number from 1 to 2."), "{stdout}");
-    assert!(stdout.ends_with("false|production|non-tty|strasse\n"), "{stdout}");
+    assert!(
+        stdout.ends_with("false|production|non-tty|strasse\n"),
+        "{stdout}"
+    );
     let trace = String::from_utf8(output.stderr).unwrap();
     assert!(
         trace.contains("prompt_gap") && trace.contains("tier0 interp"),
@@ -748,7 +790,10 @@ fn run() {
     assert_eq!(bad.status.code(), Some(2));
     assert!(bad.stdout.is_empty());
     let bad_stderr = String::from_utf8_lossy(&bad.stderr);
-    assert!(bad_stderr.contains("unknown option `--verbse`"), "{bad_stderr}");
+    assert!(
+        bad_stderr.contains("unknown option `--verbse`"),
+        "{bad_stderr}"
+    );
     assert!(
         bad_stderr.contains("did you mean `--verbose`?"),
         "{bad_stderr}"
@@ -1012,8 +1057,14 @@ fn iter_adapter_latches_emit_dominating_clif() {
     };
 
     let reference = (expected, String::new(), 0);
-    assert_eq!(resident, reference, "resident JIT adapter observable drifted");
-    assert_eq!(interpreted, reference, "interpreter adapter observable drifted");
+    assert_eq!(
+        resident, reference,
+        "resident JIT adapter observable drifted"
+    );
+    assert_eq!(
+        interpreted, reference,
+        "interpreter adapter observable drifted"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1138,7 +1189,6 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
 
     let _ = fs::remove_dir_all(&dir);
 }
-
 
 /// Card #2029: a total lowering failure must not read as Covered.
 #[test]

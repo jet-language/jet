@@ -14,9 +14,9 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{self, JitProgram, TFunc};
 use jet_codegen::Comptime::{self, CtReport, CtValue, DevSink};
-use jet_foundation::AST::{ProgramBundle, Type};
 use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::JitBackend::RunOutcome;
+use jet_foundation::AST::{ProgramBundle, Type};
 
 use super::runtime_host::{HostFns, JitRuntime};
 use super::tiers::{deopt_marshallable, record_trace, Tier, TierPlan, TierRow};
@@ -165,8 +165,11 @@ pub(crate) fn install_native_hook() {
 }
 
 fn native_call_hook(name: &str, args: &[CtValue]) -> Option<Result<CtValue, Diagnostic>> {
-    let native =
-        NATIVE_FNS.with(|s| s.borrow().get(name).map(|n| (n.code, n.params.clone(), n.ret.clone())))?;
+    let native = NATIVE_FNS.with(|s| {
+        s.borrow()
+            .get(name)
+            .map(|n| (n.code, n.params.clone(), n.ret.clone()))
+    })?;
     let (code, params, ret) = native;
     if args.len() != params.len() {
         return Some(Err(Diagnostic::error(
@@ -322,8 +325,11 @@ mod rewrite_tests {
             "fix must point at jet run --release, got: {:?}",
             d.fix
         );
-        for (label, text) in [("what", d.what.as_str()), ("why", d.why.as_str()), ("fix", d.fix.as_str())]
-        {
+        for (label, text) in [
+            ("what", d.what.as_str()),
+            ("why", d.why.as_str()),
+            ("fix", d.fix.as_str()),
+        ] {
             let lower = text.to_ascii_lowercase();
             assert!(
                 !lower.contains("comptime") && !lower.contains("compile time"),
@@ -497,7 +503,10 @@ pub(crate) fn lower_deopt_stub(
         b.seal_block(entry);
         let params = b.block_params(entry).to_vec();
         if params.len() > 8 {
-            return Err(format!("{}: deopt stub supports at most 8 params", tir.name));
+            return Err(format!(
+                "{}: deopt stub supports at most 8 params",
+                tir.name
+            ));
         }
         let mut args = Vec::with_capacity(10);
         args.push(b.ins().iconst(types::I64, deopt_idx));
@@ -673,28 +682,23 @@ pub(crate) fn jet_deopt_call(
         let memos = DEOPT_MEMOS
             .with(|state| state.borrow().clone())
             .unwrap_or_else(TIR::new_memo_state);
-        let value =
-            match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
-                allocator.as_ref(),
-                || {
-                    jet_codegen::Comptime::with_ambient(
-                        Some(crate::ambient_interp::ambient_core_call),
-                        Some(crate::ambient_interp::ambient_handle),
-                        Some(crate::ambient_interp::ambient_extern_call),
-                        || {
-                            TIR::run_named_func_with_memos(
-                                program, &func_name, args, &mut sink, memos,
-                            )
-                        },
-                    )
-                },
-            ) {
-                Ok(v) => v,
-                Err(d) => {
-                    Concurrency::with_runtime_mut(|rt| rt.set_trap(&d.what));
-                    return 0;
-                }
-            };
+        let value = match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
+            allocator.as_ref(),
+            || {
+                jet_codegen::Comptime::with_ambient(
+                    Some(crate::ambient_interp::ambient_core_call),
+                    Some(crate::ambient_interp::ambient_handle),
+                    Some(crate::ambient_interp::ambient_extern_call),
+                    || TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos),
+                )
+            },
+        ) {
+            Ok(v) => v,
+            Err(d) => {
+                Concurrency::with_runtime_mut(|rt| rt.set_trap(&d.what));
+                return 0;
+            }
+        };
         let result: Option<Result<i64, String>> = Concurrency::with_runtime_mut(|rt| {
             rt.stdout.push_str(&sink.stdout);
             rt.stderr.push_str(&sink.stderr);
@@ -736,21 +740,18 @@ fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnost
         Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => Ok(CtValue::Int(bits)),
         Type::Bool => Ok(CtValue::Bool(bits != 0)),
         Type::Char => Ok(CtValue::Char(char::from_u32(bits as u32).unwrap_or('\0'))),
-        Type::String => Ok(CtValue::Str(
-            rt.heap.clone_string(bits).unwrap_or_default(),
-        )),
-        Type::Apply { name, .. }
-            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => Ok(CtValue::Str(
-                rt.heap.clone_string(bits).unwrap_or_default(),
-            )),
+        Type::String => Ok(CtValue::Str(rt.heap.clone_string(bits).unwrap_or_default())),
+        Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => {
+            Ok(CtValue::Str(rt.heap.clone_string(bits).unwrap_or_default()))
+        }
         Type::Named(n) if n == "Int" => Ok(CtValue::Int(bits)),
         Type::Named(n) if n == "Bool" => Ok(CtValue::Bool(bits != 0)),
         Type::Named(n) if n == "Char" => {
             Ok(CtValue::Char(char::from_u32(bits as u32).unwrap_or('\0')))
         }
-        Type::Named(n) if n == "String" => Ok(CtValue::Str(
-            rt.heap.clone_string(bits).unwrap_or_default(),
-        )),
+        Type::Named(n) if n == "String" => {
+            Ok(CtValue::Str(rt.heap.clone_string(bits).unwrap_or_default()))
+        }
         Type::Named(n) if n == "Unit" => Ok(CtValue::Unit),
         _ => Err(Diagnostic::error(
             "E0956",

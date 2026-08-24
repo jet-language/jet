@@ -34,18 +34,14 @@ fn every_typed_diagnostic_row_is_complete() {
     let violations: Vec<String> = rows
         .iter()
         .flat_map(|row| {
-            [
-                ("What", row.what),
-                ("Why", row.why),
-                ("Fix", row.fix),
-            ]
-            .into_iter()
-            .filter_map(move |(part, value)| {
-                value
-                    .trim()
-                    .is_empty()
-                    .then(|| format!("{}: {} is empty", row.code, part))
-            })
+            [("What", row.what), ("Why", row.why), ("Fix", row.fix)]
+                .into_iter()
+                .filter_map(move |(part, value)| {
+                    value
+                        .trim()
+                        .is_empty()
+                        .then(|| format!("{}: {} is empty", row.code, part))
+                })
         })
         .collect();
     assert!(
@@ -68,7 +64,10 @@ fn typed_row_holes_and_structured_fixes_have_one_projection() {
         .iter()
         .filter(|row| row.structured_fix.is_some())
         .count();
-    assert_eq!(source_markers, typed_markers, "every source fix marker needs a typed row projection");
+    assert_eq!(
+        source_markers, typed_markers,
+        "every source fix marker needs a typed row projection"
+    );
 
     for row in jet_foundation::Registry::diagnostic_rows() {
         let values: Vec<(&str, String)> = row
@@ -81,16 +80,44 @@ fn typed_row_holes_and_structured_fixes_have_one_projection() {
             .map(|(hole, value)| (*hole, value.as_str()))
             .collect();
         let rendered = row.render(&holes);
-        assert!(!rendered.what.trim().is_empty(), "{} rendered empty What", row.code);
-        assert!(!rendered.why.trim().is_empty(), "{} rendered empty Why", row.code);
-        assert!(!rendered.fix.trim().is_empty(), "{} rendered empty Fix", row.code);
+        assert!(
+            !rendered.what.trim().is_empty(),
+            "{} rendered empty What",
+            row.code
+        );
+        assert!(
+            !rendered.why.trim().is_empty(),
+            "{} rendered empty Why",
+            row.code
+        );
+        assert!(
+            !rendered.fix.trim().is_empty(),
+            "{} rendered empty Fix",
+            row.code
+        );
         if row.detail {
-            assert!(!row.what.trim().is_empty(), "{} detailed row has empty What", row.code);
-            assert!(!row.why.trim().is_empty(), "{} detailed row has empty Why", row.code);
-            assert!(!row.fix.trim().is_empty(), "{} detailed row has empty Fix", row.code);
+            assert!(
+                !row.what.trim().is_empty(),
+                "{} detailed row has empty What",
+                row.code
+            );
+            assert!(
+                !row.why.trim().is_empty(),
+                "{} detailed row has empty Why",
+                row.code
+            );
+            assert!(
+                !row.fix.trim().is_empty(),
+                "{} detailed row has empty Fix",
+                row.code
+            );
         }
         if let Some(fix) = row.structured_fix {
-            assert!(!fix.source_marker().is_empty(), "{} has an empty typed structured fix", row.code);
+            assert!(
+                !fix.source_marker().is_empty(),
+                "{} has an empty typed structured fix",
+                row.code
+            );
         }
     }
 }
@@ -128,7 +155,10 @@ fn diagnostic_body_violations(text: &str) -> Vec<String> {
         if !in_wwf_table {
             continue;
         }
-        if cells.iter().all(|c| c.is_empty() || c.chars().all(|ch| ch == '-')) {
+        if cells
+            .iter()
+            .all(|c| c.is_empty() || c.chars().all(|ch| ch == '-'))
+        {
             continue; // header separator row
         }
         let Some(code) = cells.get(1).and_then(|code| diagnostic_code(code)) else {

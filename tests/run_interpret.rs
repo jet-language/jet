@@ -53,7 +53,8 @@ fn run_interpret_forces_tier_zero_without_watch() {
 
 #[test]
 fn run_interpret_keeps_unused_c_member_lists_runnable() {
-    let dir = std::env::temp_dir().join(format!("jet_run_interpret_imports_{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("jet_run_interpret_imports_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -68,7 +69,11 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
     .unwrap();
 
     let run = |interpret: bool| {
-        let cache = dir.join(if interpret { "cache-interpreter" } else { "cache-default" });
+        let cache = dir.join(if interpret {
+            "cache-interpreter"
+        } else {
+            "cache-default"
+        });
         let mut command = Command::new(jet());
         command
             .args(["run", "--trace-tiers"])
@@ -82,9 +87,19 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
     };
 
     let default = run(false);
-    assert_eq!(default.status.code(), Some(0), "{}", String::from_utf8_lossy(&default.stderr));
+    assert_eq!(
+        default.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&default.stderr)
+    );
     let forced = run(true);
-    assert_eq!(forced.status.code(), Some(0), "{}", String::from_utf8_lossy(&forced.stderr));
+    assert_eq!(
+        forced.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&forced.stderr)
+    );
     assert_eq!(forced.stdout, default.stdout);
     assert!(!String::from_utf8_lossy(&forced.stderr).contains("E2201"));
     let _ = fs::remove_dir_all(&dir);
@@ -121,7 +136,11 @@ fn c_extern_calls_match_aot_and_interpreter() {
     let release = run("release");
     let default = run("default");
     let interpret = run("interpret");
-    for (mode, output) in [("release", &release), ("default", &default), ("interpret", &interpret)] {
+    for (mode, output) in [
+        ("release", &release),
+        ("default", &default),
+        ("interpret", &interpret),
+    ] {
         assert_eq!(
             output.status.code(),
             Some(0),
@@ -129,7 +148,11 @@ fn c_extern_calls_match_aot_and_interpreter() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(output.stdout, b"10\n7\n", "{mode} C extern output");
-        assert!(output.stderr.is_empty(), "{mode} C extern stderr: {:?}", output.stderr);
+        assert!(
+            output.stderr.is_empty(),
+            "{mode} C extern stderr: {:?}",
+            output.stderr
+        );
     }
 
     let _ = fs::remove_dir_all(&cache);
@@ -143,10 +166,7 @@ fn c_extern_calls_match_aot_and_interpreter() {
 fn assert_example_tier_parity(tag: &str, example: &str, golden: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let expected = fs::read_to_string(root.join(golden)).expect("example golden output");
-    let cache = std::env::temp_dir().join(format!(
-        "jet_tier_parity_{tag}_{}",
-        std::process::id()
-    ));
+    let cache = std::env::temp_dir().join(format!("jet_tier_parity_{tag}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&cache);
 
     let run = |mode: &str, trace: bool| {

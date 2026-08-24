@@ -6,7 +6,10 @@ use std::process::Command;
 
 #[test]
 fn generic_module_profile_fact_values_are_closed_and_fingerprinted() {
-    let root = std::env::temp_dir().join(format!("jet_generic_module_profile_fact_{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_module_profile_fact_{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create profile fact fixture");
     std::fs::write(
@@ -48,10 +51,12 @@ fn run() { print(tuned.slots()) }
             false,
             &std::collections::BTreeMap::new(),
         )
-            .expect("seed profile settings");
+        .expect("seed profile settings");
         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
         assert!(
-            diagnostics.iter().all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
             "profile fact module should check: {diagnostics:#?}"
         );
         let identity = bundle
@@ -59,13 +64,22 @@ fn run() { print(tuned.slots()) }
             .iter()
             .flat_map(|module| module.items.iter())
             .find_map(|item| match item {
-                jet::AST::Item::CodeModule(module) if module.name == "tuned" => module.instance_identity.as_ref(),
+                jet::AST::Item::CodeModule(module) if module.name == "tuned" => {
+                    module.instance_identity.as_ref()
+                }
                 _ => None,
             })
             .expect("fact-fed module instance identity");
-        assert_eq!(identity.argument_values[1], format!("value:{}", if profile == "compact" { 2 } else { 5 }));
-        assert!(identity.argument_provenance[1].iter().any(|source| source.contains("settings.cache_slots")));
-        assert!(identity.argument_provenance[1].iter().any(|source| source.contains(&format!("build.{profile}"))));
+        assert_eq!(
+            identity.argument_values[1],
+            format!("value:{}", if profile == "compact" { 2 } else { 5 })
+        );
+        assert!(identity.argument_provenance[1]
+            .iter()
+            .any(|source| source.contains("settings.cache_slots")));
+        assert!(identity.argument_provenance[1]
+            .iter()
+            .any(|source| source.contains(&format!("build.{profile}"))));
         assert!(
             identity
                 .applications
@@ -75,7 +89,10 @@ fn run() { print(tuned.slots()) }
         );
         fingerprints.push(identity.fingerprint.clone());
     }
-    assert_ne!(fingerprints[0], fingerprints[1], "profile values must not collide");
+    assert_ne!(
+        fingerprints[0], fingerprints[1],
+        "profile values must not collide"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -94,10 +111,9 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         .expect("copy fact-value module");
     std::fs::copy(fixture.join("package.jet"), root.join("package.jet"))
         .expect("copy fact-value package");
-    let expected = std::fs::read(
-        repo.join("examples/features/expected/modules/fact_value_arguments.out"),
-    )
-    .expect("fact-value module golden");
+    let expected =
+        std::fs::read(repo.join("examples/features/expected/modules/fact_value_arguments.out"))
+            .expect("fact-value module golden");
     for (profile, setting, expected_output) in [
         ("compact", "2", b"2\n".as_slice()),
         ("spacious", "5", b"5\n".as_slice()),
@@ -117,7 +133,10 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
             "named profile `{profile}` failed:\n{}",
             String::from_utf8_lossy(&profile_run.stderr)
         );
-        assert_eq!(profile_run.stdout, expected_output, "named profile `{profile}` size drifted");
+        assert_eq!(
+            profile_run.stdout, expected_output,
+            "named profile `{profile}` size drifted"
+        );
 
         let profile_dev = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(["dev", entry.to_str().expect("fact-value module path")])
@@ -185,9 +204,17 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     );
 
     for args in [
-        vec!["run", "--release", entry.to_str().expect("fact-value module path")],
+        vec![
+            "run",
+            "--release",
+            entry.to_str().expect("fact-value module path"),
+        ],
         vec!["run", entry.to_str().expect("fact-value module path")],
-        vec!["run", "--interpret", entry.to_str().expect("fact-value module path")],
+        vec![
+            "run",
+            "--interpret",
+            entry.to_str().expect("fact-value module path"),
+        ],
         vec![
             "dev",
             entry.to_str().expect("fact-value module path"),
@@ -234,9 +261,8 @@ fn run() {
     print(plain.identity(7))
 }
 "#;
-    jet::compile(source).unwrap_or_else(|diags| {
-        panic!("canonical generic-module spelling failed: {diags:#?}")
-    });
+    jet::compile(source)
+        .unwrap_or_else(|diags| panic!("canonical generic-module spelling failed: {diags:#?}"));
 }
 
 #[test]
@@ -492,10 +518,8 @@ fn run() {
     jet::compile(source).unwrap_or_else(|diags| {
         panic!("nested ordinary-module generic template was dropped: {diags:#?}")
     });
-    let root = std::env::temp_dir().join(format!(
-        "jet_generic_modules_nested_{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("jet_generic_modules_nested_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create nested generic-module directory");
     let main = root.join("main.jet");
@@ -787,7 +811,10 @@ fn generic_call_formatter_keeps_adjacent_angles() {
         formatted.contains("comparison :: 1 < 2"),
         "spaced angles must remain a comparison: {formatted}"
     );
-    assert!(formatted.contains("json.decode<Wrap<Int>>(text)"), "{formatted}");
+    assert!(
+        formatted.contains("json.decode<Wrap<Int>>(text)"),
+        "{formatted}"
+    );
     assert_eq!(
         formatted,
         jet::format_source(&formatted).expect("formatted generic calls should reformat")
@@ -854,7 +881,9 @@ fn run() { value :: plain<Int>(1) }
     let non_generic_diags = jet::compile(non_generic)
         .expect_err("non-generic functions must reject explicit call type arguments");
     assert!(
-        non_generic_diags.iter().any(|diagnostic| diagnostic.code == "E0119"),
+        non_generic_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0119"),
         "expected non-generic call E0119: {non_generic_diags:#?}"
     );
 
@@ -874,7 +903,9 @@ fn run() { value :: json.decode<Int, String>("1") }
     let decode_diags = jet::compile(extra_decode_type)
         .expect_err("typed decode must reject extra call type arguments");
     assert!(
-        decode_diags.iter().any(|diagnostic| diagnostic.code == "E0119"),
+        decode_diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0119"),
         "expected typed decode E0119: {decode_diags:#?}"
     );
 }
@@ -891,10 +922,7 @@ fn run() {
     print(values.len())
 }
 "#;
-    let root = std::env::temp_dir().join(format!(
-        "jet_generic_free_calls_{}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("jet_generic_free_calls_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create generic-free test directory");
     let path = root.join("main.jet");
@@ -908,7 +936,8 @@ fn run() {
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-free test source should type-check: {diagnostics:?}"
     );
-    jet_jit::try_compile_bundle(&bundle).expect("generic free calls should compile in resident JIT");
+    jet_jit::try_compile_bundle(&bundle)
+        .expect("generic free calls should compile in resident JIT");
     jet_jit::reset_jit_trace_for_test();
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
@@ -964,14 +993,24 @@ fn run() {
 "#;
     let compiled = jet::compile(source)
         .unwrap_or_else(|diags| panic!("generic method call failed: {diags:#?}"));
-    assert!(compiled.rust.contains("<__jet_Box<i64>>::__jet_new"), "{}", compiled.rust);
-    assert!(compiled.rust.contains(".__jet_convert::<String>"), "{}", compiled.rust);
-    assert!(compiled.rust.contains("__jet_Box::__jet_make::<String>"), "{}", compiled.rust);
+    assert!(
+        compiled.rust.contains("<__jet_Box<i64>>::__jet_new"),
+        "{}",
+        compiled.rust
+    );
+    assert!(
+        compiled.rust.contains(".__jet_convert::<String>"),
+        "{}",
+        compiled.rust
+    );
+    assert!(
+        compiled.rust.contains("__jet_Box::__jet_make::<String>"),
+        "{}",
+        compiled.rust
+    );
 
-    let root = std::env::temp_dir().join(format!(
-        "jet_generic_method_calls_{}",
-        std::process::id()
-    ));
+    let root =
+        std::env::temp_dir().join(format!("jet_generic_method_calls_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create generic-method test directory");
     let path = root.join("main.jet");

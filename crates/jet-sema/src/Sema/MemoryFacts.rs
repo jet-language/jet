@@ -4,8 +4,10 @@ use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::Effects::EffectSummary;
-use crate::AST::{Expr, Func, GcPromotion, GcPromotionEdge, Item, LValue, ProgramBundle, Stmt, Type};
 use crate::Policy::{self, PolicyDeclaration, PolicyError, PolicyKey, PolicyScope, PolicyValue};
+use crate::AST::{
+    Expr, Func, GcPromotion, GcPromotionEdge, Item, LValue, ProgramBundle, Stmt, Type,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MemoryFact {
@@ -105,15 +107,12 @@ pub(crate) fn bundle_memory_inputs(
         let mut denials = Vec::new();
         collect_function_denials(&module.items, &module.alias, &mut denials);
         for (function_key, row) in denials {
-            append_signature_denials(
-                &row,
-                vec![function_key],
-                &module.display,
-                &mut declarations,
-            );
+            append_signature_denials(&row, vec![function_key], &module.display, &mut declarations);
         }
         for (_function_span, function_key) in functions {
-            let Some(summary) = qualified.get(&function_key) else { continue };
+            let Some(summary) = qualified.get(&function_key) else {
+                continue;
+            };
             for region in &summary.memory.regions {
                 let synthetic = format!(
                     "{}#policy@{}..{}",
@@ -174,7 +173,13 @@ pub(crate) fn annotate_scoped_gc_promotions(bundle: &mut ProgramBundle) -> Vec<D
         );
     }
     // Propagate hidden root transfer through ordinary calls until stable.
-    for _ in 0..bundle.modules.iter().map(|m| m.items.len()).sum::<usize>().max(1) {
+    for _ in 0..bundle
+        .modules
+        .iter()
+        .map(|m| m.items.len())
+        .sum::<usize>()
+        .max(1)
+    {
         let promoted = bundle
             .modules
             .iter()
@@ -347,13 +352,15 @@ fn annotate_scope(
                     let mut edges = promotion_edges(&binding.init)
                         .into_iter()
                         .filter(|edge| {
-                            edge.binding != binding.name
-                                && promoted_names.contains(&edge.binding)
+                            edge.binding != binding.name && promoted_names.contains(&edge.binding)
                         })
                         .collect::<Vec<_>>();
                     edges.sort_by(|left, right| {
-                        (&left.slot, left.group, &left.binding)
-                            .cmp(&(&right.slot, right.group, &right.binding))
+                        (&left.slot, left.group, &left.binding).cmp(&(
+                            &right.slot,
+                            right.group,
+                            &right.binding,
+                        ))
                     });
                     edges.dedup();
                     binding.gc_promotion = Some(GcPromotion {
@@ -371,7 +378,9 @@ fn annotate_scope(
                     promoted_return |= direct_returns.contains(&binding.name);
                 }
             }
-            Stmt::Policy { declarations, body, .. } => {
+            Stmt::Policy {
+                declarations, body, ..
+            } => {
                 let mut nested = chain.to_vec();
                 nested.extend(declarations.clone());
                 promoted_return |= annotate_scope(body, &nested, diagnostics);
@@ -419,7 +428,8 @@ fn policy_resolution_diagnostic(error: PolicyError) -> Diagnostic {
     Diagnostic::error(
         "E0355",
         "invalid effective `gc` policy".to_string(),
-        "the package, module, function, and block declarations must form one valid policy ladder".to_string(),
+        "the package, module, function, and block declarations must form one valid policy ladder"
+            .to_string(),
         "remove the conflicting declaration or tighten the enclosing policy".to_string(),
         Some(span),
     )
@@ -525,7 +535,11 @@ fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {
             collect_expr_idents(index, out);
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             collect_expr_idents(base, out);
             if let Some(range) = range {
@@ -664,8 +678,12 @@ fn append_signature_denials(
     out: &mut Vec<MemoryFactDeclaration>,
 ) {
     for (name, span) in row {
-        let Some(denial) = name.strip_prefix('!') else { continue };
-        let Some(fact) = memory_fact_from_denial(denial) else { continue };
+        let Some(denial) = name.strip_prefix('!') else {
+            continue;
+        };
+        let Some(fact) = memory_fact_from_denial(denial) else {
+            continue;
+        };
         out.push(MemoryFactDeclaration {
             fact,
             roots: roots.clone(),
@@ -707,29 +725,52 @@ fn collect_function_keys(items: &[Item], alias: &str, out: &mut Vec<(Span, Strin
         alias: &str,
         out: &mut Vec<(Span, String)>,
     ) {
-        out.push((function.span, format!("{alias}::{}", super::effect_key(owner, &function.name))));
+        out.push((
+            function.span,
+            format!("{alias}::{}", super::effect_key(owner, &function.name)),
+        ));
     }
     for item in items {
         match item {
             Item::Func(function) => one(function, None, alias, out),
             Item::Impl(implementation) if implementation.is_generated_serde => {}
             Item::Impl(implementation) => {
-                for method in &implementation.methods { one(method, Some(&implementation.type_name), alias, out); }
+                for method in &implementation.methods {
+                    one(method, Some(&implementation.type_name), alias, out);
+                }
             }
             Item::Struct(definition) => {
-                for method in &definition.methods { one(method, Some(&definition.name), alias, out); }
-                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
-                    for method in &block.methods { one(method, Some(&definition.name), alias, out); }
+                for method in &definition.methods {
+                    one(method, Some(&definition.name), alias, out);
+                }
+                for block in definition
+                    .trait_impls
+                    .iter()
+                    .filter(|block| !block.compiler_generated)
+                {
+                    for method in &block.methods {
+                        one(method, Some(&definition.name), alias, out);
+                    }
                 }
             }
             Item::Enum(definition) => {
-                for method in &definition.methods { one(method, Some(&definition.name), alias, out); }
-                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
-                    for method in &block.methods { one(method, Some(&definition.name), alias, out); }
+                for method in &definition.methods {
+                    one(method, Some(&definition.name), alias, out);
+                }
+                for block in definition
+                    .trait_impls
+                    .iter()
+                    .filter(|block| !block.compiler_generated)
+                {
+                    for method in &block.methods {
+                        one(method, Some(&definition.name), alias, out);
+                    }
                 }
             }
             Item::CodeModule(module) => {
-                if let Some(body) = &module.body { collect_function_keys(body, alias, out); }
+                if let Some(body) = &module.body {
+                    collect_function_keys(body, alias, out);
+                }
             }
             _ => {}
         }
@@ -747,7 +788,9 @@ fn collect_function_denials(
         alias: &str,
         out: &mut Vec<(String, Vec<(String, Span)>)>,
     ) {
-        let Some(row) = function.declared_effects.as_ref() else { return };
+        let Some(row) = function.declared_effects.as_ref() else {
+            return;
+        };
         if row.iter().any(|(name, _)| name.starts_with("!Mem.")) {
             out.push((
                 format!("{alias}::{}", super::effect_key(owner, &function.name)),
@@ -768,7 +811,11 @@ fn collect_function_denials(
                 for method in &definition.methods {
                     one(method, Some(&definition.name), alias, out);
                 }
-                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
+                for block in definition
+                    .trait_impls
+                    .iter()
+                    .filter(|block| !block.compiler_generated)
+                {
                     for method in &block.methods {
                         one(method, Some(&definition.name), alias, out);
                     }
@@ -778,7 +825,11 @@ fn collect_function_denials(
                 for method in &definition.methods {
                     one(method, Some(&definition.name), alias, out);
                 }
-                for block in definition.trait_impls.iter().filter(|block| !block.compiler_generated) {
+                for block in definition
+                    .trait_impls
+                    .iter()
+                    .filter(|block| !block.compiler_generated)
+                {
                     for method in &block.methods {
                         one(method, Some(&definition.name), alias, out);
                     }
@@ -819,8 +870,14 @@ pub struct MemoryFactDeclaration {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MemoryProjection {
     Proven,
-    Violated { call_path: Vec<String>, operation: String },
-    OpenWorld { call_path: Vec<String>, reason: String },
+    Violated {
+        call_path: Vec<String>,
+        operation: String,
+    },
+    OpenWorld {
+        call_path: Vec<String>,
+        reason: String,
+    },
 }
 
 pub fn project_memory_fact(
@@ -830,11 +887,19 @@ pub fn project_memory_fact(
 ) -> MemoryProjection {
     match shortest_violation(fact, root, summaries) {
         None => MemoryProjection::Proven,
-        Some(Finding { event: Some(event), path, .. }) => MemoryProjection::Violated {
+        Some(Finding {
+            event: Some(event),
+            path,
+            ..
+        }) => MemoryProjection::Violated {
             call_path: path,
             operation: event.operation,
         },
-        Some(Finding { open: Some(open), path, .. }) => MemoryProjection::OpenWorld {
+        Some(Finding {
+            open: Some(open),
+            path,
+            ..
+        }) => MemoryProjection::OpenWorld {
             call_path: path,
             reason: open.reason,
         },
@@ -868,7 +933,10 @@ pub fn check_memory_facts(
         for root in roots {
             if let Some(finding) = shortest_violation(declaration.fact, &root, summaries) {
                 let identity = if let Some(event) = &finding.event {
-                    format!("event:{}:{}:{}", event.source, event.span.start, event.span.end)
+                    format!(
+                        "event:{}:{}:{}",
+                        event.source, event.span.start, event.span.end
+                    )
                 } else if let Some(open) = &finding.open {
                     format!("open:{}:{}:{}", open.source, open.span.start, open.span.end)
                 } else {
@@ -889,12 +957,7 @@ fn shortest_violation(
     summaries: &HashMap<String, EffectSummary>,
 ) -> Option<Finding> {
     if let MemoryFact::MemAllocBounded(limit) = fact {
-        return match arena_bound(
-            root,
-            summaries,
-            &mut HashSet::new(),
-            vec![root.to_string()],
-        ) {
+        return match arena_bound(root, summaries, &mut HashSet::new(), vec![root.to_string()]) {
             Ok(proof) if proof.bytes <= limit => None,
             Ok(proof) => {
                 let ArenaProof { bytes, witness } = proof;
@@ -912,7 +975,12 @@ fn shortest_violation(
                         vec![root.to_string()],
                     ),
                 };
-                Some(Finding { event, open, path, arena_used: bytes })
+                Some(Finding {
+                    event,
+                    open,
+                    path,
+                    arena_used: bytes,
+                })
             }
             Err(finding) => Some(finding),
         };
@@ -929,7 +997,8 @@ fn shortest_violation(
                 open: Some(OpenMemoryDispatch {
                     span: Span::new(0, 0),
                     source: node.clone(),
-                    reason: "callee body is unavailable and has no verified signed memory summary".to_string(),
+                    reason: "callee body is unavailable and has no verified signed memory summary"
+                        .to_string(),
                 }),
                 path,
                 arena_used,
@@ -950,7 +1019,12 @@ fn shortest_violation(
                 _ => false,
             };
             if violates {
-                return Some(Finding { event: Some(event), open: None, path, arena_used: next_arena });
+                return Some(Finding {
+                    event: Some(event),
+                    open: None,
+                    path,
+                    arena_used: next_arena,
+                });
             }
         }
         if let Some(open) = summary.memory.open_dispatches.first() {
@@ -990,8 +1064,9 @@ fn arena_bound(
             open: Some(OpenMemoryDispatch {
                 span: Span::new(0, 0),
                 source: node.to_string(),
-                reason: "recursive call multiplicity is not statically bounded for arena accounting"
-                    .to_string(),
+                reason:
+                    "recursive call multiplicity is not statically bounded for arena accounting"
+                        .to_string(),
             }),
             path,
             arena_used: 0,
@@ -1035,7 +1110,9 @@ fn arena_bound_inner(
     let mut events = summary.memory.events.clone();
     events.sort_by_key(|event| (event.span.start, event.span.end));
     for event in events {
-        let MemoryEventKind::ArenaBytes(bytes) = event.kind else { continue };
+        let MemoryEventKind::ArenaBytes(bytes) = event.kind else {
+            continue;
+        };
         let Some(bytes) = bytes else {
             return Err(Finding {
                 event: Some(event),
@@ -1073,11 +1150,9 @@ fn arena_bound_inner(
         .iter()
         .map(|call| call.callee.as_str())
         .collect::<HashSet<_>>();
-    if let Some(edge) = summary
-        .edges
-        .iter()
-        .find(|edge| !called.contains(edge.as_str()) && may_reach_arena(edge, summaries, &mut HashSet::new()))
-    {
+    if let Some(edge) = summary.edges.iter().find(|edge| {
+        !called.contains(edge.as_str()) && may_reach_arena(edge, summaries, &mut HashSet::new())
+    }) {
         return Err(Finding {
             event: None,
             open: Some(OpenMemoryDispatch {
@@ -1133,7 +1208,10 @@ fn arena_bound_inner(
             ))
         });
     }
-    Ok(ArenaProof { bytes: total, witness })
+    Ok(ArenaProof {
+        bytes: total,
+        witness,
+    })
 }
 
 fn arena_overflow(source: &str, span: Span, path: Vec<String>, used: u64) -> Finding {
@@ -1180,7 +1258,9 @@ fn memory_violation(declaration: &MemoryFactDeclaration, finding: Finding) -> Di
     let path = finding.path.join(" -> ");
     if let Some(event) = finding.event {
         let arena = match declaration.fact {
-            MemoryFact::MemAllocBounded(_) => format!("; the proven path total is {} bytes", finding.arena_used),
+            MemoryFact::MemAllocBounded(_) => {
+                format!("; the proven path total is {} bytes", finding.arena_used)
+            }
             _ => String::new(),
         };
         return Diagnostic::error(
@@ -1231,7 +1311,10 @@ mod tests {
         summaries.insert(
             "dep".to_string(),
             EffectSummary {
-                memory: MemorySummary { events: vec![arena_event(4)], ..Default::default() },
+                memory: MemorySummary {
+                    events: vec![arena_event(4)],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -1248,7 +1331,10 @@ mod tests {
             "root".to_string(),
             EffectSummary {
                 edges: ["dep".to_string()].into_iter().collect(),
-                memory: MemorySummary { calls, ..Default::default() },
+                memory: MemorySummary {
+                    calls,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
         );
@@ -1286,11 +1372,7 @@ mod tests {
             },
         );
         assert!(matches!(
-            project_memory_fact(
-                MemoryFact::MemAllocBounded(8),
-                "recursive",
-                &summaries
-            ),
+            project_memory_fact(MemoryFact::MemAllocBounded(8), "recursive", &summaries),
             MemoryProjection::OpenWorld { .. }
         ));
     }

@@ -1,9 +1,16 @@
 //! D-CONF-MERGE1 / D-FACT-LAW1: one resolver owns every build-fact writer.
 
 use jet_foundation::Diagnostics::Span;
-use jet_foundation::Policy::{self, ContributionLayer, FactContribution, FactError, FactKey, FactValue, SourceScope};
+use jet_foundation::Policy::{
+    self, ContributionLayer, FactContribution, FactError, FactKey, FactValue, SourceScope,
+};
 
-fn writer(value: &str, scope: SourceScope, layer: ContributionLayer, source: &str) -> FactContribution {
+fn writer(
+    value: &str,
+    scope: SourceScope,
+    layer: ContributionLayer,
+    source: &str,
+) -> FactContribution {
     FactContribution::new(
         "Build.Profile",
         FactValue::Text(value.to_string()),
@@ -16,14 +23,54 @@ fn writer(value: &str, scope: SourceScope, layer: ContributionLayer, source: &st
 #[test]
 fn source_scope_and_layer_order_produce_one_explainable_chain() {
     let declarations = [
-        writer("package", SourceScope::Package, ContributionLayer::Declaration, "package.jet"),
-        writer("file", SourceScope::File, ContributionLayer::Declaration, "main.jet"),
-        writer("module", SourceScope::Module, ContributionLayer::Declaration, "main.jet"),
-        writer("function", SourceScope::Function, ContributionLayer::Declaration, "main.jet"),
-        writer("block", SourceScope::Block, ContributionLayer::Declaration, "main.jet"),
-        writer("item", SourceScope::Item, ContributionLayer::Declaration, "main.jet"),
-        writer("profile", SourceScope::Package, ContributionLayer::OptimizationBundle, "release"),
-        writer("cli", SourceScope::Package, ContributionLayer::CommandLine, "command line"),
+        writer(
+            "package",
+            SourceScope::Package,
+            ContributionLayer::Declaration,
+            "package.jet",
+        ),
+        writer(
+            "file",
+            SourceScope::File,
+            ContributionLayer::Declaration,
+            "main.jet",
+        ),
+        writer(
+            "module",
+            SourceScope::Module,
+            ContributionLayer::Declaration,
+            "main.jet",
+        ),
+        writer(
+            "function",
+            SourceScope::Function,
+            ContributionLayer::Declaration,
+            "main.jet",
+        ),
+        writer(
+            "block",
+            SourceScope::Block,
+            ContributionLayer::Declaration,
+            "main.jet",
+        ),
+        writer(
+            "item",
+            SourceScope::Item,
+            ContributionLayer::Declaration,
+            "main.jet",
+        ),
+        writer(
+            "profile",
+            SourceScope::Package,
+            ContributionLayer::OptimizationBundle,
+            "release",
+        ),
+        writer(
+            "cli",
+            SourceScope::Package,
+            ContributionLayer::CommandLine,
+            "command line",
+        ),
     ];
     let fact = Policy::resolve(FactKey::new("Build.Profile"), declarations)
         .expect("the canonical resolver accepts cross-layer overrides")
@@ -33,7 +80,13 @@ fn source_scope_and_layer_order_produce_one_explainable_chain() {
     assert_eq!(fact.provenance.len(), 8);
     assert_eq!(fact.effective, 7);
     let explanation = Policy::explain(&fact);
-    assert_eq!(explanation.lines().filter(|line| line.contains('[')).count(), 8);
+    assert_eq!(
+        explanation
+            .lines()
+            .filter(|line| line.contains('['))
+            .count(),
+        8
+    );
     assert!(explanation.contains("[effective] command line / package"));
 }
 
@@ -57,7 +110,9 @@ fn same_layer_conflict_names_both_sources() {
         .expect_err("different same-layer values must stop the build");
     assert!(matches!(error, FactError::Conflict { .. }));
 
-    let diagnostic = error.diagnostic().expect("conflicts have the UI diagnostic");
+    let diagnostic = error
+        .diagnostic()
+        .expect("conflicts have the UI diagnostic");
     assert_eq!(diagnostic.code, "E3521");
     assert!(diagnostic.why.contains("workspace-a.jet"));
     assert!(diagnostic.why.contains("workspace-b.jet"));
@@ -76,9 +131,19 @@ fn force_pins_later_layers_and_safety_only_tightens() {
     let fact = Policy::resolve(
         FactKey::new("Build.Profile"),
         [
-            writer("dev", SourceScope::Package, ContributionLayer::Declaration, "package.jet"),
+            writer(
+                "dev",
+                SourceScope::Package,
+                ContributionLayer::Declaration,
+                "package.jet",
+            ),
             force,
-            writer("debug", SourceScope::Package, ContributionLayer::CommandLine, "command line"),
+            writer(
+                "debug",
+                SourceScope::Package,
+                ContributionLayer::CommandLine,
+                "command line",
+            ),
         ],
     )
     .expect("system force is valid")

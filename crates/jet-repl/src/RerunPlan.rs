@@ -135,7 +135,12 @@ mod tests {
     fn plan_marks_pure_turns_auto_and_effectful_confirm() {
         let turns = vec![
             turn(1, "rate :: 0.07", false, Some("rate")),
-            turn(2, "invoice_total :: subtotal * (1.0 + rate)", false, Some("invoice_total")),
+            turn(
+                2,
+                "invoice_total :: subtotal * (1.0 + rate)",
+                false,
+                Some("invoice_total"),
+            ),
             turn(3, "write_file(\"out.txt\", invoice_total)", true, None),
         ];
         let plan = build_replay_plan(&turns, 1, Some("rate :: 0.08")).expect("plan");
@@ -149,7 +154,10 @@ mod tests {
 
     #[test]
     fn plan_without_effects_needs_no_confirmation() {
-        let turns = vec![turn(1, "x :: 1", false, Some("x")), turn(2, "x * 2", false, None)];
+        let turns = vec![
+            turn(1, "x :: 1", false, Some("x")),
+            turn(2, "x * 2", false, None),
+        ];
         let plan = build_replay_plan(&turns, 1, None).expect("plan");
         assert!(!plan_needs_confirmation(&plan));
     }

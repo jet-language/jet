@@ -354,12 +354,9 @@ fn parse_function_names(bytes: &[u8]) -> Result<Vec<String>, BindError> {
                 "R function `{name}` uses a reserved generated binding name"
             )));
         }
-        if out
-            .iter()
-            .any(|v: &String| {
-                v == name || v == &format!("{name}_table") || v == &format!("{name}_plot")
-            })
-        {
+        if out.iter().any(|v: &String| {
+            v == name || v == &format!("{name}_table") || v == &format!("{name}_plot")
+        }) {
             return Err(BindError::Source(format!(
                 "R function `{name}` collides with a generated binding name"
             )));
@@ -470,8 +467,8 @@ repeat {{
   writeBin(c(little(length(encoded), 4), little(response$id, 8), encoded), output)
   flush(output)
 }}
-"#
-        , svg_runtime = SVG_RUNTIME
+"#,
+        svg_runtime = SVG_RUNTIME
     )
 }
 

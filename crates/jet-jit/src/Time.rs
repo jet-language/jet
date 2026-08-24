@@ -6,10 +6,10 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use jet_codegen::AST::CtValue;
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
+use jet_codegen::AST::CtValue;
 
 pub(crate) mod time_rt {
     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
@@ -49,10 +49,7 @@ pub(crate) fn ambient_datetime_now_value() -> CtValue {
         type_name: "DateTime".to_string(),
         fields: vec![
             ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
-            (
-                "nanos".to_string(),
-                CtValue::Int(datetime.nanosecond()),
-            ),
+            ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
         ],
     }
 }
@@ -147,7 +144,9 @@ fn jet_jit_date_parse(s: i64) -> i64 {
 }
 
 fn jet_jit_datetime_from_timestamp(ts: i64) -> i64 {
-    push(TimeValue::DateTime(time_rt::JetDateTime::from_timestamp(ts)))
+    push(TimeValue::DateTime(time_rt::JetDateTime::from_timestamp(
+        ts,
+    )))
 }
 
 fn jet_jit_datetime_now() -> i64 {
@@ -174,7 +173,9 @@ fn jet_jit_time_period_months(months: i64) -> i64 {
 }
 
 fn jet_jit_time_period(years: i64, months: i64, days: i64) -> i64 {
-    push(TimeValue::Period(time_rt::JetPeriod::new(years, months, days)))
+    push(TimeValue::Period(time_rt::JetPeriod::new(
+        years, months, days,
+    )))
 }
 
 fn jet_jit_time_period_days(days: i64) -> i64 {
@@ -206,11 +207,9 @@ fn jet_jit_time_zoned_local(date: i64, time: i64, zone: i64) -> i64 {
         _ => None,
     });
     match (date, time, zone) {
-        (Some(date), Some(time), Some(zone)) => {
-            push(TimeValue::Zoned(time_rt::JetZonedDateTime::from_local(
-                &date, &time, &zone,
-            )))
-        }
+        (Some(date), Some(time), Some(zone)) => push(TimeValue::Zoned(
+            time_rt::JetZonedDateTime::from_local(&date, &time, &zone),
+        )),
         _ => 0,
     }
 }
@@ -398,9 +397,7 @@ fn jet_jit_civil_time_method(
                 0
             }
         }
-        (TimeValue::Date(d), "replace") => {
-            push(TimeValue::Date(d.replace(arg0, arg1, arg2)))
-        }
+        (TimeValue::Date(d), "replace") => push(TimeValue::Date(d.replace(arg0, arg1, arg2))),
         (TimeValue::Date(d), "add_period") => {
             let period = with_time(arg0, |o| match o {
                 TimeValue::Period(p) => Some(p.clone()),
@@ -411,12 +408,8 @@ fn jet_jit_civil_time_method(
                 None => civil_method_defect(v, &method, "argument is not a Period"),
             }
         }
-        (TimeValue::Date(d), "truncate") => {
-            push(TimeValue::Date(d.truncate(&clone_string(arg0))))
-        }
-        (TimeValue::Date(d), "format") => {
-            alloc_string(d.format_pattern(&clone_string(arg0)))
-        }
+        (TimeValue::Date(d), "truncate") => push(TimeValue::Date(d.truncate(&clone_string(arg0)))),
+        (TimeValue::Date(d), "format") => alloc_string(d.format_pattern(&clone_string(arg0))),
         (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
         (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time())),
@@ -429,9 +422,7 @@ fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "to_string") => alloc_string(dt.to_string_fmt()),
         (TimeValue::DateTime(dt), "format_rfc3339") => alloc_string(dt.format_rfc3339()),
         (TimeValue::DateTime(dt), "to_unix_ms") => dt.to_unix_ms(),
-        (TimeValue::DateTime(dt), "format") => {
-            alloc_string(dt.format_pattern(&clone_string(arg0)))
-        }
+        (TimeValue::DateTime(dt), "format") => alloc_string(dt.format_pattern(&clone_string(arg0))),
         (TimeValue::DateTime(dt), "truncate" | "floor") => {
             push(TimeValue::DateTime(dt.floor(&clone_string(arg0))))
         }
@@ -441,9 +432,9 @@ fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "round") => {
             push(TimeValue::DateTime(dt.round(&clone_string(arg0))))
         }
-        (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(dt.replace(
-            arg0, arg1, arg2, arg3, arg4, arg5,
-        ))),
+        (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(
+            dt.replace(arg0, arg1, arg2, arg3, arg4, arg5),
+        )),
         (TimeValue::DateTime(dt), "in_zone") => {
             let zone = with_time(arg0, |o| match o {
                 TimeValue::Zone(z) => Some(z.clone()),
@@ -478,9 +469,7 @@ fn jet_jit_civil_time_method(
         (TimeValue::Zone(zone), "to_string") => alloc_string(zone.to_string_fmt()),
         (TimeValue::Zoned(zoned), "to_string") => alloc_string(zoned.to_string_fmt()),
         (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
-        (TimeValue::Zoned(z), "format") => {
-            alloc_string(z.format_pattern(&clone_string(arg0)))
-        }
+        (TimeValue::Zoned(z), "format") => alloc_string(z.format_pattern(&clone_string(arg0))),
         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
         (TimeValue::Zoned(z), "is_dst") => {
             if z.is_dst() {
@@ -498,9 +487,7 @@ fn jet_jit_civil_time_method(
         // choice stays in the Prelude kernel: `add_duration_ns` moves the instant
         // and keeps the zone, `add_period` re-resolves the local wall clock, so a
         // DST transition lands correctly without any offset policy living here.
-        (TimeValue::Zoned(z), "add_duration") => {
-            push(TimeValue::Zoned(z.add_duration_ns(arg0)))
-        }
+        (TimeValue::Zoned(z), "add_duration") => push(TimeValue::Zoned(z.add_duration_ns(arg0))),
         (TimeValue::Zoned(z), "add_period") => {
             let period = with_time(arg0, |o| match o {
                 TimeValue::Period(p) => Some(p.clone()),

@@ -390,11 +390,12 @@ impl<'a> Checker<'a> {
             return;
         }
         // Cheap early-out: almost no statement runs under a live write loan.
-        if !self
-            .taskgroup_stack
-            .iter()
-            .any(|group| group.borrows.iter().any(|held| held.access == ViewAccess::Write))
-        {
+        if !self.taskgroup_stack.iter().any(|group| {
+            group
+                .borrows
+                .iter()
+                .any(|held| held.access == ViewAccess::Write)
+        }) {
             return;
         }
         if !matches!(expr, Expr::Index { .. } | Expr::Field(..)) {
@@ -439,10 +440,7 @@ impl<'a> Checker<'a> {
             .rev()
             .find(|group| group.name == receiver)
         {
-            ctx.pending.push(PendingTaskSpawn {
-                binding,
-                span,
-            });
+            ctx.pending.push(PendingTaskSpawn { binding, span });
         }
     }
 
@@ -458,9 +456,9 @@ impl<'a> Checker<'a> {
         let pending: Vec<(String, Span)> = contexts
             .into_iter()
             .flat_map(|ctx| {
-                ctx.pending.iter().filter_map(|spawn| {
-                    spawn.binding.clone().map(|name| (name, spawn.span))
-                })
+                ctx.pending
+                    .iter()
+                    .filter_map(|spawn| spawn.binding.clone().map(|name| (name, spawn.span)))
             })
             .collect();
         for (name, span) in pending {
@@ -515,7 +513,7 @@ impl<'a> Checker<'a> {
         *stmt = Stmt::Val(crate::AST::Binding {
             mutable: false,
             markers: Vec::new(),
-                reactive_upgrade: false,
+            reactive_upgrade: false,
             meta: None,
             name: synth.clone(),
             name_span: span,
@@ -528,9 +526,9 @@ impl<'a> Checker<'a> {
             ct: None,
             uninit: false,
             arena_view: false,
-                string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
+            string_view: false,
+            gc_promotion: None,
+            gc_transferred: false,
         });
         true
     }
@@ -571,7 +569,8 @@ impl<'a> Checker<'a> {
                     format!("`Group` has no method `{other}`"),
                     "task groups use the `task` keyword; `Group` values do not own readiness waits"
                         .to_string(),
-                    "write `task work()`, `task.all { … }`, or a subjectless readiness table".to_string(),
+                    "write `task work()`, `task.all { … }`, or a subjectless readiness table"
+                        .to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {
@@ -686,8 +685,8 @@ impl<'a> Checker<'a> {
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
-                    "`task.all { … }` waits for every branch and returns the results in order"
-                        .to_string(),
+                "`task.all { … }` waits for every branch and returns the results in order"
+                    .to_string(),
                 "write `task.all { first(), second() }`".to_string(),
                 Some(span),
             ));
@@ -711,12 +710,8 @@ impl<'a> Checker<'a> {
                 other => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!(
-                    "`task.all` needs task branches, not `[{}]`",
-                            other.show()
-                        ),
-                        "each branch must produce one task result"
-                            .to_string(),
+                        format!("`task.all` needs task branches, not `[{}]`", other.show()),
+                        "each branch must produce one task result".to_string(),
                         "write `task.all { first(), second() }`".to_string(),
                         Some(args[0].expr.span()),
                     ));
@@ -726,10 +721,7 @@ impl<'a> Checker<'a> {
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!(
-                        "`task.all` needs task branches, not {}",
-                        other.show()
-                    ),
+                    format!("`task.all` needs task branches, not {}", other.show()),
                     "give `task.all` one or more task branches".to_string(),
                     "write `task.all { first(), second() }`".to_string(),
                     Some(args[0].expr.span()),
@@ -810,10 +802,7 @@ impl<'a> Checker<'a> {
             Some(other) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
-                    format!(
-                        "{method_label} needs task branches, not {}",
-                        other.show()
-                    ),
+                    format!("{method_label} needs task branches, not {}", other.show()),
                     "give the combinator one or more task branches".to_string(),
                     "write `task.race { first(), second() }`".to_string(),
                     Some(args[0].expr.span()),
@@ -840,7 +829,6 @@ impl<'a> Checker<'a> {
             self.mark_moved(name.clone(), expr.span());
         }
     }
-
 }
 
 fn collect_task_idents(expr: &Expr, out: &mut HashSet<String>) {

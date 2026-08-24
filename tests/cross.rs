@@ -176,12 +176,14 @@ fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
             )
         });
     assert!(
-        out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"),
+        out.rust
+            .contains("impl __jet_Backend for __jet_LinuxBackend"),
         "Linux triple should keep the OS.Linux impl:\n{}",
         out.rust
     );
     assert!(
-        !out.rust.contains("impl __jet_Backend for __jet_MacosBackend"),
+        !out.rust
+            .contains("impl __jet_Backend for __jet_MacosBackend"),
         "Linux triple should strip the OS.MacOS impl:\n{}",
         out.rust
     );
@@ -213,12 +215,14 @@ fn os_target_gating_emits_only_macos_impl_for_macos_triple() {
         },
     );
     assert!(
-        out.rust.contains("impl __jet_Backend for __jet_MacosBackend"),
+        out.rust
+            .contains("impl __jet_Backend for __jet_MacosBackend"),
         "macOS triple should keep the OS.MacOS impl:\n{}",
         out.rust
     );
     assert!(
-        !out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"),
+        !out.rust
+            .contains("impl __jet_Backend for __jet_LinuxBackend"),
         "macOS triple should strip the OS.Linux impl:\n{}",
         out.rust
     );
@@ -249,7 +253,8 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
     // This repo's dev shell / CI host is Linux (see env: `jet::OSTarget::host()`).
     let host_is_linux = jet::Syntax::OSTarget::host() == jet::Syntax::OSTarget::Linux;
     assert_eq!(
-        out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"),
+        out.rust
+            .contains("impl __jet_Backend for __jet_LinuxBackend"),
         host_is_linux,
         "no --target= should default to the host OS:\n{}",
         out.rust
@@ -448,8 +453,14 @@ fn run() {
                 return;
             }
             let state = self.state.borrow();"#;
-    assert!(out.rust.contains(extern_marker), "missing GTK extern injection marker");
-    assert!(out.rust.contains(set_text_marker), "missing GTK signal injection marker");
+    assert!(
+        out.rust.contains(extern_marker),
+        "missing GTK extern injection marker"
+    );
+    assert!(
+        out.rust.contains(set_text_marker),
+        "missing GTK signal injection marker"
+    );
     let rust = out
         .rust
         .replacen(extern_marker, extern_replacement, 1)
@@ -458,12 +469,20 @@ fn run() {
     let bin = dir.join("gtk_tree");
     fs::write(&rs, rust).unwrap();
     let mut rustc = std::process::Command::new("rustc");
-    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin);
+    rustc
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin);
     for arg in jet::resolve_c_links(&shown).expect("gtk4 link flags") {
         rustc.arg(arg);
     }
     let compiled = rustc.output().unwrap();
-    assert!(compiled.status.success(), "generated GTK Rust failed:\n{}", String::from_utf8_lossy(&compiled.stderr));
+    assert!(
+        compiled.status.success(),
+        "generated GTK Rust failed:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
 
     let mut run_command = if have_xvfb {
         let mut command = std::process::Command::new("xvfb-run");
@@ -473,7 +492,11 @@ fn run() {
         std::process::Command::new(&bin)
     };
     let run = run_command.env("JET_UI_GTK_TRACE", "1").output().unwrap();
-    assert!(run.status.success(), "live GTK fixture failed:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert!(
+        run.status.success(),
+        "live GTK fixture failed:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "Save:2\n");
     let trace = String::from_utf8_lossy(&run.stderr);
     for event in [
@@ -491,7 +514,10 @@ fn run() {
         "GTK_UI handle-set-text 0 Rebound",
         "GTK_UI cleanup",
     ] {
-        assert!(trace.contains(event), "missing `{event}` in GTK trace:\n{trace}");
+        assert!(
+            trace.contains(event),
+            "missing `{event}` in GTK trace:\n{trace}"
+        );
     }
     assert_eq!(
         trace.matches("GTK_UI click-connect root/1 1").count(),

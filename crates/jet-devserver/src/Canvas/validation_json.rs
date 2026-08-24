@@ -1,8 +1,8 @@
-use jet_semindex::SourceSpan;
 pub(super) use jet_driver::Diagnostics::json_str;
+use jet_semindex::SourceSpan;
 
 use super::graph_helpers::{edit_error, project_edit_error, query_error};
-use super::graph_json::{CommentHint, canvas_collapse_hints, canvas_comment_hints};
+use super::graph_json::{canvas_collapse_hints, canvas_comment_hints, CommentHint};
 
 pub(super) fn validate_ident(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
@@ -150,7 +150,11 @@ pub(super) fn quoted_attr(value: &str) -> String {
     json_str(value)
 }
 
-pub(super) fn find_comment_hint(src: &str, graph_json: &str, region_id: &str) -> Option<CommentHint> {
+pub(super) fn find_comment_hint(
+    src: &str,
+    graph_json: &str,
+    region_id: &str,
+) -> Option<CommentHint> {
     for chunk in graph_json.split("\"region_id\":").skip(1) {
         let (id, _) = parse_json_string(chunk.trim_start())?;
         if id != region_id {

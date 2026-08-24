@@ -5255,8 +5255,12 @@ stepping or evaluation semantics. Mutation, memory read/write, reverse
 execution, disassembly, and other unimplemented advanced requests are
 truthfully unsupported. Conformance vendors a pinned Microsoft DAP schema,
 model-tests every legal and illegal transition/reference lifetime, and drives
-current VS Code and Zed clients plus native backend tests without skip on
-supported hosts. Terminal and editor debugging remain projections of one
+the current VS Code client plus native backend tests without skip on supported
+hosts. Under **D-DBG-EDITOR1=A**, Zed 0.7.0 deliberately registers no adapter,
+schema, locator, or launch-like command because its released extension API
+cannot prove the trust and authorization facts required by **D-DBG-AUTH1=B**;
+Zed acceptance proves that absence and exposes only explanatory language
+support. Terminal and enabled-editor debugging remain projections of one
 breakpoint, task, evaluator, exception, mapping, diagnostic, and process model.
 
 **D-SEMINDEX1**: versioned semantic-index query API (symbols/refs/types/

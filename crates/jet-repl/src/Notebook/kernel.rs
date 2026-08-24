@@ -6,9 +6,7 @@ use super::trust::{
     decide_render, grant_active, ActiveRequest, MimeBundle, RenderDecision, TrustStore,
     POLICY_VERSION,
 };
-use crate::{
-    is_item_input, ReplFlags, ReplPolicy, RerunPlan, Session, ReplTurn, ReplTurnStatus,
-};
+use crate::{is_item_input, ReplFlags, ReplPolicy, ReplTurn, ReplTurnStatus, RerunPlan, Session};
 use jet_foundation::SHA256;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -60,10 +58,7 @@ pub struct KernelView {
 }
 
 impl Kernel {
-    pub fn open(
-        path: Option<&Path>,
-        environment_hash: impl Into<String>,
-    ) -> Result<Self, String> {
+    pub fn open(path: Option<&Path>, environment_hash: impl Into<String>) -> Result<Self, String> {
         jet_driver::boot_tir_eval();
         let environment_hash = environment_hash.into();
         let mut kernel = Self::blank(path, environment_hash);
@@ -86,7 +81,11 @@ impl Kernel {
 
     fn blank(path: Option<&Path>, environment_hash: impl Into<String>) -> Self {
         let base_dir = path
-            .and_then(|p| p.parent().filter(|d| !d.as_os_str().is_empty()).map(Path::to_path_buf))
+            .and_then(|p| {
+                p.parent()
+                    .filter(|d| !d.as_os_str().is_empty())
+                    .map(Path::to_path_buf)
+            })
             .unwrap_or_else(|| PathBuf::from("."));
         let flags = notebook_flags();
         Self {
@@ -185,9 +184,8 @@ impl Kernel {
 
     pub fn merge_notebook(&mut self, theirs: JetNotebook) {
         self.notebook = super::document::merge_by_id(&self.notebook, &theirs);
-        self.document_notice = (!self.notebook.merge_conflicts.is_empty()).then(|| {
-            "merge conflicts are present; edit the marked cells before execution".into()
-        });
+        self.document_notice = (!self.notebook.merge_conflicts.is_empty())
+            .then(|| "merge conflicts are present; edit the marked cells before execution".into());
         self.reset_runtime();
     }
 

@@ -78,7 +78,10 @@ fn no_arg_discovery_formats_files() {
         String::from_utf8_lossy(&out.stderr)
     );
     let after = read(&f);
-    assert_ne!(after, UNFORMATTED, "unformatted file should have been rewritten");
+    assert_ne!(
+        after, UNFORMATTED,
+        "unformatted file should have been rewritten"
+    );
 }
 
 /// `jet fmt <dir>` formats .jet files found in the given directory.
@@ -429,7 +432,12 @@ fn stdin_mode_parse_error_exits_2() {
 
     {
         use std::io::Write;
-        child.stdin.as_mut().unwrap().write_all(INVALID.as_bytes()).unwrap();
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(INVALID.as_bytes())
+            .unwrap();
     }
     let out = child.wait_with_output().unwrap();
     assert_eq!(
@@ -461,7 +469,11 @@ fn preflight_zero_write_on_bad_file() {
         String::from_utf8_lossy(&out.stderr)
     );
     // Neither file must be written.
-    assert_eq!(read(&good), before_good, "good file must not be written when preflight fails");
+    assert_eq!(
+        read(&good),
+        before_good,
+        "good file must not be written when preflight fails"
+    );
     assert_eq!(read(&bad), before_bad, "bad file must not be written");
 }
 

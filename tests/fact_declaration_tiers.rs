@@ -1,9 +1,9 @@
 //! Card #1547 criterion 7: one fact declaration stays a declaration-only item
 //! through every applicable frontend and execution tier.
 
+mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
-mod common;
 
 use std::fs;
 use std::process::Command;
@@ -57,16 +57,14 @@ fn parser_reads_the_fact_source_and_fixture() {
         lexer_diagnostics.is_empty(),
         "lex fixture: {lexer_diagnostics:?}"
     );
-    assert!(
-        jet::Parser::parse(&tokens)
-            .expect("fact fixture must parse")
-            .items
-            .iter()
-            .any(|item| matches!(
-                item,
-                Item::FactDecl(declaration) if declaration.name == "Exactness"
-            ))
-    );
+    assert!(jet::Parser::parse(&tokens)
+        .expect("fact fixture must parse")
+        .items
+        .iter()
+        .any(|item| matches!(
+            item,
+            Item::FactDecl(declaration) if declaration.name == "Exactness"
+        )));
 }
 
 /// Registry: the one table preserves the declaration's typed law metadata.
@@ -124,7 +122,10 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
         .into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect();
-    assert!(errors.is_empty(), "fact fixture rejected before tier proof: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "fact fixture rejected before tier proof: {errors:?}"
+    );
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
         "fact fixture is not resident-JIT safe: {}",
@@ -147,7 +148,10 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
             panic!("resident JIT rejected fact fixture: {diagnostics:?}")
         }
     }
-    assert!(jet_jit::jit_executed_for_test(), "resident JIT did not execute");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "resident JIT did not execute"
+    );
     assert!(
         !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
         "fact fixture used a fallback or interpreter deopt"
@@ -207,7 +211,10 @@ fn measure_rows_share_one_registry_and_all_tiers() {
         dimension: Dimension::base("Length"),
     };
 
-    assert!(Registry::row(plane).is_some(), "measure plane must be registered");
+    assert!(
+        Registry::row(plane).is_some(),
+        "measure plane must be registered"
+    );
     assert!(fixed.knowledge_vector().facts(plane).any(|fact| matches!(
         fact,
         KnowledgeFact::Measure(Measure::Literal { kind, value })
@@ -223,11 +230,14 @@ fn measure_rows_share_one_registry_and_all_tiers() {
         KnowledgeFact::Measure(Measure::Literal { kind, value })
             if kind == "lane" && *value == 4
     )));
-    assert!(quantity.knowledge_vector().facts(plane).any(|fact| matches!(
-        fact,
-        KnowledgeFact::Measure(Measure::SignedLiteral { kind, value })
-            if kind == "exponent" && *value == 1
-    )));
+    assert!(quantity
+        .knowledge_vector()
+        .facts(plane)
+        .any(|fact| matches!(
+            fact,
+            KnowledgeFact::Measure(Measure::SignedLiteral { kind, value })
+                if kind == "exponent" && *value == 1
+        )));
 
     let source = r#"
 use core.compute as compute

@@ -7,13 +7,13 @@
 //! (`jet-pkg-model::WorkspaceLock`) share the same definition without
 //! either depending on the other.
 
-use crate::AST::ComptimeInput;
-use crate::Diagnostics::Diagnostic;
-use crate::Overlay::OverlayPolicy;
 pub use crate::Authority::{
     AuthorityError, AuthorityKind, AuthorityResolver, CheckedDirectory, CheckedFile,
     CheckedManifest, CheckedMember, CheckedPackage, FileIdentity,
 };
+use crate::Diagnostics::Diagnostic;
+use crate::Overlay::OverlayPolicy;
+use crate::AST::ComptimeInput;
 use std::path::{Path, PathBuf};
 
 /// The role of a declaration-resolved workspace source.
@@ -138,17 +138,15 @@ pub(crate) fn declares_workspace_module(src: &str) -> bool {
                 brace_depth -= 1;
                 index += 1;
             }
-            crate::Lexer::TokKind::KwModule if brace_depth == 0 => {
-                match &tokens[index + 1].kind {
-                    crate::Lexer::TokKind::Ident(name)
-                        if name == crate::Syntax::NS_WORKSPACE
-                            && !name.starts_with(crate::Syntax::MODULE_INTERNAL_PREFIX) =>
-                    {
-                        return true;
-                    }
-                    _ => index += 1,
+            crate::Lexer::TokKind::KwModule if brace_depth == 0 => match &tokens[index + 1].kind {
+                crate::Lexer::TokKind::Ident(name)
+                    if name == crate::Syntax::NS_WORKSPACE
+                        && !name.starts_with(crate::Syntax::MODULE_INTERNAL_PREFIX) =>
+                {
+                    return true;
                 }
-            }
+                _ => index += 1,
+            },
             _ => index += 1,
         }
     }

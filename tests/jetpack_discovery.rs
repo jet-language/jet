@@ -232,7 +232,10 @@ fn search_without_local_index_fails_closed() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("no local discovery index"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("no local discovery index"),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -266,7 +269,11 @@ fn top_level_jet_search_dispatches_to_jetpack() {
 #[test]
 fn top_level_jet_search_help_is_flat() {
     let out = jet().args(["search", "--help"]).output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("jet search <query>"), "stdout: {stdout}");
     assert!(!stdout.contains("jet inspect search"), "stdout: {stdout}");
@@ -294,8 +301,15 @@ fn jet_inspect_search_is_no_longer_a_canonical_route() {
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2), "grouped search must be rejected");
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "grouped search must be rejected"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E2101"), "stderr: {stderr}");
-    assert!(stderr.contains("isn't a jet inspect command"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("isn't a jet inspect command"),
+        "stderr: {stderr}"
+    );
 }

@@ -6,9 +6,9 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::Marshal::clone_string;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use crate::Marshal::clone_string;
 
 pub(crate) mod sketch_rt {
     include!("../../jet-codegen/src/Prelude/Core/Sketch.rs");
@@ -158,6 +158,3 @@ host_fns! {
     quantile: "jet_jit_sketch_quantile" => jet_jit_sketch_quantile: quant;
     sample: "jet_jit_sketch_sample" => jet_jit_sketch_sample: unary;
 }
-
-
-

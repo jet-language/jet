@@ -6,7 +6,11 @@ use jet_jit::CraneliftBackend;
 
 mod common;
 
-fn checked_bundle(source: &str, tag: &str, mode: jet::Sema::CompileMode) -> jet::AST::ProgramBundle {
+fn checked_bundle(
+    source: &str,
+    tag: &str,
+    mode: jet::Sema::CompileMode,
+) -> jet::AST::ProgramBundle {
     let dir = common::unique_tmp(tag);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
@@ -118,8 +122,12 @@ fn resident_jit_hot_swap_session() {
     let mut backend = CraneliftBackend::new();
     let first = backend.run(&v1, false);
     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
-    let swapped = backend.hot_swap("start", &v2, false).expect("resident hot swap");
-    assert!(matches!(swapped, RunOutcome::Ran { ref stderr, exit_code: 1, .. } if stderr == "selected boom\n"));
+    let swapped = backend
+        .hot_swap("start", &v2, false)
+        .expect("resident hot swap");
+    assert!(
+        matches!(swapped, RunOutcome::Ran { ref stderr, exit_code: 1, .. } if stderr == "selected boom\n")
+    );
 }
 
 #[test]
@@ -221,13 +229,12 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let explicit_check = jet::Sema::check_bundle_for_output(
-        &mut bundle,
-        jet::Sema::CompileMode::Run,
-        "release",
-    );
+    let explicit_check =
+        jet::Sema::check_bundle_for_output(&mut bundle, jet::Sema::CompileMode::Run, "release");
     assert!(
-        explicit_check.iter().any(|diagnostic| diagnostic.code == "E1321"),
+        explicit_check
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E1321"),
         "{explicit_check:?}"
     );
 
@@ -262,11 +269,7 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
         assert!(!stderr.contains("rustc rejected"), "{stderr}");
     }
 
-    reject(
-        "lib: Output :: .Library.{ name: \"lib\" };\n",
-        &[],
-        "E0101",
-    );
+    reject("lib: Output :: .Library.{ name: \"lib\" };\n", &[], "E0101");
     reject(
         "api: Output :: .Service.{ name: \"api\", entry: serve };\nfn serve() {}\n",
         &[],
@@ -291,14 +294,29 @@ fn checked_default_selects_one_of_multiple_executables() {
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );
-    let selected = bundle.modules[bundle.entry].items.iter().find_map(|item| {
-        let Item::Const(value) = item else { return None };
-        value.resolved_output.as_ref().filter(|output| output.selected)
-    }).expect("checked default selects one Output");
+    let selected = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .find_map(|item| {
+            let Item::Const(value) = item else {
+                return None;
+            };
+            value
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.selected)
+        })
+        .expect("checked default selects one Output");
     assert_eq!(selected.address, "two");
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("jet_runtime_boundary(|| __jet_second())"), "{rust}");
-    assert!(!rust.contains("jet_runtime_boundary(|| __jet_first())"), "{rust}");
+    assert!(
+        rust.contains("jet_runtime_boundary(|| __jet_second())"),
+        "{rust}"
+    );
+    assert!(
+        !rust.contains("jet_runtime_boundary(|| __jet_first())"),
+        "{rust}"
+    );
 }
 
 #[test]
@@ -315,11 +333,8 @@ fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle_for_output(
-        &mut bundle,
-        jet::Sema::CompileMode::Run,
-        "api",
-    );
+    let diagnostics =
+        jet::Sema::check_bundle_for_output(&mut bundle, jet::Sema::CompileMode::Run, "api");
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let tir = jet::Codegen::TIR::lower_jit_program(&bundle).expect("Service lowers through TIR");
     assert_eq!(tir.entry, "serve");
@@ -329,7 +344,11 @@ fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
         .current_dir(&dir)
         .output()
         .expect("run explicit Service Output");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "service\n");
 }
 
@@ -358,11 +377,14 @@ fn service_edge_emits_one_structured_report_record() {
         .lines()
         .filter(|line| line.starts_with('{'))
         .collect();
-    assert_eq!(records.len(), 1, "service failure must have one structured record:\n{stderr}");
+    assert_eq!(
+        records.len(),
+        1,
+        "service failure must have one structured record:\n{stderr}"
+    );
     assert!(
-        records[0].contains(
-            r#"{"target":"service","report":"Error [SVC503]: service unavailable\n"}"#,
-        ),
+        records[0]
+            .contains(r#"{"target":"service","report":"Error [SVC503]: service unavailable\n"}"#,),
         "service report lost its native report text:\n{stderr}"
     );
     assert!(output.stdout.is_empty(), "service failure wrote stdout");
@@ -394,7 +416,12 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
         .current_dir(&dir)
         .output()
         .expect("run Check Output harness");
-    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("unit: pass"), "{stdout}");
     assert!(stdout.contains("release: FAIL"), "{stdout}");
@@ -472,7 +499,12 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
         .current_dir(&dir)
         .output()
         .expect("run imported typed Output");
-    assert_eq!(output.status.code(), Some(1), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "42\n");
     assert!(String::from_utf8_lossy(&output.stderr).contains("imported boom"));
 }

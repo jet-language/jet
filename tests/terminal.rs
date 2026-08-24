@@ -106,9 +106,7 @@ fn run_pty(mode: &str) -> String {
         "interpret" => " --interpret",
         _ => panic!("unknown PTY mode: {mode}"),
     };
-    let shell_line = format!(
-        "stty rows 24 cols 100; exec {jet} run --quiet{profile} {example}"
-    );
+    let shell_line = format!("stty rows 24 cols 100; exec {jet} run --quiet{profile} {example}");
     let mut child = Command::new("script")
         .args(["-qfec", &shell_line, "/dev/null"])
         .env("NO_COLOR", "1")
@@ -254,12 +252,9 @@ fn terminal_parity_uses_tty_prompt_and_progress_order() {
 fn terminal_parity_matches_non_tty_golden_and_stream_order() {
     assert_resident_tier_compiles_run();
     assert_default_run_traces_native_tier();
-    let expected_stdout = include_str!(
-        "../examples/features/expected/io/terminal_parity.out"
-    );
-    let expected_stderr = include_str!(
-        "../examples/features/expected/io/terminal_parity.stderr.out"
-    );
+    let expected_stdout = include_str!("../examples/features/expected/io/terminal_parity.out");
+    let expected_stderr =
+        include_str!("../examples/features/expected/io/terminal_parity.stderr.out");
     let mut expected_merged = expected_stdout.to_string();
     expected_merged.push_str(expected_stderr);
 
@@ -567,7 +562,8 @@ fn error_report_matrix_tty_pipe_no_color_and_narrow_widths() {
         pipe.text
     );
     assert!(
-        pipe.text.contains("examples/features/errors/error_context.jet:7"),
+        pipe.text
+            .contains("examples/features/errors/error_context.jet:7"),
         "a pipe must keep whole paths: {:?}",
         pipe.text
     );
@@ -609,9 +605,11 @@ fn error_report_matrix_tty_pipe_no_color_and_narrow_widths() {
             "a 40-column terminal must not be overflowed: {line:?}"
         );
     }
-    for (number, function, line_number) in
-        [(1, "parse_config", 7), (2, "load_config", 12), (3, "run", 16)]
-    {
+    for (number, function, line_number) in [
+        (1, "parse_config", 7),
+        (2, "load_config", 12),
+        (3, "run", 16),
+    ] {
         let hop = format!("  {number}. {function} (error_context.jet:{line_number})");
         assert!(
             tty_narrow.text.contains(&hop),

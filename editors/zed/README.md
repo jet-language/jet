@@ -70,35 +70,15 @@ Rebuild with `cargo build` and reload Zed to pick up server changes.
 
 ## Native debugging
 
-The extension registers the `jet` DAP adapter through Zed extension API 0.7.0.
-It launches `jet debug --dap <file.jet>` over stdio and passes launch or local
-attach configuration, arguments, working directory, environment overrides,
-and stop-on-entry through the same bounded Jet DAP profile as VS Code.
-Restart keeps launch arguments and source breakpoints, but expires stack,
-scope, and variable references; refresh the view after the resulting stop.
+The extension does not register a Jet DAP adapter. Zed extension API 0.7.0
+does not expose the trust and authorization hooks required by the native
+debugger, so the Zed extension ships language support only.
 
-The default view shows Jet threads, stacks, scopes, nested values, and
-read-only evaluation. Use `showRawFrames` only for the clearly marked
-generated-Rust expert view. LLDB must be available to the selected Jet
-executable. The adapter accepts strict `Content-Length` frames up to 16 MiB.
-It requires `adapterID: "jet"`, uses canonical local source paths, and follows
-the `linesStartAt1` and `columnsStartAt1` values from DAP `initialize`.
-
-Launch configuration uses the open `.jet` source as `program`. Local attach
-uses the matching native `program`, its `.jetmap` `map`, and a positive
-same-user `processId`; the adapter reads the source identity from that verified
-map before it starts.
-Relative source paths in a `.jetmap` are resolved relative to that sidecar, so
-the editor may start from another working directory.
-
-```json
-{
-  "request": "launch",
-  "program": "${file}",
-  "stopOnEntry": true,
-  "showRawFrames": false
-}
-```
+Use the terminal command `jet debug <file.jet>` for native debugging. The
+terminal and VS Code adapters expose Jet threads, stacks, scopes, nested
+values, and read-only evaluation. Use `--raw-frames` only for the clearly
+marked generated-Rust expert view. Zed DAP support needs a future extension
+API with the required trust and authorization hooks.
 
 ## Verify
 

@@ -100,15 +100,13 @@ fn ci_denies_legacy_before_reading_a_missing_manifest() {
         ),
     );
 
-    let errors = compile_bundle_path_build(
-        entry.to_str().unwrap(),
-        options(BuildPolicy::ci_default()),
-    )
-    .unwrap_err();
+    let errors =
+        compile_bundle_path_build(entry.to_str().unwrap(), options(BuildPolicy::ci_default()))
+            .unwrap_err();
     assert!(
-        errors
-            .iter()
-            .any(|diagnostic| diagnostic.what.contains("legacy build wrappers are disabled in CI")),
+        errors.iter().any(|diagnostic| diagnostic
+            .what
+            .contains("legacy build wrappers are disabled in CI")),
         "CI policy must win over missing canonical manifest: {errors:#?}"
     );
     assert!(
@@ -151,13 +149,13 @@ fn allowed_legacy_bridge_rejects_stale_canonical_facts() {
         )
         .unwrap();
         let entry = write_entry(&root, &source(inputs, outputs, argv));
-        let errors = compile_bundle_path_build(
-            entry.to_str().unwrap(),
-            options(BuildPolicy::allow_all()),
-        )
-        .unwrap_err();
+        let errors =
+            compile_bundle_path_build(entry.to_str().unwrap(), options(BuildPolicy::allow_all()))
+                .unwrap_err();
         assert!(
-            errors.iter().any(|diagnostic| diagnostic.what.contains(expected)),
+            errors
+                .iter()
+                .any(|diagnostic| diagnostic.what.contains(expected)),
             "stale {name} declaration must be rejected: {errors:#?}"
         );
     }

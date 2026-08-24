@@ -155,7 +155,9 @@ fn publish_build(case_dir: &Path, serve_name: &str, serve_root: &Path) {
 
 fn write_callback_source(dest: &Path) {
     let mut src = String::from("#Target(Web)\n#HTML(\"index.html\")\n");
-    src.push_str(include_str!("../examples/features/web/web_wasm_callback.jet"));
+    src.push_str(include_str!(
+        "../examples/features/web/web_wasm_callback.jet"
+    ));
     fs::write(dest, src).expect("write callback source");
 }
 
@@ -256,7 +258,8 @@ fn web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("PASS web backend browser acceptance matrix"),
+        String::from_utf8_lossy(&output.stdout)
+            .contains("PASS web backend browser acceptance matrix"),
         "acceptance did not report completion"
     );
     let _ = fs::remove_dir_all(&root);

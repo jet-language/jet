@@ -5,8 +5,8 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
 use jet::Interpreter::{dev_iteration, RunOutcome};
+use tir_support::{build_and_run, build_and_run_full, compile, have_rustc, jit_run};
 
 /// D-FAIL-ERROR1=A: the labelled/string shape builds a default `Err` value;
 /// one positional typed value in a result arm still wraps that value.
@@ -26,8 +26,14 @@ fn run() Err! {
 }
 "#;
     let rust = compile("tir_default_err_value", src);
-    assert!(rust.contains("jet_err("), "default Err must call the Prelude constructor");
-    assert!(rust.contains("return Err("), "typed Err arm must remain a Result wrapper");
+    assert!(
+        rust.contains("jet_err("),
+        "default Err must call the Prelude constructor"
+    );
+    assert!(
+        rust.contains("return Err("),
+        "typed Err arm must remain a Result wrapper"
+    );
 }
 
 /// D-FAIL-ERROR1=A / I9: the default `jet run` edge renders the same Prelude
@@ -56,7 +62,10 @@ fn run() {
 }
 "#;
     let (jit_code, jit_stdout, jit_stderr) = jit_run("tir_exit_101_jit", src);
-    assert_eq!((jit_code, jit_stdout.as_str(), jit_stderr.as_str()), (1, "", ""));
+    assert_eq!(
+        (jit_code, jit_stdout.as_str(), jit_stderr.as_str()),
+        (1, "", "")
+    );
 
     let (interp_code, interp_stdout, interp_stderr) =
         tir_support::interpreter_run("tir_exit_101_interp", src);
@@ -585,7 +594,10 @@ fn run() {
 "#;
     let (code, stdout) = build_and_run("tir_subjectless_guard_patterns", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "first only\ntable 4 6\nleft\nright\ninline 4 6\npre 4\nvalue 4 6\n");
+    assert_eq!(
+        stdout,
+        "first only\ntable 4 6\nleft\nright\ninline 4 6\npre 4\nvalue 4 6\n"
+    );
 }
 
 /// Coexistence: a free function and a method in the same program both route
@@ -742,10 +754,7 @@ fn run() {
 "#;
     let (code, stdout) = build_and_run("union_codable_roundtrip", src);
     assert_eq!(code, 0);
-    assert_eq!(
-        stdout,
-        "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n"
-    );
+    assert_eq!(stdout, "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n");
 }
 
 #[test]
@@ -1178,11 +1187,8 @@ fn run() {
     }
 }
 "#;
-    let (code, stdout, stderr) = build_and_run_full(
-        "jet_tir_test",
-        "tir_unified_loop_invalid_stride",
-        invalid,
-    );
+    let (code, stdout, stderr) =
+        build_and_run_full("jet_tir_test", "tir_unified_loop_invalid_stride", invalid);
     assert_eq!(code, 70);
     assert_eq!(stdout, "source\nstride\n", "no source item may be pulled");
     assert!(stderr.contains("E0123: loop stride must be positive"));

@@ -18,8 +18,8 @@
 //! see commit 2b3825e), so this module owns the only pass that gives module
 //! bodies meaning.
 
-mod DevService;
 mod Computed;
+mod DevService;
 mod Diagnostics;
 mod Environment;
 mod Eval;
@@ -29,6 +29,14 @@ mod System;
 mod Types;
 
 pub use Diagnostics::merge_error_to_diagnostic;
+pub use Environment::{
+    valid_env_name, DotenvSpec, EnvironmentIntegration, EnvironmentLifecycle, FileConflict,
+    FileMode, FormatterSpec, HookAction, HookSpec, IntegrationKind, LanguageExpansion,
+    LanguagePack, LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile,
+    ManagedFileError, PackageProfileError, PackageProfileFact, PackageProfilePackage,
+    PackageProfilePlan, PackageProfileSet, PackageProfileSpec, PresetError, PresetSet, PresetSpec,
+    ReloadPolicy, ResolvedPackageProfile, ResolvedPreset,
+};
 pub use Eval::{evaluate_modules, evaluate_source, merge_all, pkg_ref};
 pub use PackageOutput::{
     env_plan_from_package_outputs, project_package_outputs, PackageOutputError, PackageOutputPlan,
@@ -38,18 +46,11 @@ pub use Source::{
     evaluate_env_with_selections, evaluate_package_profile, is_module_surface,
 };
 pub use Types::{
-    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EnvironmentRead, EvaluatedModule,
-    FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan, ImageKind, ImagePlan, OptionPlan,
-    PromptPathMode, PromptStripMode,
-    ReadyProbe, RestartPolicy, SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy,
-    SecretSpec, ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
-};
-pub use Environment::{
-    DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, FormatterSpec, HookAction, HookSpec, LanguageExpansion, LanguagePack,
-    LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
-    EnvironmentIntegration, IntegrationKind, PackageProfileError, PackageProfileFact,
-    PackageProfilePackage, PackageProfilePlan, PackageProfileSet, PackageProfileSpec, PresetError,
-    PresetSet, PresetSpec, ReloadPolicy, ResolvedPackageProfile, ResolvedPreset, valid_env_name,
+    AdapterPlan, AdapterRecipe, DevServicePlan, EnvPlan, EnvironmentFacts, EnvironmentRead,
+    EvaluatedModule, FleetPlan, HostOverride, HostOverrideProvenance, HostOverrideValue, HostPlan,
+    ImageKind, ImagePlan, OptionPlan, PromptPathMode, PromptStripMode, ReadyProbe, RestartPolicy,
+    SecretDeclaration, SecretDefault, SecretGenerator, SecretRotationPolicy, SecretSpec,
+    ServicePlan, ShutdownPolicy, SystemPlan, VmTestPlan,
 };
 
 #[cfg(test)]
@@ -168,8 +169,7 @@ module full {
         assert_eq!(default_plan.prompt.as_deref(), Some("dev"));
         assert_eq!(default_plan.active_environment_provenance, vec!["dev"]);
 
-        let full_plan =
-            evaluate_env_with_environment(source, &base_dir(), Some("full")).unwrap();
+        let full_plan = evaluate_env_with_environment(source, &base_dir(), Some("full")).unwrap();
         assert_eq!(full_plan.active_environment.as_deref(), Some("full"));
         assert_eq!(full_plan.package_refs, vec!["fd@default"]);
         assert_eq!(full_plan.prompt.as_deref(), Some("full"));
@@ -198,19 +198,32 @@ module env.full {
 "#;
         let plan = evaluate_env(source, &base_dir()).unwrap();
         assert_eq!(
-            plan.dev_services.iter().map(|service| service.name.as_str()).collect::<Vec<_>>(),
+            plan.dev_services
+                .iter()
+                .map(|service| service.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["dev_service"]
         );
         assert_eq!(
-            plan.lifecycle.checks.iter().map(|check| check.name.as_str()).collect::<Vec<_>>(),
+            plan.lifecycle
+                .checks
+                .iter()
+                .map(|check| check.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["dev-check"]
         );
         assert_eq!(
-            plan.files.iter().map(|file| file.destination.as_str()).collect::<Vec<_>>(),
+            plan.files
+                .iter()
+                .map(|file| file.destination.as_str())
+                .collect::<Vec<_>>(),
             vec!["config/dev.txt"]
         );
         assert_eq!(
-            plan.environment_reads.iter().map(|read| read.name.as_str()).collect::<Vec<_>>(),
+            plan.environment_reads
+                .iter()
+                .map(|read| read.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["$DEV_ONLY"]
         );
     }
@@ -245,7 +258,10 @@ module profile.dev {
         assert_eq!(plan.applied, vec!["base", "dev"]);
         assert_eq!(plan.sources, vec!["profile.base", "profile.dev"]);
         assert_eq!(
-            plan.packages.iter().map(|package| package.raw.as_str()).collect::<Vec<_>>(),
+            plan.packages
+                .iter()
+                .map(|package| package.raw.as_str())
+                .collect::<Vec<_>>(),
             vec!["ripgrep@default", "fd@default"]
         );
         assert_eq!(plan.packages[0].source, "default");
@@ -317,7 +333,9 @@ module env.dev {{
         );
         let plan = evaluate_env_with_preset(&source, &base_dir(), Some("explicit")).unwrap();
         assert_eq!(
-            plan.selected_preset.as_ref().map(|preset| preset.name.as_str()),
+            plan.selected_preset
+                .as_ref()
+                .map(|preset| preset.name.as_str()),
             Some("explicit")
         );
         assert!(plan.package_refs.contains(&"git@nixpkgs".to_string()));
@@ -333,8 +351,8 @@ module second {
     env.two: Env.{ reload: "prompt" }
 }
 "#;
-        let error = evaluate_env(source, &base_dir())
-            .expect_err("reload conflict must be explicit");
+        let error =
+            evaluate_env(source, &base_dir()).expect_err("reload conflict must be explicit");
         assert_eq!(error.code, "E1333");
         assert!(
             error.what.contains("reload policy") && error.what.contains("second"),
@@ -674,9 +692,18 @@ module dev {
             panic!("expected a fetch step");
         };
         assert_eq!(sha256, "sha{}\n\t");
-        assert!(matches!(recipe.steps[1], super::super::Recipe::BuildStep::Exec { .. }));
-        assert!(matches!(recipe.steps[2], super::super::Recipe::BuildStep::Install { .. }));
-        assert!(matches!(recipe.steps[3], super::super::Recipe::BuildStep::InstallTree { .. }));
+        assert!(matches!(
+            recipe.steps[1],
+            super::super::Recipe::BuildStep::Exec { .. }
+        ));
+        assert!(matches!(
+            recipe.steps[2],
+            super::super::Recipe::BuildStep::Install { .. }
+        ));
+        assert!(matches!(
+            recipe.steps[3],
+            super::super::Recipe::BuildStep::InstallTree { .. }
+        ));
     }
 
     #[test]
@@ -882,8 +909,14 @@ module env.dev {
             .find(|value| value.kind == IntegrationKind::Android)
             .unwrap();
         assert_eq!(android.options.get("api").map(String::as_str), Some("35"));
-        assert_eq!(android.options.get("build_tools").map(String::as_str), Some("35.0.0"));
-        assert!(android.tasks.iter().any(|value| value == "android-sdk-check"));
+        assert_eq!(
+            android.options.get("build_tools").map(String::as_str),
+            Some("35.0.0")
+        );
+        assert!(android
+            .tasks
+            .iter()
+            .any(|value| value == "android-sdk-check"));
         assert!(android.providers.iter().any(|value| value == "nixpkgs"));
         assert!(android.validate_target("linux.x64").is_ok());
         assert!(android.validate_target("darwin.aarch64").is_err());
@@ -894,12 +927,18 @@ module env.dev {
             .unwrap_or_else(|| {
                 panic!("the Android/Apple integration proof must include an Apple preset")
             });
-        assert_eq!(apple.options.get("targets").map(String::as_str), Some("IOS"));
+        assert_eq!(
+            apple.options.get("targets").map(String::as_str),
+            Some("IOS")
+        );
         assert_eq!(
             apple.options.get("license").map(String::as_str),
             Some("policy-required")
         );
-        assert!(apple.packages.iter().any(|value| value == "apple-sdk@nixpkgs"));
+        assert!(apple
+            .packages
+            .iter()
+            .any(|value| value == "apple-sdk@nixpkgs"));
         assert!(apple.validate_target("darwin.aarch64").is_ok());
         assert!(apple.validate_target("linux.x64").is_err());
         let certs = plan
@@ -912,7 +951,10 @@ module env.dev {
         assert_eq!(certs.providers, vec!["vault"]);
         assert_eq!(certs.secrets, vec!["dev_certificate"]);
         assert_eq!(certs.grants, vec!["certificate.read"]);
-        assert_eq!(certs.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
+        assert_eq!(
+            certs.options.get("arg0").map(String::as_str),
+            Some("<redacted-names>")
+        );
         let cloud = plan
             .integrations
             .iter()
@@ -923,7 +965,10 @@ module env.dev {
         assert_eq!(cloud.providers, vec!["credential-store"]);
         assert_eq!(cloud.secrets, vec!["aws_production"]);
         assert_eq!(cloud.grants, vec!["credential.read"]);
-        assert_eq!(cloud.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
+        assert_eq!(
+            cloud.options.get("arg0").map(String::as_str),
+            Some("<redacted-names>")
+        );
         let vault = plan
             .integrations
             .iter()
@@ -934,7 +979,10 @@ module env.dev {
         assert_eq!(vault.providers, vec!["vault"]);
         assert_eq!(vault.secrets, vec!["database_password"]);
         assert_eq!(vault.grants, vec!["vault.read"]);
-        assert_eq!(vault.options.get("arg0").map(String::as_str), Some("<redacted-names>"));
+        assert_eq!(
+            vault.options.get("arg0").map(String::as_str),
+            Some("<redacted-names>")
+        );
         let hosts = plan
             .integrations
             .iter()
@@ -943,7 +991,10 @@ module env.dev {
         assert_eq!(hosts.preset, "project-hosts");
         assert_eq!(hosts.tasks, vec!["host-binding-check"]);
         assert_eq!(hosts.providers, vec!["host-binding"]);
-        assert_eq!(hosts.options.get("host.api.local").map(String::as_str), Some("127.0.0.1"));
+        assert_eq!(
+            hosts.options.get("host.api.local").map(String::as_str),
+            Some("127.0.0.1")
+        );
         let agent = plan
             .integrations
             .iter()
@@ -1689,11 +1740,18 @@ module system.box {
         let postgres = &plan.dev_services[1];
         assert_eq!(postgres.name, "postgres");
         assert!(postgres.enable);
-        assert!(postgres.run.is_none(), "postgres relies on the built-in catalog");
+        assert!(
+            postgres.run.is_none(),
+            "postgres relies on the built-in catalog"
+        );
         let worker = &plan.dev_services[2];
         assert_eq!(worker.name, "worker");
         assert_eq!(worker.ports, vec![8080]);
-        let worker_run = vec!["worker".to_string(), "--port".to_string(), "8080".to_string()];
+        let worker_run = vec![
+            "worker".to_string(),
+            "--port".to_string(),
+            "8080".to_string(),
+        ];
         assert_eq!(worker.run.as_deref(), Some(worker_run.as_slice()));
         assert!(worker.ready.is_some());
         let cache = &plan.dev_services[3];

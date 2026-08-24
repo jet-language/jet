@@ -18,8 +18,8 @@ pub use program_imports::{
     core_import_maps, core_list_path, core_list_prefix, member_import_local,
     rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreListPath, ErrorConvDef,
     FencedNames, FencedStatement, ForeignImportError, ForeignLanguage, ForeignNamespace,
-    ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl,
-    MigrationOp, PackageGuarantees, Program, ProgramBundle, TryConvert,
+    ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl, MigrationOp,
+    PackageGuarantees, Program, ProgramBundle, TryConvert,
 };
 
 #[path = "AST/items.rs"]
@@ -31,17 +31,16 @@ pub use items::{
     Contribution, DeriveBodyItem, DeriveDef, DistinctDef, EffectDecl, EnumDef, EnumGroup, EnvLit,
     EveryArg, EveryMarker, EverySchedule, EveryScheduleError, ExternFn, ExternRustBlock, FactDecl,
     Field, FleetField, FleetFieldValue, FleetLit, Func, GenericModuleDef, GenericModuleParam,
-    HostEntry, ImageField, ImageFieldValue, ImageFromRef, ImageLit, ImplDef, InlineForeign,
-    Item, ItemTemplateLoop,
-    JobCachePolicy, JobMetadata, JobScope, JobSkip, KernelMarker, KernelMode, KernelProof, Marker,
-    MarkerDecl, MarkerDeclParam, MarkerTextDecl, MaturityTag, ModuleAliasDef, ModuleArg,
-    ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity, Namespace, OptionEntry, Param,
-    ParamZone, PerfLit, ProfileLit, ProtocolDecl, ProtocolDirection, ProtocolMessage, QuantityKind,
-    SerdeWireShape, ServiceEntry, SourceDecl, StateDecl, StateTransition, StructDef, StructLayout,
-    SystemField, SystemFieldValue, SystemLit, TagDef, TestDef, TraitDef, TraitImplBlock,
-    TraitMethodSig, TypeAliasDef, TypeParam, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember,
-    UnitRatio, UnitScaleProvenance, UserPolicyDecl, Variant, VariantField, VariantPayload,
-    VmTestField, VmTestFieldValue, VmTestLit, DEFAULT_MEMO_BOUND,
+    HostEntry, ImageField, ImageFieldValue, ImageFromRef, ImageLit, ImplDef, InlineForeign, Item,
+    ItemTemplateLoop, JobCachePolicy, JobMetadata, JobScope, JobSkip, KernelMarker, KernelMode,
+    KernelProof, Marker, MarkerDecl, MarkerDeclParam, MarkerTextDecl, MaturityTag, ModuleAliasDef,
+    ModuleArg, ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity, Namespace,
+    OptionEntry, Param, ParamZone, PerfLit, ProfileLit, ProtocolDecl, ProtocolDirection,
+    ProtocolMessage, QuantityKind, SerdeWireShape, ServiceEntry, SourceDecl, StateDecl,
+    StateTransition, StructDef, StructLayout, SystemField, SystemFieldValue, SystemLit, TagDef,
+    TestDef, TraitDef, TraitImplBlock, TraitMethodSig, TypeAliasDef, TypeParam, UnitDimensionDecl,
+    UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, UserPolicyDecl, Variant,
+    VariantField, VariantPayload, VmTestField, VmTestFieldValue, VmTestLit, DEFAULT_MEMO_BOUND,
 };
 
 #[path = "AST/patterns.rs"]
@@ -77,8 +76,8 @@ pub use expressions::{
 mod comptime;
 pub use comptime::{
     canonical_view_provenance_map, ClosureData, CtFloat, CtKey, CtOpaque, CtReport, CtValue,
-    Deprecation, FuncSig, ViewProvenance, ViewProvenanceCell, ViewProvenanceMap, ViewSource, ViewSourcePath,
-    ViewSourceProjection,
+    Deprecation, FuncSig, ViewProvenance, ViewProvenanceCell, ViewProvenanceMap, ViewSource,
+    ViewSourcePath, ViewSourceProjection,
 };
 
 #[path = "AST/ffi.rs"]
@@ -86,9 +85,8 @@ mod ffi;
 pub use ffi::{
     binder_descriptor, foreign_abi_contract, BinderCapability, BinderCapabilityReport,
     BinderDescriptor, BinderRuntime, BinderStatus, BinderSurface, BindingStubKind, CFfi,
-    CImportLink, CLib, ComptimeInput, ForeignAbiContract, ForeignAsyncModel,
+    CImportLink, CLib, ComptimeInput, FfiLink, ForeignAbiContract, ForeignAsyncModel,
     ForeignCallbackModel, ForeignCallingConvention, ForeignErrorModel, ForeignLayoutModel,
-    ForeignOwnershipModel, ForeignProvider, ForeignSafety, ForeignScalar,
-    ForeignStubFile, ForeignTaskBoundary, FfiLink, FOREIGN_ABI_CONTRACT_VERSION,
-    FOREIGN_BINDERS, FOREIGN_DESCRIPTOR_SCHEMA,
+    ForeignOwnershipModel, ForeignProvider, ForeignSafety, ForeignScalar, ForeignStubFile,
+    ForeignTaskBoundary, FOREIGN_ABI_CONTRACT_VERSION, FOREIGN_BINDERS, FOREIGN_DESCRIPTOR_SCHEMA,
 };

@@ -10,7 +10,11 @@ mod common;
 
 use jet::REPL::{run_transcript, run_transcript_with_flags};
 
-fn run_repl_process(state: &std::path::Path, input: &[u8], limit: Option<&str>) -> std::process::Output {
+fn run_repl_process(
+    state: &std::path::Path,
+    input: &[u8],
+    limit: Option<&str>,
+) -> std::process::Output {
     use std::io::Write as _;
     use std::process::{Command, Stdio};
 
@@ -48,7 +52,10 @@ fn spawn_repl_process(state: &std::path::Path) -> std::process::Child {
 fn wait_for_history_dir(state: &std::path::Path) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while !state.join("jet").is_dir() {
-        assert!(std::time::Instant::now() < deadline, "history directory was not opened");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "history directory was not opened"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -63,11 +70,18 @@ fn repl_history_persists_only_successes_searches_clears_and_is_private() {
 
     let history = state.join("jet/repl-history");
     let stored = std::fs::read_to_string(&history).expect("history file");
-    assert_eq!(stored.lines().count(), 1, "failed turn persisted: {stored:?}");
+    assert_eq!(
+        stored.lines().count(),
+        1,
+        "failed turn persisted: {stored:?}"
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&history).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&history).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     let second = run_repl_process(
@@ -77,7 +91,10 @@ fn repl_history_persists_only_successes_searches_clears_and_is_private() {
     );
     let out = String::from_utf8_lossy(&second.stdout);
     assert!(out.contains("answer :: 42"), "search output: {out:?}");
-    assert!(out.contains("No history matches."), "failed turn was searchable: {out:?}");
+    assert!(
+        out.contains("No history matches."),
+        "failed turn was searchable: {out:?}"
+    );
     assert!(out.contains("History cleared."), "clear output: {out:?}");
     assert!(!history.exists(), "clear must erase whole file");
     std::fs::remove_dir_all(state).ok();
@@ -91,15 +108,28 @@ fn repl_history_limit_and_corrupt_tail_recover_visibly() {
     assert!(first.status.success());
     let history = state.join("jet/repl-history");
     use std::io::Write as _;
-    std::fs::OpenOptions::new().append(true).open(&history).unwrap().write_all(b"broken-tail").unwrap();
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&history)
+        .unwrap()
+        .write_all(b"broken-tail")
+        .unwrap();
 
     let second = run_repl_process(&state, b":history search +\n:quit\n", Some("2"));
     let out = String::from_utf8_lossy(&second.stdout);
     let err = String::from_utf8_lossy(&second.stderr);
     assert!(!out.contains("1 + 1"), "retention exceeded: {out:?}");
-    assert!(out.contains("2 + 2") && out.contains("3 + 3"), "retained entries missing: {out:?}");
-    assert!(err.contains("corrupt history tail") && err.contains("discarded"), "warning missing: {err:?}");
-    assert!(!std::fs::read_to_string(&history).unwrap().contains("broken-tail"));
+    assert!(
+        out.contains("2 + 2") && out.contains("3 + 3"),
+        "retained entries missing: {out:?}"
+    );
+    assert!(
+        err.contains("corrupt history tail") && err.contains("discarded"),
+        "warning missing: {err:?}"
+    );
+    assert!(!std::fs::read_to_string(&history)
+        .unwrap()
+        .contains("broken-tail"));
     std::fs::remove_dir_all(state).ok();
 }
 
@@ -110,9 +140,20 @@ fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() {
     let state = std::env::temp_dir().join(format!("jet_repl_history_off_{}", std::process::id()));
     std::fs::remove_dir_all(&state).ok();
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .arg("repl").env("XDG_STATE_HOME", &state).env("JET_REPL_HISTORY", "off")
-        .env("NO_COLOR", "1").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
-    child.stdin.as_mut().unwrap().write_all(b"8 + 9\n:history search 8\n:quit\n").unwrap();
+        .arg("repl")
+        .env("XDG_STATE_HOME", &state)
+        .env("JET_REPL_HISTORY", "off")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"8 + 9\n:history search 8\n:quit\n")
+        .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(String::from_utf8_lossy(&output.stdout).contains("8 + 9"));
     assert!(!state.join("jet/repl-history").exists());
@@ -130,7 +171,8 @@ fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() {
 fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() {
     use std::os::unix::fs::{symlink, PermissionsExt};
     let root = std::env::temp_dir().join(format!("jet_repl_history_link_{}", std::process::id()));
-    let outside = std::env::temp_dir().join(format!("jet_repl_history_outside_{}", std::process::id()));
+    let outside =
+        std::env::temp_dir().join(format!("jet_repl_history_outside_{}", std::process::id()));
     std::fs::remove_dir_all(&root).ok();
     std::fs::remove_dir_all(&outside).ok();
     std::fs::create_dir_all(&root).unwrap();
@@ -140,9 +182,18 @@ fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() {
 
     let output = run_repl_process(&root.join("linked/state"), b"5 + 5\n:quit\n", None);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("session-only history"), "fallback invisible: {stderr:?}");
-    assert!(!outside.join("state").exists(), "history escaped through state symlink");
-    assert_eq!(std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777, 0o755);
+    assert!(
+        stderr.contains("session-only history"),
+        "fallback invisible: {stderr:?}"
+    );
+    assert!(
+        !outside.join("state").exists(),
+        "history escaped through state symlink"
+    );
+    assert_eq!(
+        std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
     std::fs::remove_dir_all(root).ok();
     std::fs::remove_dir_all(outside).ok();
 }
@@ -153,7 +204,8 @@ fn repl_history_parent_swap_stays_on_held_directory() {
     use std::io::Write as _;
     use std::os::unix::fs::symlink;
     let state = std::env::temp_dir().join(format!("jet_repl_history_swap_{}", std::process::id()));
-    let outside = std::env::temp_dir().join(format!("jet_repl_history_swap_out_{}", std::process::id()));
+    let outside =
+        std::env::temp_dir().join(format!("jet_repl_history_swap_out_{}", std::process::id()));
     std::fs::remove_dir_all(&state).ok();
     std::fs::remove_dir_all(&outside).ok();
     std::fs::create_dir_all(&outside).unwrap();
@@ -162,11 +214,25 @@ fn repl_history_parent_swap_stays_on_held_directory() {
     let held = state.join("held-jet");
     std::fs::rename(state.join("jet"), &held).unwrap();
     symlink(&outside, state.join("jet")).unwrap();
-    child.stdin.as_mut().unwrap().write_all(b"4 + 4\n:quit\n").unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"4 + 4\n:quit\n")
+        .unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success());
-    assert!(!outside.join("repl-history").exists(), "swap redirected history write");
-    assert_eq!(std::fs::read_to_string(held.join("repl-history")).unwrap().lines().count(), 1);
+    assert!(
+        !outside.join("repl-history").exists(),
+        "swap redirected history write"
+    );
+    assert_eq!(
+        std::fs::read_to_string(held.join("repl-history"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
     std::fs::remove_file(state.join("jet")).ok();
     std::fs::remove_dir_all(state).ok();
     std::fs::remove_dir_all(outside).ok();
@@ -183,7 +249,8 @@ fn repl_history_two_processes_merge_and_clear_cannot_resurrect() {
     let mut first_stdin = first.stdin.take().unwrap();
     let mut second_stdin = second.stdin.take().unwrap();
     let writer_a = std::thread::spawn(move || first_stdin.write_all(b"left_marker :: 1\n:quit\n"));
-    let writer_b = std::thread::spawn(move || second_stdin.write_all(b"right_marker :: 2\n:quit\n"));
+    let writer_b =
+        std::thread::spawn(move || second_stdin.write_all(b"right_marker :: 2\n:quit\n"));
     writer_a.join().unwrap().unwrap();
     writer_b.join().unwrap().unwrap();
     assert!(first.wait().unwrap().success());
@@ -194,13 +261,21 @@ fn repl_history_two_processes_merge_and_clear_cannot_resurrect() {
         None,
     );
     let merged = String::from_utf8_lossy(&merged.stdout);
-    assert!(merged.contains("left_marker :: 1") && merged.contains("right_marker :: 2"), "lost update: {merged:?}");
+    assert!(
+        merged.contains("left_marker :: 1") && merged.contains("right_marker :: 2"),
+        "lost update: {merged:?}"
+    );
 
     let mut stale = spawn_repl_process(&state);
     wait_for_history_dir(&state);
     let cleared = run_repl_process(&state, b":history clear\n:quit\n", None);
     assert!(cleared.status.success());
-    stale.stdin.as_mut().unwrap().write_all(b"fresh_marker :: 3\n:quit\n").unwrap();
+    stale
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"fresh_marker :: 3\n:quit\n")
+        .unwrap();
     assert!(stale.wait().unwrap().success());
     let after = run_repl_process(
         &state,
@@ -208,8 +283,14 @@ fn repl_history_two_processes_merge_and_clear_cannot_resurrect() {
         None,
     );
     let after = String::from_utf8_lossy(&after.stdout);
-    assert!(after.contains("fresh_marker :: 3"), "fresh write missing: {after:?}");
-    assert!(!after.contains("left_marker :: 1") && !after.contains("right_marker :: 2"), "clear resurrected history: {after:?}");
+    assert!(
+        after.contains("fresh_marker :: 3"),
+        "fresh write missing: {after:?}"
+    );
+    assert!(
+        !after.contains("left_marker :: 1") && !after.contains("right_marker :: 2"),
+        "clear resurrected history: {after:?}"
+    );
     std::fs::remove_dir_all(state).ok();
 }
 
@@ -219,7 +300,9 @@ fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
     use std::process::Command;
     let state = std::env::temp_dir().join(format!("jet_repl_history_f3_{}", std::process::id()));
     std::fs::remove_dir_all(&state).ok();
-    assert!(run_repl_process(&state, b"3 + 3\n:quit\n", None).status.success());
+    assert!(run_repl_process(&state, b"3 + 3\n:quit\n", None)
+        .status
+        .success());
     let shell = r#"
 {
   sleep 0.2
@@ -241,9 +324,19 @@ fn repl_raw_f3_search_recalls_and_submits_persistent_history() {
         .output()
         .expect("run raw REPL under PTY");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("history search>"), "F3 did not open search: {out:?}");
-    assert!(out.contains("6 : Int"), "recalled submission did not execute: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("history search>"),
+        "F3 did not open search: {out:?}"
+    );
+    assert!(
+        out.contains("6 : Int"),
+        "recalled submission did not execute: {out:?}"
+    );
     std::fs::remove_dir_all(state).ok();
 }
 
@@ -266,48 +359,74 @@ fn run_raw_multiline_pty(writer: &str) -> std::process::Output {
 #[cfg(unix)]
 #[test]
 fn repl_raw_enter_uses_parser_completeness_not_bracket_balance() {
-    let output = run_raw_multiline_pty(
-        "printf '40 +\\r'; sleep 0.15; printf '2\\r'",
-    );
+    let output = run_raw_multiline_pty("printf '40 +\\r'; sleep 0.15; printf '2\\r'");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
     assert!(out.contains("· "), "continuation prompt missing: {out:?}");
-    assert!(out.contains("42 : Int"), "parser-complete input did not submit: {out:?}");
+    assert!(
+        out.contains("42 : Int"),
+        "parser-complete input did not submit: {out:?}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn repl_raw_escape_enter_forces_newline_then_blank_submits() {
-    let output = run_raw_multiline_pty(
-        "printf '40 + 2\\033\\r'; sleep 0.15; printf '\\r'",
-    );
+    let output = run_raw_multiline_pty("printf '40 + 2\\033\\r'; sleep 0.15; printf '\\r'");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("· "), "forced newline did not redraw continuation: {out:?}");
-    assert!(out.contains("42 : Int"), "blank continuation did not submit: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("· "),
+        "forced newline did not redraw continuation: {out:?}"
+    );
+    assert!(
+        out.contains("42 : Int"),
+        "blank continuation did not submit: {out:?}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn repl_raw_blank_continuation_force_submits_incomplete_input() {
-    let output = run_raw_multiline_pty(
-        "printf '1 +\\r'; sleep 0.15; printf '\\r'",
-    );
+    let output = run_raw_multiline_pty("printf '1 +\\r'; sleep 0.15; printf '\\r'");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("E0003"), "blank continuation kept waiting: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("E0003"),
+        "blank continuation kept waiting: {out:?}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn repl_raw_multiline_redraw_keeps_second_line_editable() {
-    let output = run_raw_multiline_pty(
-        "printf '10 +\\r'; sleep 0.15; printf '3\\1772\\r'",
-    );
+    let output = run_raw_multiline_pty("printf '10 +\\r'; sleep 0.15; printf '3\\1772\\r'");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("· 2"), "continuation redraw lost edited line: {out:?}");
-    assert!(out.contains("12 : Int"), "edited multiline input was wrong: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("· 2"),
+        "continuation redraw lost edited line: {out:?}"
+    );
+    assert!(
+        out.contains("12 : Int"),
+        "edited multiline input was wrong: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -332,9 +451,19 @@ fn repl_raw_narrow_soft_wrap_keeps_cursor_delete_and_redraw_aligned() {
         .output()
         .expect("run narrow raw REPL under PTY");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("\x1b[1A"), "soft-wrap redraw never moved to prior physical row: {out:?}");
-    assert!(out.contains("64 : Int"), "cursor/delete changed wrapped input incorrectly: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("\x1b[1A"),
+        "soft-wrap redraw never moved to prior physical row: {out:?}"
+    );
+    assert!(
+        out.contains("64 : Int"),
+        "cursor/delete changed wrapped input incorrectly: {out:?}"
+    );
 }
 
 #[test]
@@ -358,9 +487,19 @@ fn repl_cooked_keeps_bracket_balance_continuation() {
         .unwrap();
     let output = child.wait_with_output().unwrap();
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "cooked status: {:?}\n{out}", output.status);
-    assert!(out.contains("...  "), "cooked continuation prompt missing: {out:?}");
-    assert!(out.contains("[1, 2]"), "balanced cooked input failed: {out:?}");
+    assert!(
+        output.status.success(),
+        "cooked status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("...  "),
+        "cooked continuation prompt missing: {out:?}"
+    );
+    assert!(
+        out.contains("[1, 2]"),
+        "balanced cooked input failed: {out:?}"
+    );
 }
 
 /// Parse a transcript file: return `(inputs, expected_outputs)`.
@@ -508,7 +647,10 @@ fn run() {
     assert!(out.contains("before"), "got: {out:?}");
     assert!(out.contains("value: 1"), "got: {out:?}");
     assert!(out.contains("closed: stream"), "got: {out:?}");
-    assert!(!out.contains("after"), "producer resumed after break: {out:?}");
+    assert!(
+        !out.contains("after"),
+        "producer resumed after break: {out:?}"
+    );
 }
 
 #[test]
@@ -557,12 +699,28 @@ fn repl_function_declare_and_call() {
 #[test]
 fn repl_imaginary_literal_uses_the_unit_path() {
     let out = run_transcript(
-        &["use core.math.[abs]", "z :: 3 + 4i", "z * z", "abs(z)", "i :: 9", "i"],
+        &[
+            "use core.math.[abs]",
+            "z :: 3 + 4i",
+            "z * z",
+            "abs(z)",
+            "i :: 9",
+            "i",
+        ],
         None,
     );
-    assert!(!out.contains("error ["), "imaginary REPL transcript failed: {out}");
-    assert!(out.contains("-7 + 24i"), "square missing from transcript: {out}");
-    assert!(out.contains("5.0"), "magnitude missing from transcript: {out}");
+    assert!(
+        !out.contains("error ["),
+        "imaginary REPL transcript failed: {out}"
+    );
+    assert!(
+        out.contains("-7 + 24i"),
+        "square missing from transcript: {out}"
+    );
+    assert!(
+        out.contains("5.0"),
+        "magnitude missing from transcript: {out}"
+    );
     assert!(out.contains("9 : Int"), "bare i did not stay an Int: {out}");
 }
 
@@ -576,8 +734,14 @@ fn repl_range_fact_proves_fixed_list_index() {
         ],
         None,
     );
-    assert!(out.contains("two : String"), "REPL range proof failed: {out:?}");
-    assert!(!out.contains("E0965"), "REPL range proof emitted a bounds error: {out:?}");
+    assert!(
+        out.contains("two : String"),
+        "REPL range proof failed: {out:?}"
+    );
+    assert!(
+        !out.contains("E0965"),
+        "REPL range proof emitted a bounds error: {out:?}"
+    );
 }
 
 #[test]
@@ -803,8 +967,14 @@ fn repl_net_runtime_call_still_requires_authority() {
         &["use core.net as net", "net.tcp_connect(\"127.0.0.1:1\")"],
         None,
     );
-    assert!(out.contains("ok"), "core.net import should be accepted: {out}");
-    assert!(out.contains("E1803"), "live socket call must require authority: {out}");
+    assert!(
+        out.contains("ok"),
+        "core.net import should be accepted: {out}"
+    );
+    assert!(
+        out.contains("E1803"),
+        "live socket call must require authority: {out}"
+    );
 }
 
 #[test]
@@ -869,11 +1039,11 @@ fn repl_move_int_not_moved() {
 
 #[test]
 fn repl_failed_multi_statement_turn_rolls_back_scope_and_moves() {
-    let out = run_transcript(
-        &["s :: \"hello\"", "t :: s; 1 / 0", ":type t", "s"],
-        None,
+    let out = run_transcript(&["s :: \"hello\"", "t :: s; 1 / 0", ":type t", "s"], None);
+    assert!(
+        out.contains("isn't defined"),
+        "failed turn leaked `t`: {out}"
     );
-    assert!(out.contains("isn't defined"), "failed turn leaked `t`: {out}");
     assert!(
         out.contains("\"hello\" : String"),
         "failed turn consumed `s`: {out}"
@@ -1083,11 +1253,14 @@ fn repl_use_repl_incompatible_module_hard_rejected() {
 #[test]
 fn repl_infinite_loop_hits_e1801_fuel_cap() {
     let out = run_transcript(&["loop { }"], None);
-    assert!(out.contains("Error [E1801]:"), "missing REPL fuel diagnostic:\n{out}");
+    assert!(
+        out.contains("Error [E1801]:"),
+        "missing REPL fuel diagnostic:\n{out}"
+    );
     assert!(out.contains("Why:"), "missing E1801 reason:\n{out}");
     assert!(out.contains("Fix:"), "missing E1801 fix:\n{out}");
-    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/cli/repl_e1801.txt");
+    let path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli/repl_e1801.txt");
     if std::env::var_os("UPDATE_EXPECT").is_some() {
         std::fs::write(&path, &out).unwrap();
     }
@@ -1157,10 +1330,7 @@ fn repl_core_math_multiple_calls() {
 
 #[test]
 fn repl_core_grouped_math_use_list_inline() {
-    let out = run_transcript(
-        &["use core.math.[abs, min]", "abs(-8) + min(9, 4)"],
-        None,
-    );
+    let out = run_transcript(&["use core.math.[abs, min]", "abs(-8) + min(9, 4)"], None);
     assert_eq!(out.trim(), "ok\n12 : Int");
 }
 
@@ -1232,7 +1402,10 @@ fn repl_complex_bindings_keep_exact_typed_ast_across_turns() {
     assert!(!out.contains("error ["), "complex state regressed: {out}");
     assert!(out.contains("7 : Int"), "struct value unavailable: {out}");
     assert!(out.contains("5 : Int"), "closure value unavailable: {out}");
-    assert!(out.contains("\"repl\" : String"), "list element type collapsed: {out}");
+    assert!(
+        out.contains("\"repl\" : String"),
+        "list element type collapsed: {out}"
+    );
 }
 
 #[test]
@@ -1255,7 +1428,13 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
         None,
     );
     assert!(!out.contains("error ["), "typed state regressed: {out}");
-    for expected in ["\"jet\" : String", "2 : Int", "7 : Int", "9 : Int", "11 : Int"] {
+    for expected in [
+        "\"jet\" : String",
+        "2 : Int",
+        "7 : Int",
+        "9 : Int",
+        "11 : Int",
+    ] {
         assert!(out.contains(expected), "missing {expected:?}: {out}");
     }
 }
@@ -1273,10 +1452,22 @@ fn repl_declared_types_survive_empty_and_absent_values() {
         ],
         None,
     );
-    assert!(!out.contains("error ["), "declared type state regressed: {out}");
-    assert!(out.contains("names : [String]"), "empty list type collapsed: {out}");
-    assert!(out.contains("missing : String?"), "None type collapsed: {out}");
-    assert!(out.contains("0 : Int") && out.contains("\"fallback\" : String"), "values unusable: {out}");
+    assert!(
+        !out.contains("error ["),
+        "declared type state regressed: {out}"
+    );
+    assert!(
+        out.contains("names : [String]"),
+        "empty list type collapsed: {out}"
+    );
+    assert!(
+        out.contains("missing : String?"),
+        "None type collapsed: {out}"
+    );
+    assert!(
+        out.contains("0 : Int") && out.contains("\"fallback\" : String"),
+        "values unusable: {out}"
+    );
 }
 
 #[test]
@@ -1297,7 +1488,10 @@ fn repl_core_io_eprint_inline() {
 
 #[test]
 fn repl_core_io_print_keeps_variadic_lines_inline() {
-    let inputs = &["use core.term as io", "io.print(\"repl-one\", \"repl-two\")"];
+    let inputs = &[
+        "use core.term as io",
+        "io.print(\"repl-one\", \"repl-two\")",
+    ];
     let out = run_transcript_with_flags(inputs, None, &[], &["io"]);
     assert!(
         out.contains("repl-one") && out.contains("repl-two"),
@@ -1484,9 +1678,18 @@ fn repl_tty_ctrl_c_reaches_child_group_and_restores_input() {
         .output()
         .unwrap();
     let transcript = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY interrupt session failed: {transcript}");
-    assert!(transcript.contains("42 : Int"), "REPL did not resume after Ctrl-C: {transcript}");
-    assert_eq!(std::fs::read_to_string(root.join("child-exited.txt")).unwrap(), "done");
+    assert!(
+        output.status.success(),
+        "PTY interrupt session failed: {transcript}"
+    );
+    assert!(
+        transcript.contains("42 : Int"),
+        "REPL did not resume after Ctrl-C: {transcript}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("child-exited.txt")).unwrap(),
+        "done"
+    );
     let pid = std::fs::read_to_string(root.join("child.pid")).unwrap();
     let alive = Command::new("kill")
         .args(["-0", pid.trim()])
@@ -1525,12 +1728,31 @@ fn repl_tty_ctrl_c_cancels_compute_atomically_and_records_turn() {
         .output()
         .unwrap();
     let transcript = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY compute interrupt failed: {transcript}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(3), "interrupt missed 100ms recovery path");
-    assert!(transcript.contains("Interrupted. External effects already performed were not rolled back."), "interrupt notice missing: {transcript}");
-    assert!(transcript.contains("42 : Int"), "prior binding lost: {transcript}");
-    assert!(transcript.contains("E0107") && transcript.contains("partial"), "partial binding committed: {transcript}");
-    assert!(transcript.contains("#2 interrupted"), "interrupted turn not addressable: {transcript}");
+    assert!(
+        output.status.success(),
+        "PTY compute interrupt failed: {transcript}"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "interrupt missed 100ms recovery path"
+    );
+    assert!(
+        transcript
+            .contains("Interrupted. External effects already performed were not rolled back."),
+        "interrupt notice missing: {transcript}"
+    );
+    assert!(
+        transcript.contains("42 : Int"),
+        "prior binding lost: {transcript}"
+    );
+    assert!(
+        transcript.contains("E0107") && transcript.contains("partial"),
+        "partial binding committed: {transcript}"
+    );
+    assert!(
+        transcript.contains("#2 interrupted"),
+        "interrupted turn not addressable: {transcript}"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -1581,7 +1803,9 @@ fn repl_tty_compute_interrupt_returns_within_100ms() {
     while interrupted_at.elapsed() <= std::time::Duration::from_millis(100) {
         if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(5)) {
             transcript.push_str(&String::from_utf8_lossy(&chunk));
-            if transcript.contains("Interrupted. External effects already performed were not rolled back.") {
+            if transcript
+                .contains("Interrupted. External effects already performed were not rolled back.")
+            {
                 latency = Some(interrupted_at.elapsed());
                 break;
             }
@@ -1596,7 +1820,10 @@ fn repl_tty_compute_interrupt_returns_within_100ms() {
     }
     drop(rx);
     reader.join().ok();
-    assert!(latency.is_some(), "prompt missed 100ms interrupt bound: {transcript}");
+    assert!(
+        latency.is_some(),
+        "prompt missed 100ms interrupt bound: {transcript}"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -1604,7 +1831,8 @@ fn repl_tty_compute_interrupt_returns_within_100ms() {
 fn repl_tty_ctrl_c_warns_while_blocking_child_stops() {
     use std::process::Command;
 
-    let root = std::env::temp_dir().join(format!("jet_repl_interrupt_warning_{}", std::process::id()));
+    let root =
+        std::env::temp_dir().join(format!("jet_repl_interrupt_warning_{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let shell = r#"
 {
@@ -1627,8 +1855,14 @@ fn repl_tty_ctrl_c_warns_while_blocking_child_stops() {
         .output()
         .unwrap();
     let transcript = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY blocking interrupt failed: {transcript}");
-    assert!(transcript.contains("waiting for active external I/O to stop"), "blocking warning missing: {transcript}");
+    assert!(
+        output.status.success(),
+        "PTY blocking interrupt failed: {transcript}"
+    );
+    assert!(
+        transcript.contains("waiting for active external I/O to stop"),
+        "blocking warning missing: {transcript}"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -1657,8 +1891,14 @@ fn repl_tty_second_ctrl_c_during_turn_exits_session() {
         .output()
         .unwrap();
     let transcript = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "second Ctrl-C did not exit: {transcript}");
-    assert!(!transcript.contains("42 : Int"), "REPL accepted input after double interrupt: {transcript}");
+    assert!(
+        output.status.success(),
+        "second Ctrl-C did not exit: {transcript}"
+    );
+    assert!(
+        !transcript.contains("42 : Int"),
+        "REPL accepted input after double interrupt: {transcript}"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -1686,11 +1926,26 @@ fn repl_raw_completion_menu_selects_shared_symbol() {
         .output()
         .unwrap();
     let transcript = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "completion PTY failed: {transcript}");
-    assert!(transcript.contains("completion —"), "selection menu missing: {transcript}");
-    assert!(transcript.contains("> alpha") && transcript.contains("> alpine"), "selection did not move: {transcript}");
-    assert!(transcript.contains("2 : Int"), "selected symbol was not inserted: {transcript}");
-    assert!(!transcript.contains("\x1b[7m"), "NO_COLOR completion used color: {transcript:?}");
+    assert!(
+        output.status.success(),
+        "completion PTY failed: {transcript}"
+    );
+    assert!(
+        transcript.contains("completion —"),
+        "selection menu missing: {transcript}"
+    );
+    assert!(
+        transcript.contains("> alpha") && transcript.contains("> alpine"),
+        "selection did not move: {transcript}"
+    );
+    assert!(
+        transcript.contains("2 : Int"),
+        "selected symbol was not inserted: {transcript}"
+    );
+    assert!(
+        !transcript.contains("\x1b[7m"),
+        "NO_COLOR completion used color: {transcript:?}"
+    );
 }
 
 #[test]
@@ -1700,7 +1955,10 @@ fn repl_non_tty_denies_ungranted_files_before_execution() {
     let target = root.join("must-not-exist.txt");
     let input = "#Abilities(caps: FS) { fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
     let out = run_transcript(&["use core.files as fs", input], root.to_str());
-    assert!(out.contains("E1803") && out.contains("FS.Write"), "missing deterministic deny: {out}");
+    assert!(
+        out.contains("E1803") && out.contains("FS.Write"),
+        "missing deterministic deny: {out}"
+    );
     assert!(!target.exists(), "denied effect executed");
     std::fs::remove_dir_all(root).ok();
 }
@@ -1709,7 +1967,8 @@ fn repl_non_tty_denies_ungranted_files_before_execution() {
 fn repl_allow_and_deny_flags_work_in_transcript_mode() {
     let root = std::env::temp_dir().join(format!("jet_repl_flags_{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create root");
-    let input = "#Abilities(caps: FS) { fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
+    let input =
+        "#Abilities(caps: FS) { fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
     let allowed = run_transcript_with_flags(
         &["use core.files as fs", input],
         root.to_str(),
@@ -1717,7 +1976,10 @@ fn repl_allow_and_deny_flags_work_in_transcript_mode() {
         &[],
     );
     assert!(!allowed.contains("E1803"), "--allow-fs rejected: {allowed}");
-    assert_eq!(std::fs::read_to_string(root.join("flag.txt")).unwrap(), "allowed");
+    assert_eq!(
+        std::fs::read_to_string(root.join("flag.txt")).unwrap(),
+        "allowed"
+    );
     std::fs::remove_file(root.join("flag.txt")).unwrap();
 
     let denied = run_transcript_with_flags(
@@ -1726,8 +1988,14 @@ fn repl_allow_and_deny_flags_work_in_transcript_mode() {
         &["fs"],
         &["fs"],
     );
-    assert!(denied.contains("E1803"), "--deny-fs must override allow: {denied}");
-    assert!(!root.join("flag.txt").exists(), "explicitly denied effect executed");
+    assert!(
+        denied.contains("E1803"),
+        "--deny-fs must override allow: {denied}"
+    );
+    assert!(
+        !root.join("flag.txt").exists(),
+        "explicitly denied effect executed"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -1741,22 +2009,37 @@ fn repl_cli_allow_and_deny_flags_control_non_tty_execution() {
     let input = b"use core.files as fs\n#Abilities(caps: FS) { fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }\n:quit\n";
     let run = |extra: &[&str]| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
-        cmd.arg("repl").arg("--project").arg(&root).args(extra)
+        cmd.arg("repl")
+            .arg("--project")
+            .arg(&root)
+            .args(extra)
             .env("NO_COLOR", "1")
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut child = cmd.spawn().unwrap();
         child.stdin.as_mut().unwrap().write_all(input).unwrap();
         child.wait_with_output().unwrap()
     };
 
     let allowed = run(&["--allow-fs"]);
-    assert!(allowed.status.success(), "allow status: {:?}", allowed.status);
-    assert_eq!(std::fs::read_to_string(root.join("cli.txt")).unwrap(), "yes");
+    assert!(
+        allowed.status.success(),
+        "allow status: {:?}",
+        allowed.status
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("cli.txt")).unwrap(),
+        "yes"
+    );
     std::fs::remove_file(root.join("cli.txt")).unwrap();
 
     let denied = run(&["--allow-fs", "--deny-fs"]);
     let stderr = String::from_utf8_lossy(&denied.stderr);
-    assert!(stderr.contains("E1803"), "missing deny diagnostic: {stderr}");
+    assert!(
+        stderr.contains("E1803"),
+        "missing deny diagnostic: {stderr}"
+    );
     assert!(!root.join("cli.txt").exists(), "CLI-denied write executed");
     std::fs::remove_dir_all(root).ok();
 }
@@ -1766,13 +2049,22 @@ fn repl_effect_needs_lexical_grant_even_with_allow_flag() {
     let root = std::env::temp_dir().join(format!("jet_repl_missing_grant_{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let out = run_transcript_with_flags(
-        &["use core.files as fs", "fs.write(\"no.txt\", \"bad\") ?? panic(\"write failed\")"],
+        &[
+            "use core.files as fs",
+            "fs.write(\"no.txt\", \"bad\") ?? panic(\"write failed\")",
+        ],
         root.to_str(),
         &["fs"],
         &[],
     );
-    assert!(out.contains("E1803") && out.contains("no REPL runtime authority"), "missing lexical denial: {out}");
-    assert!(!root.join("no.txt").exists(), "operation without #Abilities executed");
+    assert!(
+        out.contains("E1803") && out.contains("no REPL runtime authority"),
+        "missing lexical denial: {out}"
+    );
+    assert!(
+        !root.join("no.txt").exists(),
+        "operation without #Abilities executed"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -1796,7 +2088,10 @@ fn repl_allow_fs_still_rejects_paths_outside_project_root() {
         out.contains("E1803") && out.contains("FS.Write") && out.contains(&escaped),
         "absolute escape was not rejected before execution: {out}"
     );
-    assert!(!outside.exists(), "confined REPL wrote outside project root");
+    assert!(
+        !outside.exists(),
+        "confined REPL wrote outside project root"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -1817,8 +2112,14 @@ fn repl_allow_fs_rejects_symlink_components_before_open() {
         &["fs"],
         &[],
     );
-    assert!(out.contains("E1803"), "symlink traversal was not denied: {out}");
-    assert!(!outside.join("must-not-exist.txt").exists(), "symlink escape executed");
+    assert!(
+        out.contains("E1803"),
+        "symlink traversal was not denied: {out}"
+    );
+    assert!(
+        !outside.join("must-not-exist.txt").exists(),
+        "symlink escape executed"
+    );
     std::fs::remove_file(root.join("escape")).ok();
     std::fs::remove_dir_all(root).ok();
     std::fs::remove_dir_all(outside).ok();
@@ -1855,9 +2156,19 @@ fn repl_tty_prompts_and_reuses_exact_session_tuple() {
         .output()
         .expect("run REPL under PTY");
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("Core effect FS requests runtime authority"), "missing prompt: {out}");
-    assert!(out.contains("Using session FS.Read authority for `value.txt`"), "missing exact tuple reuse: {out}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("Core effect FS requests runtime authority"),
+        "missing prompt: {out}"
+    );
+    assert!(
+        out.contains("Using session FS.Read authority for `value.txt`"),
+        "missing exact tuple reuse: {out}"
+    );
     assert!(!out.contains("E1803"), "approved tuple denied: {out}");
     std::fs::remove_dir_all(root).ok();
 }
@@ -1905,14 +2216,17 @@ fn repl_immut_binding_rejects_reassign() {
 // rerun replay plan (D-FE-REPL-RERUN1=A) — plus the bare `?name` transcript
 // path (D-FE-REPL-DOCS1=B), which runs in every mode including this one.
 
-use jet::REPL::{Docs, Render, RerunPlan, ReplTurn, ReplTurnStatus, Session};
+use jet::REPL::{Docs, Render, ReplTurn, ReplTurnStatus, RerunPlan, Session};
 
 #[test]
 fn banner_wording_matches_hybrid_ratification() {
     // D-FE-REPL1=D ratified banner text (tests/cli/no_args_repl_banner.txt
     // pins the same wording end-to-end through the real `jet` binary).
     let banner = Render::render_banner("1.0.0", false);
-    assert_eq!(banner, "Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)");
+    assert_eq!(
+        banner,
+        "Jet 1.0.0 — interactive REPL  (:quit, :help, ^B bindings)"
+    );
 }
 
 #[test]
@@ -1959,9 +2273,15 @@ fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
         doc.starts_with("List.filter(f: fn(T) Bool) -> List<T>"),
         "got: {doc:?}"
     );
-    assert!(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}");
+    assert!(
+        doc.contains("Keeps items where f(item) is true."),
+        "got: {doc:?}"
+    );
     assert!(doc.contains("Source:"), "got: {doc:?}");
-    assert!(doc.contains("Example:"), "shared symbol example missing: {doc:?}");
+    assert!(
+        doc.contains("Example:"),
+        "shared symbol example missing: {doc:?}"
+    );
 }
 
 #[test]
@@ -1979,9 +2299,11 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
 #[test]
 fn shared_semantic_symbols_catalog_numeric_conversions_and_parse() {
     let parse = jet::SemanticSymbols::lookup("Int.parse").expect("Int.parse symbol");
-    assert_eq!(parse.signature, "Int.parse(text: String) -> Int ParseError!");
-    let narrow = jet::SemanticSymbols::lookup("F32.from_float")
-        .expect("F32.from_float symbol");
+    assert_eq!(
+        parse.signature,
+        "Int.parse(text: String) -> Int ParseError!"
+    );
+    let narrow = jet::SemanticSymbols::lookup("F32.from_float").expect("F32.from_float symbol");
     assert_eq!(narrow.module, "core.numeric");
     assert!(narrow.signature.ends_with("-> F32 String!"));
     assert!(jet::SemanticSymbols::lookup("I64.from_f32").is_some());
@@ -1995,9 +2317,18 @@ fn repl_raw_member_completion_menu_is_selectable() {
         "printf 'items :: [1, 2, 3]\\r'; sleep 0.12; printf 'items.f\\t'; sleep 0.15; printf '\\033[B\\033[B\\r'; sleep 0.15; printf '\\003'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "selectable completion PTY failed: {out}");
-    assert!(out.contains("filter") && out.contains("filter_map"), "shared candidates missing: {out:?}");
-    assert!(out.contains("items.find"), "two Down keys did not select the third completion: {out:?}");
+    assert!(
+        output.status.success(),
+        "selectable completion PTY failed: {out}"
+    );
+    assert!(
+        out.contains("filter") && out.contains("filter_map"),
+        "shared candidates missing: {out:?}"
+    );
+    assert!(
+        out.contains("items.find"),
+        "two Down keys did not select the third completion: {out:?}"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -2009,7 +2340,10 @@ fn repl_raw_core_module_member_completion_inserts_sqrt() {
         "printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sq\\t'; sleep 0.12; printf '(16.0)\\r'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "module completion PTY failed: {out}");
+    assert!(
+        output.status.success(),
+        "module completion PTY failed: {out}"
+    );
     assert!(
         out.contains("4") && (out.contains("Float") || out.contains("4.0")),
         "math.sq<Tab> did not become math.sqrt(16.0): {out:?}"
@@ -2042,7 +2376,9 @@ fn repl_docs_resolve_imported_core_module_member() {
 #[test]
 fn docs_lookup_local_binding_shows_live_value() {
     let mut session = Session::new();
-    session.scope.insert("answer".to_string(), jet::AST::CtValue::Int(42));
+    session
+        .scope
+        .insert("answer".to_string(), jet::AST::CtValue::Int(42));
     let doc = Docs::lookup(&session, "answer").expect("bound name should resolve");
     assert!(doc.starts_with("answer: Int :: 42\n"));
     assert!(doc.contains("Source: this session"));
@@ -2064,7 +2400,11 @@ fn bare_question_name_is_the_primary_docs_spelling() {
 #[test]
 fn live_binding_shadows_same_name_session_item_in_docs_and_completion() {
     let out = run_transcript(
-        &["fn answer() Int -[]> { return 1 }", "answer :: 42", "?answer"],
+        &[
+            "fn answer() Int -[]> { return 1 }",
+            "answer :: 42",
+            "?answer",
+        ],
         None,
     );
     assert!(out.contains("answer: Int :: 42"), "got: {out:?}");
@@ -2109,14 +2449,23 @@ fn rerun_plan_gates_effectful_turns_and_lets_pure_turns_auto_replay() {
 
     let plan = RerunPlan::build_replay_plan(&turns, 1, Some("rate :: 0.08")).expect("plan");
     assert_eq!(plan.steps.len(), 3);
-    assert_eq!(plan.steps[0].input, "rate :: 0.08", "edited turn's text is substituted");
-    assert!(RerunPlan::plan_needs_confirmation(&plan), "the write_file step needs confirmation");
+    assert_eq!(
+        plan.steps[0].input, "rate :: 0.08",
+        "edited turn's text is substituted"
+    );
+    assert!(
+        RerunPlan::plan_needs_confirmation(&plan),
+        "the write_file step needs confirmation"
+    );
 
     let rendered = RerunPlan::render_replay_plan(&plan, false);
     assert!(rendered.starts_with("Replay plan:\n"), "got: {rendered:?}");
     assert!(rendered.contains("auto"), "got: {rendered:?}");
     assert!(rendered.contains("confirm effect"), "got: {rendered:?}");
-    assert!(rendered.trim_end().ends_with("Apply? [y/N]"), "got: {rendered:?}");
+    assert!(
+        rendered.trim_end().ends_with("Apply? [y/N]"),
+        "got: {rendered:?}"
+    );
 
     // A plan with no effectful steps needs no confirmation at all.
     let pure_only = RerunPlan::build_replay_plan(&turns, 1, None).map(|mut p| {
@@ -2130,7 +2479,8 @@ fn rerun_plan_gates_effectful_turns_and_lets_pure_turns_auto_replay() {
 fn rerun_plan_keeps_interrupted_turn_addressable() {
     let mut interrupted = fixture_turn(1, "loop { }", false, None);
     interrupted.status = ReplTurnStatus::Interrupted;
-    let plan = RerunPlan::build_replay_plan(&[interrupted], 1, None).expect("interrupted turn reruns");
+    let plan =
+        RerunPlan::build_replay_plan(&[interrupted], 1, None).expect("interrupted turn reruns");
     assert_eq!(plan.steps.len(), 1);
     assert_eq!(plan.steps[0].input, "loop { }");
 }
@@ -2162,10 +2512,23 @@ fn repl_raw_rerun_selects_edits_and_replays_downstream_state() {
         "printf 'rate := 7\\r'; sleep 0.12; printf 'total :: rate * 2\\r'; sleep 0.12; printf '\\022'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\1778\\r'; sleep 0.2; printf 'total\\r'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("select turn to edit"), "arbitrary-turn selector missing: {out:?}");
-    assert!(out.contains("rerun #2: total :: rate * 2"), "downstream turn not replayed: {out:?}");
-    assert!(out.contains("16 : Int"), "edited state did not reach downstream binding: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("select turn to edit"),
+        "arbitrary-turn selector missing: {out:?}"
+    );
+    assert!(
+        out.contains("rerun #2: total :: rate * 2"),
+        "downstream turn not replayed: {out:?}"
+    );
+    assert!(
+        out.contains("16 : Int"),
+        "edited state did not reach downstream binding: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -2175,11 +2538,28 @@ fn repl_raw_rerun_effect_skip_marks_turn_and_downstream_stale_without_execution(
         "printf 'x := 1\\r'; sleep 0.12; printf 'print(\"EFFECT_ONCE\")\\r'; sleep 0.12; printf 'y :: x + 1\\r'; sleep 0.12; printf '\\022'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\r'; sleep 0.12; printf 's'; sleep 0.15; printf ':turns\\r'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
     let normalized = out.replace('\r', "");
-    assert_eq!(normalized.lines().filter(|line| *line == "EFFECT_ONCE").count(), 1, "skipped effect replayed: {out:?}");
-    assert!(out.contains("skip and mark stale"), "per-effect skip prompt missing: {out:?}");
-    assert!(out.contains("stale"), "skipped/downstream turns not stale-marked: {out:?}");
+    assert_eq!(
+        normalized
+            .lines()
+            .filter(|line| *line == "EFFECT_ONCE")
+            .count(),
+        1,
+        "skipped effect replayed: {out:?}"
+    );
+    assert!(
+        out.contains("skip and mark stale"),
+        "per-effect skip prompt missing: {out:?}"
+    );
+    assert!(
+        out.contains("stale"),
+        "skipped/downstream turns not stale-marked: {out:?}"
+    );
 }
 
 #[test]
@@ -2193,15 +2573,27 @@ fn repl_cooked_rerun_edits_and_applies_downstream_state() {
     );
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "cooked rerun failed: {out}");
-    assert!(out.contains("edit turn 1 [x := 1]"), "cooked edit prompt missing: {out}");
-    assert!(out.contains("rerun #2: y :: x + 1"), "cooked downstream replay missing: {out}");
-    assert!(out.contains("9 : Int"), "cooked edited state not live: {out}");
+    assert!(
+        out.contains("edit turn 1 [x := 1]"),
+        "cooked edit prompt missing: {out}"
+    );
+    assert!(
+        out.contains("rerun #2: y :: x + 1"),
+        "cooked downstream replay missing: {out}"
+    );
+    assert!(
+        out.contains("9 : Int"),
+        "cooked edited state not live: {out}"
+    );
     std::fs::remove_dir_all(state).ok();
 }
 
 #[test]
 fn repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream() {
-    let state = std::env::temp_dir().join(format!("jet_repl_rerun_cooked_effect_{}", std::process::id()));
+    let state = std::env::temp_dir().join(format!(
+        "jet_repl_rerun_cooked_effect_{}",
+        std::process::id()
+    ));
     std::fs::remove_dir_all(&state).ok();
     let output = run_repl_process(
         &state,
@@ -2210,9 +2602,19 @@ fn repl_cooked_rerun_prompts_each_effect_and_skip_stales_downstream() {
     );
     let out = String::from_utf8_lossy(&output.stdout).replace('\r', "");
     assert!(output.status.success(), "cooked effect rerun failed: {out}");
-    assert_eq!(out.lines().filter(|line| *line == "COOKED_EFFECT").count(), 1, "skipped cooked effect replayed: {out}");
-    assert!(out.contains("replay effect turn 2?"), "per-effect cooked prompt missing: {out}");
-    assert!(out.contains("#2 ok stale") && out.contains("#3 ok stale"), "cooked stale marking missing: {out}");
+    assert_eq!(
+        out.lines().filter(|line| *line == "COOKED_EFFECT").count(),
+        1,
+        "skipped cooked effect replayed: {out}"
+    );
+    assert!(
+        out.contains("replay effect turn 2?"),
+        "per-effect cooked prompt missing: {out}"
+    );
+    assert!(
+        out.contains("#2 ok stale") && out.contains("#3 ok stale"),
+        "cooked stale marking missing: {out}"
+    );
     std::fs::remove_dir_all(state).ok();
 }
 
@@ -2223,7 +2625,11 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
     let root = std::env::temp_dir().join(format!("jet_repl_rerun_project_{}", std::process::id()));
     std::fs::remove_dir_all(&root).ok();
     std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("helper.jet"), "fn add_three(x: Int) Int -[]> { return x + 3; }\n").unwrap();
+    std::fs::write(
+        root.join("helper.jet"),
+        "fn add_three(x: Int) Int -[]> { return x + 3; }\n",
+    )
+    .unwrap();
     let shell = r#"
 {
   sleep 0.2
@@ -2252,9 +2658,18 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
         .unwrap();
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "project replay PTY failed: {out}");
-    assert!(out.contains("rerun #2: y :: add_three(x)"), "project downstream replay missing: {out}");
-    assert!(out.contains("8 : Int"), "project function baseline was lost: {out}");
-    assert!(!out.contains("E0102"), "project function became unknown: {out}");
+    assert!(
+        out.contains("rerun #2: y :: add_three(x)"),
+        "project downstream replay missing: {out}"
+    );
+    assert!(
+        out.contains("8 : Int"),
+        "project function baseline was lost: {out}"
+    );
+    assert!(
+        !out.contains("E0102"),
+        "project function became unknown: {out}"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -2265,11 +2680,27 @@ fn repl_raw_pin_and_fold_select_arbitrary_turns() {
         "printf 'first :: 1\\r'; sleep 0.12; printf 'second :: 2\\r'; sleep 0.12; printf '\\020'; sleep 0.12; printf '1\\r'; sleep 0.12; printf '\\006'; sleep 0.12; printf '1\\r'; sleep 0.12; printf ':turns\\r'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("select turn to pin"), "^P arbitrary selector missing: {out:?}");
-    assert!(out.contains("select turn to fold"), "^F arbitrary selector missing: {out:?}");
-    assert!(out.contains("#1 ok pinned folded"), "selected turn state missing: {out:?}");
-    assert!(!out.contains("#2 ok pinned") && !out.contains("#2 ok folded"), "latest turn was changed instead: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("select turn to pin"),
+        "^P arbitrary selector missing: {out:?}"
+    );
+    assert!(
+        out.contains("select turn to fold"),
+        "^F arbitrary selector missing: {out:?}"
+    );
+    assert!(
+        out.contains("#1 ok pinned folded"),
+        "selected turn state missing: {out:?}"
+    );
+    assert!(
+        !out.contains("#2 ok pinned") && !out.contains("#2 ok folded"),
+        "latest turn was changed instead: {out:?}"
+    );
 }
 
 #[test]
@@ -2279,25 +2710,47 @@ fn repl_cooked_prompt_keeps_truthful_turn_digits() {
     let output = run_repl_process(&state, b"1 + 1\n2 + 2\n:quit\n", None);
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "cooked REPL failed: {out}");
-    assert!(out.contains("1 user> ") && out.contains("2 user> ") && out.contains("3 user> "), "cooked turn ids missing: {out:?}");
+    assert!(
+        out.contains("1 user> ") && out.contains("2 user> ") && out.contains("3 user> "),
+        "cooked turn ids missing: {out:?}"
+    );
     std::fs::remove_dir_all(state).ok();
 }
 
 #[cfg(unix)]
 #[test]
 fn repl_raw_long_list_unfold_opens_indexed_pager() {
-    let values = (0..25).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let values = (0..25)
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     let script = format!(
         "printf '[{}]\\r'; sleep 0.2; printf '\\r'; sleep 0.15; printf 'j'; sleep 0.12; printf 'q'; sleep 0.12; printf ':quit\\r'",
         values
     );
     let output = run_raw_multiline_pty(&script);
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("25 rows folded"), "long collection did not fold: {out:?}");
-    assert!(out.contains("idx") && out.contains("value"), "indexed table missing: {out:?}");
-    assert!(out.contains("j/k") && out.contains("q"), "pager controls missing: {out:?}");
-    assert!(out.contains(" 10 │ 10"), "pager did not advance to second page: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("25 rows folded"),
+        "long collection did not fold: {out:?}"
+    );
+    assert!(
+        out.contains("idx") && out.contains("value"),
+        "indexed table missing: {out:?}"
+    );
+    assert!(
+        out.contains("j/k") && out.contains("q"),
+        "pager controls missing: {out:?}"
+    );
+    assert!(
+        out.contains(" 10 │ 10"),
+        "pager did not advance to second page: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -2307,10 +2760,23 @@ fn repl_raw_bindings_are_live_in_side_pane() {
         "printf '\\002'; sleep 0.12; printf 'score := 7\\r'; sleep 0.2; printf ':quit\\r'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("session") && out.contains("bindings"), "workspace headers missing: {out:?}");
-    assert!(out.contains("│ score: Int := 7"), "binding not in side column: {out:?}");
-    assert!(out.contains("new this step"), "live changed marker missing: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("session") && out.contains("bindings"),
+        "workspace headers missing: {out:?}"
+    );
+    assert!(
+        out.contains("│ score: Int := 7"),
+        "binding not in side column: {out:?}"
+    );
+    assert!(
+        out.contains("new this step"),
+        "live changed marker missing: {out:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -2320,9 +2786,16 @@ fn repl_raw_no_color_never_renders_history_ghost_as_real_text() {
         "printf 'alphabet := 1\\r'; sleep 0.12; printf 'a'; sleep 0.15; printf '\\003'",
     );
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
     let second = out.rsplit("2 user> ").next().unwrap_or(&out);
-    assert!(!second.contains("alphabet := 1"), "NO_COLOR ghost became fake typed text: {second:?}");
+    assert!(
+        !second.contains("alphabet := 1"),
+        "NO_COLOR ghost became fake typed text: {second:?}"
+    );
 }
 
 #[cfg(unix)]
@@ -2346,9 +2819,19 @@ fn repl_raw_color_highlights_live_input() {
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("\u{1b}["), "live editor emitted no ANSI highlighting: {out:?}");
-    assert!(out.contains("\u{1b}[1;96m") || out.contains("\u{1b}[32m"), "input tokens were not colorized: {out:?}");
+    assert!(
+        output.status.success(),
+        "PTY status: {:?}\n{out}",
+        output.status
+    );
+    assert!(
+        out.contains("\u{1b}["),
+        "live editor emitted no ANSI highlighting: {out:?}"
+    );
+    assert!(
+        out.contains("\u{1b}[1;96m") || out.contains("\u{1b}[32m"),
+        "input tokens were not colorized: {out:?}"
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -2404,13 +2887,20 @@ fn repl_terminal_matrix_raw_width_color_eof_and_ctrl_d() {
     }
 
     let eof = Command::new("sh")
-        .args(["-c", "timeout 8s script -qec '\"$JET_REPL_BIN\" repl < /dev/null' /dev/null"])
+        .args([
+            "-c",
+            "timeout 8s script -qec '\"$JET_REPL_BIN\" repl < /dev/null' /dev/null",
+        ])
         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
         .env("NO_COLOR", "1")
         .env("JET_REPL_HISTORY", "off")
         .output()
         .unwrap();
-    assert!(eof.status.success(), "PTY EOF row hung or failed: {}", String::from_utf8_lossy(&eof.stdout));
+    assert!(
+        eof.status.success(),
+        "PTY EOF row hung or failed: {}",
+        String::from_utf8_lossy(&eof.stdout)
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -2418,8 +2908,14 @@ fn repl_terminal_matrix_raw_width_color_eof_and_ctrl_d() {
 fn repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful() {
     use std::process::Command;
     let cases = [
-        ("stdin-pipe/stdout-pty", "printf \"1 + 1\\n:quit\\n\" | \"$JET_REPL_BIN\" repl"),
-        ("missing-stty", "PATH=/definitely-missing \"$JET_REPL_BIN\" repl"),
+        (
+            "stdin-pipe/stdout-pty",
+            "printf \"1 + 1\\n:quit\\n\" | \"$JET_REPL_BIN\" repl",
+        ),
+        (
+            "missing-stty",
+            "PATH=/definitely-missing \"$JET_REPL_BIN\" repl",
+        ),
     ];
     for (name, inner) in cases {
         let shell = if name == "missing-stty" {
@@ -2436,9 +2932,18 @@ fn repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful() {
             .unwrap();
         let out = String::from_utf8_lossy(&output.stdout);
         assert!(output.status.success(), "{name} row failed: {out}");
-        assert!(out.contains("interactive keys require a TTY"), "{name} falsely claimed raw mode: {out:?}");
-        assert!(!out.contains("Tab complete"), "{name} advertised unavailable keys: {out:?}");
-        assert!(out.contains("1 user> ") && out.contains("2 : Int"), "{name} cooked behavior missing: {out:?}");
+        assert!(
+            out.contains("interactive keys require a TTY"),
+            "{name} falsely claimed raw mode: {out:?}"
+        );
+        assert!(
+            !out.contains("Tab complete"),
+            "{name} advertised unavailable keys: {out:?}"
+        );
+        assert!(
+            out.contains("1 user> ") && out.contains("2 : Int"),
+            "{name} cooked behavior missing: {out:?}"
+        );
     }
 
     let root = std::env::temp_dir().join(format!("jet_repl_stdout_mode_{}", std::process::id()));
@@ -2448,12 +2953,27 @@ fn repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful() {
         "{{ sleep 0.2; printf '3 + 4\\r:quit\\r'; }} | timeout 8s script -qec '\"$JET_REPL_BIN\" repl > \"{}\"' /dev/null",
         captured.display()
     );
-    let output = Command::new("sh").args(["-c", &shell]).env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet")).env("NO_COLOR", "1").env("JET_REPL_HISTORY", "off").output().unwrap();
+    let output = Command::new("sh")
+        .args(["-c", &shell])
+        .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+        .env("NO_COLOR", "1")
+        .env("JET_REPL_HISTORY", "off")
+        .output()
+        .unwrap();
     let stderr_side = String::from_utf8_lossy(&output.stdout);
     let stdout_side = std::fs::read_to_string(&captured).unwrap();
-    assert!(output.status.success(), "stdin-pty/stdout-file row failed: {stderr_side}");
-    assert!(stderr_side.contains("interactive keys require a TTY"), "redirected stdout falsely entered raw mode: {stderr_side:?}");
-    assert!(stdout_side.contains("1 user> ") && stdout_side.contains("7 : Int"), "redirected cooked stdout missing: {stdout_side:?}");
+    assert!(
+        output.status.success(),
+        "stdin-pty/stdout-file row failed: {stderr_side}"
+    );
+    assert!(
+        stderr_side.contains("interactive keys require a TTY"),
+        "redirected stdout falsely entered raw mode: {stderr_side:?}"
+    );
+    assert!(
+        stdout_side.contains("1 user> ") && stdout_side.contains("7 : Int"),
+        "redirected cooked stdout missing: {stdout_side:?}"
+    );
     std::fs::remove_dir_all(root).ok();
 }
 
@@ -2465,10 +2985,22 @@ fn repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable() {
     );
     let raw_out = String::from_utf8_lossy(&raw.stdout);
     assert!(raw.status.success(), "raw key matrix failed: {raw_out}");
-    for marker in ["bindings", "select turn to pin", "select turn to fold", "select turn to edit", "history search>"] {
-        assert!(raw_out.contains(marker), "raw key `{marker}` unreachable: {raw_out:?}");
+    for marker in [
+        "bindings",
+        "select turn to pin",
+        "select turn to fold",
+        "select turn to edit",
+        "history search>",
+    ] {
+        assert!(
+            raw_out.contains(marker),
+            "raw key `{marker}` unreachable: {raw_out:?}"
+        );
     }
-    assert!(raw_out.contains("1 : Int"), "Tab completion did not resolve live binding: {raw_out:?}");
+    assert!(
+        raw_out.contains("1 : Int"),
+        "Tab completion did not resolve live binding: {raw_out:?}"
+    );
 
     let state = std::env::temp_dir().join(format!("jet_repl_text_matrix_{}", std::process::id()));
     std::fs::remove_dir_all(&state).ok();
@@ -2478,9 +3010,22 @@ fn repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable() {
         None,
     );
     let cooked_out = String::from_utf8_lossy(&cooked.stdout);
-    assert!(cooked.status.success(), "text fallback matrix failed: {cooked_out}");
-    for marker in ["alpha: Int := 1", "turn pinned", "turn folded", "turn unfolded", "rerun #1", "#1 ok"] {
-        assert!(cooked_out.contains(marker), "text fallback `{marker}` unreachable: {cooked_out:?}");
+    assert!(
+        cooked.status.success(),
+        "text fallback matrix failed: {cooked_out}"
+    );
+    for marker in [
+        "alpha: Int := 1",
+        "turn pinned",
+        "turn folded",
+        "turn unfolded",
+        "rerun #1",
+        "#1 ok",
+    ] {
+        assert!(
+            cooked_out.contains(marker),
+            "text fallback `{marker}` unreachable: {cooked_out:?}"
+        );
     }
     std::fs::remove_dir_all(state).ok();
 }
@@ -2606,7 +3151,10 @@ fn repl_core_random_widened_draws_dispatch() {
             &["rand"],
             &[],
         );
-        assert!(!out.contains("error ["), "authorized call failed: {call}: {out}");
+        assert!(
+            !out.contains("error ["),
+            "authorized call failed: {call}: {out}"
+        );
     }
     let shuffle = run_transcript_with_flags(
         &[
@@ -2618,7 +3166,10 @@ fn repl_core_random_widened_draws_dispatch() {
         &["rand"],
         &[],
     );
-    assert!(!shuffle.contains("error ["), "authorized shuffle failed: {shuffle}");
+    assert!(
+        !shuffle.contains("error ["),
+        "authorized shuffle failed: {shuffle}"
+    );
 }
 
 // ── card #392: `core.text.fmt` (pure text formatting) now dispatches at comptime,
@@ -2641,7 +3192,10 @@ fn repl_core_fmt_dispatch() {
         "fmt.pad_center(\"hi\", 6, \"*\")",
     ];
     let out = run_transcript(inputs, None);
-    assert!(!out.contains("E0956"), "core.text.fmt should dispatch at comptime, got: {out}");
+    assert!(
+        !out.contains("E0956"),
+        "core.text.fmt should dispatch at comptime, got: {out}"
+    );
     assert!(out.contains("\"1,234,567\" : String"), "got: {out}");
     assert!(out.contains("\"3.14\" : String"), "got: {out}");
     assert!(out.contains("\"45.7%\" : String"), "got: {out}");
@@ -2733,10 +3287,7 @@ fn repl_core_url_dispatch() {
 // parity: guard tests/repl.rs::repl_core_data_dispatch
 #[test]
 fn repl_core_data_dispatch() {
-    let inputs = &[
-        "use core.data as data",
-        "data.status()",
-    ];
+    let inputs = &["use core.data as data", "data.status()"];
     let out = run_transcript(inputs, None);
     assert!(
         !out.contains("E0956"),
@@ -2787,9 +3338,15 @@ fn repl_zstd_decompress_is_resident_and_typed() {
         ],
         None,
     );
-    assert!(!out.contains("E0956"), "resident decoder hit fallback: {out}");
+    assert!(
+        !out.contains("E0956"),
+        "resident decoder hit fallback: {out}"
+    );
     assert!(out.contains("[104, 101, 108, 108, 111]"), "got: {out}");
-    assert!(out.contains("[255]"), "malformed frame was not a typed Err: {out}");
+    assert!(
+        out.contains("[255]"),
+        "malformed frame was not a typed Err: {out}"
+    );
 }
 
 #[test]
@@ -2806,8 +3363,14 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
         "data.left_join([1, 2], [1], (x) -> \"{x}\", (x) -> \"{x}\")",
     ];
     let out = run_transcript(inputs, None);
-    assert!(out.contains("[table, filter]"), "deferred plan missing: {out}");
-    assert!(out.contains("[2, 3]"), "materialized filter/sort result missing: {out}");
+    assert!(
+        out.contains("[table, filter]"),
+        "deferred plan missing: {out}"
+    );
+    assert!(
+        out.contains("[2, 3]"),
+        "materialized filter/sort result missing: {out}"
+    );
     assert!(
         out.lines()
             .any(|line| line.matches("DataJoin(left: 1, right: 1)").count() == 4),
@@ -2853,12 +3416,17 @@ fn repl_core_data_schema_empty_table_and_series_law() {
         out.contains("DataColumn(name: value, type_name: Float)"),
         "Series<Float> must be one value column: {out}"
     );
-    let ticket_value_hits = out.matches("DataColumn(name: value, type_name: Ticket)").count();
+    let ticket_value_hits = out
+        .matches("DataColumn(name: value, type_name: Ticket)")
+        .count();
     assert!(
         ticket_value_hits >= 2,
         "non-empty and empty Series<Ticket> both need value:Ticket (not expanded fields): {out}"
     );
-    assert!(out.contains("[] : List"), "zero-field row must have zero columns: {out}");
+    assert!(
+        out.contains("[] : List"),
+        "zero-field row must have zero columns: {out}"
+    );
     assert!(
         out.contains("DataColumn(name: value, type_name: Int)"),
         "generic row fields must substitute concrete type arguments: {out}"
@@ -2881,7 +3449,9 @@ fn repl_core_data_table_echo_hides_elem_type() {
         "core.data containers should dispatch at comptime, got: {out}"
     );
     assert!(
-        out.contains("Table(rows:") && out.contains("Series(values:") && out.contains("LazyFrame(rows:"),
+        out.contains("Table(rows:")
+            && out.contains("Series(values:")
+            && out.contains("LazyFrame(rows:"),
         "expected Table/Series/LazyFrame echoes: {out}"
     );
     assert!(
@@ -2892,10 +3462,7 @@ fn repl_core_data_table_echo_hides_elem_type() {
 
 #[test]
 fn repl_core_data_json_ingest_and_select() {
-    let fixture = std::env::temp_dir().join(format!(
-        "jet_repl_data_json_{}",
-        std::process::id()
-    ));
+    let fixture = std::env::temp_dir().join(format!("jet_repl_data_json_{}", std::process::id()));
     std::fs::create_dir_all(&fixture).unwrap();
     std::fs::write(
         fixture.join("model.jet"),
@@ -2924,10 +3491,7 @@ fn repl_core_data_json_ingest_and_select() {
             && out.contains("DataColumn(name: minutes, type_name: Float)"),
         "json table schema missing: {out}"
     );
-    assert!(
-        out.contains("2 : Int"),
-        "selected count missing: {out}"
-    );
+    assert!(out.contains("2 : Int"), "selected count missing: {out}");
     assert!(
         out.contains("DataStatus(step: core.data.json") && out.contains("path: native"),
         "json status row missing: {out}"
@@ -2951,11 +3515,8 @@ fn repl_file_argument_loads_definitions_without_running_entry() {
     )
     .unwrap();
 
-    let out = jet::REPL::run_transcript_with_preload(
-        &["triple(4)"],
-        None,
-        &source.to_string_lossy(),
-    );
+    let out =
+        jet::REPL::run_transcript_with_preload(&["triple(4)"], None, &source.to_string_lossy());
     std::fs::remove_dir_all(&fixture).ok();
 
     assert!(
@@ -3007,7 +3568,11 @@ fn repl_project_flag_value_is_not_read_as_the_preload_file() {
 
     let project = std::env::temp_dir().join(format!("jet_repl_proj_arg_{}", std::process::id()));
     std::fs::create_dir_all(&project).unwrap();
-    std::fs::write(project.join("helper.jet"), "fn helper() Int -[]> { return 7 }\n").unwrap();
+    std::fs::write(
+        project.join("helper.jet"),
+        "fn helper() Int -[]> { return 7 }\n",
+    )
+    .unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_jet"))
         .arg("repl")

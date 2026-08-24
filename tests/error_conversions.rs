@@ -54,7 +54,9 @@ impl Int -> String {
 fn run() {}
 "#;
     let diagnostics = jet::compile(source).expect_err("foreign typed target must be rejected");
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E2406"));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "E2406"));
 }
 
 #[test]

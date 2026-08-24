@@ -34,9 +34,9 @@ pub(crate) fn rewrite_inline_calls_stmts(
 ) {
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(e)
-            | Stmt::Yield(e, _)
-            | Stmt::DeferClose { close: e, .. } => rewrite_inline_calls_expr(e, siblings, modname),
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+                rewrite_inline_calls_expr(e, siblings, modname)
+            }
             Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
             Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
             Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
@@ -54,7 +54,12 @@ pub(crate) fn rewrite_inline_calls_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step, exclusive: _ } => {
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive: _,
+                    } => {
                         rewrite_inline_calls_expr(start, siblings, modname);
                         rewrite_inline_calls_expr(end, siblings, modname);
                         if let Some(step) = step {

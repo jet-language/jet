@@ -58,14 +58,19 @@ fn full_verification_uses_clean_short_external_tmpdir() {
             .lines()
             .map(PathBuf::from)
             .collect::<Vec<_>>();
-        assert_eq!(roots.len(), 4, "temp probe must report every exported temp root");
-        assert!(roots.iter().all(|path| path == &roots[0]));
-        assert!(
-            roots[0]
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().starts_with("jet-verify."))
+        assert_eq!(
+            roots.len(),
+            4,
+            "temp probe must report every exported temp root"
         );
-        assert!(!roots[0].exists(), "verification temp root must be removed on exit");
+        assert!(roots.iter().all(|path| path == &roots[0]));
+        assert!(roots[0]
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("jet-verify.")));
+        assert!(
+            !roots[0].exists(),
+            "verification temp root must be removed on exit"
+        );
         (output.status, roots[0].clone())
     };
 
@@ -179,10 +184,20 @@ fn strict_full_verification_rejects_executable_impostors() {
         .env("JET_CANVAS_NODE", "true")
         .output()
         .expect("run strict Canvas prerequisite preflight");
-    assert!(!output.status.success(), "arbitrary executables must fail identity checks");
+    assert!(
+        !output.status.success(),
+        "arbitrary executables must fail identity checks"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(stderr.matches("Canvas interaction tests require").count(), 1, "{stderr}");
-    assert!(stderr.contains("missing: chromium,firefox,geckodriver,node"), "{stderr}");
+    assert_eq!(
+        stderr.matches("Canvas interaction tests require").count(),
+        1,
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("missing: chromium,firefox,geckodriver,node"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -241,9 +256,7 @@ fn cdp_driver_owns_parallel_browsers_under_long_tmpdir() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&output.stdout).contains("PASS 4 isolated Chromium lifecycles")
-    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("PASS 4 isolated Chromium lifecycles"));
 }
 
 struct CanvasBrowserPermit;
@@ -252,9 +265,13 @@ impl CanvasBrowserPermit {
     fn acquire() -> Self {
         let (available, wake) =
             CANVAS_BROWSER_POOL.get_or_init(|| (Mutex::new(MAX_CANVAS_BROWSERS), Condvar::new()));
-        let mut available = available.lock().expect("Canvas browser permit lock poisoned");
+        let mut available = available
+            .lock()
+            .expect("Canvas browser permit lock poisoned");
         while *available == 0 {
-            available = wake.wait(available).expect("Canvas browser permit lock poisoned");
+            available = wake
+                .wait(available)
+                .expect("Canvas browser permit lock poisoned");
         }
         *available -= 1;
         Self
@@ -265,7 +282,9 @@ impl Drop for CanvasBrowserPermit {
     fn drop(&mut self) {
         let (available, wake) =
             CANVAS_BROWSER_POOL.get_or_init(|| (Mutex::new(MAX_CANVAS_BROWSERS), Condvar::new()));
-        *available.lock().expect("Canvas browser permit lock poisoned") += 1;
+        *available
+            .lock()
+            .expect("Canvas browser permit lock poisoned") += 1;
         wake.notify_one();
     }
 }
@@ -365,11 +384,7 @@ struct BigFixtureFacts {
 fn write_big_fixture(dir: &Path) -> BigFixtureFacts {
     let mut main = String::new();
     for module in 0..BIG_MODULE_COUNT {
-        writeln!(
-            &mut main,
-            "use \"./part_{module:02}\" as p{module:02}"
-        )
-        .unwrap();
+        writeln!(&mut main, "use \"./part_{module:02}\" as p{module:02}").unwrap();
     }
     main.push('\n');
     main.push_str("fn run() {\n");
@@ -414,9 +429,9 @@ fn write_big_fixture(dir: &Path) -> BigFixtureFacts {
 
 fn read_big_fixture_facts(dir: &Path) -> BigFixtureFacts {
     let mut canonical = String::new();
-    for name in std::iter::once("main.jet".to_owned()).chain(
-        (0..BIG_MODULE_COUNT).map(|module| format!("part_{module:02}.jet")),
-    ) {
+    for name in std::iter::once("main.jet".to_owned())
+        .chain((0..BIG_MODULE_COUNT).map(|module| format!("part_{module:02}.jet")))
+    {
         let source = fs::read_to_string(dir.join(&name)).expect("read generated Canvas source");
         canonical.push_str(&name);
         canonical.push('\n');
@@ -436,10 +451,22 @@ fn assert_big_fixture_preflight(repo: &Path, case: &CanvasCase, port: u16) {
         .as_ref()
         .expect("big fixture facts for big-project-perf");
     let actual = read_big_fixture_facts(&case.dir);
-    assert_eq!(actual.file_count, expected.file_count, "generated file count changed");
-    assert_eq!(actual.function_count, expected.function_count, "generated function count changed");
-    assert_eq!(actual.source_bytes, expected.source_bytes, "generated source bytes changed");
-    assert_eq!(actual.source_sha256, expected.source_sha256, "generated source changed");
+    assert_eq!(
+        actual.file_count, expected.file_count,
+        "generated file count changed"
+    );
+    assert_eq!(
+        actual.function_count, expected.function_count,
+        "generated function count changed"
+    );
+    assert_eq!(
+        actual.source_bytes, expected.source_bytes,
+        "generated source bytes changed"
+    );
+    assert_eq!(
+        actual.source_sha256, expected.source_sha256,
+        "generated source changed"
+    );
 
     let jet = cargo_target_dir(repo).join("debug/jet");
     let check = Command::new(jet)
@@ -461,7 +488,10 @@ fn assert_big_fixture_preflight(repo: &Path, case: &CanvasCase, port: u16) {
         BIG_FUNCTION_COUNT + 1,
         "Jet served an unexpected generated graph count"
     );
-    assert!(graph.contains("\"title\":\"run\""), "generated entry graph is missing");
+    assert!(
+        graph.contains("\"title\":\"run\""),
+        "generated entry graph is missing"
+    );
     eprintln!(
         "BIG_PROJECT_PREFLIGHT files={} functions={} source_bytes={} source_sha256={} graphs={} jet_check=passed",
         actual.file_count,
@@ -930,9 +960,7 @@ fn big_project_perf_budget() {
 
 #[test]
 fn gecko_smoke() {
-    if std::env::var_os("JET_CANVAS_GECKO_SMOKE").as_deref()
-        != Some(std::ffi::OsStr::new("1"))
-    {
+    if std::env::var_os("JET_CANVAS_GECKO_SMOKE").as_deref() != Some(std::ffi::OsStr::new("1")) {
         eprintln!("ignored: Gecko smoke lane not selected");
         return;
     }
@@ -992,12 +1020,7 @@ fn run_canvas_scenario(name: &str) {
     );
 }
 
-fn run_browser_scenario(
-    name: &str,
-    browser: &str,
-    node: &Path,
-    environment: &[(&str, &Path)],
-) {
+fn run_browser_scenario(name: &str, browser: &str, node: &Path, environment: &[(&str, &Path)]) {
     let _browser_permit = CanvasBrowserPermit::acquire();
     ensure_jet_built();
 
@@ -1024,9 +1047,7 @@ fn run_browser_scenario(
         .arg(&case.screenshots)
         .arg("--seed")
         .arg("373");
-    let output = command
-        .output()
-        .expect("run Canvas scenario driver");
+    let output = command.output().expect("run Canvas scenario driver");
     let server_exit = server
         .child
         .try_wait()
@@ -1060,7 +1081,10 @@ fn ensure_jet_built() {
             .arg("build")
             .status()
             .expect("cargo build for Canvas scenarios");
-        assert!(status.success(), "cargo build failed before Canvas scenarios");
+        assert!(
+            status.success(),
+            "cargo build failed before Canvas scenarios"
+        );
         assert!(
             target.join("debug/jet").is_file(),
             "cargo build did not produce the Canvas scenario jet binary"
@@ -1128,8 +1152,9 @@ fn resolve_canvas_tool(name: &str, strict: bool) -> Option<PathBuf> {
         "chromium" => version.contains("Chromium") || version.contains("Chrome"),
         "firefox" => version.contains("Firefox"),
         "geckodriver" => version.starts_with("geckodriver"),
-        "node" => version.starts_with('v')
-            && version.as_bytes().get(1).is_some_and(u8::is_ascii_digit),
+        "node" => {
+            version.starts_with('v') && version.as_bytes().get(1).is_some_and(u8::is_ascii_digit)
+        }
         _ => false,
     };
     valid.then_some(path)
@@ -1189,11 +1214,8 @@ impl CanvasCase {
                 .expect("write Canvas library package fixture");
             }
             if name == "library-panel-events" {
-                fs::copy(
-                    repo.join("examples/features/ui/events.jet"),
-                    &entry,
-                )
-                .expect("copy Canvas library events source");
+                fs::copy(repo.join("examples/features/ui/events.jet"), &entry)
+                    .expect("copy Canvas library events source");
             } else {
                 let source = if matches!(
                     name,
@@ -1331,7 +1353,10 @@ fn http_body(port: u16, path: &str) -> String {
     stream
         .read_to_string(&mut response)
         .expect("read Jet Canvas preflight body");
-    assert!(response.starts_with("HTTP/1.1 200"), "Jet Canvas preflight failed: {response}");
+    assert!(
+        response.starts_with("HTTP/1.1 200"),
+        "Jet Canvas preflight failed: {response}"
+    );
     response
         .split_once("\r\n\r\n")
         .map(|(_, body)| body.to_owned())

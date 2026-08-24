@@ -42,7 +42,10 @@ fn memory_denial_parser_keeps_the_canonical_effect_row() {
     assert_eq!(effects, vec!["!Mem.Alloc"]);
 
     let (tokens, lexer_diagnostics) = jet::Lexer::lex("fn run() -[Mem.Alloc(above: 1)]> {}");
-    assert!(lexer_diagnostics.is_empty(), "lex positive row: {lexer_diagnostics:?}");
+    assert!(
+        lexer_diagnostics.is_empty(),
+        "lex positive row: {lexer_diagnostics:?}"
+    );
     let diagnostics = jet::Parser::parse(&tokens).expect_err("bounded rights are denial-only");
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "E0119" && diagnostic.fix.contains("!Mem.Alloc(above: 1)")
@@ -83,7 +86,9 @@ fn manifest_memory_denial_reaches_the_same_sema_fact_pass() {
     assert_eq!(bundle.package_guarantees.memory_denials, vec!["Mem.Alloc"]);
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0921"),
         "manifest denial did not reach the memory fact pass: {diagnostics:#?}"
     );
     let _ = std::fs::remove_dir_all(root);
@@ -91,7 +96,11 @@ fn manifest_memory_denial_reaches_the_same_sema_fact_pass() {
 
 #[test]
 fn memory_denial_matches_aot_jit_and_interpreter() {
-    tir_support::assert_tiers_agree("memory-denial-parity", MEMORY_DENIAL_SOURCE, "memory denial\n");
+    tir_support::assert_tiers_agree(
+        "memory-denial-parity",
+        MEMORY_DENIAL_SOURCE,
+        "memory denial\n",
+    );
 }
 
 #[test]
@@ -138,17 +147,21 @@ fn memory_denial_matches_repl() {
         ],
         None,
     );
-    assert!(transcript.contains("memory denial"), "REPL lost the denial program: {transcript}");
-    assert!(!transcript.contains("E0921"), "REPL changed a valid denial into a diagnostic: {transcript}");
+    assert!(
+        transcript.contains("memory denial"),
+        "REPL lost the denial program: {transcript}"
+    );
+    assert!(
+        !transcript.contains("E0921"),
+        "REPL changed a valid denial into a diagnostic: {transcript}"
+    );
 }
 
 #[test]
 fn memory_denial_matches_web_lowering() {
-    let compiled = jet::compile_web_with_path(
-        MEMORY_DENIAL_SOURCE,
-        "tests/fixtures/memory_denial_web.jet",
-    )
-    .expect("web accepts the memory denial source");
+    let compiled =
+        jet::compile_web_with_path(MEMORY_DENIAL_SOURCE, "tests/fixtures/memory_denial_web.jet")
+            .expect("web accepts the memory denial source");
     assert!(compiled.web.is_some(), "web lowering produced no artifact");
 }
 
@@ -177,7 +190,6 @@ fn assert_cli_snapshot(name: &str, actual: &[u8]) {
     .unwrap();
     assert_eq!(actual, expected, "CLI snapshot mismatch: {name}");
 }
-
 
 fn ledger(root: &Path, rows: &[&str]) {
     let path = root.join(".jet/memory/ledger-v1.jsonl");
@@ -228,8 +240,8 @@ fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
 /// different kernel than the others while every golden still passed.
 #[test]
 fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
-    use jet::AST::Type;
     use jet::Codegen::TIR::{view_copy_owned_type, view_copy_symbol};
+    use jet::AST::Type;
 
     let view_of = |element: Type| Type::Apply {
         name: "View".to_string(),
@@ -322,7 +334,11 @@ fn exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs() {
 
     ledger(&root, &[]);
     let empty = run(&root, &["audit", "memory", "--json"]);
-    assert!(empty.status.success(), "{}", String::from_utf8_lossy(&empty.stderr));
+    assert!(
+        empty.status.success(),
+        "{}",
+        String::from_utf8_lossy(&empty.stderr)
+    );
     assert_cli_snapshot("memory_audit_empty.txt", &empty.stdout);
     let empty_json = String::from_utf8_lossy(&empty.stdout);
     assert!(empty_json.contains("\"coverage\":\"exercised runs only\""));
@@ -332,7 +348,11 @@ fn exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs() {
     ledger(&root, &[&gc]);
     let gc_only = run(&root, &["audit", "memory", "--json"]);
     let gc_json = String::from_utf8_lossy(&gc_only.stdout);
-    assert!(gc_only.status.success(), "{}", String::from_utf8_lossy(&gc_only.stderr));
+    assert!(
+        gc_only.status.success(),
+        "{}",
+        String::from_utf8_lossy(&gc_only.stderr)
+    );
     assert_cli_snapshot("memory_audit_gc.txt", &gc_only.stdout);
     assert!(gc_json.contains("\"kind\":\"gc\""));
     assert!(gc_json.contains("\"witnesses\":1"));
@@ -341,7 +361,11 @@ fn exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs() {
     ledger(&root, &[&sentry]);
     let sentry_only = run(&root, &["audit", "memory", "--json"]);
     let sentry_json = String::from_utf8_lossy(&sentry_only.stdout);
-    assert!(sentry_only.status.success(), "{}", String::from_utf8_lossy(&sentry_only.stderr));
+    assert!(
+        sentry_only.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sentry_only.stderr)
+    );
     assert_cli_snapshot("memory_audit_sentry.txt", &sentry_only.stdout);
     assert!(sentry_json.contains("\"kind\":\"sentry\""));
     assert!(sentry_json.contains("\"witnesses\":1"));
@@ -349,7 +373,11 @@ fn exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs() {
     ledger(&root, &[&gc, &sentry]);
     let combined = run(&root, &["audit", "memory", "--json"]);
     let combined_json = String::from_utf8_lossy(&combined.stdout);
-    assert!(combined.status.success(), "{}", String::from_utf8_lossy(&combined.stderr));
+    assert!(
+        combined.status.success(),
+        "{}",
+        String::from_utf8_lossy(&combined.stderr)
+    );
     assert_cli_snapshot("memory_audit_combined.txt", &combined.stdout);
     assert!(combined_json.contains("\"kind\":\"gc\""));
     assert!(combined_json.contains("\"kind\":\"sentry\""));
@@ -367,21 +395,35 @@ fn memory_fix_applies_one_exact_repair_and_names_ambiguous_options() {
     let exact = row("gc", "gc", &["owned"]);
     ledger(&root, &[&exact]);
     let fixed = run(&root, &["fix", "memory"]);
-    assert!(fixed.status.success(), "{}", String::from_utf8_lossy(&fixed.stderr));
+    assert!(
+        fixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
     assert_cli_snapshot("memory_fix_exact.txt", &fixed.stdout);
-    assert_eq!(std::fs::read_to_string(root.join("main.jet")).unwrap(), "owned");
+    assert_eq!(
+        std::fs::read_to_string(root.join("main.jet")).unwrap(),
+        "owned"
+    );
 
     std::fs::write(root.join("main.jet"), "borrow").unwrap();
     let ambiguous = row("gc", "gc", &["owned", "#Policy(gc) borrow"]);
     ledger(&root, &[&ambiguous]);
     let unchanged = run(&root, &["fix", "memory"]);
-    assert!(unchanged.status.success(), "{}", String::from_utf8_lossy(&unchanged.stderr));
+    assert!(
+        unchanged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&unchanged.stderr)
+    );
     assert_cli_snapshot("memory_fix_ambiguous.txt", &unchanged.stdout);
     let stdout = String::from_utf8_lossy(&unchanged.stdout);
     assert!(stdout.contains("options: main.jet:0..6 observed"));
     assert!(stdout.contains("  - owned"));
     assert!(stdout.contains("  - #Policy(gc) borrow"));
-    assert_eq!(std::fs::read_to_string(root.join("main.jet")).unwrap(), "borrow");
+    assert_eq!(
+        std::fs::read_to_string(root.join("main.jet")).unwrap(),
+        "borrow"
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -392,8 +434,8 @@ fn missing_memory_ledger_is_stable_e2112() {
     std::fs::create_dir_all(&root).unwrap();
     let output = run(&root, &["audit", "memory"]);
     assert_eq!(output.status.code(), Some(1));
-    let actual = String::from_utf8_lossy(&output.stderr)
-        .replace(root.to_str().unwrap(), "WORKSPACE");
+    let actual =
+        String::from_utf8_lossy(&output.stderr).replace(root.to_str().unwrap(), "WORKSPACE");
     assert_eq!(actual, include_str!("cli/memory_ledger_missing_e2112.txt"));
     let _ = std::fs::remove_dir_all(root);
 }
@@ -442,10 +484,9 @@ fn run() {
     let first_ledger = std::fs::read_to_string(&ledger_path).unwrap();
     let first_rows = first_ledger.lines().count();
     assert!(first_rows > 0, "the exercised GC run wrote no witnesses");
-    assert!(first_ledger.lines().all(|row| {
-        row.contains("\"kind\":\"gc\"")
-            && row.contains("\"provenance\":\"")
-    }));
+    assert!(first_ledger
+        .lines()
+        .all(|row| { row.contains("\"kind\":\"gc\"") && row.contains("\"provenance\":\"") }));
 
     let second = run(&root, &["run", source]);
     assert!(

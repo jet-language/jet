@@ -36,14 +36,12 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
     let mut bundle = jet::Loader::load_entry(&shown).expect("fenced-name bundle should load");
     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
         .into_iter()
-        .filter(|diagnostic| {
-            matches!(
-                diagnostic.severity,
-                jet::Diagnostics::Severity::Error
-            )
-        })
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
-    assert!(errors.is_empty(), "fenced names must type-check: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "fenced names must type-check: {errors:?}"
+    );
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
         "expanded statements must stay resident-JIT safe: {}",

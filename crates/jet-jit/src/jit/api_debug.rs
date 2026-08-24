@@ -8,14 +8,14 @@ use super::resident::{
     resident_run_fresh, resident_run_mixed, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
-use super::tiers::{plan_tiers, record_trace};
-use super::trace::note_jit_execution;
 use super::safety::{
-    collect_select_arms_jit, count_spawn_sites, entry_return_supported, jit_list_task_type, jit_value_type,
-    resident_safe_capture_policy, resident_safe_expr, resident_safe_func,
+    collect_select_arms_jit, count_spawn_sites, entry_return_supported, jit_list_task_type,
+    jit_value_type, resident_safe_capture_policy, resident_safe_expr, resident_safe_func,
     resident_safe_func_detail, resident_safe_program, resident_safe_spawn_lambda,
     resident_safe_stmt,
 };
+use super::tiers::{plan_tiers, record_trace};
+use super::trace::note_jit_execution;
 use super::RESIDENT_RUNTIME;
 
 pub fn cranelift_host_supported() -> bool {
@@ -63,9 +63,7 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
     }
     note_jit_execution();
     if plan.deopt.is_empty() {
-        match catch_jit_panic("resident run", || {
-            resident_run_fresh(&program, cap_bytes)
-        }) {
+        match catch_jit_panic("resident run", || resident_run_fresh(&program, cap_bytes)) {
             Ok(outcome) => {
                 record_trace(plan.rows);
                 Ok(outcome)
@@ -371,10 +369,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
                 collect_expr_ops(&contract.message, out);
             }
             TStmt::ContractScope {
-                pre,
-                body,
-                post,
-                ..
+                pre, body, post, ..
             } => {
                 for contract in pre.iter().chain(post) {
                     collect_expr_ops(&contract.condition, out);
@@ -383,8 +378,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
                 collect_stmt_ops(body, out);
             }
             TStmt::SplitViews {
-                owner: Some(owner),
-                ..
+                owner: Some(owner), ..
             } => collect_expr_ops(owner, out),
             TStmt::SplitViews { owner: None, .. } => {}
             TStmt::RefutableBind { init, fallback, .. } => {
@@ -398,9 +392,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             TStmt::Assign { value, .. }
             | TStmt::Return(Some(value))
             | TStmt::ExprStmt(value)
-            | TStmt::DeferClose { close: value, .. } => {
-                collect_expr_ops(value, out)
-            }
+            | TStmt::DeferClose { close: value, .. } => collect_expr_ops(value, out),
             TStmt::BreakValue { value, .. } => collect_expr_ops(value, out),
             TStmt::GcEdit {
                 index_temp, stmt, ..
@@ -532,8 +524,7 @@ fn collect_if_cond_ops(cond: &TIfCond, out: &mut Vec<String>) {
             collect_if_cond_ops(right, out);
         }
         TIfCond::IfLet { subj, .. } => collect_expr_ops(subj, out),
-        TIfCond::IsNone { subj, .. }
-        | TIfCond::Matches { subj, .. } => collect_expr_ops(subj, out),
+        TIfCond::IsNone { subj, .. } | TIfCond::Matches { subj, .. } => collect_expr_ops(subj, out),
     }
 }
 
@@ -663,8 +654,8 @@ fn jit_select_arm_counts_lowered(bundle: &ProgramBundle) -> Option<(usize, usize
     let m = program.funcs.iter().find(|f| f.name == program.entry)?;
     for s in &m.body {
         if let TStmt::TaskGroup { body, .. }
-            | TStmt::Region(body)
-            | TStmt::SentryPolicy { body, .. } = s
+        | TStmt::Region(body)
+        | TStmt::SentryPolicy { body, .. } = s
         {
             for inner in body {
                 if let TStmt::Let { init, .. } = inner {
@@ -693,8 +684,8 @@ fn jit_main_uncovered_detail_lowered(bundle: &ProgramBundle) -> Option<String> {
             continue;
         }
         if let TStmt::TaskGroup { body, .. }
-            | TStmt::Region(body)
-            | TStmt::SentryPolicy { body, .. } = s
+        | TStmt::Region(body)
+        | TStmt::SentryPolicy { body, .. } = s
         {
             for (j, inner) in body.iter().enumerate() {
                 if !resident_safe_stmt(inner, &names) {
@@ -823,9 +814,10 @@ fn resident_jit_safe_bundle_detail_lowered(bundle: &ProgramBundle) -> String {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let main_ok = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         // Typed CLI entry is a host trampoline; user `run` is the resident body.
-        program.funcs.iter().any(|f| {
-            f.name == "run" && resident_safe_func(f, &names)
-        })
+        program
+            .funcs
+            .iter()
+            .any(|f| f.name == "run" && resident_safe_func(f, &names))
     } else {
         program.funcs.iter().any(|f| {
             f.name == program.entry
@@ -915,7 +907,8 @@ fn resident_jit_safe_bundle_detail_lowered(bundle: &ProgramBundle) -> String {
                         }
                     }
                     if *tail {
-                        if let Some(TStmt::ExprStmt(expr) | TStmt::Return(Some(expr))) = body.last() {
+                        if let Some(TStmt::ExprStmt(expr) | TStmt::Return(Some(expr))) = body.last()
+                        {
                             if !resident_safe_expr(expr, &names) {
                                 why.push("tail unsafe".into());
                             }

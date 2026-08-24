@@ -44,15 +44,51 @@ pub const TEACHING_RESERVED: &[ReservedEntry] = &[
 
 /// Sigils with compiler meaning outside ordinary operators.
 pub const RESERVED_SIGILS: &[ReservedEntry] = &[
-    ReservedEntry { spelling: crate::Syntax::SIGIL_BIND_IMMUT, kind: "sigil", note: "bind an immutable local" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_BIND_MUT, kind: "sigil", note: "bind a mutable local" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_WRITE, kind: "sigil", note: "borrow for write (D-MEM1)" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_MOVE, kind: "sigil", note: "take/move ownership (D-MEM1)" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_COPY, kind: "sigil", note: "produce an owned copy (D-SHAPE-COPY1)" },
-    ReservedEntry { spelling: crate::Syntax::COMPTIME_MARK, kind: "sigil", note: "compile-time value or block (S57)" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_FENCE_OPEN, kind: "sigil", note: "open a comptime fence" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_FENCE_CLOSE, kind: "sigil", note: "close a comptime fence" },
-    ReservedEntry { spelling: crate::Syntax::SIGIL_SPREAD, kind: "sigil", note: "spread elements" },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_BIND_IMMUT,
+        kind: "sigil",
+        note: "bind an immutable local",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_BIND_MUT,
+        kind: "sigil",
+        note: "bind a mutable local",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_WRITE,
+        kind: "sigil",
+        note: "borrow for write (D-MEM1)",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_MOVE,
+        kind: "sigil",
+        note: "take/move ownership (D-MEM1)",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_COPY,
+        kind: "sigil",
+        note: "produce an owned copy (D-SHAPE-COPY1)",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::COMPTIME_MARK,
+        kind: "sigil",
+        note: "compile-time value or block (S57)",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_FENCE_OPEN,
+        kind: "sigil",
+        note: "open a comptime fence",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_FENCE_CLOSE,
+        kind: "sigil",
+        note: "close a comptime fence",
+    },
+    ReservedEntry {
+        spelling: crate::Syntax::SIGIL_SPREAD,
+        kind: "sigil",
+        note: "spread elements",
+    },
 ];
 
 /// Plain-text render of `jet inspect reserved`.
@@ -75,11 +111,13 @@ pub fn reserved_report_text() -> String {
 /// `--json` render of `jet inspect reserved`.
 pub fn reserved_report_json() -> String {
     fn esc(s: &str) -> String {
-        s.chars().flat_map(|c| match c {
-            '"' => "\\\"".chars().collect::<Vec<_>>(),
-            '\\' => "\\\\".chars().collect(),
-            c => vec![c],
-        }).collect()
+        s.chars()
+            .flat_map(|c| match c {
+                '"' => "\\\"".chars().collect::<Vec<_>>(),
+                '\\' => "\\\\".chars().collect(),
+                c => vec![c],
+            })
+            .collect()
     }
     let keywords = crate::Syntax::JET_KEYWORD_LIST
         .iter()
@@ -89,10 +127,14 @@ pub fn reserved_report_json() -> String {
     let render_entries = |entries: &[ReservedEntry]| {
         entries
             .iter()
-            .map(|entry| format!(
-                "{{\"spelling\":\"{}\",\"kind\":\"{}\",\"note\":\"{}\"}}",
-                esc(entry.spelling), esc(entry.kind), esc(entry.note)
-            ))
+            .map(|entry| {
+                format!(
+                    "{{\"spelling\":\"{}\",\"kind\":\"{}\",\"note\":\"{}\"}}",
+                    esc(entry.spelling),
+                    esc(entry.kind),
+                    esc(entry.note)
+                )
+            })
             .collect::<Vec<_>>()
             .join(",")
     };
@@ -180,14 +222,50 @@ pub struct NestedCommandSpec {
 /// Adding a handler requires updating this exhaustive mapping and its route test.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HandlerKey {
-    Publish, Yank, Keygen, Key, Vendor,
-    Graph, Query, ExplainBuild, Compiler, Impact, Dossier, Guarantees, Provenance, Digest, InspectEnv, Semindex, Expand, Unsafe, Gates, Authority, Schema, Codemod, Audit, Sbom, Bind, Live,
-    Logs, Info, Outdated,
+    Publish,
+    Yank,
+    Keygen,
+    Key,
+    Vendor,
+    Graph,
+    Query,
+    ExplainBuild,
+    Compiler,
+    Impact,
+    Dossier,
+    Guarantees,
+    Provenance,
+    Digest,
+    InspectEnv,
+    Semindex,
+    Expand,
+    Unsafe,
+    Gates,
+    Authority,
+    Schema,
+    Codemod,
+    Audit,
+    Sbom,
+    Bind,
+    Live,
+    Logs,
+    Info,
+    Outdated,
     Hangar,
     GcReport,
     ProjectParts,
-    Push, Bridge, Services, Config,
-    Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp, Exec,
+    Push,
+    Bridge,
+    Services,
+    Config,
+    Toolchain,
+    Upgrade,
+    Doctor,
+    Completions,
+    Man,
+    Devtools,
+    Lsp,
+    Exec,
     Env,
     SharedStore,
     Perf,
@@ -199,21 +277,49 @@ pub enum HandlerKey {
 impl HandlerKey {
     pub const fn dispatch_word(self) -> &'static str {
         match self {
-            Self::Publish => "publish", Self::Yank => "yank", Self::Keygen => "keygen",
-            Self::Key => "key", Self::Vendor => "vendor", Self::Graph => "graph",
-            Self::Query => "query", Self::ExplainBuild => "explain-build", Self::Compiler => "compiler", Self::Impact => "impact",
-            Self::Dossier => "dossier", Self::Guarantees => "guarantees", Self::Provenance => "provenance", Self::Digest => "digest", Self::InspectEnv => "inspect", Self::Semindex => "semindex", Self::Expand => "expand", Self::Unsafe => "unsafe",
-            Self::Gates => "gates", Self::Authority => "authority",
-            Self::Schema => "schema", Self::Codemod => "codemod", Self::Audit => "audit",
-            Self::Sbom => "sbom", Self::Bind => "bind", Self::Live => "live",
-            Self::Logs => "logs", Self::Info => "info", Self::Outdated => "outdated",
+            Self::Publish => "publish",
+            Self::Yank => "yank",
+            Self::Keygen => "keygen",
+            Self::Key => "key",
+            Self::Vendor => "vendor",
+            Self::Graph => "graph",
+            Self::Query => "query",
+            Self::ExplainBuild => "explain-build",
+            Self::Compiler => "compiler",
+            Self::Impact => "impact",
+            Self::Dossier => "dossier",
+            Self::Guarantees => "guarantees",
+            Self::Provenance => "provenance",
+            Self::Digest => "digest",
+            Self::InspectEnv => "inspect",
+            Self::Semindex => "semindex",
+            Self::Expand => "expand",
+            Self::Unsafe => "unsafe",
+            Self::Gates => "gates",
+            Self::Authority => "authority",
+            Self::Schema => "schema",
+            Self::Codemod => "codemod",
+            Self::Audit => "audit",
+            Self::Sbom => "sbom",
+            Self::Bind => "bind",
+            Self::Live => "live",
+            Self::Logs => "logs",
+            Self::Info => "info",
+            Self::Outdated => "outdated",
             Self::Hangar => "hangar",
             Self::GcReport => "gc",
             Self::ProjectParts => "parts",
-            Self::Push => "push", Self::Bridge => "bridge", Self::Services => "services", Self::Config => "config",
+            Self::Push => "push",
+            Self::Bridge => "bridge",
+            Self::Services => "services",
+            Self::Config => "config",
             Self::Toolchain => "toolchain",
-            Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
-            Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
+            Self::Upgrade => "upgrade",
+            Self::Doctor => "doctor",
+            Self::Completions => "completions",
+            Self::Man => "man",
+            Self::Devtools => "devtools",
+            Self::Lsp => "lsp",
             Self::Exec => "exec",
             Self::Env => "env",
             Self::SharedStore => "shared-store",
@@ -225,16 +331,54 @@ impl HandlerKey {
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Hangar | Self::GcReport | Self::Perf | Self::Env | Self::InspectEnv | Self::SharedStore)
+        matches!(
+            self,
+            Self::Hangar
+                | Self::GcReport
+                | Self::Perf
+                | Self::Env
+                | Self::InspectEnv
+                | Self::SharedStore
+        )
     }
 }
 
 const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "publish", usage: "publish [--force] [--no-sign]", summary: "Publish the current package", handler: HandlerKey::Publish, also_canonical_top_level: false },
-    NestedCommandSpec { name: "yank", usage: "yank <version> [--message <reason>]", summary: "Stop new installs of a published version", handler: HandlerKey::Yank, also_canonical_top_level: false },
-    NestedCommandSpec { name: "keygen", usage: "keygen [--registry <name>] [--force]", summary: "Create a package-signing key", handler: HandlerKey::Keygen, also_canonical_top_level: false },
-    NestedCommandSpec { name: "key", usage: "key backup [<dest>] [--registry <name>]", summary: "Manage the package-signing key", handler: HandlerKey::Key, also_canonical_top_level: false },
-    NestedCommandSpec { name: "vendor", usage: "vendor [--vendor-dir <path>]", summary: "Copy dependencies into vendor/", handler: HandlerKey::Vendor, also_canonical_top_level: false },
+    NestedCommandSpec {
+        name: "publish",
+        usage: "publish [--force] [--no-sign]",
+        summary: "Publish the current package",
+        handler: HandlerKey::Publish,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "yank",
+        usage: "yank <version> [--message <reason>]",
+        summary: "Stop new installs of a published version",
+        handler: HandlerKey::Yank,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "keygen",
+        usage: "keygen [--registry <name>] [--force]",
+        summary: "Create a package-signing key",
+        handler: HandlerKey::Keygen,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "key",
+        usage: "key backup [<dest>] [--registry <name>]",
+        summary: "Manage the package-signing key",
+        handler: HandlerKey::Key,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "vendor",
+        usage: "vendor [--vendor-dir <path>]",
+        summary: "Copy dependencies into vendor/",
+        handler: HandlerKey::Vendor,
+        also_canonical_top_level: false,
+    },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
@@ -275,26 +419,112 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
 // `hangar`. Archive verbs share Jetpack's signed, versioned archive format,
 // quarantine-first import, and atomic closure publication path.
 const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "path", usage: "path [--json]", summary: "Show the resolved user Hangar path", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "verify", usage: "verify [--json]", summary: "Check package-store integrity", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "repair", usage: "repair <entry> --from <archive.hangar> [--json]", summary: "Repair a damaged Hangar object from a signed archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "copy", usage: "copy <entry> --to <hangar-root> [--json]", summary: "Copy a verified closure between local Hangars", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "import", usage: "import <archive.hangar> [--json]", summary: "Verify and import a signed Hangar archive", handler: HandlerKey::Hangar, also_canonical_top_level: true },
-    NestedCommandSpec { name: "export", usage: "export <entry> --to <archive.hangar> [--json]", summary: "Export a signed Hangar closure", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "dump", usage: "dump <entry> [--json]", summary: "Stream a signed Hangar archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "restore", usage: "restore [--json]", summary: "Restore a signed Hangar archive from stdin", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "sign", usage: "sign <entry-or-archive> [--to <path>] [--json]", summary: "Sign a Hangar object or archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "recover", usage: "recover [--json]", summary: "Recover Hangar staging, build scratch, and leases", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "rollback", usage: "rollback [--json]", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "generations", usage: "generations [--json]", summary: "List package-store generations", handler: HandlerKey::Hangar, also_canonical_top_level: false },
-    NestedCommandSpec { name: "du", usage: "du [--json]", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec {
+        name: "path",
+        usage: "path [--json]",
+        summary: "Show the resolved user Hangar path",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "verify",
+        usage: "verify [--json]",
+        summary: "Check package-store integrity",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "repair",
+        usage: "repair <entry> --from <archive.hangar> [--json]",
+        summary: "Repair a damaged Hangar object from a signed archive",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "copy",
+        usage: "copy <entry> --to <hangar-root> [--json]",
+        summary: "Copy a verified closure between local Hangars",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "import",
+        usage: "import <archive.hangar> [--json]",
+        summary: "Verify and import a signed Hangar archive",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: true,
+    },
+    NestedCommandSpec {
+        name: "export",
+        usage: "export <entry> --to <archive.hangar> [--json]",
+        summary: "Export a signed Hangar closure",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "dump",
+        usage: "dump <entry> [--json]",
+        summary: "Stream a signed Hangar archive",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "restore",
+        usage: "restore [--json]",
+        summary: "Restore a signed Hangar archive from stdin",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "sign",
+        usage: "sign <entry-or-archive> [--to <path>] [--json]",
+        summary: "Sign a Hangar object or archive",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "recover",
+        usage: "recover [--json]",
+        summary: "Recover Hangar staging, build scratch, and leases",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "rollback",
+        usage: "rollback [--json]",
+        summary: "Restore an earlier package-store generation",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "generations",
+        usage: "generations [--json]",
+        summary: "List package-store generations",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "du",
+        usage: "du [--json]",
+        summary: "Show disk use for each stored object",
+        handler: HandlerKey::Hangar,
+        also_canonical_top_level: false,
+    },
 ];
-const GC_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "report", usage: "report", summary: "Show values moved into automatic memory management", handler: HandlerKey::GcReport, also_canonical_top_level: true },
-];
-const PROJECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "parts", usage: "parts", summary: "List loaded and skipped project modules", handler: HandlerKey::ProjectParts, also_canonical_top_level: false },
-];
+const GC_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
+    name: "report",
+    usage: "report",
+    summary: "Show values moved into automatic memory management",
+    handler: HandlerKey::GcReport,
+    also_canonical_top_level: true,
+}];
+const PROJECT_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
+    name: "parts",
+    usage: "parts",
+    summary: "List loaded and skipped project modules",
+    handler: HandlerKey::ProjectParts,
+    also_canonical_top_level: false,
+}];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
     NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
@@ -310,26 +540,98 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
 // stays non-exhaustive because `export` is a private callback used by the shell
 // hook and must continue downstream.
 const ENV_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "test", usage: "test [-- command]", summary: "Run environment checks in a clean environment", handler: HandlerKey::Env, also_canonical_top_level: true },
-    NestedCommandSpec { name: "hook", usage: "hook <bash|zsh|fish>", summary: "Print the shell auto-activation hook", handler: HandlerKey::Env, also_canonical_top_level: false },
-    NestedCommandSpec { name: "sync", usage: "sync", summary: "Apply typed managed environment files", handler: HandlerKey::Env, also_canonical_top_level: false },
-    NestedCommandSpec { name: "info", usage: "info", summary: "Show the typed environment plan", handler: HandlerKey::Env, also_canonical_top_level: false },
+    NestedCommandSpec {
+        name: "test",
+        usage: "test [-- command]",
+        summary: "Run environment checks in a clean environment",
+        handler: HandlerKey::Env,
+        also_canonical_top_level: true,
+    },
+    NestedCommandSpec {
+        name: "hook",
+        usage: "hook <bash|zsh|fish>",
+        summary: "Print the shell auto-activation hook",
+        handler: HandlerKey::Env,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "sync",
+        usage: "sync",
+        summary: "Apply typed managed environment files",
+        handler: HandlerKey::Env,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "info",
+        usage: "info",
+        summary: "Show the typed environment plan",
+        handler: HandlerKey::Env,
+        also_canonical_top_level: false,
+    },
 ];
 const SHARED_STORE_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "install", usage: "install", summary: "Install the optional shared Hangar broker", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
-    NestedCommandSpec { name: "enroll", usage: "enroll <uid> [--read-only]", summary: "Grant a user shared-store broker access", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
-    NestedCommandSpec { name: "status", usage: "status", summary: "Show shared-store broker configuration", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
-    NestedCommandSpec { name: "broker", usage: "broker [--fd <n>]", summary: "Serve one shared-store broker request", handler: HandlerKey::SharedStore, also_canonical_top_level: false },
+    NestedCommandSpec {
+        name: "install",
+        usage: "install",
+        summary: "Install the optional shared Hangar broker",
+        handler: HandlerKey::SharedStore,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "enroll",
+        usage: "enroll <uid> [--read-only]",
+        summary: "Grant a user shared-store broker access",
+        handler: HandlerKey::SharedStore,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "status",
+        usage: "status",
+        summary: "Show shared-store broker configuration",
+        handler: HandlerKey::SharedStore,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "broker",
+        usage: "broker [--fd <n>]",
+        summary: "Serve one shared-store broker request",
+        handler: HandlerKey::SharedStore,
+        also_canonical_top_level: false,
+    },
 ];
 // D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
 // This group is *not* exhaustive (see `CommandSpec::exhaustive`) — jetos's
 // own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
 // owned by the `jet os` dispatcher and are not modeled here.
 const OS_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "push", usage: "push", summary: "Deploy one or more Jetos machines", handler: HandlerKey::Push, also_canonical_top_level: false },
-    NestedCommandSpec { name: "bridge", usage: "bridge", summary: "Convert an existing system configuration to Jet", handler: HandlerKey::Bridge, also_canonical_top_level: false },
-    NestedCommandSpec { name: "services", usage: "services", summary: "Manage development services", handler: HandlerKey::Services, also_canonical_top_level: false },
-    NestedCommandSpec { name: "config", usage: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config, also_canonical_top_level: false },
+    NestedCommandSpec {
+        name: "push",
+        usage: "push",
+        summary: "Deploy one or more Jetos machines",
+        handler: HandlerKey::Push,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "bridge",
+        usage: "bridge",
+        summary: "Convert an existing system configuration to Jet",
+        handler: HandlerKey::Bridge,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "services",
+        usage: "services",
+        summary: "Manage development services",
+        handler: HandlerKey::Services,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "config",
+        usage: "config",
+        summary: "Manage Jet settings and trust",
+        handler: HandlerKey::Config,
+        also_canonical_top_level: false,
+    },
 ];
 
 // D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run` and
@@ -337,12 +639,48 @@ const OS_ACTIONS: &[NestedCommandSpec] = &[
 // lists the full family. Measurement remains a mode of the canonical test
 // intent, not another perf-session action.
 const PERF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "run", usage: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
-    NestedCommandSpec { name: "test", usage: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
-    NestedCommandSpec { name: "attach", usage: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
-    NestedCommandSpec { name: "view", usage: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf, also_canonical_top_level: false },
-    NestedCommandSpec { name: "compare", usage: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf, also_canonical_top_level: false },
-    NestedCommandSpec { name: "export", usage: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
+    NestedCommandSpec {
+        name: "run",
+        usage: "run",
+        summary: "Run a program and write a .jettrace",
+        handler: HandlerKey::Perf,
+        also_canonical_top_level: true,
+    },
+    NestedCommandSpec {
+        name: "test",
+        usage: "test",
+        summary: "Run tests and write a .jettrace",
+        handler: HandlerKey::Perf,
+        also_canonical_top_level: true,
+    },
+    NestedCommandSpec {
+        name: "attach",
+        usage: "attach",
+        summary: "Attach to a running process and write a .jettrace",
+        handler: HandlerKey::Perf,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "view",
+        usage: "view",
+        summary: "Show a .jettrace summary",
+        handler: HandlerKey::Perf,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "compare",
+        usage: "compare",
+        summary: "Compare two .jettrace artifacts",
+        handler: HandlerKey::Perf,
+        also_canonical_top_level: false,
+    },
+    NestedCommandSpec {
+        name: "export",
+        usage: "export",
+        summary: "Export a loss-declared projection of a .jettrace",
+        handler: HandlerKey::Perf,
+        also_canonical_top_level: false,
+    },
 ];
 
 /// #1659 criterion 1 (round 2): groups are no longer a second parallel array —
@@ -361,25 +699,31 @@ pub fn command_group(name: &str) -> Option<&'static CommandSpec> {
 /// (CmdPerf.rs) so every caller reads the same `COMMANDS` table instead
 /// of re-deriving its own text.
 pub fn command_group_usage(name: &str) -> String {
-    let Some(group) = command_group(name) else { return String::new() };
+    let Some(group) = command_group(name) else {
+        return String::new();
+    };
     let mut output = String::new();
     for action in group.actions {
         for usage in action.usage.lines() {
             output.push_str(&format!(
                 "  {} {} {:<48} {}\n",
-                BINARY_NAME,
-                group.name,
-                usage,
-                action.summary
+                BINARY_NAME, group.name, usage, action.summary
             ));
         }
     }
     output
 }
 
-pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
+pub fn nested_command(
+    group: &str,
+    action: &str,
+) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
     let group = command_group(group)?;
-    group.actions.iter().find(|spec| spec.name == action).map(|action| (group, action))
+    group
+        .actions
+        .iter()
+        .find(|spec| spec.name == action)
+        .map(|action| (group, action))
 }
 
 pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
@@ -404,13 +748,19 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static Neste
     }) {
         return None;
     }
-    command_groups().find_map(|group| {
-        group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
-    }).filter(|(_, action)| {
-        // E0043 reserves bare `install` for its teaching diagnostic even though
-        // the real shared-store action is `jet shared-store install`.
-        !action.also_canonical_top_level && action.name != "install"
-    })
+    command_groups()
+        .find_map(|group| {
+            group
+                .actions
+                .iter()
+                .find(|action| action.name == name)
+                .map(|action| (group, action))
+        })
+        .filter(|(_, action)| {
+            // E0043 reserves bare `install` for its teaching diagnostic even though
+            // the real shared-store action is `jet shared-store install`.
+            !action.also_canonical_top_level && action.name != "install"
+        })
 }
 
 pub fn moved_command_group(name: &str) -> Option<&'static str> {
@@ -420,11 +770,46 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 /// Every built-in subcommand. Order here is the order shown in the man page and
 /// completions; the greeting picks the `headline` ones.
 pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec { name: "registry", summary: "Publish and manage packages", headline: false, actions: REGISTRY_ACTIONS, exhaustive: true, usage: None },
-    CommandSpec { name: "inspect", summary: "Explore code, builds, packages, and bindings", headline: false, actions: INSPECT_ACTIONS, exhaustive: true, usage: None },
-    CommandSpec { name: "hangar", summary: "Inspect and maintain the package store", headline: false, actions: HANGAR_ACTIONS, exhaustive: true, usage: None },
-    CommandSpec { name: "project", summary: "Inspect project files and modules", headline: false, actions: PROJECT_ACTIONS, exhaustive: true, usage: None },
-    CommandSpec { name: "self", summary: "Manage the Jet installation and editor tools", headline: false, actions: SELF_ACTIONS, exhaustive: true, usage: None },
+    CommandSpec {
+        name: "registry",
+        summary: "Publish and manage packages",
+        headline: false,
+        actions: REGISTRY_ACTIONS,
+        exhaustive: true,
+        usage: None,
+    },
+    CommandSpec {
+        name: "inspect",
+        summary: "Explore code, builds, packages, and bindings",
+        headline: false,
+        actions: INSPECT_ACTIONS,
+        exhaustive: true,
+        usage: None,
+    },
+    CommandSpec {
+        name: "hangar",
+        summary: "Inspect and maintain the package store",
+        headline: false,
+        actions: HANGAR_ACTIONS,
+        exhaustive: true,
+        usage: None,
+    },
+    CommandSpec {
+        name: "project",
+        summary: "Inspect project files and modules",
+        headline: false,
+        actions: PROJECT_ACTIONS,
+        exhaustive: true,
+        usage: None,
+    },
+    CommandSpec {
+        name: "self",
+        summary: "Manage the Jet installation and editor tools",
+        headline: false,
+        actions: SELF_ACTIONS,
+        exhaustive: true,
+        usage: None,
+    },
     CommandSpec {
         name: "diff",
         summary: "Compare two Jet programs by meaning",
@@ -707,7 +1092,9 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>]"),
+        usage: Some(
+            "find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>]",
+        ),
     },
     CommandSpec {
         name: "update",
@@ -994,7 +1381,9 @@ pub fn retired_command(argv: &[String]) -> Option<&'static RetiredCommandSpec> {
 }
 
 pub fn is_retired_root(name: &str) -> bool {
-    RETIRED_COMMANDS.iter().any(|spec| spec.spelling.split_whitespace().next() == Some(name))
+    RETIRED_COMMANDS
+        .iter()
+        .any(|spec| spec.spelling.split_whitespace().next() == Some(name))
 }
 
 /// D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B: canonical top-level
@@ -1250,7 +1639,10 @@ pub fn usage_page(version: &str) -> String {
         "Welcome to {lang}! (v{version})\n\nusage:\n",
         lang = crate::Syntax::LANG_NAME,
     );
-    for command in COMMANDS.iter().filter(|command| is_canonical_top_level(command.name)) {
+    for command in COMMANDS
+        .iter()
+        .filter(|command| is_canonical_top_level(command.name))
+    {
         output.push_str(&format!(
             "  {:<36} {}\n",
             command_usage(command.name),
@@ -1290,7 +1682,7 @@ pub fn is_builtin(name: &str) -> bool {
 pub fn owns_flag_vocabulary(name: &str) -> bool {
     matches!(
         name,
-            "env"
+        "env"
             | "remote"
             | "shared-store"
             | "dev"
@@ -1400,7 +1792,20 @@ pub fn completions_bash() -> String {
         .collect::<Vec<_>>()
         .join(" ");
     let flags = FLAGS.iter().map(|f| f.long).collect::<Vec<_>>().join(" ");
-    let nested = command_groups().map(|g| format!("        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;", g.name, g.actions.iter().map(|a| a.name).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
+    let nested = command_groups()
+        .map(|g| {
+            format!(
+                "        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;",
+                g.name,
+                g.actions
+                    .iter()
+                    .map(|a| a.name)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "# bash completion for {bin} (generated by `{bin} self completions bash`)\n\
 _{bin}() {{\n\
@@ -1434,10 +1839,25 @@ complete -F _{bin} {bin}\n",
 pub fn completions_zsh() -> String {
     let mut cmd_lines = String::new();
     for c in COMMANDS {
-        if !is_canonical_top_level(c.name) { continue; }
+        if !is_canonical_top_level(c.name) {
+            continue;
+        }
         cmd_lines.push_str(&format!("        '{}:{}'\n", c.name, escape_zsh(c.summary)));
     }
-    let nested = command_groups().map(|g| format!("            {}) _values 'action' {} ;;", g.name, g.actions.iter().map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary))).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
+    let nested = command_groups()
+        .map(|g| {
+            format!(
+                "            {}) _values 'action' {} ;;",
+                g.name,
+                g.actions
+                    .iter()
+                    .map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut flag_lines = String::new();
     for f in FLAGS.iter() {
         flag_lines.push_str(&format!("        '{}[{}]'\n", f.long, escape_zsh(f.help)));
@@ -1475,7 +1895,9 @@ pub fn completions_fish() -> String {
     // Only complete subcommands when none has been seen yet.
     let seen = "__fish_use_subcommand";
     for c in COMMANDS {
-        if !is_canonical_top_level(c.name) { continue; }
+        if !is_canonical_top_level(c.name) {
+            continue;
+        }
         out.push_str(&format!(
             "complete -c {bin} -n '{seen}' -a {name} -d '{desc}'\n",
             bin = BINARY_NAME,
@@ -1502,9 +1924,31 @@ pub fn completions_fish() -> String {
 
 /// PowerShell completion script, derived from the same nested registry.
 pub fn completions_powershell() -> String {
-    let top = COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)).map(|c| format!("'{}'", c.name)).collect::<Vec<_>>().join(",");
-    let groups = command_groups().map(|g| format!("'{}' = @({})", g.name, g.actions.iter().map(|a| format!("'{}'", a.name)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join("; ");
-    let flags = FLAGS.iter().map(|f| format!("'{}'", f.long)).collect::<Vec<_>>().join(",");
+    let top = COMMANDS
+        .iter()
+        .filter(|c| is_canonical_top_level(c.name))
+        .map(|c| format!("'{}'", c.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    let groups = command_groups()
+        .map(|g| {
+            format!(
+                "'{}' = @({})",
+                g.name,
+                g.actions
+                    .iter()
+                    .map(|a| format!("'{}'", a.name))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let flags = FLAGS
+        .iter()
+        .map(|f| format!("'{}'", f.long))
+        .collect::<Vec<_>>()
+        .join(",");
     format!("# PowerShell completion for {bin} (generated by `{bin} self completions powershell`)\n$JetCommands = @({top})\n$JetFlags = @({flags})\n$JetGroups = @{{ {groups} }}\nRegister-ArgumentCompleter -Native -CommandName {bin} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $choices = if ($wordToComplete.StartsWith('-')) {{ $JetFlags }} elseif ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {{ $JetGroups[$words[1]] }} else {{ $JetCommands }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }} }}\n", bin=BINARY_NAME, top=top, flags=flags, groups=groups)
 }
 
@@ -1530,11 +1974,18 @@ pub fn completions_for_program(
                     shell_single_quote(command_name),
                 ));
             }
-            let cases = schema.commands.iter().map(|command| format!(
-                "        {}) flags={} ;;",
-                shell_single_quote(&command.name),
-                shell_single_quote(&schema.command_completion_words(command).join(" ")),
-            )).collect::<Vec<_>>().join("\n");
+            let cases = schema
+                .commands
+                .iter()
+                .map(|command| {
+                    format!(
+                        "        {}) flags={} ;;",
+                        shell_single_quote(&command.name),
+                        shell_single_quote(&schema.command_completion_words(command).join(" ")),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
             Some(format!(
                 "# bash completion from JetCommandSchema v{}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {}\n",
                 jet_foundation::CLISchema::RECORD_VERSION,
@@ -1551,68 +2002,159 @@ pub fn completions_for_program(
                 let args = specs.join(" \\\n");
                 return Some(format!(
                     "#compdef {}\n# zsh completion from JetCommandSchema v{}\n_arguments \\\n{}\n",
-                    shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, args,
+                    shell_single_quote(command_name),
+                    jet_foundation::CLISchema::RECORD_VERSION,
+                    args,
                 ));
             }
             // The whole `_arguments` spec is already single-quoted below.
             // Jet command words are checked identifiers; quoting each word
             // again produces literal quote characters in zsh's candidate list.
-            let commands = schema.commands.iter().map(|command| command.name.as_str()).collect::<Vec<_>>().join(" ");
+            let commands = schema
+                .commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
             let mut root_specs = zsh_standard_specs(schema.standard, schema.version.is_some());
             root_specs.extend(zsh_input_specs(&schema.inputs));
             root_specs.push(format!("    '1:command:({commands})'"));
             let root_args = root_specs.join(" \\\n");
-            let cases = schema.commands.iter().map(|command| format!(
-                "        {}) _arguments \\\n{} ;;",
-                shell_single_quote(&command.name),
-                {
-                    let specs = zsh_input_specs(&schema.command_inputs(command));
-                    specs.join(" \\\n")
-                },
-            )).collect::<Vec<_>>().join("\n");
+            let cases = schema
+                .commands
+                .iter()
+                .map(|command| {
+                    format!(
+                        "        {}) _arguments \\\n{} ;;",
+                        shell_single_quote(&command.name),
+                        {
+                            let specs = zsh_input_specs(&schema.command_inputs(command));
+                            specs.join(" \\\n")
+                        },
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
             Some(format!(
                 "#compdef {}\n# zsh completion from JetCommandSchema v{}\nif (( CURRENT == 2 )); then\n_arguments \\\n{}\nelse\n    case $words[2] in\n{}\n    esac\nfi\n",
                 shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, root_args, cases,
             ))
         }
         "fish" => {
-            let mut out = format!("# fish completion from JetCommandSchema v{}\n", jet_foundation::CLISchema::RECORD_VERSION);
-            let root_condition = if schema.commands.is_empty() { "" } else { " -n '__fish_use_subcommand'" };
-            out.push_str(&format!("complete -c {}{} -l help -d 'show help'\n", fish_single(command_name), root_condition));
+            let mut out = format!(
+                "# fish completion from JetCommandSchema v{}\n",
+                jet_foundation::CLISchema::RECORD_VERSION
+            );
+            let root_condition = if schema.commands.is_empty() {
+                ""
+            } else {
+                " -n '__fish_use_subcommand'"
+            };
+            out.push_str(&format!(
+                "complete -c {}{} -l help -d 'show help'\n",
+                fish_single(command_name),
+                root_condition
+            ));
             if schema.standard {
-                out.push_str(&format!("complete -c {}{} -l verbose -s v -d 'print extra detail'\n", fish_single(command_name), root_condition));
-                out.push_str(&format!("complete -c {}{} -l quiet -s q -d 'suppress normal output'\n", fish_single(command_name), root_condition));
-                out.push_str(&format!("complete -c {}{} -l color -r -d 'control terminal color'\n", fish_single(command_name), root_condition));
+                out.push_str(&format!(
+                    "complete -c {}{} -l verbose -s v -d 'print extra detail'\n",
+                    fish_single(command_name),
+                    root_condition
+                ));
+                out.push_str(&format!(
+                    "complete -c {}{} -l quiet -s q -d 'suppress normal output'\n",
+                    fish_single(command_name),
+                    root_condition
+                ));
+                out.push_str(&format!(
+                    "complete -c {}{} -l color -r -d 'control terminal color'\n",
+                    fish_single(command_name),
+                    root_condition
+                ));
                 if schema.version.is_some() {
-                    out.push_str(&format!("complete -c {}{} -l version -d 'show version'\n", fish_single(command_name), root_condition));
+                    out.push_str(&format!(
+                        "complete -c {}{} -l version -d 'show version'\n",
+                        fish_single(command_name),
+                        root_condition
+                    ));
                 }
             }
             for input in &schema.inputs {
-                let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
-                out.push_str(&format!("complete -c {}{} -l {}{} -d {}{}\n", fish_single(command_name), root_condition, input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
+                let short = input
+                    .short
+                    .as_ref()
+                    .map_or_else(String::new, |short| format!(" -s {short}"));
+                out.push_str(&format!(
+                    "complete -c {}{} -l {}{} -d {}{}\n",
+                    fish_single(command_name),
+                    root_condition,
+                    input.flag,
+                    short,
+                    fish_single(&input.help),
+                    if input.metavar.is_some() { " -r" } else { "" }
+                ));
             }
             for command in &schema.commands {
-                out.push_str(&format!("complete -c {} -n '__fish_use_subcommand' -a {}\n", fish_single(command_name), fish_single(&command.name)));
-                out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l help -d 'show help'\n", fish_single(command_name), command.name));
+                out.push_str(&format!(
+                    "complete -c {} -n '__fish_use_subcommand' -a {}\n",
+                    fish_single(command_name),
+                    fish_single(&command.name)
+                ));
+                out.push_str(&format!(
+                    "complete -c {} -n '__fish_seen_subcommand_from {}' -l help -d 'show help'\n",
+                    fish_single(command_name),
+                    command.name
+                ));
                 let command_inputs = schema.command_inputs(command);
                 for input in &command_inputs {
-                    let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
-                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l {}{} -d {}{}\n", fish_single(command_name), command.name, input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
+                    let short = input
+                        .short
+                        .as_ref()
+                        .map_or_else(String::new, |short| format!(" -s {short}"));
+                    out.push_str(&format!(
+                        "complete -c {} -n '__fish_seen_subcommand_from {}' -l {}{} -d {}{}\n",
+                        fish_single(command_name),
+                        command.name,
+                        input.flag,
+                        short,
+                        fish_single(&input.help),
+                        if input.metavar.is_some() { " -r" } else { "" }
+                    ));
                 }
             }
             Some(out)
         }
         "powershell" => {
-            let root = root_words.iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
+            let root = root_words
+                .iter()
+                .map(|word| ps_single(word))
+                .collect::<Vec<_>>()
+                .join(",");
             if schema.commands.is_empty() {
                 return Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)));
             }
-            let flags = root_input_words.iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
-            let command_flags = schema.commands.iter().map(|command| format!(
-                "{} = @({})",
-                ps_single(&command.name),
-                schema.command_completion_words(command).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(","),
-            )).collect::<Vec<_>>().join("; ");
+            let flags = root_input_words
+                .iter()
+                .map(|word| ps_single(word))
+                .collect::<Vec<_>>()
+                .join(",");
+            let command_flags = schema
+                .commands
+                .iter()
+                .map(|command| {
+                    format!(
+                        "{} = @({})",
+                        ps_single(&command.name),
+                        schema
+                            .command_completion_words(command)
+                            .iter()
+                            .map(|word| ps_single(word))
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
             Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)))
         }
         _ => None,
@@ -1687,11 +2229,21 @@ fn zsh_input_specs(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<
     specs
 }
 
-fn shell_single_quote(value: &str) -> String { format!("'{}'", value.replace('\'', "'\\''")) }
-fn zsh_single(value: &str) -> String { value.replace('\'', "'\\''") }
-fn zsh_bracket(value: &str) -> String { zsh_single(value).replace('[', "\\[").replace(']', "\\]") }
-fn fish_single(value: &str) -> String { shell_single_quote(value) }
-fn ps_single(value: &str) -> String { format!("'{}'", value.replace('\'', "''")) }
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+fn zsh_single(value: &str) -> String {
+    value.replace('\'', "'\\''")
+}
+fn zsh_bracket(value: &str) -> String {
+    zsh_single(value).replace('[', "\\[").replace(']', "\\]")
+}
+fn fish_single(value: &str) -> String {
+    shell_single_quote(value)
+}
+fn ps_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
 
 /// roff man page for `jet`, section 1.
 pub fn man_page(version: &str) -> String {
@@ -1720,11 +2272,18 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
     ));
     out.push_str(".SH COMMANDS\n");
     for c in COMMANDS {
-        if !is_canonical_top_level(c.name) { continue; }
+        if !is_canonical_top_level(c.name) {
+            continue;
+        }
         out.push_str(&format!(".TP\n.B {}\n{}\n", c.name, roff_escape(c.summary)));
         if let Some(group) = command_group(c.name) {
             for action in group.actions {
-                out.push_str(&format!(".TP\n.B {} {}\n{}\n", group.name, action.name, roff_escape(action.summary)));
+                out.push_str(&format!(
+                    ".TP\n.B {} {}\n{}\n",
+                    group.name,
+                    action.name,
+                    roff_escape(action.summary)
+                ));
             }
         }
     }
@@ -1771,7 +2330,10 @@ mod tests {
             standard: false,
             version: None,
         };
-        assert_eq!(completion_command_name("build/greeter"), Ok("greeter".to_string()));
+        assert_eq!(
+            completion_command_name("build/greeter"),
+            Ok("greeter".to_string())
+        );
         assert_eq!(
             completion_command_name("safe\nINJECT_COMMAND\rnext"),
             Err("the program command name contains a control character")
@@ -1808,7 +2370,13 @@ mod tests {
 
     #[test]
     fn dry_run_is_one_shared_flag_row() {
-        assert_eq!(FLAGS.iter().filter(|flag| flag.long == DRY_RUN_FLAG).count(), 1);
+        assert_eq!(
+            FLAGS
+                .iter()
+                .filter(|flag| flag.long == DRY_RUN_FLAG)
+                .count(),
+            1
+        );
         assert!(is_known_flag(DRY_RUN_FLAG));
         assert!(man_page("0.0.0").contains(DRY_RUN_FLAG));
         assert!(completions_bash().contains(DRY_RUN_FLAG));
@@ -1822,7 +2390,12 @@ mod tests {
 
     #[test]
     fn completions_mention_every_command() {
-        for shell_out in [completions_bash(), completions_zsh(), completions_fish(), completions_powershell()] {
+        for shell_out in [
+            completions_bash(),
+            completions_zsh(),
+            completions_fish(),
+            completions_powershell(),
+        ] {
             for c in COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)) {
                 assert!(
                     shell_out.contains(c.name),
@@ -1831,9 +2404,18 @@ mod tests {
                 );
             }
             for group in command_groups() {
-                assert!(shell_out.contains(group.name), "completion missing group {}", group.name);
+                assert!(
+                    shell_out.contains(group.name),
+                    "completion missing group {}",
+                    group.name
+                );
                 for action in group.actions {
-                    assert!(shell_out.contains(action.name), "completion missing {} {}", group.name, action.name);
+                    assert!(
+                        shell_out.contains(action.name),
+                        "completion missing {} {}",
+                        group.name,
+                        action.name
+                    );
                 }
             }
         }
@@ -1853,7 +2435,11 @@ mod tests {
                     assert!(moved_command(action.name).is_none());
                     continue;
                 }
-                assert!(!is_canonical_top_level(action.name), "moved bare command leaked: {}", action.name);
+                assert!(
+                    !is_canonical_top_level(action.name),
+                    "moved bare command leaked: {}",
+                    action.name
+                );
                 let owner = moved_command_group(action.name);
                 assert!(owner.is_some(), "missing moved owner for {}", action.name);
                 // An action name can appear in more than one group (`export` under
@@ -1861,7 +2447,10 @@ mod tests {
                 assert!(
                     command_groups().any(|candidate| {
                         candidate.name == owner.unwrap()
-                            && candidate.actions.iter().any(|entry| entry.name == action.name)
+                            && candidate
+                                .actions
+                                .iter()
+                                .any(|entry| entry.name == action.name)
                     }),
                     "{} moved to unknown owner {:?}",
                     action.name,
@@ -1891,7 +2480,12 @@ mod tests {
     fn every_nested_action_has_canonical_usage() {
         for group in command_groups() {
             for action in group.actions {
-                assert!(!action.usage.trim().is_empty(), "missing usage for {} {}", group.name, action.name);
+                assert!(
+                    !action.usage.trim().is_empty(),
+                    "missing usage for {} {}",
+                    group.name,
+                    action.name
+                );
                 for usage in action.usage.lines() {
                     assert!(
                         usage == action.name || usage.starts_with(&format!("{} ", action.name)),
@@ -1907,61 +2501,107 @@ mod tests {
     fn every_nested_action_routes_to_a_real_dispatch_seam() {
         use HandlerKey::*;
         let expected = [
-            ("registry", "publish", Publish, "publish", false), ("registry", "yank", Yank, "yank", false),
-            ("registry", "keygen", Keygen, "keygen", false), ("registry", "key", Key, "key", false),
-            ("registry", "vendor", Vendor, "vendor", false), ("inspect", "graph", Graph, "graph", false),
-            ("inspect", "query", Query, "query", false), ("inspect", "explain-build", ExplainBuild, "explain-build", false),
+            ("registry", "publish", Publish, "publish", false),
+            ("registry", "yank", Yank, "yank", false),
+            ("registry", "keygen", Keygen, "keygen", false),
+            ("registry", "key", Key, "key", false),
+            ("registry", "vendor", Vendor, "vendor", false),
+            ("inspect", "graph", Graph, "graph", false),
+            ("inspect", "query", Query, "query", false),
+            (
+                "inspect",
+                "explain-build",
+                ExplainBuild,
+                "explain-build",
+                false,
+            ),
             ("inspect", "compiler", Compiler, "compiler", false),
-            ("inspect", "impact", Impact, "impact", false), ("inspect", "dossier", Dossier, "dossier", false),
+            ("inspect", "impact", Impact, "impact", false),
+            ("inspect", "dossier", Dossier, "dossier", false),
             ("inspect", "guarantees", Guarantees, "guarantees", false),
             ("inspect", "provenance", Provenance, "provenance", false),
             ("inspect", "digest", Digest, "digest", false),
             ("inspect", "env", InspectEnv, "inspect", true),
-            ("inspect", "semindex", Semindex, "semindex", false), ("inspect", "expand", Expand, "expand", false),
+            ("inspect", "semindex", Semindex, "semindex", false),
+            ("inspect", "expand", Expand, "expand", false),
             ("inspect", "unsafe", Unsafe, "unsafe", false),
-            ("inspect", "gates", Gates, "gates", false), ("inspect", "authority", Authority, "authority", false),
-            ("inspect", "schema", Schema, "schema", false), ("inspect", "codemod", Codemod, "codemod", false),
-            ("inspect", "audit", Audit, "audit", false), ("inspect", "sbom", Sbom, "sbom", false),
+            ("inspect", "gates", Gates, "gates", false),
+            ("inspect", "authority", Authority, "authority", false),
+            ("inspect", "schema", Schema, "schema", false),
+            ("inspect", "codemod", Codemod, "codemod", false),
+            ("inspect", "audit", Audit, "audit", false),
+            ("inspect", "sbom", Sbom, "sbom", false),
             ("inspect", "bind", Bind, "bind", false),
             ("inspect", "live", Live, "live", false),
             ("inspect", "logs", Logs, "logs", false),
-            ("inspect", "info", Info, "info", false), ("inspect", "outdated", Outdated, "outdated", false),
-            ("inspect", "reserved", Reserved, "reserved", false), ("inspect", "facts", Facts, "facts", false),
+            ("inspect", "info", Info, "info", false),
+            ("inspect", "outdated", Outdated, "outdated", false),
+            ("inspect", "reserved", Reserved, "reserved", false),
+            ("inspect", "facts", Facts, "facts", false),
             ("inspect", "structure", Structure, "structure", false),
-            ("hangar", "path", Hangar, "hangar", true), ("hangar", "verify", Hangar, "hangar", true),
+            ("hangar", "path", Hangar, "hangar", true),
+            ("hangar", "verify", Hangar, "hangar", true),
             ("hangar", "repair", Hangar, "hangar", true),
-            ("hangar", "copy", Hangar, "hangar", true), ("hangar", "import", Hangar, "hangar", true),
-            ("hangar", "export", Hangar, "hangar", true), ("hangar", "dump", Hangar, "hangar", true),
-            ("hangar", "restore", Hangar, "hangar", true), ("hangar", "sign", Hangar, "hangar", true),
+            ("hangar", "copy", Hangar, "hangar", true),
+            ("hangar", "import", Hangar, "hangar", true),
+            ("hangar", "export", Hangar, "hangar", true),
+            ("hangar", "dump", Hangar, "hangar", true),
+            ("hangar", "restore", Hangar, "hangar", true),
+            ("hangar", "sign", Hangar, "hangar", true),
             ("hangar", "recover", Hangar, "hangar", true),
-            ("hangar", "rollback", Hangar, "hangar", true), ("hangar", "generations", Hangar, "hangar", true),
+            ("hangar", "rollback", Hangar, "hangar", true),
+            ("hangar", "generations", Hangar, "hangar", true),
             ("hangar", "du", Hangar, "hangar", true),
             ("gc", "report", GcReport, "gc", true),
             ("project", "parts", ProjectParts, "parts", false),
             ("self", "toolchain", Toolchain, "toolchain", false),
-            ("self", "upgrade", Upgrade, "upgrade", false), ("self", "doctor", Doctor, "doctor", false),
-            ("self", "completions", Completions, "completions", false), ("self", "man", Man, "man", false),
-            ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
+            ("self", "upgrade", Upgrade, "upgrade", false),
+            ("self", "doctor", Doctor, "doctor", false),
+            ("self", "completions", Completions, "completions", false),
+            ("self", "man", Man, "man", false),
+            ("self", "devtools", Devtools, "devtools", false),
+            ("self", "lsp", Lsp, "lsp", false),
             ("self", "exec", Exec, "exec", false),
-            ("env", "test", Env, "env", true), ("env", "hook", Env, "env", true),
-            ("env", "sync", Env, "env", true), ("env", "info", Env, "env", true),
+            ("env", "test", Env, "env", true),
+            ("env", "hook", Env, "env", true),
+            ("env", "sync", Env, "env", true),
+            ("env", "info", Env, "env", true),
             ("shared-store", "install", SharedStore, "shared-store", true),
             ("shared-store", "enroll", SharedStore, "shared-store", true),
             ("shared-store", "status", SharedStore, "shared-store", true),
             ("shared-store", "broker", SharedStore, "shared-store", true),
-            ("os", "push", Push, "push", false), ("os", "bridge", Bridge, "bridge", false),
-            ("os", "services", Services, "services", false), ("os", "config", Config, "config", false),
-            ("perf", "run", Perf, "perf", true), ("perf", "test", Perf, "perf", true),
+            ("os", "push", Push, "push", false),
+            ("os", "bridge", Bridge, "bridge", false),
+            ("os", "services", Services, "services", false),
+            ("os", "config", Config, "config", false),
+            ("perf", "run", Perf, "perf", true),
+            ("perf", "test", Perf, "perf", true),
             ("perf", "attach", Perf, "perf", true),
-            ("perf", "view", Perf, "perf", true), ("perf", "compare", Perf, "perf", true),
+            ("perf", "view", Perf, "perf", true),
+            ("perf", "compare", Perf, "perf", true),
             ("perf", "export", Perf, "perf", true),
         ];
-        assert_eq!(command_groups().map(|g| g.actions.len()).sum::<usize>(), expected.len());
+        assert_eq!(
+            command_groups().map(|g| g.actions.len()).sum::<usize>(),
+            expected.len()
+        );
         for (group_name, action_name, handler, dispatch_word, keeps_group) in expected {
-            let (_, action) = nested_command(group_name, action_name).unwrap_or_else(|| panic!("missing {group_name} {action_name}"));
-            assert_eq!(action.handler, handler, "wrong handler for {group_name} {action_name}");
-            assert_eq!(action.handler.dispatch_word(), dispatch_word, "wrong dispatcher for {group_name} {action_name}");
-            assert_eq!(action.handler.keeps_group(), keeps_group, "wrong argv policy for {group_name} {action_name}");
+            let (_, action) = nested_command(group_name, action_name)
+                .unwrap_or_else(|| panic!("missing {group_name} {action_name}"));
+            assert_eq!(
+                action.handler, handler,
+                "wrong handler for {group_name} {action_name}"
+            );
+            assert_eq!(
+                action.handler.dispatch_word(),
+                dispatch_word,
+                "wrong dispatcher for {group_name} {action_name}"
+            );
+            assert_eq!(
+                action.handler.keeps_group(),
+                keeps_group,
+                "wrong argv policy for {group_name} {action_name}"
+            );
             let mut normalized = vec![group_name, action_name, "tail"];
             if !action.handler.keeps_group() {
                 normalized[0] = action.handler.dispatch_word();
@@ -1972,15 +2612,36 @@ mod tests {
             } else {
                 vec![dispatch_word, "tail"]
             };
-            assert_eq!(normalized, expected_argv, "wrong normalized argv for {group_name} {action_name}");
+            assert_eq!(
+                normalized, expected_argv,
+                "wrong normalized argv for {group_name} {action_name}"
+            );
         }
         for group in command_groups() {
             for action in group.actions {
-                assert!(!action.summary.trim().is_empty(), "missing summary for {} {}", group.name, action.name);
-                assert!(is_builtin(action.handler.dispatch_word()), "{} {} routes to missing handler {}", group.name, action.name, action.handler.dispatch_word());
-                assert_eq!(nested_command(group.name, action.name).map(|(_, a)| a.handler), Some(action.handler));
+                assert!(
+                    !action.summary.trim().is_empty(),
+                    "missing summary for {} {}",
+                    group.name,
+                    action.name
+                );
+                assert!(
+                    is_builtin(action.handler.dispatch_word()),
+                    "{} {} routes to missing handler {}",
+                    group.name,
+                    action.name,
+                    action.handler.dispatch_word()
+                );
+                assert_eq!(
+                    nested_command(group.name, action.name).map(|(_, a)| a.handler),
+                    Some(action.handler)
+                );
                 if action.handler.keeps_group() {
-                    assert_eq!(action.handler.dispatch_word(), group.name, "kept group must own its dispatcher");
+                    assert_eq!(
+                        action.handler.dispatch_word(),
+                        group.name,
+                        "kept group must own its dispatcher"
+                    );
                 }
             }
         }
@@ -2060,7 +2721,12 @@ mod tests {
         for group in command_groups() {
             let text = command_group_usage(group.name);
             for action in group.actions {
-                assert!(text.contains(action.name), "{} usage missing action {}", group.name, action.name);
+                assert!(
+                    text.contains(action.name),
+                    "{} usage missing action {}",
+                    group.name,
+                    action.name
+                );
             }
         }
         assert_eq!(command_group_usage("no-such-group"), "");
@@ -2078,14 +2744,20 @@ mod tests {
         ];
         for retired in RETIRED_COMMANDS {
             assert_eq!(
-                COMMANDS.iter().filter(|command| command.name == retired.spelling).count(),
+                COMMANDS
+                    .iter()
+                    .filter(|command| command.name == retired.spelling)
+                    .count(),
                 0,
                 "retired route {} remains a top-level row",
                 retired.spelling
             );
             assert_eq!(
                 command_groups()
-                    .flat_map(|group| group.actions.iter().map(move |action| (group.name, action.name)))
+                    .flat_map(|group| group
+                        .actions
+                        .iter()
+                        .map(move |action| (group.name, action.name)))
                     .filter(|(group, action)| format!("{group} {action}") == retired.spelling)
                     .count(),
                 0,
@@ -2094,7 +2766,10 @@ mod tests {
             );
             let needle = format!("{} {}", BINARY_NAME, retired.spelling);
             for surface in &surfaces {
-                assert!(!surface.contains(&needle), "retired route leaked into generated surface: {needle}\n{surface}");
+                assert!(
+                    !surface.contains(&needle),
+                    "retired route leaked into generated surface: {needle}\n{surface}"
+                );
             }
             assert_eq!(retired.category, RetirementCategory::Semantic);
             assert_eq!(retired.error_code, "E2101");

@@ -145,8 +145,12 @@ fn http_web_defaults_forced_deopt_uses_prelude_ambient() {
         let output = run(FORCED_DEOPT, "http_i9_forced_deopt");
         assert_eq!(output.stderr, "");
         assert_eq!(output.exit_code, 0);
-        assert!(output.stdout.starts_with("strasse\nReno|31\nInvalidFraming\nPolicy { reason: "));
-        assert!(output.stdout.contains("CORS credentials need named origins."));
+        assert!(output
+            .stdout
+            .starts_with("strasse\nReno|31\nInvalidFraming\nPolicy { reason: "));
+        assert!(output
+            .stdout
+            .contains("CORS credentials need named origins."));
         assert!(jet_jit::deopt_invoked_for_test());
         assert!(!jet_jit::fallback_invoked_for_test());
     });

@@ -66,7 +66,9 @@ fn zip_family_matches_aot_default_and_forced_interpreter() {
                 assert_eq!(stderr, "", "{tier} stderr");
                 assert_eq!(stdout, EXPECTED, "{tier} output");
             }
-            RunOutcome::Problems(diagnostics) => panic!("{tier} rejected zip family: {diagnostics:#?}"),
+            RunOutcome::Problems(diagnostics) => {
+                panic!("{tier} rejected zip family: {diagnostics:#?}")
+            }
         }
     }
 }

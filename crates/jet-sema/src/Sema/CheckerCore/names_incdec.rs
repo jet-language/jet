@@ -1,159 +1,159 @@
-use crate::AST::{Expr, IncDecOp, LValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Diagnostics::{computed_field_not_settable, expr_root_ident, suggest_field};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
+use crate::AST::{Expr, IncDecOp, LValue, Type};
 impl<'a> Checker<'a> {
-        /// Declare one name bound by a destructuring pattern (S74).
-        pub(crate) fn declare_bound(
-            &mut self,
-            name: &str,
-            span: Span,
-            ty: Type,
-            mutable: bool,
-            binding_sigil_span: Option<Span>,
-        ) {
-            let sendable = self.sendability_problem(&ty, true).is_none();
-            let single_use_span = if self.type_is_single_use(&ty) {
-                Some(span)
-            } else {
-                None
-            };
-            self.declare_with_sendability(
-                name,
+    /// Declare one name bound by a destructuring pattern (S74).
+    pub(crate) fn declare_bound(
+        &mut self,
+        name: &str,
+        span: Span,
+        ty: Type,
+        mutable: bool,
+        binding_sigil_span: Option<Span>,
+    ) {
+        let sendable = self.sendability_problem(&ty, true).is_none();
+        let single_use_span = if self.type_is_single_use(&ty) {
+            Some(span)
+        } else {
+            None
+        };
+        self.declare_with_sendability(
+            name,
+            span,
+            LocalInfo {
+                def_span: span,
+                binding_sigil_span,
+                ty,
+                mutable,
+                param_conv: None,
+                decl_loop_depth: self.loop_depth,
+                interrupt_sendable: false,
+                reactive_local: false,
+                reactive_shared: false,
+                single_use_span,
+                constant_value: None,
+                invalid: false,
+            },
+            sendable,
+        );
+    }
+
+    // --- expressions ------------------------------------------------------
+
+    pub(crate) fn require_bool(&mut self, e: &mut Expr, what: &str) {
+        if let Some(t) = self.infer(e) {
+            if t != Type::Bool {
+                self.diags.push(Diagnostic::error(
+                    "E0110",
+                    format!(
+                        "{} must be {}, but this is {}",
+                        what,
+                        Type::Bool.show(),
+                        t.show()
+                    ),
+                    "the program needs a clear yes or no here".to_string(),
+                    "compare the value to something, e.g. `x > 0` or `name == \"ok\"`".to_string(),
+                    Some(e.span()),
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn unknown_name(&mut self, name: &str, span: Span) {
+        let mut fix = format!(
+            "declare it first: `{} {} ...`",
+            name,
+            Syntax::SIGIL_BIND_IMMUT
+        );
+        if let Some(module) = unique_core_module_for_alias(name) {
+            fix = format!("add `use {module} as {name}`");
+        }
+        // I8: one suggester. `suggest_field` is the same distance-≤2
+        // nearest-candidate pick this used to inline, and it refuses a
+        // candidate equal to `name` — a visible-but-unresolvable name must
+        // not be echoed back as the fix for its own failed lookup (#2002).
+        let candidates: Vec<String> = self
+            .visible_names()
+            .into_iter()
+            .chain(self.consts.keys().cloned())
+            .collect();
+        let suggestion = suggest_field(name, &candidates);
+        if let Some(cand) = suggestion.as_deref() {
+            fix = format!("did you mean `{}`?", cand);
+        }
+        let mut diagnostic = Diagnostic::error(
+            "E0107",
+            format!("nothing named `{}` exists here", name),
+            "a name must be declared before it's used".to_string(),
+            fix,
+            Some(span),
+        );
+        if let Some(cand) = suggestion {
+            diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
                 span,
-                LocalInfo {
-                    def_span: span,
-                    binding_sigil_span,
-                    ty,
-                    mutable,
-                    param_conv: None,
-                    decl_loop_depth: self.loop_depth,
-                    interrupt_sendable: false,
-                    reactive_local: false,
-                    reactive_shared: false,
-                    single_use_span,
-                    constant_value: None,
-                    invalid: false,
-                },
-                sendable,
-            );
+                new_text: cand,
+            });
         }
-    
-        // --- expressions ------------------------------------------------------
-    
-        pub(crate) fn require_bool(&mut self, e: &mut Expr, what: &str) {
-            if let Some(t) = self.infer(e) {
-                if t != Type::Bool {
+        self.diags.push(diagnostic);
+    }
+
+    /// D-INCR1: type-check `++`/`--`. Prefix returns the updated value; postfix
+    /// returns the value before the update. Operand must be a mutable integer
+    /// lvalue (same LHS policy as S17; indexed slots are rejected like `+=`).
+    pub(crate) fn check_incdec(
+        &mut self,
+        op: IncDecOp,
+        operand: &mut Expr,
+        _postfix: bool,
+        span: Span,
+    ) -> Option<Type> {
+        let update_op = match op {
+            IncDecOp::Inc => "+",
+            IncDecOp::Dec => "-",
+        };
+        let operand = operand.without_parens();
+        let lvalue = match operand {
+            Expr::Ident(name, name_span) => LValue::Local {
+                name: name.clone(),
+                name_span: *name_span,
+            },
+            Expr::Index { span: idx_span, .. } => {
+                self.diags.push(Diagnostic::from_row(
+                    "E0163",
+                    &[("op", update_op)],
+                    Some(*idx_span),
+                ));
+                return None;
+            }
+            Expr::Field(base, field, field_span) => LValue::Field {
+                base: base.clone(),
+                field: field.clone(),
+                span: *field_span,
+            },
+            other => {
+                self.diags.push(Diagnostic::error(
+                    "E0160",
+                    "this value can't be incremented or decremented".to_string(),
+                    "only a mutable name or field like `count` or `self.hits` accepts `++`/`--`"
+                        .to_string(),
+                    format!(
+                        "use a `{}` binding and write `name += 1` / `name -= 1`",
+                        Syntax::SIGIL_BIND_MUT
+                    ),
+                    Some(other.span()),
+                ));
+                return None;
+            }
+        };
+
+        let ty = match &lvalue {
+            LValue::Local { name, name_span } => {
+                let name_span = *name_span;
+                if let Some(info) = self.flow.uninit.get(name) {
+                    let _ = info;
                     self.diags.push(Diagnostic::error(
-                        "E0110",
-                        format!(
-                            "{} must be {}, but this is {}",
-                            what,
-                            Type::Bool.show(),
-                            t.show()
-                        ),
-                        "the program needs a clear yes or no here".to_string(),
-                        "compare the value to something, e.g. `x > 0` or `name == \"ok\"`".to_string(),
-                        Some(e.span()),
-                    ));
-                }
-            }
-        }
-    
-        pub(crate) fn unknown_name(&mut self, name: &str, span: Span) {
-            let mut fix = format!(
-                "declare it first: `{} {} ...`",
-                name,
-                Syntax::SIGIL_BIND_IMMUT
-            );
-            if let Some(module) = unique_core_module_for_alias(name) {
-                fix = format!("add `use {module} as {name}`");
-            }
-            // I8: one suggester. `suggest_field` is the same distance-≤2
-            // nearest-candidate pick this used to inline, and it refuses a
-            // candidate equal to `name` — a visible-but-unresolvable name must
-            // not be echoed back as the fix for its own failed lookup (#2002).
-            let candidates: Vec<String> = self
-                .visible_names()
-                .into_iter()
-                .chain(self.consts.keys().cloned())
-                .collect();
-            let suggestion = suggest_field(name, &candidates);
-            if let Some(cand) = suggestion.as_deref() {
-                fix = format!("did you mean `{}`?", cand);
-            }
-            let mut diagnostic = Diagnostic::error(
-                "E0107",
-                format!("nothing named `{}` exists here", name),
-                "a name must be declared before it's used".to_string(),
-                fix,
-                Some(span),
-            );
-            if let Some(cand) = suggestion {
-                diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
-                    span,
-                    new_text: cand,
-                });
-            }
-            self.diags.push(diagnostic);
-        }
-    
-        /// D-INCR1: type-check `++`/`--`. Prefix returns the updated value; postfix
-        /// returns the value before the update. Operand must be a mutable integer
-        /// lvalue (same LHS policy as S17; indexed slots are rejected like `+=`).
-        pub(crate) fn check_incdec(
-            &mut self,
-            op: IncDecOp,
-            operand: &mut Expr,
-            _postfix: bool,
-            span: Span,
-        ) -> Option<Type> {
-            let update_op = match op {
-                IncDecOp::Inc => "+",
-                IncDecOp::Dec => "-",
-            };
-            let operand = operand.without_parens();
-            let lvalue = match operand {
-                Expr::Ident(name, name_span) => LValue::Local {
-                    name: name.clone(),
-                    name_span: *name_span,
-                },
-                Expr::Index { span: idx_span, .. } => {
-                    self.diags.push(Diagnostic::from_row(
-                        "E0163",
-                        &[("op", update_op)],
-                        Some(*idx_span),
-                    ));
-                    return None;
-                }
-                Expr::Field(base, field, field_span) => LValue::Field {
-                    base: base.clone(),
-                    field: field.clone(),
-                    span: *field_span,
-                },
-                other => {
-                    self.diags.push(Diagnostic::error(
-                        "E0160",
-                        "this value can't be incremented or decremented".to_string(),
-                        "only a mutable name or field like `count` or `self.hits` accepts `++`/`--`"
-                            .to_string(),
-                        format!(
-                            "use a `{}` binding and write `name += 1` / `name -= 1`",
-                            Syntax::SIGIL_BIND_MUT
-                        ),
-                        Some(other.span()),
-                    ));
-                    return None;
-                }
-            };
-    
-            let ty = match &lvalue {
-                LValue::Local { name, name_span } => {
-                    let name_span = *name_span;
-                    if let Some(info) = self.flow.uninit.get(name) {
-                        let _ = info;
-                        self.diags.push(Diagnostic::error(
                             "E0420",
                             format!("`{}` may be read before it is given a value", name),
                             format!(
@@ -163,72 +163,67 @@ impl<'a> Checker<'a> {
                             format!("give `{}` a value with `{} = …` before updating it", name, name),
                             Some(name_span),
                         ));
-                    }
-                    let Some(info) = self.lookup(name).cloned() else {
-                        if self.is_persist_binding(name) {
-                            let ty = self
-                                .consts
-                                .get(name.as_str())
-                                .cloned()
-                                .unwrap_or(Type::Int);
-                            if !ty.is_integer() {
-                                self.diags.push(Diagnostic::error(
-                                    "E0162",
-                                    format!("`++`/`--` is not defined for {}", ty.show()),
-                                    "increment and decrement work on integer types only"
-                                        .to_string(),
-                                    format!(
-                                        "use `{}` += 1 / `{}` -= 1 on an integer binding",
-                                        name, name
-                                    ),
-                                    Some(span),
-                                ));
-                                return None;
-                            }
-                            return Some(ty);
-                        }
-                        if self.consts.contains_key(name.as_str()) {
+                }
+                let Some(info) = self.lookup(name).cloned() else {
+                    if self.is_persist_binding(name) {
+                        let ty = self.consts.get(name.as_str()).cloned().unwrap_or(Type::Int);
+                        if !ty.is_integer() {
                             self.diags.push(Diagnostic::error(
-                                "E0111",
-                                format!("`{}` is a const and can never change", name),
-                                "a const is fixed for the whole program".to_string(),
+                                "E0162",
+                                format!("`++`/`--` is not defined for {}", ty.show()),
+                                "increment and decrement work on integer types only".to_string(),
                                 format!(
-                                    "use a `{}` binding if it needs to change",
-                                    Syntax::SIGIL_BIND_MUT
+                                    "use `{}` += 1 / `{}` -= 1 on an integer binding",
+                                    name, name
                                 ),
-                                Some(name_span),
+                                Some(span),
                             ));
-                        } else {
-                            self.unknown_name(name, name_span);
+                            return None;
                         }
-                        return None;
+                        return Some(ty);
+                    }
+                    if self.consts.contains_key(name.as_str()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0111",
+                            format!("`{}` is a const and can never change", name),
+                            "a const is fixed for the whole program".to_string(),
+                            format!(
+                                "use a `{}` binding if it needs to change",
+                                Syntax::SIGIL_BIND_MUT
+                            ),
+                            Some(name_span),
+                        ));
+                    } else {
+                        self.unknown_name(name, name_span);
+                    }
+                    return None;
+                };
+                self.mark_local_write(name);
+                if !info.mutable {
+                    let what = if info.param_conv.is_some() {
+                        format!("the parameter `{}` can't be changed here", name)
+                    } else {
+                        format!(
+                            "`{}` was made with `{}`, so it can't change",
+                            name,
+                            Syntax::SIGIL_BIND_IMMUT
+                        )
                     };
-                    self.mark_local_write(name);
-                    if !info.mutable {
-                        let what = if info.param_conv.is_some() {
-                            format!("the parameter `{}` can't be changed here", name)
-                        } else {
-                            format!(
-                                "`{}` was made with `{}`, so it can't change",
-                                name,
-                                Syntax::SIGIL_BIND_IMMUT
-                            )
-                        };
-                        let fix = if info.param_conv.is_some() {
-                            format!(
+                    let fix = if info.param_conv.is_some() {
+                        format!(
                                 "mark the parameter `{}: {}{}` with the write-access marker `&` if the function should change it",
                                 name,
                                 Syntax::SIGIL_WRITE,
                                 info.ty.name()
                             )
-                        } else {
-                            format!(
-                                "declare it with `{} {} ...` instead",
-                                name,
-                                Syntax::SIGIL_BIND_MUT
-                            )
-                        };
-                        self.diags.push(Diagnostic::error(
+                    } else {
+                        format!(
+                            "declare it with `{} {} ...` instead",
+                            name,
+                            Syntax::SIGIL_BIND_MUT
+                        )
+                    };
+                    self.diags.push(Diagnostic::error(
                             "E0161",
                             what,
                             format!(
@@ -238,100 +233,100 @@ impl<'a> Checker<'a> {
                             fix,
                             Some(name_span),
                         ));
-                        return None;
-                    }
-                    if !info.ty.is_integer() {
-                        self.diags.push(Diagnostic::error(
-                            "E0162",
-                            format!("`++`/`--` is not defined for {}", info.ty.show()),
-                            "increment and decrement work on integer types only".to_string(),
-                            if info.ty.is_float() {
-                                format!("use `{} += 1.0` / `{} -= 1.0` instead", name, name)
-                            } else {
-                                format!(
-                                    "use `{} += 1` / `{} -= 1` on an integer binding",
-                                    name, name
-                                )
-                            },
-                            Some(span),
-                        ));
-                        return None;
-                    }
-                    info.ty.clone()
+                    return None;
                 }
-                LValue::Field {
-                    base,
-                    field,
-                    span: field_span,
-                } => {
-                    self.borrow_ctx = true;
-                    let mut base_expr = base.as_ref().clone();
-                    let base_ty = self.infer(&mut base_expr)?;
-                    if let Some(root) = expr_root_ident(base) {
-                        let root = root.to_string();
-                        if let Some(info) = self.lookup(&root) {
-                            if !info.mutable {
-                                let is_self = root == Syntax::KW_SELF;
-                                let what = if is_self {
-                                    format!(
+                if !info.ty.is_integer() {
+                    self.diags.push(Diagnostic::error(
+                        "E0162",
+                        format!("`++`/`--` is not defined for {}", info.ty.show()),
+                        "increment and decrement work on integer types only".to_string(),
+                        if info.ty.is_float() {
+                            format!("use `{} += 1.0` / `{} -= 1.0` instead", name, name)
+                        } else {
+                            format!(
+                                "use `{} += 1` / `{} -= 1` on an integer binding",
+                                name, name
+                            )
+                        },
+                        Some(span),
+                    ));
+                    return None;
+                }
+                info.ty.clone()
+            }
+            LValue::Field {
+                base,
+                field,
+                span: field_span,
+            } => {
+                self.borrow_ctx = true;
+                let mut base_expr = base.as_ref().clone();
+                let base_ty = self.infer(&mut base_expr)?;
+                if let Some(root) = expr_root_ident(base) {
+                    let root = root.to_string();
+                    if let Some(info) = self.lookup(&root) {
+                        if !info.mutable {
+                            let is_self = root == Syntax::KW_SELF;
+                            let what = if is_self {
+                                format!(
                                         "cannot edit `{}` — `{}` has read access only; the write-access marker `&` is required",
                                         field,
                                         Syntax::KW_SELF
                                     )
-                                } else {
-                                    format!(
+                            } else {
+                                format!(
                                         "cannot edit `{}` — `{}` does not have the write-access marker `&`",
                                         field, root
                                     )
-                                };
-                                let fix = if is_self {
-                                    format!(
+                            };
+                            let fix = if is_self {
+                                format!(
                                         "write the receiver with the write-access marker `&`: `{}{}` to grant write access",
                                         Syntax::SIGIL_WRITE,
                                         Syntax::KW_SELF
                                     )
-                                } else {
-                                    format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT)
-                                };
-                                self.diags.push(Diagnostic::error(
-                                    "E0161",
-                                    what,
-                                    "increment and decrement edit the field in place".to_string(),
-                                    fix,
-                                    Some(*field_span),
-                                ));
-                                return None;
-                            }
+                            } else {
+                                format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT)
+                            };
+                            self.diags.push(Diagnostic::error(
+                                "E0161",
+                                what,
+                                "increment and decrement edit the field in place".to_string(),
+                                fix,
+                                Some(*field_span),
+                            ));
+                            return None;
                         }
                     }
-                    // D-FIELDPOL1: `s.computed_field++` — a computed field is never
-                    // stored, so `++`/`--` has nothing to edit in place.
-                    if self.field_is_computed(&base_ty, field) {
-                        self.diags
-                            .push(computed_field_not_settable(field, *field_span));
-                        return None;
-                    }
-                    let field_ty = self.field_type(&base_ty, field, *field_span)?;
-                    if !field_ty.is_integer() {
-                        self.diags.push(Diagnostic::error(
-                            "E0162",
-                            format!(
-                                "`++`/`--` is not defined for field `{}` ({})",
-                                field,
-                                field_ty.show()
-                            ),
-                            "increment and decrement work on integer fields only".to_string(),
-                            format!("use `self.{field} += 1` / `self.{field} -= 1` instead"),
-                            Some(span),
-                        ));
-                        return None;
-                    }
-                    field_ty
                 }
-                LValue::Index { .. } => unreachable!("indexed inc/dec rejected above"),
-            };
-            Some(ty)
-        }
+                // D-FIELDPOL1: `s.computed_field++` — a computed field is never
+                // stored, so `++`/`--` has nothing to edit in place.
+                if self.field_is_computed(&base_ty, field) {
+                    self.diags
+                        .push(computed_field_not_settable(field, *field_span));
+                    return None;
+                }
+                let field_ty = self.field_type(&base_ty, field, *field_span)?;
+                if !field_ty.is_integer() {
+                    self.diags.push(Diagnostic::error(
+                        "E0162",
+                        format!(
+                            "`++`/`--` is not defined for field `{}` ({})",
+                            field,
+                            field_ty.show()
+                        ),
+                        "increment and decrement work on integer fields only".to_string(),
+                        format!("use `self.{field} += 1` / `self.{field} -= 1` instead"),
+                        Some(span),
+                    ));
+                    return None;
+                }
+                field_ty
+            }
+            LValue::Index { .. } => unreachable!("indexed inc/dec rejected above"),
+        };
+        Some(ty)
+    }
 }
 
 const CORE_DIAGNOSTIC_ALIASES: &[(&str, &str)] = &[

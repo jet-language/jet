@@ -3,9 +3,9 @@
 use crate::Comptime::DevSink;
 use crate::Diagnostics::{span_line_col, Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use jet_foundation::Report::render_status_json;
 use crate::AST::{CtValue, Type};
 use crate::{Lexer, Parser, AST};
+use jet_foundation::Report::render_status_json;
 
 pub const API_VERSION: u32 = 1;
 pub const SCHEMA_VERSION: u32 = 1;

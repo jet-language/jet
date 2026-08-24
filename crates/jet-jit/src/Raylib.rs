@@ -74,22 +74,8 @@ fn jet_jit_raylib_key_down(name: i64) -> i8 {
 
 fn jet_jit_raylib_begin_drawing(_window: i64) {}
 fn jet_jit_raylib_clear_background(_color: i64) {}
-fn jet_jit_raylib_draw_rectangle(
-    _x: i64,
-    _y: i64,
-    _w: i64,
-    _h: i64,
-    _color: i64,
-) {
-}
-fn jet_jit_raylib_draw_text(
-    _text: i64,
-    _x: i64,
-    _y: i64,
-    _size: i64,
-    _color: i64,
-) {
-}
+fn jet_jit_raylib_draw_rectangle(_x: i64, _y: i64, _w: i64, _h: i64, _color: i64) {}
+fn jet_jit_raylib_draw_text(_text: i64, _x: i64, _y: i64, _size: i64, _color: i64) {}
 fn jet_jit_raylib_end_drawing() {}
 fn jet_jit_raylib_close_window(_window: i64) {}
 
@@ -170,8 +156,3 @@ host_fns! {
     load_sound: "jet_jit_raylib_load_sound" => jet_jit_raylib_load_sound: sig(1, Some(types::I64));
     play_sound: "jet_jit_raylib_play_sound" => jet_jit_raylib_play_sound: sig(1, Some(types::I8));
 }
-
-
-
-
-

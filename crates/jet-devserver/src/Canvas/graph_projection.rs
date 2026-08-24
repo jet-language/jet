@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use jet_driver::AST::{self, Expr, Item, Stmt};
 use jet_driver::Diagnostics::Span;
+use jet_driver::AST::{self, Expr, Item, Stmt};
 use jet_semindex::{SemIndex, SemIndexEffectFacts, SourceSpan, SymbolKind};
 
 use super::graph_helpers::{
@@ -16,8 +16,8 @@ use super::graph_json::{
     node_catalog, set_pin_append, set_pin_source_span,
 };
 use super::schema_api::{
-    CanvasCallableExport, GRAPH_SCHEMA_VERSION, GraphBuilder, GraphEditAnchor, InlineExpr,
-    NodeQueryRef, NodeRec, PinRec, Projection, source_revision,
+    source_revision, CanvasCallableExport, GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef,
+    NodeRec, PinRec, Projection, GRAPH_SCHEMA_VERSION,
 };
 use super::validation_json::{json_str, span_json};
 
@@ -247,11 +247,7 @@ fn pattern_catalog_json(bundle: &AST::ProgramBundle) -> String {
             let variants = variants
                 .into_iter()
                 .map(|(variant, arity)| {
-                    format!(
-                        "{{\"name\":{},\"arity\":{}}}",
-                        json_str(&variant),
-                        arity
-                    )
+                    format!("{{\"name\":{},\"arity\":{}}}", json_str(&variant), arity)
                 })
                 .collect::<Vec<_>>()
                 .join(",");
@@ -262,10 +258,7 @@ fn pattern_catalog_json(bundle: &AST::ProgramBundle) -> String {
     format!("{{{entries}}}")
 }
 
-fn collect_pattern_variants(
-    items: &[Item],
-    catalog: &mut BTreeMap<String, Vec<(String, usize)>>,
-) {
+fn collect_pattern_variants(items: &[Item], catalog: &mut BTreeMap<String, Vec<(String, usize)>>) {
     for item in items {
         match item {
             Item::Enum(def) => {
@@ -316,11 +309,8 @@ fn collect_item_graphs(
                 let ledger_name = owner
                     .map(|owner| jet_foundation::Names::member_name(owner, &f.name))
                     .unwrap_or_else(|| f.name.clone());
-                let visibility = super::graph_json::ledger_function_visibility(
-                    ledger,
-                    module_idx,
-                    &ledger_name,
-                );
+                let visibility =
+                    super::graph_json::ledger_function_visibility(ledger, module_idx, &ledger_name);
                 inline_spans.extend(graph.inline_exprs.iter().map(|i| InlineExpr {
                     id: i.id.clone(),
                     span: i.span,
@@ -432,7 +422,12 @@ fn canvas_blueprint_facts_json(
         );
     }
     let task_flows = task_flow_facts(src).join(",");
-    let outputs = index.outputs().iter().map(output_fact_json).collect::<Vec<_>>().join(",");
+    let outputs = index
+        .outputs()
+        .iter()
+        .map(output_fact_json)
+        .collect::<Vec<_>>()
+        .join(",");
     let package_facts = index
         .package_facts()
         .map(jet_semindex::package_facts_json)
@@ -455,8 +450,20 @@ fn canvas_blueprint_facts_json(
 }
 
 fn output_fact_json(output: &jet_semindex::OutputFact) -> String {
-    let effects = output.entry.effects.iter().map(|effect| json_str(effect)).collect::<Vec<_>>().join(",");
-    let params = output.entry.params.iter().map(|param| json_str(param)).collect::<Vec<_>>().join(",");
+    let effects = output
+        .entry
+        .effects
+        .iter()
+        .map(|effect| json_str(effect))
+        .collect::<Vec<_>>()
+        .join(",");
+    let params = output
+        .entry
+        .params
+        .iter()
+        .map(|param| json_str(param))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
         "{{\"binding\":{},\"kind\":{},\"name\":{},\"entry\":{{\"identity\":{},\"name\":{},\"module_path\":{},\"definition_span\":{},\"reference_span\":{},\"params\":[{}],\"return_type\":{},\"authority\":{},\"effects\":[{}]}},\"fact_source\":\"semindex_resolved_output\"}}",
         json_str(&output.binding), json_str(&output.kind), json_str(&output.name),
@@ -532,11 +539,7 @@ fn collect_interface_facts(
                         block.trait_span,
                         scope,
                     );
-                    out.push(inline_trait_impl_fact_json(
-                        &type_path,
-                        &trait_path,
-                        block,
-                    ));
+                    out.push(inline_trait_impl_fact_json(&type_path, &trait_path, block));
                 }
             }
             Item::Enum(e) => {
@@ -561,11 +564,7 @@ fn collect_interface_facts(
                         block.trait_span,
                         scope,
                     );
-                    out.push(inline_trait_impl_fact_json(
-                        &type_path,
-                        &trait_path,
-                        block,
-                    ));
+                    out.push(inline_trait_impl_fact_json(&type_path, &trait_path, block));
                 }
             }
             Item::CodeModule(m) => {
@@ -602,7 +601,11 @@ fn source_item_path(
         if fallback_scope.is_empty() {
             format!("{module_alias}.{internal_name}")
         } else {
-            format!("{module_alias}.{}.{}", fallback_scope.join("."), internal_name)
+            format!(
+                "{module_alias}.{}.{}",
+                fallback_scope.join("."),
+                internal_name
+            )
         },
     ] {
         if let Some(path) = name_ledger.display_path(module_idx, &candidate, Some(module_idx)) {
@@ -876,7 +879,10 @@ fn event_constructor_kind(
     aliases: &[String],
 ) -> Option<&'static str> {
     let before = src.get(..call_span.start.min(src.len()))?.trim_end();
-    if !aliases.iter().any(|alias| before.ends_with(&format!("{alias}."))) {
+    if !aliases
+        .iter()
+        .any(|alias| before.ends_with(&format!("{alias}.")))
+    {
         return None;
     }
     match callee {
@@ -894,7 +900,11 @@ fn event_constructor_kind(
 fn constructor_type(callee: &str, source: &str) -> Option<String> {
     let type_args = source
         .find('<')
-        .and_then(|start| source[start + 1..].find('>').map(|end| &source[start + 1..start + 1 + end]))
+        .and_then(|start| {
+            source[start + 1..]
+                .find('>')
+                .map(|end| &source[start + 1..start + 1 + end])
+        })
         .map(str::trim)
         .filter(|args| !args.is_empty());
     match callee {
@@ -989,7 +999,8 @@ fn event_scope_argument(
         .filter_map(|reference| {
             let target = reference.target.as_ref()?;
             let definition = index.definitions().iter().find(|definition| {
-                definition.module_path == target.module_path && definition.def_span == target.def_span
+                definition.module_path == target.module_path
+                    && definition.def_span == target.def_span
             })?;
             matches!(&definition.kind, SymbolKind::Local { ty: Some(ty), .. } if ty == "EventScope")
                 .then(|| (reference.name.clone(), reference.span))
@@ -1076,10 +1087,7 @@ fn trait_param_signature(src: &str, p: &AST::Param) -> String {
     out
 }
 
-fn trait_return_view_from(
-    m: &AST::TraitMethodSig,
-    params: &[AST::Param],
-) -> String {
+fn trait_return_view_from(m: &AST::TraitMethodSig, params: &[AST::Param]) -> String {
     let Some(map) = &m.declared_return_view_provenance else {
         return String::new();
     };
@@ -1127,9 +1135,7 @@ fn trait_return_view_from(
         }
     } else {
         map.iter()
-            .map(|(path, provenance)| {
-                format!("{}: {}", path.join("."), source_union(provenance))
-            })
+            .map(|(path, provenance)| format!("{}: {}", path.join("."), source_union(provenance)))
             .collect::<Vec<_>>()
             .join(", ")
     };
@@ -1495,21 +1501,57 @@ fn project_stmt(
             );
             let initializer_span = Span::new(init.name_span.start, init.init.span().end);
             let init_pin = add_pin(g, &node_id, "initializer", "input", "Value", "", false);
-            connect_expr_to_input_with_span(g, index, src, &init.init, initializer_span, ordinal * 10, "initializer", &node_id, &init_pin, x - 220, y);
+            connect_expr_to_input_with_span(
+                g,
+                index,
+                src,
+                &init.init,
+                initializer_span,
+                ordinal * 10,
+                "initializer",
+                &node_id,
+                &init_pin,
+                x - 220,
+                y,
+            );
             let cond_pin = add_pin(g, &node_id, "condition", "input", "Bool", "", false);
-            connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", &node_id, &cond_pin, x - 220, y + 30);
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                cond,
+                ordinal * 10 + 1,
+                "condition",
+                &node_id,
+                &cond_pin,
+                x - 220,
+                y + 30,
+            );
             add_inline(g, &node_id, ordinal, "cond", src, cond.span());
             if let Some(step) = step {
                 let afterthought = match step.as_ref() {
-                    Stmt::Assign { target, value, .. } => {
-                        Some((value, Span::new(target.span().start, expr_source_end(value))))
-                    }
+                    Stmt::Assign { target, value, .. } => Some((
+                        value,
+                        Span::new(target.span().start, expr_source_end(value)),
+                    )),
                     Stmt::Expr(value) => Some((value, value.span())),
                     _ => None,
                 };
                 if let Some((afterthought, afterthought_span)) = afterthought {
                     let pin = add_pin(g, &node_id, "afterthought", "input", "Value", "", false);
-                    connect_expr_to_input_with_span(g, index, src, afterthought, afterthought_span, ordinal * 10 + 2, "afterthought", &node_id, &pin, x - 220, y + 60);
+                    connect_expr_to_input_with_span(
+                        g,
+                        index,
+                        src,
+                        afterthought,
+                        afterthought_span,
+                        ordinal * 10 + 2,
+                        "afterthought",
+                        &node_id,
+                        &pin,
+                        x - 220,
+                        y + 60,
+                    );
                 }
             }
             project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200);
@@ -1547,22 +1589,82 @@ fn project_stmt(
                 g.local_types.insert(var2.clone(), iter_ty.to_string());
             }
             match kind {
-                AST::ForKind::Range { start, end, step, exclusive: _ } => {
+                AST::ForKind::Range {
+                    start,
+                    end,
+                    step,
+                    exclusive: _,
+                } => {
                     let start_pin = add_pin(g, &node_id, "range_start", "input", "Int", "", false);
-                    connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", &node_id, &start_pin, x - 220, y);
+                    connect_expr_to_input(
+                        g,
+                        index,
+                        src,
+                        start,
+                        ordinal * 10,
+                        "range_start",
+                        &node_id,
+                        &start_pin,
+                        x - 220,
+                        y,
+                    );
                     let end_pin = add_pin(g, &node_id, "range_end", "input", "Int", "", false);
-                    connect_expr_to_input(g, index, src, end, ordinal * 10 + 1, "range_end", &node_id, &end_pin, x - 220, y + 30);
+                    connect_expr_to_input(
+                        g,
+                        index,
+                        src,
+                        end,
+                        ordinal * 10 + 1,
+                        "range_end",
+                        &node_id,
+                        &end_pin,
+                        x - 220,
+                        y + 30,
+                    );
                     if let Some(step) = step {
                         let stride_pin = add_pin(g, &node_id, "stride", "input", "Int", "", false);
-                        connect_expr_to_input(g, index, src, step, ordinal * 10 + 2, "stride", &node_id, &stride_pin, x - 220, y + 60);
+                        connect_expr_to_input(
+                            g,
+                            index,
+                            src,
+                            step,
+                            ordinal * 10 + 2,
+                            "stride",
+                            &node_id,
+                            &stride_pin,
+                            x - 220,
+                            y + 60,
+                        );
                     }
                 }
                 AST::ForKind::In { collection, step } => {
                     let source_pin = add_pin(g, &node_id, "source", "input", "Iterable", "", false);
-                    connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", &node_id, &source_pin, x - 220, y);
+                    connect_expr_to_input(
+                        g,
+                        index,
+                        src,
+                        collection,
+                        ordinal * 10,
+                        "source",
+                        &node_id,
+                        &source_pin,
+                        x - 220,
+                        y,
+                    );
                     if let Some(step) = step {
                         let stride_pin = add_pin(g, &node_id, "stride", "input", "Int", "", false);
-                        connect_expr_to_input(g, index, src, step, ordinal * 10 + 1, "stride", &node_id, &stride_pin, x - 220, y + 30);
+                        connect_expr_to_input(
+                            g,
+                            index,
+                            src,
+                            step,
+                            ordinal * 10 + 1,
+                            "stride",
+                            &node_id,
+                            &stride_pin,
+                            x - 220,
+                            y + 30,
+                        );
                     }
                 }
             }
@@ -1813,8 +1915,16 @@ fn project_stmt(
             add_region(g, ordinal, "region", name, *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70);
         }
-        Stmt::Policy { declarations, body, span } => {
-            let label = declarations.iter().map(|d| d.key.name()).collect::<Vec<_>>().join(", ");
+        Stmt::Policy {
+            declarations,
+            body,
+            span,
+        } => {
+            let label = declarations
+                .iter()
+                .map(|d| d.key.name())
+                .collect::<Vec<_>>()
+                .join(", ");
             add_region(g, ordinal, "policy", &format!("#Policy({label})"), *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70);
         }
@@ -2008,7 +2118,9 @@ fn dispatch_arm_pattern_fragment(src: &str, expr: &Expr) -> (String, usize) {
     let dispatch_open = fragment.find("==").and_then(|pos| {
         let after_cmp = &fragment[pos + 2..];
         let after_space = after_cmp.trim_start();
-        after_space.starts_with('{').then(|| (pos + 2, after_cmp.len() - after_space.len()))
+        after_space
+            .starts_with('{')
+            .then(|| (pos + 2, after_cmp.len() - after_space.len()))
     });
     if let Some((comparator, whitespace)) = dispatch_open {
         offset += comparator + whitespace;
@@ -2065,12 +2177,14 @@ fn project_classic_switch_else(
     y: i32,
 ) {
     match else_body {
-        Some([stmt @ Stmt::Switch {
-            subject,
-            arms,
-            span,
-            ..
-        }]) if AST::is_subjectless_guard(subject, *span)
+        Some(
+            [stmt @ Stmt::Switch {
+                subject,
+                arms,
+                span,
+                ..
+            }],
+        ) if AST::is_subjectless_guard(subject, *span)
             && switch_was_classic_if(src, arms, *span) =>
         {
             project_stmt(g, index, src, stmt, ordinal * 100 + 60, x, y);
@@ -2131,10 +2245,8 @@ fn binding_source_span(src: &str, binding: &AST::Binding) -> SourceSpan {
     if src.as_bytes().get(init_end) == Some(&b'(') {
         init_end += 1;
     }
-    let init_span = span_through_closing_parens(
-        src,
-        Span::new(binding.init.span().start, init_end),
-    );
+    let init_span =
+        span_through_closing_parens(src, Span::new(binding.init.span().start, init_end));
     SourceSpan {
         start: binding.name_span.start,
         end: init_span.end,
@@ -2174,7 +2286,8 @@ fn connect_expr_to_input_with_span(
     } else if pure_leaf(expr) && !matches!(expr, Expr::Binary(..)) {
         add_inline(g, owner_node_id, ordinal, role, src, inline_span);
         wire_ident_refs(g, expr, input_pin);
-    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false) {
+    } else if let Some(out) = project_expr_node(g, index, src, expr, ordinal, x, provider_y, false)
+    {
         if details_composite_expr(expr)
             || matches!(expr, Expr::EnumLit { .. })
             || matches!(expr, Expr::MethodCall { method, .. } if starts_uppercase(method))
@@ -2303,7 +2416,10 @@ fn getter_key(index: &SemIndex, name: &str, span: SourceSpan) -> String {
 }
 
 fn method_is_pure(index: &SemIndex, span: SourceSpan) -> Option<bool> {
-    let reference = index.references().iter().find(|reference| reference.span == span)?;
+    let reference = index
+        .references()
+        .iter()
+        .find(|reference| reference.span == span)?;
     let target = reference.target.as_ref()?;
     let definition = index.definitions().iter().find(|definition| {
         definition.module_path == target.module_path && definition.def_span == target.def_span
@@ -2318,7 +2434,13 @@ fn method_is_pure(index: &SemIndex, span: SourceSpan) -> Option<bool> {
 
 fn canvas_ident_fragment(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -2352,15 +2474,7 @@ fn project_expr_node(
             add_inline(g, &node_id, ordinal, "value", src, *span);
 
             let left_ty = expr_type(g, index, left);
-            let left_input = add_pin(
-                g,
-                &node_id,
-                "left",
-                "input",
-                &left_ty,
-                "",
-                false,
-            );
+            let left_input = add_pin(g, &node_id, "left", "input", &left_ty, "", false);
             connect_expr_to_input(
                 g,
                 index,
@@ -2375,15 +2489,7 @@ fn project_expr_node(
             );
 
             let right_ty = expr_type(g, index, right);
-            let right_input = add_pin(
-                g,
-                &node_id,
-                "right",
-                "input",
-                &right_ty,
-                "",
-                false,
-            );
+            let right_input = add_pin(g, &node_id, "right", "input", &right_ty, "", false);
             connect_expr_to_input(
                 g,
                 index,
@@ -2399,13 +2505,7 @@ fn project_expr_node(
 
             let result_ty = expr_type(g, index, expr);
             Some(add_pin(
-                g,
-                &node_id,
-                "result",
-                "output",
-                &result_ty,
-                "",
-                false,
+                g, &node_id, "result", "output", &result_ty, "", false,
             ))
         }
         Expr::Call(c) => {
@@ -2472,9 +2572,8 @@ fn project_expr_node(
         } => {
             let node_id = format!("{}:expr:{ordinal}:method:{method}", g.graph_id);
             let variant_like = starts_uppercase(method);
-            let pure = method_is_pure(index, (*method_span).into()).unwrap_or_else(|| {
-                !exec_context && !call_has_effects(index, method)
-            });
+            let pure = method_is_pure(index, (*method_span).into())
+                .unwrap_or_else(|| !exec_context && !call_has_effects(index, method));
             let archetype = if variant_like || pure {
                 "function_pure"
             } else {

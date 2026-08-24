@@ -2061,7 +2061,10 @@ fn rename_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) 
             let semantic_op = lsp_rename_semantic_op(&db.index, old_name, new_name);
             Some(response(
                 id,
-                &format!(r#"{{"changes":{{{}}},"semantic_ops":[{}]}}"#, changes, semantic_op),
+                &format!(
+                    r#"{{"changes":{{{}}},"semantic_ops":[{}]}}"#,
+                    changes, semantic_op
+                ),
             ))
         }
         Err(msg) => Some(error_response(id, -32600, &msg)),
@@ -2071,11 +2074,7 @@ fn rename_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) 
 /// LSP clients apply the workspace edit, so the semantic receipt travels in
 /// the same response until the client persists the edit. It is metadata, not a
 /// second rename engine: targets come from the checked definition facts.
-fn lsp_rename_semantic_op(
-    index: &jet_semindex::SemIndex,
-    from: &str,
-    to: &str,
-) -> String {
+fn lsp_rename_semantic_op(index: &jet_semindex::SemIndex, from: &str, to: &str) -> String {
     let targets = index
         .definition_facts()
         .iter()

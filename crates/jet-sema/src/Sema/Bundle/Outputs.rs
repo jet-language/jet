@@ -18,11 +18,17 @@ pub(super) enum CLIEntryShape {
 /// D-CLI-GLOBAL1=E: classify `fn run`'s parameter type against its defining module.
 /// The entry signature stays in the entry file; its public `#[CLI]` type may
 /// live in one directly imported module.
-pub(super) fn cli_entry_param_shape(_items: &[Item], ty: &Type, reg: &TraitRegistry) -> CLIEntryShape {
+pub(super) fn cli_entry_param_shape(
+    _items: &[Item],
+    ty: &Type,
+    reg: &TraitRegistry,
+) -> CLIEntryShape {
     let Type::Named(name) = ty else {
         return CLIEntryShape::Invalid;
     };
-    let name = name.rsplit_once("::").map_or(name.as_str(), |(_, leaf)| leaf);
+    let name = name
+        .rsplit_once("::")
+        .map_or(name.as_str(), |(_, leaf)| leaf);
     let name = name.rsplit_once('.').map_or(name, |(_, leaf)| leaf);
     if reg.implements_trait(name, "CLI") {
         return CLIEntryShape::Struct;
@@ -46,14 +52,20 @@ fn output_error(what: String, why: String, fix: String, span: Span) -> Diagnosti
 }
 
 fn output_string(expr: &Expr) -> Option<String> {
-    let Expr::Str(parts, _) = expr else { return None };
+    let Expr::Str(parts, _) = expr else {
+        return None;
+    };
     match parts.as_slice() {
         [StrPart::Lit(value)] => Some(value.clone()),
         _ => None,
     }
 }
 
-fn output_fields<'a>(args: &'a [EnumLitArg], span: Span, diags: &mut Vec<Diagnostic>) -> Option<HashMap<&'a str, &'a Expr>> {
+fn output_fields<'a>(
+    args: &'a [EnumLitArg],
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<HashMap<&'a str, &'a Expr>> {
     let mut fields = HashMap::new();
     for arg in args {
         let EnumLitArg::Named { label, expr } = arg else {
@@ -101,7 +113,8 @@ fn resolve_output_callable(
             } else {
                 diags.push(output_error(
                     format!("Output entry `{name}` does not resolve to a function"),
-                    "an Output entry is an ordinary checked function reference, not a text lookup".to_string(),
+                    "an Output entry is an ordinary checked function reference, not a text lookup"
+                        .to_string(),
                     format!("define `fn {name}(...)`, import it, or update `entry:`"),
                     *span,
                 ));
@@ -112,7 +125,8 @@ fn resolve_output_callable(
             let Expr::Ident(alias, alias_span) = base.as_ref() else {
                 diags.push(output_error(
                     "Output entry has no resolvable module owner".to_string(),
-                    "qualified function references use one imported or inline module alias".to_string(),
+                    "qualified function references use one imported or inline module alias"
+                        .to_string(),
                     "write `entry: module_name.function`".to_string(),
                     *span,
                 ));
@@ -201,7 +215,9 @@ fn resolve_output_callable(
             }
         }
         crate::AST::OutputKind::Executable => signature.params.is_empty(),
-        crate::AST::OutputKind::Service | crate::AST::OutputKind::Check => signature.params.is_empty(),
+        crate::AST::OutputKind::Service | crate::AST::OutputKind::Check => {
+            signature.params.is_empty()
+        }
         _ => false,
     };
     let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
@@ -258,9 +274,15 @@ fn resolve_output_callable(
     })
 }
 
-fn output_default(bundle: &ProgramBundle, field: &str, diags: &mut Vec<Diagnostic>) -> Option<String> {
+fn output_default(
+    bundle: &ProgramBundle,
+    field: &str,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<String> {
     let value = bundle.modules[bundle.entry].items.iter().find_map(|item| {
-        let Item::Const(value) = item else { return None };
+        let Item::Const(value) = item else {
+            return None;
+        };
         matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT_DEFAULTS)
             .then_some(&value.value)
     })?;
@@ -274,7 +296,9 @@ fn output_default(bundle: &ProgramBundle, field: &str, diags: &mut Vec<Diagnosti
         return None;
     };
     fields.iter().find_map(|(name, _, value)| {
-        if name != field { return None; }
+        if name != field {
+            return None;
+        }
         match value {
             Expr::Ident(address, _) => Some(address.clone()),
             _ => {
@@ -302,27 +326,63 @@ pub(super) fn resolve_outputs(
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         for (item_idx, item) in module.items.iter().enumerate() {
             let Item::Const(value) = item else { continue };
-            if !matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) { continue; }
-            let Expr::EnumLit { variant, args, span, .. } = &value.value else {
-                diags.push(output_error("Output needs one closed kind".to_string(), "Output is the closed sum of the nine ratified kinds".to_string(), "write `.Executable.{ ... }`, `.Service.{ ... }`, or another Output kind".to_string(), value.value.span()));
+            if !matches!(&value.ty, Some(Type::Named(name)) if name == Syntax::TYPE_OUTPUT) {
+                continue;
+            }
+            let Expr::EnumLit {
+                variant,
+                args,
+                span,
+                ..
+            } = &value.value
+            else {
+                diags.push(output_error(
+                    "Output needs one closed kind".to_string(),
+                    "Output is the closed sum of the nine ratified kinds".to_string(),
+                    "write `.Executable.{ ... }`, `.Service.{ ... }`, or another Output kind"
+                        .to_string(),
+                    value.value.span(),
+                ));
                 continue;
             };
             let Some(kind) = crate::AST::OutputKind::from_name(variant) else {
-                diags.push(output_error(format!("`{variant}` is not an Output kind"), "Output has exactly nine ratified kinds".to_string(), format!("use one of: {}", Syntax::OUTPUT_KINDS.join(", ")), *span));
+                diags.push(output_error(
+                    format!("`{variant}` is not an Output kind"),
+                    "Output has exactly nine ratified kinds".to_string(),
+                    format!("use one of: {}", Syntax::OUTPUT_KINDS.join(", ")),
+                    *span,
+                ));
                 continue;
             };
-            let Some(fields) = output_fields(args, *span, diags) else { continue };
+            let Some(fields) = output_fields(args, *span, diags) else {
+                continue;
+            };
             let Some(name_expr) = fields.get(Syntax::OUTPUT_FIELD_NAME) else {
-                diags.push(output_error("Output is missing `name:`".to_string(), "every Output has one stable user-facing name".to_string(), "add `name: \"...\"`".to_string(), *span));
+                diags.push(output_error(
+                    "Output is missing `name:`".to_string(),
+                    "every Output has one stable user-facing name".to_string(),
+                    "add `name: \"...\"`".to_string(),
+                    *span,
+                ));
                 continue;
             };
             let Some(output_name) = output_string(name_expr) else {
-                diags.push(output_error("Output `name:` must be fixed text".to_string(), "graph identity cannot depend on runtime interpolation".to_string(), "write a plain string literal".to_string(), name_expr.span()));
+                diags.push(output_error(
+                    "Output `name:` must be fixed text".to_string(),
+                    "graph identity cannot depend on runtime interpolation".to_string(),
+                    "write a plain string literal".to_string(),
+                    name_expr.span(),
+                ));
                 continue;
             };
             if !kind.is_runnable() {
                 if let Some(entry) = fields.get(Syntax::OUTPUT_FIELD_ENTRY) {
-                    diags.push(output_error(format!("{kind:?} Output is not runnable"), "only Executable, Service, and Check link to functions".to_string(), "remove `entry:` from this Output".to_string(), entry.span()));
+                    diags.push(output_error(
+                        format!("{kind:?} Output is not runnable"),
+                        "only Executable, Service, and Check link to functions".to_string(),
+                        "remove `entry:` from this Output".to_string(),
+                        entry.span(),
+                    ));
                 }
                 continue;
             }
@@ -344,7 +404,12 @@ pub(super) fn resolve_outputs(
                 continue;
             }
             let Some(entry) = fields.get(Syntax::OUTPUT_FIELD_ENTRY) else {
-                diags.push(output_error(format!("{kind:?} Output is missing `entry:`"), "every runnable Output links to one checked function".to_string(), "add `entry: function_name`".to_string(), *span));
+                diags.push(output_error(
+                    format!("{kind:?} Output is missing `entry:`"),
+                    "every runnable Output links to one checked function".to_string(),
+                    "add `entry: function_name`".to_string(),
+                    *span,
+                ));
                 continue;
             };
             if let Some(fact) = resolve_output_callable(
@@ -362,9 +427,10 @@ pub(super) fn resolve_outputs(
             }
         }
     }
-    let has_legacy_run = bundle.modules[bundle.entry].items.iter().any(|item| {
-        matches!(item, Item::Func(function) if function.name == "run")
-    });
+    let has_legacy_run = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Func(function) if function.name == "run"));
     let run_default = output_default(bundle, Syntax::OUTPUT_DEFAULT_RUN, diags);
     let run_default_index = run_default.as_ref().and_then(|address| {
         resolved.iter().position(|(_, _, fact)| {
@@ -403,13 +469,16 @@ pub(super) fn resolve_outputs(
                 choices.sort();
                 diags.push(output_error(
                     format!("`{address}` is not an Output compatible with `jet run`"),
-                    "an explicit run address must name one checked Executable or Service Output".to_string(),
+                    "an explicit run address must name one checked Executable or Service Output"
+                        .to_string(),
                     format!("choose one of: {}", choices.join(", ")),
                     Span::new(0, 0),
                 ));
             }
         } else if !has_legacy_run {
-            let executable = resolved.iter().enumerate()
+            let executable = resolved
+                .iter()
+                .enumerate()
                 .filter(|(_, (_, _, fact))| fact.kind == crate::AST::OutputKind::Executable)
                 .map(|(index, _)| index)
                 .collect::<Vec<_>>();
@@ -419,7 +488,10 @@ pub(super) fn resolve_outputs(
                 if let Some(index) = run_default_index {
                     resolved[index].2.selected = true;
                 } else if run_default.is_none() {
-                    let mut names = executable.iter().map(|index| resolved[*index].2.address.clone()).collect::<Vec<_>>();
+                    let mut names = executable
+                        .iter()
+                        .map(|index| resolved[*index].2.address.clone())
+                        .collect::<Vec<_>>();
                     names.sort();
                     diags.push(Diagnostic::error("E1321", "this Package has more than one runnable Executable".to_string(), "without `fn run`, a singular run selects only a sole compatible Output or a checked default".to_string(), format!("choose an explicit Output or add `defaults: .{{ run: {} }}`; candidates: {}", names[0], names.join(", ")), None));
                 }
@@ -431,6 +503,8 @@ pub(super) fn resolve_outputs(
         }
     }
     for (module, item, fact) in resolved {
-        if let Item::Const(value) = &mut bundle.modules[module].items[item] { value.resolved_output = Some(fact); }
+        if let Item::Const(value) = &mut bundle.modules[module].items[item] {
+            value.resolved_output = Some(fact);
+        }
     }
 }

@@ -49,7 +49,11 @@ fn assert_authority_output(output: &std::process::Output, tier: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "authority\n", "{tier}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "authority\n",
+        "{tier}"
+    );
 }
 
 #[test]
@@ -63,10 +67,7 @@ fn malformed_authority_fields_share_e1221() {
             "grants",
             "authority: .{ grants: { \"dep\": [NotAnAuthority] } }",
         ),
-        (
-            "trust",
-            "authority: .{ trust: { default: maybe } }",
-        ),
+        ("trust", "authority: .{ trust: { default: maybe } }"),
         (
             "providers",
             "authority: .{ providers: { nix: { deny: [\"openssl-1.0\"] } } }",
@@ -75,11 +76,16 @@ fn malformed_authority_fields_share_e1221() {
 
     for (field, block) in cases {
         let source = format!("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n");
-        let diagnostic = jet::Manifest::parse(Path::new("package.jet"), &source)
-            .unwrap_err();
+        let diagnostic = jet::Manifest::parse(Path::new("package.jet"), &source).unwrap_err();
         assert_eq!(diagnostic.code, "E1221", "{field}: {diagnostic:?}");
-        assert!(diagnostic.what.contains("authority"), "{field}: {diagnostic:?}");
-        assert!(diagnostic.fix.contains("authority:"), "{field}: {diagnostic:?}");
+        assert!(
+            diagnostic.what.contains("authority"),
+            "{field}: {diagnostic:?}"
+        );
+        assert!(
+            diagnostic.fix.contains("authority:"),
+            "{field}: {diagnostic:?}"
+        );
     }
 }
 
@@ -96,8 +102,14 @@ fn retired_authority_fields_name_the_new_block() {
         let diagnostic = jet::Manifest::parse(Path::new("package.jet"), &source)
             .expect_err("retired authority field must fail");
         assert_eq!(diagnostic.code, "E1206", "{block}: {diagnostic:?}");
-        assert!(diagnostic.why.contains("authority:"), "{block}: {diagnostic:?}");
-        assert!(diagnostic.fix.contains("authority:"), "{block}: {diagnostic:?}");
+        assert!(
+            diagnostic.why.contains("authority:"),
+            "{block}: {diagnostic:?}"
+        );
+        assert!(
+            diagnostic.fix.contains("authority:"),
+            "{block}: {diagnostic:?}"
+        );
     }
 }
 
@@ -117,8 +129,14 @@ authority: .{ holds: { deny: [Mem.Alloc] } }
         .iter()
         .map(|declaration| declaration.key.name())
         .collect::<Vec<_>>();
-    assert_eq!(keys, ["unsafe", "gc", "explicit_units", "copies", "sentries"]);
-    assert_eq!(facts.authority.holds.deny, Some(vec!["Mem.Alloc".to_string()]));
+    assert_eq!(
+        keys,
+        ["unsafe", "gc", "explicit_units", "copies", "sentries"]
+    );
+    assert_eq!(
+        facts.authority.holds.deny,
+        Some(vec!["Mem.Alloc".to_string()])
+    );
     assert!(facts.authority.trust.is_none());
     assert!(facts.authority.providers.is_empty());
 
@@ -131,8 +149,14 @@ authority: .{ holds: { deny: [Mem.Alloc] } }
         let diagnostic = jet::Manifest::parse(Path::new("package.jet"), &source)
             .expect_err("retired memory floor must move to authority.holds.deny");
         assert_eq!(diagnostic.code, "E1206", "{retired}: {diagnostic:?}");
-        assert!(diagnostic.why.contains("authority.holds"), "{retired}: {diagnostic:?}");
-        assert!(diagnostic.fix.contains("authority.holds"), "{retired}: {diagnostic:?}");
+        assert!(
+            diagnostic.why.contains("authority.holds"),
+            "{retired}: {diagnostic:?}"
+        );
+        assert!(
+            diagnostic.fix.contains("authority.holds"),
+            "{retired}: {diagnostic:?}"
+        );
     }
 }
 
@@ -179,7 +203,11 @@ fn i9_parser_reads_one_authority_block() {
     assert_eq!(facts.authority.holds.allow, Some(vec!["IO".to_string()]));
     assert_eq!(facts.authority.grants.len(), 1);
     assert_eq!(
-        facts.authority.trust.as_ref().and_then(|trust| trust.require),
+        facts
+            .authority
+            .trust
+            .as_ref()
+            .and_then(|trust| trust.require),
         Some(jet::Package::ProvenanceRequirement::None)
     );
     assert_eq!(facts.authority.providers.len(), 1);
@@ -196,8 +224,8 @@ fn lock_and_authority_ledger_mirror_the_manifest_block() {
         update_dep: None,
         resolution: jet::Publish::ResolveMode::Conservative,
     };
-    let (lock, _) = jet::Fetch::fetch(&root, &manifest, None, &options)
-        .expect("authority-only manifest fetch");
+    let (lock, _) =
+        jet::Fetch::fetch(&root, &manifest, None, &options).expect("authority-only manifest fetch");
     assert_eq!(lock.authority, Some(manifest.authority.clone()));
 
     let lock_path = root.join(".jet/lock");
@@ -223,9 +251,15 @@ fn lock_and_authority_ledger_mirror_the_manifest_block() {
         "authority.trust.require",
         "authority.providers.nix",
     ] {
-        assert!(json.contains(&format!("\"subject\":\"{subject}\"")), "{subject}: {json}");
+        assert!(
+            json.contains(&format!("\"subject\":\"{subject}\"")),
+            "{subject}: {json}"
+        );
     }
-    assert!(json.contains(".jet/lock"), "lock authority provenance missing: {json}");
+    assert!(
+        json.contains(".jet/lock"),
+        "lock authority provenance missing: {json}"
+    );
     let _ = fs::remove_dir_all(root);
 }
 
@@ -233,9 +267,13 @@ fn lock_and_authority_ledger_mirror_the_manifest_block() {
 fn i9_sema_consumes_authority_holds() {
     let root = authority_project("sema");
     let entry = root.join("run.jet");
-    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).expect("load authority project");
+    let mut bundle =
+        jet::Loader::load_entry(entry.to_str().unwrap()).expect("load authority project");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(diagnostics.is_empty(), "sema changed authority meaning: {diagnostics:#?}");
+    assert!(
+        diagnostics.is_empty(),
+        "sema changed authority meaning: {diagnostics:#?}"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -246,7 +284,10 @@ fn i9_tir_receives_the_authority_project() {
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
         .expect("TIR front end accepts authority project");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(diagnostics.is_empty(), "TIR sema changed authority meaning: {diagnostics:#?}");
+    assert!(
+        diagnostics.is_empty(),
+        "TIR sema changed authority meaning: {diagnostics:#?}"
+    );
     let program = jet::Codegen::TIR::lower_jit_program(&bundle)
         .expect("authority project lowers through TIR");
     let mut sink = jet::Comptime::DevSink::default();
@@ -263,7 +304,10 @@ fn i9_interpreter_runs_the_authority_project() {
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
         .expect("interpreter front end accepts authority project");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(diagnostics.is_empty(), "interpreter sema changed authority meaning: {diagnostics:#?}");
+    assert!(
+        diagnostics.is_empty(),
+        "interpreter sema changed authority meaning: {diagnostics:#?}"
+    );
 
     match jet::Interpreter::run_checked(&bundle, true) {
         jet::Interpreter::RunOutcome::Ran {
@@ -321,7 +365,10 @@ fn i9_repl_keeps_the_authority_project_meaning() {
     let root = authority_project("repl");
     let project = root.to_string_lossy().to_string();
     let transcript = jet::REPL::run_transcript(&["run()"], Some(&project));
-    assert!(transcript.contains("authority"), "REPL changed authority meaning: {transcript}");
+    assert!(
+        transcript.contains("authority"),
+        "REPL changed authority meaning: {transcript}"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

@@ -1,6 +1,6 @@
-use crate::AST::{Stmt, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Sema::Checker;
+use crate::AST::{Stmt, Type};
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_comptime_block(&mut self, stmt: &mut Stmt) {
@@ -59,8 +59,7 @@ impl<'a> Checker<'a> {
                     ),
                     "the condition selects a branch at compile time — it must be true or false"
                         .to_string(),
-                    "write a Bool known-time expression, like `@if flag { … }`"
-                        .to_string(),
+                    "write a Bool known-time expression, like `@if flag { … }`".to_string(),
                     Some(*cond_span),
                 ));
                 return;
@@ -101,8 +100,7 @@ impl<'a> Checker<'a> {
             self.check_block(dropped, true);
             self.in_dropped_comptime_arm = previous;
             self.flow = facts;
-            let diagnostics: Vec<Diagnostic> =
-                self.diags.drain(diagnostic_start..).collect();
+            let diagnostics: Vec<Diagnostic> = self.diags.drain(diagnostic_start..).collect();
             self.diags.extend(
                 diagnostics
                     .into_iter()

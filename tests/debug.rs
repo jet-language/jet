@@ -623,16 +623,51 @@ fn dap_frame(body: &str) -> String {
     format!("Content-Length: {}\r\n\r\n{}", body.as_bytes().len(), body)
 }
 
+fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String> {
+    let marker = format!("\"request_seq\":{request_seq},\"success\":");
+    let command = format!("\"command\":\"{command}\"");
+    let bytes = output.as_bytes();
+    let mut cursor = 0;
+    while let Some(relative_start) = output[cursor..].find("Content-Length: ") {
+        let start = cursor + relative_start;
+        let header_end = output[start..].find("\r\n\r\n")?;
+        let header = &output[start..start + header_end];
+        let length = header
+            .strip_prefix("Content-Length: ")?
+            .parse::<usize>()
+            .ok()?;
+        let body_start = start + header_end + 4;
+        let body_end = body_start.checked_add(length)?;
+        let body = std::str::from_utf8(bytes.get(body_start..body_end)?).ok()?;
+        if body.contains(&marker) && body.contains(&command) {
+            return Some(body.to_string());
+        }
+        cursor = body_end;
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_state(pid: u32) -> Option<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| stat.split_whitespace().nth(2).map(str::to_owned))
+}
+
 #[test]
 fn dap_cli_exercises_the_production_wire_and_attach_failure() {
     let tag = format!("dap_cli_failure_{}", std::process::id());
     let file = native_fixture(&tag, LOOPS);
     let input = format!(
-        "{}{}",
+        "{}{}{}",
         dap_frame(
             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true}}"#
         ),
-        dap_frame(r#"{"seq":2,"type":"request","command":"attach","arguments":{"processId":0}}"#),
+        dap_frame(&format!(
+            r#"{{"seq":2,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":7}}]}}}}"#,
+            file
+        )),
+        dap_frame(r#"{"seq":3,"type":"request","command":"attach","arguments":{"processId":0}}"#),
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["debug", "--dap", &file])
@@ -653,19 +688,118 @@ fn dap_cli_exercises_the_production_wire_and_attach_failure() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "DAP command failed:\n{stderr}");
+    let initialize = dap_response(&stdout, 1, "initialize").expect("initialize response");
+    assert!(initialize.contains("\"success\":true"), "{initialize}");
+    let breakpoints = dap_response(&stdout, 2, "setBreakpoints").expect("breakpoint response");
+    assert!(breakpoints.contains("\"verified\":true"), "{breakpoints}");
     assert!(
-        stdout.contains("Content-Length:"),
-        "missing DAP framing:\n{stdout}"
+        breakpoints.contains("\"id\":1,\"verified\":true,\"line\":7"),
+        "{breakpoints}"
     );
-    assert!(stdout.contains("\"command\":\"initialize\""), "{stdout}");
-    assert!(stdout.contains("\"command\":\"attach\""), "{stdout}");
-    assert!(stdout.contains("\"success\":false"), "{stdout}");
-    assert!(stdout.contains("\"id\":22032"), "{stdout}");
+    let attach = dap_response(&stdout, 3, "attach").expect("attach response");
+    assert!(attach.contains("\"success\":false"), "{attach}");
+    assert!(attach.contains("\"id\":22032"), "{attach}");
+    assert!(attach.contains("\"code\":\"E2236\""), "{attach}");
     assert!(
         !stdout.contains("\"event\":\"stopped\""),
         "invalid attach must not start a target: {stdout}"
     );
     let _ = std::fs::remove_file(&file);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn dap_cli_rejects_a_cross_executable_attach_through_the_production_wire() {
+    if !have("rustc") {
+        return;
+    }
+    let tag = format!(
+        "dap_cli_attach_denied_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    );
+    let file = native_fixture(&tag, "fn run() {\n    loop {}\n}\n");
+    let stem = Path::new(&file)
+        .file_stem()
+        .expect("attach fixture has a file stem")
+        .to_string_lossy();
+    let binary = Path::new("build").join(format!("{stem}_dbg"));
+    let map = binary.with_extension("jetmap");
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    let mut input = adapter.stdin.take().expect("DAP stdin");
+    input
+        .write_all(
+            dap_frame(
+                r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path"}}"#,
+            )
+            .as_bytes(),
+        )
+        .expect("send initialize request");
+    input.flush().expect("flush initialize request");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !(binary.is_file() && map.is_file()) {
+        if adapter
+            .try_wait()
+            .expect("check production DAP process")
+            .is_some()
+        {
+            panic!("production DAP process exited before writing its debug map");
+        }
+        assert!(
+            Instant::now() < deadline,
+            "production DAP process did not publish its debug map"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let mut target = Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("start mismatched native attach target");
+    let attach = dap_frame(&format!(
+        r#"{{"seq":2,"type":"request","command":"attach","arguments":{{"processId":{},"program":"{}","map":"{}"}}}}"#,
+        target.id(),
+        binary.display(),
+        map.display()
+    ));
+    input
+        .write_all(attach.as_bytes())
+        .expect("send attach request");
+    input.flush().expect("flush attach request");
+    drop(input);
+    let output = adapter
+        .wait_with_output()
+        .expect("wait for the production Jet DAP command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let target_alive = target.try_wait().expect("check denied target").is_none();
+    let _ = target.kill();
+    let _ = target.wait();
+    let _ = std::fs::remove_file(&map);
+    let _ = std::fs::remove_file(&binary);
+    let _ = std::fs::remove_file(Path::new("build").join(format!("{stem}.rs")));
+    let _ = std::fs::remove_file(&file);
+
+    assert!(output.status.success(), "DAP command failed:\n{stderr}");
+    assert!(stdout.contains("\"command\":\"attach\""), "{stdout}");
+    assert!(
+        stdout.contains("\"request_seq\":2,\"success\":false,\"command\":\"attach\""),
+        "{stdout}"
+    );
+    assert!(stdout.contains("\"id\":22037"), "{stdout}");
+    assert!(stdout.contains("\"code\":\"E2231\""), "{stdout}");
+    assert!(!stdout.contains("\"event\":\"stopped\""), "{stdout}");
+    assert!(target_alive, "denied attach must leave the target alive");
 }
 
 #[cfg(target_os = "linux")]
@@ -746,10 +880,7 @@ fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
         {
             break;
         }
-        let state = std::fs::read_to_string(format!("/proc/{}/stat", target.id()))
-            .ok()
-            .and_then(|stat| stat.split_whitespace().nth(2).map(str::to_owned));
-        if matches!(state.as_deref(), Some("T" | "t")) {
+        if matches!(linux_process_state(target.id()).as_deref(), Some("T" | "t")) {
             target_stopped = true;
             break;
         }
@@ -766,6 +897,21 @@ fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let target_alive = target.try_wait().expect("check detached target").is_none();
+    let target_running = if target_alive {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match linux_process_state(target.id()).as_deref() {
+                Some("T" | "t") if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Some("T" | "t") => break false,
+                Some(_) => break true,
+                None => break false,
+            }
+        }
+    } else {
+        false
+    };
     if target_alive {
         let _ = target.kill();
     }
@@ -792,6 +938,10 @@ fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
         "production disconnect must leave an attached target alive"
     );
     assert!(
+        target_running,
+        "production disconnect must resume the attached target"
+    );
+    assert!(
         target_stopped,
         "production attach must stop the real target before disconnect"
     );
@@ -805,7 +955,7 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
     let tag = format!("dap_cli_success_{}", std::process::id());
     let file = native_fixture(&tag, LOOPS);
     let input = format!(
-        "{}{}{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}",
         dap_frame(
             r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path","linesStartAt1":true,"columnsStartAt1":true}}"#
         ),
@@ -823,9 +973,10 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
             r#"{"seq":6,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#
         ),
         dap_frame(r#"{"seq":7,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
-        dap_frame(r#"{"seq":8,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
+        dap_frame(
+            r#"{"seq":8,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#
+        ),
         dap_frame(r#"{"seq":9,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
-        dap_frame(r#"{"seq":10,"type":"request","command":"disconnect","arguments":{}}"#),
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["debug", "--dap", &file])
@@ -846,13 +997,28 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "DAP command failed:\n{stderr}");
-    assert!(stdout.contains("\"command\":\"initialize\""), "{stdout}");
-    assert!(stdout.contains("\"verified\":true"), "{stdout}");
+    let breakpoints = dap_response(&stdout, 2, "setBreakpoints").expect("breakpoint response");
+    assert!(breakpoints.contains("\"verified\":true"), "{breakpoints}");
+    assert!(
+        breakpoints.contains("\"id\":1,\"verified\":true,\"line\":7"),
+        "{breakpoints}"
+    );
+    assert!(
+        stdout.contains("\"request_seq\":1,\"success\":true,\"command\":\"initialize\""),
+        "{stdout}"
+    );
     assert!(stdout.contains("\"event\":\"stopped\""), "{stdout}");
+    assert!(stdout.contains("\"reason\":\"breakpoint\""), "{stdout}");
+    assert!(stdout.contains("\"hitBreakpointIds\":[1]"), "{stdout}");
     assert!(stdout.contains("\"command\":\"threads\""), "{stdout}");
     assert!(stdout.contains("\"command\":\"stackTrace\""), "{stdout}");
     assert!(stdout.contains("\"name\":\"run\""), "{stdout}");
     assert!(stdout.contains("\"line\":2"), "{stdout}");
+    let breakpoint_stack = dap_response(&stdout, 8, "stackTrace").expect("breakpoint stack trace");
+    assert!(
+        breakpoint_stack.contains("\"line\":7"),
+        "{breakpoint_stack}"
+    );
     assert!(
         stdout.contains(&format!("\"path\":\"{}\"", file)),
         "{stdout}"

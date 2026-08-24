@@ -1,5 +1,5 @@
-use crate::AST::Type;
 use super::alloc_ptrs::result_ty;
+use crate::AST::Type;
 
 /// D-DEP-WASM1=A: the resolved return type of a covered `Plugin` method, read
 /// from `check_plugin_method`'s authoritative match — a pure lookup for

@@ -35,11 +35,11 @@
 //! D-TXN2 effect wall stays with transactions the author wrote.
 
 use super::*;
+use crate::Diagnostics::Span;
 use crate::AST::{
     AccessConvention, BinOp, CallArg, CallArgFlags, Expr, LValue, Lambda, LambdaBody, LambdaMeta,
     LambdaParam, Stmt, Type,
 };
-use crate::Diagnostics::Span;
 
 /// The synthesized lambda parameter standing for the locked payload, and the
 /// synthesized name holding a hoisted right-hand side. Neither is spellable
@@ -158,12 +158,7 @@ impl<'a> Checker<'a> {
         }
         let handle = std::mem::replace(&mut **inner, Expr::Absent(span));
         let projection = Expr::Field(Box::new(payload(span)), member, span);
-        *e = shared_access_call(
-            handle,
-            "read",
-            LambdaBody::Expr(Box::new(projection)),
-            span,
-        );
+        *e = shared_access_call(handle, "read", LambdaBody::Expr(Box::new(projection)), span);
         true
     }
 

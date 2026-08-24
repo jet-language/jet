@@ -50,8 +50,12 @@ struct PackageEffectAggregate {
 }
 
 fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<Span> {
-    bundle.modules.get(bundle.entry)?.imports.iter().find_map(|import| {
-        match &import.kind {
+    bundle
+        .modules
+        .get(bundle.entry)?
+        .imports
+        .iter()
+        .find_map(|import| match &import.kind {
             ImportKind::Module(name, span) if name == dependency => Some(*span),
             ImportKind::Unqualified {
                 module_alias,
@@ -59,8 +63,7 @@ fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<
                 ..
             } if module_alias == dependency => Some(*module_alias_span),
             _ => None,
-        }
-    })
+        })
 }
 
 /// Attribute every function's solved effect set (`Sema::check_bundle_with_effect_facts`
@@ -276,18 +279,13 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
     }
     // D-EFFTREE1: allow/deny/grants entries may be ancestor roots (or leaves);
     // the substrate verdict, not exact membership, decides budget authority.
-    let allow: Option<EffectSet> = manifest
-        .authority
-        .holds
-        .allow
-        .as_ref()
-        .map(|names| {
-            names
-                .iter()
-                .filter(|name| !is_memory_right(name))
-                .filter_map(|n| parse_right(n))
-                .collect()
-        });
+    let allow: Option<EffectSet> = manifest.authority.holds.allow.as_ref().map(|names| {
+        names
+            .iter()
+            .filter(|name| !is_memory_right(name))
+            .filter_map(|n| parse_right(n))
+            .collect()
+    });
     let deny: EffectSet = manifest
         .authority
         .holds
@@ -324,7 +322,11 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
             continue;
         }
         let granted = grants.get(pkg.name.as_str());
-        for effect in pkg.effects.iter().filter(|effect| effect_root(effect) != "Mem") {
+        for effect in pkg
+            .effects
+            .iter()
+            .filter(|effect| effect_root(effect) != "Mem")
+        {
             if granted.is_some_and(|g| answer(g, &empty, effect) == Verdict::Allowed) {
                 continue;
             }

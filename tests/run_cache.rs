@@ -229,7 +229,11 @@ fn argv_change_misses_cache() {
         .env("JET_RUN_TRACE", "1")
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("[run-cache] store"),
         "{}",
@@ -285,7 +289,10 @@ fn phases_zero_on_inprocess_warm_hit() {
     assert_eq!(after_warm.parse, 0, "warm must skip parse: {after_warm:?}");
     assert_eq!(after_warm.check, 0, "warm must skip check: {after_warm:?}");
     assert_eq!(after_warm.lower, 0, "warm must skip lower: {after_warm:?}");
-    assert_eq!(after_warm.codegen, 0, "warm must skip codegen: {after_warm:?}");
+    assert_eq!(
+        after_warm.codegen, 0,
+        "warm must skip codegen: {after_warm:?}"
+    );
     assert_eq!(after_warm.link, 0, "warm must skip link: {after_warm:?}");
     assert!(
         after_warm.cache_hits >= 1,
@@ -425,7 +432,10 @@ fn example_stems_replay_identically_on_a_second_run() {
                 trace_err.contains("[run-cache] hit"),
                 "{stem}: expected a warm hit, so the replay path is what ran: {trace_err}"
             );
-            assert_eq!(trace_code, cold_code, "{stem}: traced replay changed the exit code");
+            assert_eq!(
+                trace_code, cold_code,
+                "{stem}: traced replay changed the exit code"
+            );
             assert_eq!(trace_out, cold_out, "{stem}: traced replay changed stdout");
         }
     }

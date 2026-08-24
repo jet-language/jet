@@ -16,9 +16,9 @@ mod Discovery;
 mod Edit;
 
 pub use Blocks::{
-    build_entry_source, dep_display, parse_policy_document, BuildOptimize, BuildPanic,
-    AuthorityHolds, BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority,
-    ImportBoundary, ProvenanceRequirement, Target, TrustDecision, TrustPolicy,
+    build_entry_source, dep_display, parse_policy_document, AuthorityHolds, BuildOptimize,
+    BuildPanic, BuildProfileDef, DepSource, ImportBoundary, PackageEntry, PackageKind,
+    ProvenanceRequirement, ProviderAuthority, Target, TrustDecision, TrustPolicy,
 };
 pub use Convert::{new_template, to_manifest};
 pub use Discovery::{discover_module_in, DiscoveryError};
@@ -27,9 +27,9 @@ pub use Edit::{add_dep, remove_dep};
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage};
 use crate::Lexer;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::fmt;
 use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,13 +85,13 @@ impl OutputFact {
     pub fn is_loadable(&self) -> bool {
         self.kind == PackageOutputKind::Library
             && matches!(
-                &self.payload,
-                OutputPayload::Object(fields)
-                    if matches!(
-                        fields.get(crate::Syntax::OUTPUT_FIELD_LOADABLE),
-                        Some(OutputPayload::Bool(true))
-                    )
-        )
+                    &self.payload,
+                    OutputPayload::Object(fields)
+                        if matches!(
+                            fields.get(crate::Syntax::OUTPUT_FIELD_LOADABLE),
+                            Some(OutputPayload::Bool(true))
+                        )
+            )
     }
 
     /// D-LIB-EXPORT1=C: a native Library output asks the driver for the
@@ -337,7 +337,9 @@ pub struct ConfigFacts {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComposeError {
-    MembersInConfig { origin: String },
+    MembersInConfig {
+        origin: String,
+    },
     Conflict {
         field: String,
         left_origin: String,
@@ -345,8 +347,13 @@ pub enum ComposeError {
         left: String,
         right: String,
     },
-    UnknownDefault { intent: String, output: String },
-    UnknownIntent { intent: String },
+    UnknownDefault {
+        intent: String,
+        output: String,
+    },
+    UnknownIntent {
+        intent: String,
+    },
 }
 
 impl fmt::Display for ComposeError {
@@ -382,38 +389,70 @@ pub enum PackageParseError {
     MalformedField(String),
     UnknownField(String),
     UnknownOutputKind(String),
-    InvalidValue { field: String, value: String },
+    InvalidValue {
+        field: String,
+        value: String,
+    },
     ConfigMembers,
     Composition(String),
     /// D-ECO-MEMBERS1: a member Package may not introduce another member list.
-    NestedMembers { root: String, member: String },
+    NestedMembers {
+        root: String,
+        member: String,
+    },
     /// D-LINTPOLICY1: a registered diagnostic code was used as a lint-policy
     /// selector; Manifest turns the typed pair into the E1206 row.
-    LintPolicyCode { code: String, name: String },
+    LintPolicyCode {
+        code: String,
+        name: String,
+    },
     /// D-TGT1/D-TGT2/D-TGT3: a `packages:` entry names an unknown or
     /// not-yet-shipped target.
-    BadTarget { name: String, value: String, reserved: bool },
+    BadTarget {
+        name: String,
+        value: String,
+        reserved: bool,
+    },
     /// D-TGT1: a `packages:` entry uses the removed `kind:` field.
-    KindFieldRemoved { name: String },
+    KindFieldRemoved {
+        name: String,
+    },
     /// D-TGT3/D-TGT4: a target block carries an unknown field.
-    BadTargetField { name: String, detail: String },
+    BadTargetField {
+        name: String,
+        detail: String,
+    },
     /// U1/S52/E1209: a reserved top-level key (`dev_deps`/`patch`/`workspace`)
     /// was used non-empty.
     ReservedSection(&'static str),
     /// D-EFFBUDGET1: a malformed `authority:`/`build.allow:` block.
     BadEffectsBlock(String),
     /// D-AUTHORITY-MANIFEST1: a retired authority field moved into `authority:`.
-    RetiredAuthorityField { field: String, replacement: String },
+    RetiredAuthorityField {
+        field: String,
+        replacement: String,
+    },
     /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
-    BadMemoryPolicy { detail: String },
+    BadMemoryPolicy {
+        detail: String,
+    },
     /// D-ONCE-RETIRE1=C: a retired package policy field needs migration.
-    RetiredPolicyField { field: String, replacement: String },
+    RetiredPolicyField {
+        field: String,
+        replacement: String,
+    },
     /// D-MEM-GUARANTEE1=A: malformed or widening package guarantee policy.
-    BadGuaranteePolicy { detail: String },
+    BadGuaranteePolicy {
+        detail: String,
+    },
     /// D-JPK-POLICYSURFACE1=D: malformed SPDX/source package policy.
-    BadPackagePolicy { detail: String },
+    BadPackagePolicy {
+        detail: String,
+    },
     /// D-ALLOC-PROGRAM1=A: malformed hosted whole-program allocator fact.
-    BadAllocatorPolicy { detail: String },
+    BadAllocatorPolicy {
+        detail: String,
+    },
 }
 
 impl fmt::Display for PackageParseError {
@@ -536,7 +575,11 @@ impl PackageFacts {
     /// to be inferred from the source at realize time.
     pub fn package_kind(&self, name: &str) -> Option<Blocks::PackageKind> {
         let entry = self.packages.iter().find(|p| p.name == name)?;
-        if entry.targets.iter().any(|t| *t == Blocks::Target::Executable) {
+        if entry
+            .targets
+            .iter()
+            .any(|t| *t == Blocks::Target::Executable)
+        {
             Some(Blocks::PackageKind::Executable)
         } else if entry.targets.iter().any(|t| *t == Blocks::Target::Library) {
             Some(Blocks::PackageKind::Library)
@@ -608,9 +651,7 @@ impl PackageFacts {
     /// Load one complete Package while preserving authority failures. A
     /// missing root is the only absent result; malformed, nonregular, or
     /// changed metadata remains an error for authority-sensitive callers.
-    pub fn load_checked(
-        dir: &std::path::Path,
-    ) -> Result<Option<Self>, AuthorityError> {
+    pub fn load_checked(dir: &std::path::Path) -> Result<Option<Self>, AuthorityError> {
         let resolver = match AuthorityResolver::open(dir) {
             Ok(resolver) => resolver,
             Err(error) if error.is_missing() => return Ok(None),
@@ -665,9 +706,7 @@ impl PackageFacts {
                         Err(error) => return Err(authority_package_error(error)),
                     }
                 }
-                Err(error) if error.is_missing() => {
-                    discover_config_path(resolver, &relative)?
-                }
+                Err(error) if error.is_missing() => discover_config_path(resolver, &relative)?,
                 Err(error) => return Err(authority_package_error(error)),
             };
             let path = checked.path.clone();
@@ -678,9 +717,7 @@ impl PackageFacts {
             if !resolved_config_paths.contains(&relative_path) {
                 resolved_config_paths.push(relative_path);
             }
-            let text = checked
-                .text()
-                .map_err(authority_package_error)?;
+            let text = checked.text().map_err(authority_package_error)?;
             resolver
                 .revalidate_file(&checked)
                 .map_err(authority_package_error)?;
@@ -713,10 +750,7 @@ impl PackageFacts {
 
     /// Return the ordered sources that contributed to one typed field.
     pub fn field_provenance(&self, field: &str) -> &[String] {
-        self.provenance
-            .get(field)
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
+        self.provenance.get(field).map(Vec::as_slice).unwrap_or(&[])
     }
 
     /// Ensure every explicitly contained name belongs to this package's
@@ -835,8 +869,8 @@ impl PackageFacts {
         &self,
         root: &std::path::Path,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        let resolver = AuthorityResolver::open(root)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let resolver =
+            AuthorityResolver::open(root).map_err(|error| format!("{}: {error}", self.origin))?;
         self.resolve_run_entry_checked(&resolver)
             .map(|file| file.map(|file| file.path))
     }
@@ -916,8 +950,8 @@ impl PackageFacts {
         &self,
         root: &std::path::Path,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        let resolver = AuthorityResolver::open(root)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let resolver =
+            AuthorityResolver::open(root).map_err(|error| format!("{}: {error}", self.origin))?;
         self.resolve_build_entry_checked(&resolver)
             .map(|file| file.map(|file| file.path))
     }
@@ -956,9 +990,7 @@ impl PackageFacts {
                 .map(|(file, line)| format!("{}:{line}", file.path.display()))
                 .collect::<Vec<_>>()
                 .join(" and ");
-            return Err(format!(
-                "two build entries for the package: {locations}"
-            ));
+            return Err(format!("two build entries for the package: {locations}"));
         }
         Ok(entries.into_iter().next().map(|(file, _)| file))
     }
@@ -976,8 +1008,8 @@ impl PackageFacts {
         root: &std::path::Path,
         command: &str,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        let resolver = AuthorityResolver::open(root)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let resolver =
+            AuthorityResolver::open(root).map_err(|error| format!("{}: {error}", self.origin))?;
         self.resolve_command_entry_checked(&resolver, command)
             .map(|file| file.map(|file| file.path))
     }
@@ -1031,8 +1063,8 @@ impl PackageFacts {
         root: &std::path::Path,
         output: &OutputFact,
     ) -> Result<Option<std::path::PathBuf>, String> {
-        let resolver = AuthorityResolver::open(root)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let resolver =
+            AuthorityResolver::open(root).map_err(|error| format!("{}: {error}", self.origin))?;
         self.entry_path_checked(&resolver, output)
             .map_err(|error| format!("{}: {error}", self.origin))
     }
@@ -1055,9 +1087,7 @@ impl PackageFacts {
             return Ok(None);
         };
         let parts = entry.split('.').collect::<Vec<_>>();
-        if (parts.len() != 1 && parts.len() != 2)
-            || parts.iter().any(|part| !is_identifier(part))
-        {
+        if (parts.len() != 1 && parts.len() != 2) || parts.iter().any(|part| !is_identifier(part)) {
             return Ok(None);
         }
         let canonical_run_name = crate::Syntax::DEFAULT_ENTRY_FILE
@@ -1077,10 +1107,9 @@ impl PackageFacts {
             }
         }
         if parts.len() == 1 {
-            let matches = self
-                .discover_function_entries_checked(resolver, parts[0], false, false)?;
-            return Ok((matches.len() == 1)
-                .then(|| matches.into_iter().next().unwrap().0));
+            let matches =
+                self.discover_function_entries_checked(resolver, parts[0], false, false)?;
+            return Ok((matches.len() == 1).then(|| matches.into_iter().next().unwrap().0));
         }
         let files = self.source_files_checked(resolver)?;
         let result = {
@@ -1119,12 +1148,9 @@ impl PackageFacts {
     }
 
     #[cfg(test)]
-    fn source_files(
-        &self,
-        root: &std::path::Path,
-    ) -> Result<Vec<std::path::PathBuf>, String> {
-        let resolver = AuthorityResolver::open(root)
-            .map_err(|error| format!("{}: {error}", self.origin))?;
+    fn source_files(&self, root: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
+        let resolver =
+            AuthorityResolver::open(root).map_err(|error| format!("{}: {error}", self.origin))?;
         self.source_files_checked(&resolver)
             .map(|files| files.into_iter().map(|file| file.path).collect())
             .map_err(|error| format!("{}: {error}", self.origin))
@@ -1179,9 +1205,7 @@ impl PackageFacts {
                 .map(|sources| {
                     sources
                         .iter()
-                        .flat_map(|source| {
-                            imported_source_paths(resolver.root(), source, &sources)
-                        })
+                        .flat_map(|source| imported_source_paths(resolver.root(), source, &sources))
                         .map(|path| normalize_discovery_path(&path))
                         .collect::<std::collections::BTreeSet<_>>()
                 })
@@ -1273,7 +1297,9 @@ impl PackageFacts {
             let candidate = std::path::Path::new(path);
             if path.is_empty()
                 || candidate.is_absolute()
-                || candidate.components().any(|c| c == std::path::Component::ParentDir)
+                || candidate
+                    .components()
+                    .any(|c| c == std::path::Component::ParentDir)
             {
                 return Err(ComposeError::Conflict {
                     field: "members".to_string(),
@@ -1309,10 +1335,11 @@ impl PackageFacts {
         &self,
         resolver: &AuthorityResolver,
     ) -> Result<Vec<CheckedPackage>, AuthorityError> {
-        self.validate_members().map_err(|error| AuthorityError::Invalid {
-            path: Path::new(&self.origin).to_path_buf(),
-            detail: error.to_string(),
-        })?;
+        self.validate_members()
+            .map_err(|error| AuthorityError::Invalid {
+                path: Path::new(&self.origin).to_path_buf(),
+                detail: error.to_string(),
+            })?;
         let mut physical = Vec::new();
         let mut names = Vec::new();
         let mut packages = Vec::new();
@@ -1337,7 +1364,9 @@ impl PackageFacts {
                 if canonical == "." {
                     return Err(AuthorityError::Invalid {
                         path: package.member.manifest.file.path.clone(),
-                        detail: format!("member reference `{relative}` resolves to its Package root"),
+                        detail: format!(
+                            "member reference `{relative}` resolves to its Package root"
+                        ),
                     });
                 }
                 if physical.iter().any(|existing| existing == &canonical) {
@@ -1370,10 +1399,7 @@ impl PackageFacts {
     /// physical Package root. Transition planners use the same checked
     /// discovery result when they preview a new member, so name collisions do
     /// not create a second member-validation mechanism.
-    pub fn member_names_in(
-        &self,
-        dir: &std::path::Path,
-    ) -> Result<Vec<String>, PackageParseError> {
+    pub fn member_names_in(&self, dir: &std::path::Path) -> Result<Vec<String>, PackageParseError> {
         let resolver = AuthorityResolver::open(dir).map_err(authority_package_error)?;
         self.member_names_in_checked(&resolver)
     }
@@ -1383,7 +1409,12 @@ impl PackageFacts {
         resolver: &AuthorityResolver,
     ) -> Result<Vec<String>, PackageParseError> {
         self.checked_members_in(resolver)
-            .map(|packages| packages.into_iter().map(|package| package.facts.name).collect())
+            .map(|packages| {
+                packages
+                    .into_iter()
+                    .map(|package| package.facts.name)
+                    .collect()
+            })
             .map_err(authority_package_error)
     }
 }
@@ -1392,11 +1423,7 @@ impl PackageFacts {
 /// locations before a default run resolves its authority snapshot. The old
 /// `.jet/main.jet` layout wrote generated state beside source, so it maps to
 /// the project-root `run.jet`; `src/main.jet` stays under `src`.
-fn migrate_retired_entry(
-    root: &Path,
-    origin: &str,
-    package_name: &str,
-) -> Result<bool, String> {
+fn migrate_retired_entry(root: &Path, origin: &str, package_name: &str) -> Result<bool, String> {
     let resolver = AuthorityResolver::open(root)
         .map_err(|error| format_entry_error(origin, error.to_string()))?;
     let candidates = [
@@ -1409,8 +1436,7 @@ fn migrate_retired_entry(
             Path::new("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
         ),
         (
-            Path::new(crate::Syntax::SOURCE_ROOT_DIR)
-                .join(crate::Syntax::LEGACY_ENTRY_FILE),
+            Path::new(crate::Syntax::SOURCE_ROOT_DIR).join(crate::Syntax::LEGACY_ENTRY_FILE),
             PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
         ),
     ];
@@ -1419,10 +1445,7 @@ fn migrate_retired_entry(
         Path::new("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
     ];
     if !package_name.is_empty() {
-        let named = PathBuf::from(format!(
-            "{package_name}.{}",
-            crate::Syntax::FILE_EXT
-        ));
+        let named = PathBuf::from(format!("{package_name}.{}", crate::Syntax::FILE_EXT));
         if !canonical_paths.contains(&named) {
             canonical_paths.push(named);
         }
@@ -1505,14 +1528,15 @@ fn format_entry_error(origin: &str, error: String) -> String {
 
 fn intent_accepts_kind(intent: &str, kind: PackageOutputKind) -> bool {
     match intent {
-        "run" => matches!(kind, PackageOutputKind::Executable | PackageOutputKind::Service),
+        "run" => matches!(
+            kind,
+            PackageOutputKind::Executable | PackageOutputKind::Service
+        ),
         "test" | "check" => kind == PackageOutputKind::Check,
         "dev" | "enter" => kind == PackageOutputKind::Environment,
         "publish" => matches!(
             kind,
-            PackageOutputKind::Library
-                | PackageOutputKind::Executable
-                | PackageOutputKind::Service
+            PackageOutputKind::Library | PackageOutputKind::Executable | PackageOutputKind::Service
         ),
         "deploy" | "fleet" => kind == PackageOutputKind::Fleet,
         "activate" | "activation" => {
@@ -1592,21 +1616,34 @@ pub fn rewrite_retired_targets(text: &str) -> (String, usize) {
     }
     let tokens: Vec<&Lexer::Token> = tokens
         .iter()
-        .filter(|token| !Lexer::is_comment(&token.kind) && !matches!(token.kind, Lexer::TokKind::Eof))
+        .filter(|token| {
+            !Lexer::is_comment(&token.kind) && !matches!(token.kind, Lexer::TokKind::Eof)
+        })
         .collect();
     let mut package_ranges = Vec::new();
     for index in 0..tokens.len() {
-        let Lexer::TokKind::Ident(name) = &tokens[index].kind else { continue };
+        let Lexer::TokKind::Ident(name) = &tokens[index].kind else {
+            continue;
+        };
         if name != crate::Syntax::MANIFEST_BLOCK_PACKAGES
-            || !matches!(tokens.get(index + 1).map(|token| &token.kind), Some(Lexer::TokKind::Colon))
+            || !matches!(
+                tokens.get(index + 1).map(|token| &token.kind),
+                Some(Lexer::TokKind::Colon)
+            )
         {
             continue;
         }
         let mut open = index + 2;
-        if matches!(tokens.get(open).map(|token| &token.kind), Some(Lexer::TokKind::Dot)) {
+        if matches!(
+            tokens.get(open).map(|token| &token.kind),
+            Some(Lexer::TokKind::Dot)
+        ) {
             open += 1;
         }
-        if !matches!(tokens.get(open).map(|token| &token.kind), Some(Lexer::TokKind::LBrace)) {
+        if !matches!(
+            tokens.get(open).map(|token| &token.kind),
+            Some(Lexer::TokKind::LBrace)
+        ) {
             continue;
         }
         let mut depth = 1usize;
@@ -1627,7 +1664,8 @@ pub fn rewrite_retired_targets(text: &str) -> (String, usize) {
 
     let mut spans = Vec::new();
     for (index, token) in tokens.iter().enumerate() {
-        if !matches!(&token.kind, Lexer::TokKind::Ident(name) if name == crate::Syntax::RETIRED_TARGET_PLUGIN) {
+        if !matches!(&token.kind, Lexer::TokKind::Ident(name) if name == crate::Syntax::RETIRED_TARGET_PLUGIN)
+        {
             continue;
         }
         let in_packages = package_ranges
@@ -1682,11 +1720,9 @@ pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, St
         .is_some()
         || trimmed.starts_with("Config");
     if is_config {
-        ConfigFacts::parse(text, origin)
-            .map_err(|error| error.to_string())?;
+        ConfigFacts::parse(text, origin).map_err(|error| error.to_string())?;
     } else {
-        PackageFacts::parse(text, origin)
-            .map_err(|error| error.to_string())?;
+        PackageFacts::parse(text, origin).map_err(|error| error.to_string())?;
     }
 
     let entries = top_level_entries(text);
@@ -1710,7 +1746,11 @@ pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, St
 }
 
 fn format_package_entry(entry: &str, indent: usize) -> String {
-    let entry = entry.trim().trim_end_matches(',').trim_end_matches(';').trim();
+    let entry = entry
+        .trim()
+        .trim_end_matches(',')
+        .trim_end_matches(';')
+        .trim();
     let Some((left, operator, right)) = split_package_binding(entry) else {
         return format_package_value(entry, indent);
     };
@@ -1720,7 +1760,11 @@ fn format_package_entry(entry: &str, indent: usize) -> String {
 }
 
 fn format_package_value(value: &str, indent: usize) -> String {
-    let value = value.trim().trim_end_matches(',').trim_end_matches(';').trim();
+    let value = value
+        .trim()
+        .trim_end_matches(',')
+        .trim_end_matches(';')
+        .trim();
     let Some((open, close)) = package_record_bounds(value) else {
         return value.to_string();
     };
@@ -1765,8 +1809,7 @@ fn package_has_top_level_comma(value: &str) -> bool {
 }
 
 fn package_has_trailing_top_level_comma(value: &str) -> bool {
-    package_top_level_comma(value)
-        .is_some_and(|comma| value[comma + 1..].trim().is_empty())
+    package_top_level_comma(value).is_some_and(|comma| value[comma + 1..].trim().is_empty())
 }
 
 fn package_top_level_comma(value: &str) -> Option<usize> {
@@ -1959,16 +2002,19 @@ fn parse_common(
             "allocator" => return Err(PackageParseError::UnknownField(field.clone())),
             "runtime" if !config => {
                 let raw = scalar(&value);
-                facts.layer = Some(crate::Syntax::RuntimeLayer::parse_manifest(&raw).ok_or_else(
-                    || PackageParseError::InvalidValue {
-                        field: "runtime".to_string(),
-                        value: raw.clone(),
-                    },
-                )?);
+                facts.layer = Some(
+                    crate::Syntax::RuntimeLayer::parse_manifest(&raw).ok_or_else(|| {
+                        PackageParseError::InvalidValue {
+                            field: "runtime".to_string(),
+                            value: raw.clone(),
+                        }
+                    })?,
+                );
             }
             "runtime" => return Err(PackageParseError::UnknownField(field.clone())),
             crate::Syntax::MANIFEST_BLOCK_DEPS => {
-                facts.deps = Blocks::parse_deps(record_body(&value, crate::Syntax::MANIFEST_BLOCK_DEPS)?)?
+                facts.deps =
+                    Blocks::parse_deps(record_body(&value, crate::Syntax::MANIFEST_BLOCK_DEPS)?)?
             }
             crate::Syntax::MANIFEST_BLOCK_BOUNDARIES if config => {
                 return Err(PackageParseError::UnknownField(field.clone()))
@@ -1980,7 +2026,9 @@ fn parse_common(
                 )?)?
             }
             "packages" if config => return Err(PackageParseError::UnknownField(field.clone())),
-            "packages" => facts.packages = Blocks::parse_packages(record_body(&value, "packages")?)?,
+            "packages" => {
+                facts.packages = Blocks::parse_packages(record_body(&value, "packages")?)?
+            }
             "services" => facts.services = parse_services(&value)?,
             crate::Syntax::MANIFEST_BLOCK_OUTPUTS => {
                 for (name, output) in parse_outputs(&value)? {
@@ -2057,11 +2105,11 @@ fn parse_common(
                     exceptions,
                 };
             }
-            crate::Syntax::MANIFEST_BLOCK_MEMBERS if config => return Err(PackageParseError::ConfigMembers),
-            crate::Syntax::MANIFEST_BLOCK_MEMBERS => facts.members = parse_members(&value)?,
-            "configs" if config => {
-                return Err(PackageParseError::UnknownField(field.clone()))
+            crate::Syntax::MANIFEST_BLOCK_MEMBERS if config => {
+                return Err(PackageParseError::ConfigMembers)
             }
+            crate::Syntax::MANIFEST_BLOCK_MEMBERS => facts.members = parse_members(&value)?,
+            "configs" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "configs" => facts.configs = parse_list(&value),
             // U1/S52/E1209: reserved for a future Jet feature — legal only
             // when declared empty.
@@ -2202,7 +2250,9 @@ fn merge_optional_field(
     origin: &str,
     provenance: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), ComposeError> {
-    let Some(incoming) = incoming else { return Ok(()) };
+    let Some(incoming) = incoming else {
+        return Ok(());
+    };
     let left_origin = provenance_origin(provenance, field, fallback);
     match current {
         None => *current = Some(incoming.clone()),
@@ -2352,11 +2402,7 @@ fn merge_outputs(
         if existing.kind != value.kind {
             return Err(ComposeError::Conflict {
                 field: format!("{path}.kind"),
-                left_origin: provenance_origin(
-                    provenance,
-                    &format!("{path}.kind"),
-                    fallback,
-                ),
+                left_origin: provenance_origin(provenance, &format!("{path}.kind"), fallback),
                 right_origin: origin.to_string(),
                 left: format!("{:?}", existing.kind),
                 right: format!("{:?}", value.kind),
@@ -2457,7 +2503,9 @@ fn merge_output_payload(
                         current.insert(key.clone(), value.clone());
                     }
                     Some(existing) => {
-                        merge_output_payload(existing, value, &field, fallback, origin, provenance)?;
+                        merge_output_payload(
+                            existing, value, &field, fallback, origin, provenance,
+                        )?;
                     }
                 }
                 record_provenance(provenance, &field, origin);
@@ -2520,7 +2568,14 @@ fn merge_environments(
         if let Some(name) = value.fields.get("name") {
             let mut names = BTreeMap::new();
             names.insert("name".to_string(), name.clone());
-            merge_string_fields(&mut merged.fields, &names, &path, fallback, origin, provenance)?;
+            merge_string_fields(
+                &mut merged.fields,
+                &names,
+                &path,
+                fallback,
+                origin,
+                provenance,
+            )?;
         }
         merge_string_list_field(
             &mut merged.tools,
@@ -2656,7 +2711,12 @@ fn record_environment_provenance(
         record_provenance(provenance, &format!("{path}.{field}"), origin);
     }
     for (name, service) in &environment.services {
-        record_service_provenance(provenance, &format!("{path}.services.{name}"), origin, service);
+        record_service_provenance(
+            provenance,
+            &format!("{path}.services.{name}"),
+            origin,
+            service,
+        );
     }
     for name in environment.secrets.keys() {
         record_provenance(provenance, &format!("{path}.secrets.{name}"), origin);
@@ -2819,7 +2879,12 @@ fn parse_output_payload(value: &str) -> Result<OutputPayload, PackageParseError>
         return Ok(OutputPayload::Object(
             entries
                 .into_iter()
-                .map(|(key, value)| Ok((key.trim_matches('"').to_string(), parse_output_payload(&value)?)))
+                .map(|(key, value)| {
+                    Ok((
+                        key.trim_matches('"').to_string(),
+                        parse_output_payload(&value)?,
+                    ))
+                })
                 .collect::<Result<BTreeMap<_, _>, PackageParseError>>()?,
         ));
     }
@@ -2829,9 +2894,7 @@ fn parse_output_payload(value: &str) -> Result<OutputPayload, PackageParseError>
     Ok(OutputPayload::String(scalar(value)))
 }
 
-fn parse_environments(
-    value: &str,
-) -> Result<BTreeMap<String, EnvironmentFact>, PackageParseError> {
+fn parse_environments(value: &str) -> Result<BTreeMap<String, EnvironmentFact>, PackageParseError> {
     let mut environments = BTreeMap::new();
     for (key, raw) in record_entries(value, "environments")? {
         let body = record_body(&raw, "environment")?;
@@ -2865,12 +2928,12 @@ fn parse_environments(
             .transpose()?
             .unwrap_or_default();
         let environment = EnvironmentFact {
-                name,
-                tools,
-                services,
-                secrets,
-                fields,
-            };
+            name,
+            tools,
+            services,
+            secrets,
+            fields,
+        };
         if environments.insert(key.clone(), environment).is_some() {
             return Err(PackageParseError::Composition(format!(
                 "environment `{key}` is declared more than once"
@@ -2883,17 +2946,18 @@ fn parse_environments(
 fn parse_services(value: &str) -> Result<BTreeMap<String, ServiceFact>, PackageParseError> {
     let mut services = BTreeMap::new();
     for (key, raw) in record_entries(value, "services")? {
-        let fields = named_entries_checked(record_body(&raw, "service")?, &format!("services.{key}"))?
-            .into_iter()
-            .map(|(field, value)| {
-                if !service_field_allowed(&field) {
-                    return Err(PackageParseError::UnknownField(format!(
-                        "services.{key}.{field}"
-                    )));
-                }
-                Ok((field, value))
-            })
-            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let fields =
+            named_entries_checked(record_body(&raw, "service")?, &format!("services.{key}"))?
+                .into_iter()
+                .map(|(field, value)| {
+                    if !service_field_allowed(&field) {
+                        return Err(PackageParseError::UnknownField(format!(
+                            "services.{key}.{field}"
+                        )));
+                    }
+                    Ok((field, value))
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
         let enable = match fields.get("enable") {
             None => false,
             Some(value) if scalar(value) == "true" => true,
@@ -2910,20 +2974,21 @@ fn parse_services(value: &str) -> Result<BTreeMap<String, ServiceFact>, PackageP
             Some(value) => parse_list(value)
                 .into_iter()
                 .map(|port| {
-                    port.parse::<i64>().map_err(|_| PackageParseError::InvalidValue {
-                        field: format!("services.{key}.ports"),
-                        value: port,
-                    })
+                    port.parse::<i64>()
+                        .map_err(|_| PackageParseError::InvalidValue {
+                            field: format!("services.{key}.ports"),
+                            value: port,
+                        })
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         };
         let ready = fields.get("ready").map(|v| scalar(v));
         let service = ServiceFact {
-                enable,
-                ports,
-                ready,
-                fields,
-            };
+            enable,
+            ports,
+            ready,
+            fields,
+        };
         if services.insert(key.clone(), service).is_some() {
             return Err(PackageParseError::Composition(format!(
                 "service `{key}` is declared more than once"
@@ -2946,10 +3011,7 @@ fn parse_members(value: &str) -> Result<Vec<MemberRef>, PackageParseError> {
             value: value.to_string(),
         });
     }
-    Ok(parse_list(value)
-        .into_iter()
-        .map(MemberRef::Path)
-        .collect())
+    Ok(parse_list(value).into_iter().map(MemberRef::Path).collect())
 }
 
 fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
@@ -2974,11 +3036,7 @@ fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
         PackageOutputKind::System => {
             matches!(
                 field,
-                "name"
-                    | crate::Syntax::SYSTEM_FIELD_TARGET
-                    | "packages"
-                    | "services"
-                    | "options"
+                "name" | crate::Syntax::SYSTEM_FIELD_TARGET | "packages" | "services" | "options"
             )
         }
         PackageOutputKind::Fleet => matches!(field, "name" | "hosts"),
@@ -3032,7 +3090,10 @@ fn parse_settings(value: &str) -> Result<BTreeMap<String, SettingDecl>, PackageP
                 value: raw,
             });
         }
-        if out.insert(key.clone(), SettingDecl { ty, default }).is_some() {
+        if out
+            .insert(key.clone(), SettingDecl { ty, default })
+            .is_some()
+        {
             return Err(PackageParseError::Composition(format!(
                 "`settings.{key}` is declared more than once"
             )));
@@ -3088,7 +3149,9 @@ fn named_entries_checked(
     let mut seen = BTreeMap::<String, String>::new();
     for entry in top_level_entries(body) {
         let Some((field, value)) = split_field(&entry) else {
-            return Err(PackageParseError::MalformedField(format!("{scope}: {entry}")));
+            return Err(PackageParseError::MalformedField(format!(
+                "{scope}: {entry}"
+            )));
         };
         if seen.contains_key(&field) {
             return Err(PackageParseError::Composition(format!(
@@ -3441,13 +3504,13 @@ fn import_target_paths(
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .join(path),
-        crate::AST::ImportKind::Module(name, _) => name.split('.').fold(
-            root.to_path_buf(),
-            |mut path, component| {
-                path.push(component);
-                path
-            },
-        ),
+        crate::AST::ImportKind::Module(name, _) => {
+            name.split('.')
+                .fold(root.to_path_buf(), |mut path, component| {
+                    path.push(component);
+                    path
+                })
+        }
         crate::AST::ImportKind::Unqualified { .. } => return Vec::new(),
     };
     let mut paths = vec![base.clone()];
@@ -3556,14 +3619,22 @@ fn top_level_function_lines(source: &str, wanted: &str) -> Vec<usize> {
 /// manifest shape error.
 fn is_build_entry_decl(entry: &str) -> bool {
     let rest = entry.trim_start();
-    let Some(rest) = rest.strip_prefix("fn") else { return false };
-    let Some(next) = rest.chars().next() else { return false };
+    let Some(rest) = rest.strip_prefix("fn") else {
+        return false;
+    };
+    let Some(next) = rest.chars().next() else {
+        return false;
+    };
     if !next.is_whitespace() {
         return false;
     }
     let rest = rest.trim_start();
-    let Some(rest) = rest.strip_prefix("build") else { return false };
-    rest.chars().next().is_none_or(|c| !c.is_alphanumeric() && c != '_')
+    let Some(rest) = rest.strip_prefix("build") else {
+        return false;
+    };
+    rest.chars()
+        .next()
+        .is_none_or(|c| !c.is_alphanumeric() && c != '_')
 }
 
 fn strip_comments(value: &str) -> String {
@@ -3610,7 +3681,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("jet-package-{tag}-{}-{stamp}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("jet-package-{tag}-{}-{stamp}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -3631,7 +3703,10 @@ defaults: .{ run: app, test: check }
         .unwrap();
         assert_eq!(facts.outputs["app"].kind, PackageOutputKind::Executable);
         assert_eq!(facts.select_output("run", None, None).unwrap().name, "app");
-        assert_eq!(facts.select_output("test", None, None).unwrap().name, "check");
+        assert_eq!(
+            facts.select_output("test", None, None).unwrap().name,
+            "check"
+        );
     }
 
     #[test]
@@ -3657,7 +3732,10 @@ outputs: .{ mod: .Library.{ loadable: "yes" } }"#,
             "package.jet",
         )
         .unwrap_err();
-        assert!(error.to_string().contains("outputs.mod.loadable"), "{error}");
+        assert!(
+            error.to_string().contains("outputs.mod.loadable"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -3774,11 +3852,7 @@ dev :: Config{
     #[test]
     fn named_config_discovery_skips_leading_underscore_files() {
         let dir = temp_dir("config-discovery");
-        std::fs::write(
-            dir.join("package.jet"),
-            "name: \"demo\"\nconfigs: [dev]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
         std::fs::write(
             dir.join("_dev.jet"),
             "pub dev :: Config.{ version: \"ignored\" }\n",
@@ -3789,11 +3863,7 @@ dev :: Config{
             "pub dev :: Config.{ version: \"selected\" }\n",
         )
         .unwrap();
-        std::fs::write(
-            dir.join("ordinary.jet"),
-            "pub run() { }\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("ordinary.jet"), "pub run() { }\n").unwrap();
 
         let facts = PackageFacts::load(&dir).unwrap().unwrap();
         assert_eq!(facts.version.as_deref(), Some("selected"));
@@ -3817,17 +3887,9 @@ dev :: Config{
     #[test]
     fn ambiguous_named_config_discovery_fails_before_composition() {
         let dir = temp_dir("config-ambiguous");
-        std::fs::write(
-            dir.join("package.jet"),
-            "name: \"demo\"\nconfigs: [dev]\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
         for file in ["one.jet", "two.jet"] {
-            std::fs::write(
-                dir.join(file),
-                "pub dev :: Config.{ version: \"same\" }\n",
-            )
-            .unwrap();
+            std::fs::write(dir.join(file), "pub dev :: Config.{ version: \"same\" }\n").unwrap();
         }
 
         let error = PackageFacts::load(&dir).unwrap().unwrap_err().to_string();
@@ -3848,12 +3910,9 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
 
     #[test]
     fn scalar_config_conflict_names_both_sources_and_does_not_mutate() {
-        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet")
-            .unwrap();
-        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet")
-            .unwrap();
-        let second = ConfigFacts::parse("Config.{ version: \"2\" }", "configs/two.jet")
-            .unwrap();
+        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet").unwrap();
+        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet").unwrap();
+        let second = ConfigFacts::parse("Config.{ version: \"2\" }", "configs/two.jet").unwrap();
 
         let error = facts.compose([first, second]).unwrap_err();
         match error {
@@ -3878,12 +3937,9 @@ outputs: .{ app: .Executable.{ entry: run, entry: other } }"#,
 
     #[test]
     fn equal_scalar_config_contributors_keep_ordered_provenance() {
-        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet")
-            .unwrap();
-        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet")
-            .unwrap();
-        let second = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/two.jet")
-            .unwrap();
+        let mut facts = PackageFacts::parse_uncomposed("name: \"demo\"\n", "package.jet").unwrap();
+        let first = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/one.jet").unwrap();
+        let second = ConfigFacts::parse("Config.{ version: \"1\" }", "configs/two.jet").unwrap();
 
         facts.compose([first, second]).unwrap();
         assert_eq!(facts.version.as_deref(), Some("1"));
@@ -3906,7 +3962,10 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
         )
         .unwrap();
         let output = facts.outputs.get("app").unwrap();
-        assert_eq!(facts.entry_path(&dir, output).unwrap(), Some(dir.join("run.jet")));
+        assert_eq!(
+            facts.entry_path(&dir, output).unwrap(),
+            Some(dir.join("run.jet"))
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 
@@ -3956,7 +4015,10 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
             "package.jet",
         )
         .unwrap();
-        assert_eq!(facts.select_output("run", Some("app"), None).unwrap().name, "app");
+        assert_eq!(
+            facts.select_output("run", Some("app"), None).unwrap().name,
+            "app"
+        );
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
             Some(dir.join("run.jet"))
@@ -3973,7 +4035,10 @@ outputs: .{ app: .Executable.{ entry: run } }"#,
 
         std::fs::write(dir.join("run.jet"), "fn run() { print(2) }\n").unwrap();
         std::fs::write(dir.join("other.jet"), "fn run() { print(3) }\n").unwrap();
-        assert_eq!(facts.select_output("run", Some("app"), None).unwrap().name, "app");
+        assert_eq!(
+            facts.select_output("run", Some("app"), None).unwrap().name,
+            "app"
+        );
         assert_eq!(
             facts.resolve_run_entry(&dir).unwrap(),
             Some(dir.join("run.jet"))

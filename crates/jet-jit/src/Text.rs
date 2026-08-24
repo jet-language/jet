@@ -7,9 +7,9 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::Marshal::{alloc_string, clone_string, result_err_msg};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use crate::Marshal::{clone_string, alloc_string, result_err_msg};
 
 /// Canonical text/unicode runtime — types stubbed, algorithm via include!
 pub(crate) mod text_rt {
@@ -144,9 +144,9 @@ pub(crate) mod text_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
+    use crate::fault_injection::jet_fault_should_fail;
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    use crate::fault_injection::jet_fault_should_fail;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
 
     pub(crate) fn lower(s: &str) -> String {
@@ -388,11 +388,19 @@ fn jet_jit_text_trim_end(s: i64) -> i64 {
 }
 
 fn jet_jit_text_pad_start(s: i64, width: i64, fill: i64) -> i64 {
-    alloc_string(text_rt::pad_start(&clone_string(s), width, &clone_string(fill)))
+    alloc_string(text_rt::pad_start(
+        &clone_string(s),
+        width,
+        &clone_string(fill),
+    ))
 }
 
 fn jet_jit_text_pad_end(s: i64, width: i64, fill: i64) -> i64 {
-    alloc_string(text_rt::pad_end(&clone_string(s), width, &clone_string(fill)))
+    alloc_string(text_rt::pad_end(
+        &clone_string(s),
+        width,
+        &clone_string(fill),
+    ))
 }
 
 fn jet_jit_text_index_of(s: i64, needle: i64) -> i64 {
@@ -413,8 +421,9 @@ fn jet_jit_text_title(s: i64) -> i64 {
 fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
     let s = clone_string(recv);
     match method {
-        0 => text_rt::last_index_of(&s, &clone_string(arg0))
-            .map_or(0, |index| index.wrapping_add(1)),
+        0 => {
+            text_rt::last_index_of(&s, &clone_string(arg0)).map_or(0, |index| index.wrapping_add(1))
+        }
         1 => i64::from(text_rt::is_lower(&s)),
         2 => i64::from(text_rt::is_upper(&s)),
         3 => alloc_string(text_rt::capitalize(&s)),
@@ -431,7 +440,8 @@ fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
 }
 
 fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
-    let Some((before, after)) = text_rt::split_once(&clone_string(s), &clone_string(separator)) else {
+    let Some((before, after)) = text_rt::split_once(&clone_string(s), &clone_string(separator))
+    else {
         return 0;
     };
     Concurrency::with_runtime_mut(|rt| {
@@ -445,7 +455,11 @@ fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
 }
 
 fn jet_jit_text_center(s: i64, width: i64, fill: i64) -> i64 {
-    alloc_string(text_rt::center(&clone_string(s), width, &clone_string(fill)))
+    alloc_string(text_rt::center(
+        &clone_string(s),
+        width,
+        &clone_string(fill),
+    ))
 }
 
 fn jet_jit_text_starts_any(s: i64, prefixes: i64) -> i8 {
@@ -460,7 +474,6 @@ fn jet_jit_text_char_indices(s: i64) -> i64 {
 fn jet_jit_text_inspect(s: i64) -> i64 {
     list_from_strings(text_rt::inspect(&clone_string(s)))
 }
-
 
 pub(crate) enum RegexValue {
     Regex(text_rt::jet_std::JetRegex),
@@ -477,7 +490,11 @@ fn push_regex(v: RegexValue) -> i64 {
 
 fn with_regex<R: Default>(handle: i64, f: impl FnOnce(&RegexValue) -> R) -> R {
     Concurrency::with_runtime_mut(|rt| {
-        match rt.regex_values.get(handle.saturating_sub(1) as usize).and_then(|s| s.as_ref()) {
+        match rt
+            .regex_values
+            .get(handle.saturating_sub(1) as usize)
+            .and_then(|s| s.as_ref())
+        {
             Some(v) => f(v),
             None => R::default(),
         }
@@ -501,7 +518,10 @@ fn regex_result_ok(bits: u64) -> i64 {
 fn regex_result_err(msg: String) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let sid = rt.heap.alloc_string(msg);
-        rt.results.push(super::JitResultValue { ok: false, bits: sid as u64 });
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: sid as u64,
+        });
         rt.results.len() as i64
     })
 }
@@ -528,7 +548,11 @@ fn list_strings(items: Vec<String>) -> i64 {
 }
 
 fn jet_jit_regex_flags(ci: i64, ml: i64, ds: i64) -> i64 {
-    push_regex(RegexValue::Flags(text_rt::jet_std::jet_regex_flags(ci != 0, ml != 0, ds != 0)))
+    push_regex(RegexValue::Flags(text_rt::jet_std::jet_regex_flags(
+        ci != 0,
+        ml != 0,
+        ds != 0,
+    )))
 }
 
 fn jet_jit_regex_literal(pat: i64) -> i64 {
@@ -602,9 +626,11 @@ fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
     let text = clone_string(text);
     let replacement = clone_string(repl);
     clone_compiled_regex(pat)
-        .map(|regex| Concurrency::with_runtime_mut(|rt| {
-            rt.heap.alloc_string(regex.replace(&text, &replacement))
-        }))
+        .map(|regex| {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.heap.alloc_string(regex.replace(&text, &replacement))
+            })
+        })
         .unwrap_or_default()
 }
 
@@ -634,7 +660,9 @@ fn jet_jit_regex_compile_with(pat: i64, flags: i64) -> i64 {
         RegexValue::Flags(f) => Some(f.clone()),
         _ => None,
     });
-    let Some(flags) = flags else { return regex_result_err("bad RegexFlags".into()); };
+    let Some(flags) = flags else {
+        return regex_result_err("bad RegexFlags".into());
+    };
     match text_rt::jet_std::jet_regex_compile_with(&clone_string(pat), &flags) {
         Ok(rx) => regex_result_ok(push_regex(RegexValue::Regex(rx)) as u64),
         Err(e) => regex_result_err(e),
@@ -657,12 +685,16 @@ fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
             let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
             for m in rx.matches(&clone_string(arg0)) {
                 let h = push_regex(RegexValue::Match(m));
-                Concurrency::with_runtime_mut(|rt| { let _ = rt.heap.list_push_int(list, h); });
+                Concurrency::with_runtime_mut(|rt| {
+                    let _ = rt.heap.list_push_int(list, h);
+                });
             }
             list
         }
         (RegexValue::Regex(rx), "split") => list_strings(rx.split(&clone_string(arg0))),
-        (RegexValue::Regex(rx), "split_limit") => list_strings(rx.split_limit(&clone_string(arg0), arg1)),
+        (RegexValue::Regex(rx), "split_limit") => {
+            list_strings(rx.split_limit(&clone_string(arg0), arg1))
+        }
         (RegexValue::Regex(rx), "replace" | "replace_all") => {
             let s = if method == "replace" {
                 rx.replace(&clone_string(arg0), &clone_string(arg1))
@@ -707,7 +739,6 @@ fn jet_jit_regex_escape(text: i64) -> i64 {
     let s = text_rt::jet_std::jet_regex_escape(&clone_string(text));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
-
 
 host_fns! {
     struct TextHostFns;
@@ -787,4 +818,3 @@ host_fns! {
             q
         };
 }
-

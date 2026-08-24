@@ -113,7 +113,8 @@ fn sync_laws_hold_on_aot_path() {
 
 #[test]
 fn sync_laws_hold_on_default_run() {
-    let (code, stdout, stderr) = run_default_multi("sync_laws_jit", "main.jet", &[("main.jet", SOURCE)]);
+    let (code, stdout, stderr) =
+        run_default_multi("sync_laws_jit", "main.jet", &[("main.jet", SOURCE)]);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(stdout, SYNC_EXPECTED);
 }

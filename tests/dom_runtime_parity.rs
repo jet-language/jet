@@ -23,7 +23,10 @@ fn rust_backend_stage_order(ui_rs: &str) -> Vec<String> {
     let mut rest = body;
     while let Some(fn_at) = rest.find("fn ") {
         rest = &rest[fn_at + 3..];
-        let name: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
         stages.push(name);
     }
     stages
@@ -56,8 +59,8 @@ fn js_export_order(js: &str) -> Vec<String> {
 #[test]
 fn dom_runtime_ports_the_same_pipeline_stages_in_the_same_order() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let ui_rs = fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs"))
-        .expect("read Ui.rs");
+    let ui_rs =
+        fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs");
     let dom_js = fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js"))
         .expect("read DomRuntime.js");
 
@@ -95,15 +98,23 @@ fn dom_runtime_ports_the_same_pipeline_stages_in_the_same_order() {
 #[test]
 fn dom_runtime_default_mount_matches_ui_rs() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let ui_rs = fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs");
-    let dom_js =
-        fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js")).expect("read DomRuntime.js");
+    let ui_rs =
+        fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/Ui.rs")).expect("read Ui.rs");
+    let dom_js = fs::read_to_string(repo.join("crates/jet-codegen/src/Prelude/DomRuntime.js"))
+        .expect("read DomRuntime.js");
 
     fn number_after(source: &str, needle: &str) -> f64 {
-        let at = source.find(needle).unwrap_or_else(|| panic!("expected `{needle}` in source"));
+        let at = source
+            .find(needle)
+            .unwrap_or_else(|| panic!("expected `{needle}` in source"));
         let rest = &source[at + needle.len()..];
-        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
-        digits.parse().unwrap_or_else(|e| panic!("parse number after `{needle}`: {e} ({digits:?})"))
+        let digits: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        digits
+            .parse()
+            .unwrap_or_else(|e| panic!("parse number after `{needle}`: {e} ({digits:?})"))
     }
 
     let rust_cols = number_after(&ui_rs, "pub const DEFAULT_MOUNT_COLS: f64 = ");
@@ -111,6 +122,12 @@ fn dom_runtime_default_mount_matches_ui_rs() {
     let js_cols = number_after(&dom_js, "export const DEFAULT_MOUNT_COLS = ");
     let js_rows = number_after(&dom_js, "export const DEFAULT_MOUNT_ROWS = ");
 
-    assert_eq!(rust_cols, js_cols, "Ui.rs DEFAULT_MOUNT_COLS ({rust_cols}) drifted from DomRuntime.js ({js_cols})");
-    assert_eq!(rust_rows, js_rows, "Ui.rs DEFAULT_MOUNT_ROWS ({rust_rows}) drifted from DomRuntime.js ({js_rows})");
+    assert_eq!(
+        rust_cols, js_cols,
+        "Ui.rs DEFAULT_MOUNT_COLS ({rust_cols}) drifted from DomRuntime.js ({js_cols})"
+    );
+    assert_eq!(
+        rust_rows, js_rows,
+        "Ui.rs DEFAULT_MOUNT_ROWS ({rust_rows}) drifted from DomRuntime.js ({js_rows})"
+    );
 }

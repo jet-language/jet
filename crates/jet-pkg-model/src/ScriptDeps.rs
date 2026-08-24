@@ -217,7 +217,10 @@ pub fn e1253(dep: &InlineDep, reason: &Unresolved) -> Diagnostic {
 pub fn l0203_unpinned(dep: &InlineDep) -> Diagnostic {
     Diagnostic::from_row(
         "L0203",
-        &[("name", dep.name.as_str()), ("selector", dep.selector.as_str())],
+        &[
+            ("name", dep.name.as_str()),
+            ("selector", dep.selector.as_str()),
+        ],
         Some(dep.span),
     )
 }

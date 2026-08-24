@@ -1,17 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use jet_comptime::AST::{Expr, Stmt};
 use jet_comptime::Comptime::{
-    CtValue, DevSink, ReplAuthorizer, ReplEffectRequest, evaluate_owned_with_imports_opts,
-    run_repl_step,
+    evaluate_owned_with_imports_opts, run_repl_step, CtValue, DevSink, ReplAuthorizer,
+    ReplEffectRequest,
 };
 use jet_comptime::Diagnostics::{Diagnostic, Span};
+use jet_comptime::AST::{Expr, Stmt};
 
-fn tls_call_diag(
-    impure_depth: usize,
-    gates: jet_foundation::Policy::GateSet,
-) -> Diagnostic {
+fn tls_call_diag(impure_depth: usize, gates: jet_foundation::Policy::GateSet) -> Diagnostic {
     let expr = Expr::MethodCall {
         receiver: Box::new(Expr::Ident("tls".to_string(), Span::new(0, 3))),
         method: "client".to_string(),
@@ -54,9 +51,7 @@ fn core_tls_follows_the_whole_tier2_comptime_gate() {
 
     let allowed = tls_call_diag(
         1,
-        jet_foundation::Policy::GateSet::allow(
-            jet_foundation::Policy::PolicyKey::Impure,
-        ),
+        jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
     );
     assert_eq!(allowed.code, "E3412");
     assert_ne!(allowed.code, "E0956");

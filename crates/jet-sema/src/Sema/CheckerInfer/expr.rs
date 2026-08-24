@@ -2,16 +2,16 @@
 //!
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
-use super::*;
 use super::fallible::value_loop_requires_route;
+use super::*;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
-use crate::Syntax;
 use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
 use crate::Sema::Diagnostics::{owned_type_for_read_view, soft_public_use};
+use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, OrFallback,
-    Lambda, LambdaBody, LambdaMeta, LambdaParam, StrPart, Type, TypedLitBody, UnOp,
-    noelse_terminated,
+    noelse_terminated, AccessConvention, BinOp, Call, CallArg, CallArgFlags, EnumLitArg, Expr,
+    IndexKind, Lambda, LambdaBody, LambdaMeta, LambdaParam, OrFallback, StrPart, Type,
+    TypedLitBody, UnOp,
 };
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
@@ -103,9 +103,7 @@ fn replace_bare_member_subject_with(expr: &mut Expr, subject: &str) {
     match expr {
         Expr::Ident(name, _) if name.is_empty() => *name = subject.to_string(),
         Expr::Field(inner, ..) => replace_bare_member_subject_with(inner, subject),
-        Expr::MethodCall { receiver, .. } => {
-            replace_bare_member_subject_with(receiver, subject)
-        }
+        Expr::MethodCall { receiver, .. } => replace_bare_member_subject_with(receiver, subject),
         _ => {}
     }
 }
@@ -131,8 +129,7 @@ fn reflected_fact_type(base: &Type, read: jet_foundation::Registry::FactRead) ->
             Some(Type::Named("EffectInfo".to_string()))
         }
         (
-            "TypeInfo" | "FunctionInfo" | "MethodInfo" | "FieldInfo" | "FactInfo"
-            | "FactValue",
+            "TypeInfo" | "FunctionInfo" | "MethodInfo" | "FieldInfo" | "FactInfo" | "FactValue",
             jet_foundation::Registry::FactRead::RegisteredPlane(_),
         ) => Some(Type::Named("FactValue".to_string())),
         ("TypeInfo", _) | ("FunctionInfo" | "MethodInfo", _) => {
@@ -158,9 +155,7 @@ impl<'a> Checker<'a> {
         self.modules
             .and_then(|modules| modules.get(self.module_idx))
             .map(|state| {
-                jet_foundation::Layout::TargetLayout::from_triple(
-                    &state.build_facts.target_triple,
-                )
+                jet_foundation::Layout::TargetLayout::from_triple(&state.build_facts.target_triple)
             })
             .unwrap_or_else(jet_foundation::Layout::TargetLayout::host)
     }
@@ -325,8 +320,7 @@ impl<'a> Checker<'a> {
 
         let aggregate_value = match &**inner {
             Expr::ComptimeName {
-                value: Some(value),
-                ..
+                value: Some(value), ..
             } => crate::Comptime::reflected_fact_field(value, read)
                 .cloned()
                 .map(|value| (value.jet_type(), value)),
@@ -352,11 +346,11 @@ impl<'a> Checker<'a> {
                     self.module_path,
                     &target,
                 )
-                    .and_then(|value| {
-                        crate::Comptime::reflected_fact_field(&value, read)
-                            .cloned()
-                            .map(|value| (value.jet_type(), value))
-                    })
+                .and_then(|value| {
+                    crate::Comptime::reflected_fact_field(&value, read)
+                        .cloned()
+                        .map(|value| (value.jet_type(), value))
+                })
             }
             _ => None,
         };
@@ -375,216 +369,192 @@ impl<'a> Checker<'a> {
         let value_and_type = match aggregate_value {
             Some(value) => Some(value),
             None => match read {
-            jet_foundation::Registry::FactRead::Range => match &**inner {
-                Expr::Ident(type_name, _) => self
-                    .registry
-                    .distinct_range(type_name)
-                    .map(|(start, end)| {
-                        (
-                            Type::Named(Syntax::TYPE_RANGE.to_string()),
-                            crate::Comptime::build_range_info(start, end),
-                        )
-                    }),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Dimension => match &**inner {
-                Expr::Ident(type_name, _) => self
-                    .registry
-                    .unit_dimension(type_name)
-                    .map(|dimension| {
-                        (
-                            Type::Named("DimensionInfo".to_string()),
-                            crate::Comptime::build_dimension_info(&dimension),
-                        )
-                    }),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Measure
-            | jet_foundation::Registry::FactRead::Exactness
-            | jet_foundation::Registry::FactRead::Classification
-            | jet_foundation::Registry::FactRead::Obligation => match &**inner {
-                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
-                    read,
-                    subject_name,
-                    self.items,
-                )
-                .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::States => match &**inner {
-                Expr::Ident(type_name, _) => self
-                    .struct_owner_module(type_name, None)
-                    .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
-                    .and_then(|module| module.declared_states.get(type_name))
-                    .map(|states| {
-                        (
-                            Type::List(Box::new(Type::Named("StateInfo".to_string()))),
-                            crate::Comptime::build_state_infos(type_name, states),
-                        )
-                    }),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Effects => match &**inner {
-                Expr::Ident(function_name, _) => self.ct_funcs.get(function_name).map(|function| {
-                    let effects = function
-                        .declared_effects
-                        .as_ref()
-                        .map(|effects| {
-                            effects
-                                .iter()
-                                .map(|(name, _)| name.clone())
-                                .collect::<Vec<_>>()
+                jet_foundation::Registry::FactRead::Range => match &**inner {
+                    Expr::Ident(type_name, _) => {
+                        self.registry.distinct_range(type_name).map(|(start, end)| {
+                            (
+                                Type::Named(Syntax::TYPE_RANGE.to_string()),
+                                crate::Comptime::build_range_info(start, end),
+                            )
                         })
-                        .unwrap_or_default();
-                    (
-                        Type::Named("EffectInfo".to_string()),
-                        crate::Comptime::build_effect_info(&effects),
-                    )
-                }),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Sendability => match &**inner {
-                Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => Some((
-                    Type::Named("SendabilityInfo".to_string()),
-                    crate::Comptime::build_sendability_info(self.sendability_for(subject_name)),
-                )),
-                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
-                    read,
-                    subject_name,
-                    self.items,
-                )
-                .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Movedness => match &**inner {
-                Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => Some((
-                    Type::Named("MovednessInfo".to_string()),
-                    crate::Comptime::build_movedness_info(
-                        self.flow.moved.contains(subject_name),
-                    ),
-                )),
-                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
-                    read,
-                    subject_name,
-                    self.items,
-                )
-                .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Attribution => match &**inner {
-                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
-                    read,
-                    subject_name,
-                    self.items,
-                )
-                .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::TrackOrigin => match &**inner {
-                Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => {
-                    let origin = self
-                        .flow
-                        .track_origins
-                        .get(subject_name)
-                        .map(String::as_str);
-                    let value = crate::Comptime::build_track_origin_info(origin);
-                    Some((value.jet_type(), value))
-                }
-                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
-                    read,
-                    subject_name,
-                    self.items,
-                )
-                .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::ViewProvenance => match &**inner {
-                Expr::Ident(function_name, _) => self
-                    .ct_funcs
-                    .get(function_name)
-                    .and_then(|function| {
-                        function
-                            .return_view_provenance
-                            .as_ref()
-                            .and_then(|map| map.values().next())
-                            .map(crate::Comptime::build_view_provenance_info)
-                    })
-                    .or_else(|| {
-                        crate::Comptime::registered_fact_value(
-                            read,
-                            function_name,
-                            self.items,
-                        )
-                    })
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Dimension => match &**inner {
+                    Expr::Ident(type_name, _) => {
+                        self.registry.unit_dimension(type_name).map(|dimension| {
+                            (
+                                Type::Named("DimensionInfo".to_string()),
+                                crate::Comptime::build_dimension_info(&dimension),
+                            )
+                        })
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Measure
+                | jet_foundation::Registry::FactRead::Exactness
+                | jet_foundation::Registry::FactRead::Classification
+                | jet_foundation::Registry::FactRead::Obligation => match &**inner {
+                    Expr::Ident(subject_name, _) => {
+                        crate::Comptime::registered_fact_value(read, subject_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::States => match &**inner {
+                    Expr::Ident(type_name, _) => self
+                        .struct_owner_module(type_name, None)
+                        .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
+                        .and_then(|module| module.declared_states.get(type_name))
+                        .map(|states| {
+                            (
+                                Type::List(Box::new(Type::Named("StateInfo".to_string()))),
+                                crate::Comptime::build_state_infos(type_name, states),
+                            )
+                        }),
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Effects => match &**inner {
+                    Expr::Ident(function_name, _) => {
+                        self.ct_funcs.get(function_name).map(|function| {
+                            let effects = function
+                                .declared_effects
+                                .as_ref()
+                                .map(|effects| {
+                                    effects
+                                        .iter()
+                                        .map(|(name, _)| name.clone())
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            (
+                                Type::Named("EffectInfo".to_string()),
+                                crate::Comptime::build_effect_info(&effects),
+                            )
+                        })
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Sendability => match &**inner {
+                    Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => Some((
+                        Type::Named("SendabilityInfo".to_string()),
+                        crate::Comptime::build_sendability_info(self.sendability_for(subject_name)),
+                    )),
+                    Expr::Ident(subject_name, _) => {
+                        crate::Comptime::registered_fact_value(read, subject_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Movedness => match &**inner {
+                    Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => Some((
+                        Type::Named("MovednessInfo".to_string()),
+                        crate::Comptime::build_movedness_info(
+                            self.flow.moved.contains(subject_name),
+                        ),
+                    )),
+                    Expr::Ident(subject_name, _) => {
+                        crate::Comptime::registered_fact_value(read, subject_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Attribution => match &**inner {
+                    Expr::Ident(subject_name, _) => {
+                        crate::Comptime::registered_fact_value(read, subject_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::TrackOrigin => match &**inner {
+                    Expr::Ident(subject_name, _) if self.lookup(subject_name).is_some() => {
+                        let origin = self
+                            .flow
+                            .track_origins
+                            .get(subject_name)
+                            .map(String::as_str);
+                        let value = crate::Comptime::build_track_origin_info(origin);
+                        Some((value.jet_type(), value))
+                    }
+                    Expr::Ident(subject_name, _) => {
+                        crate::Comptime::registered_fact_value(read, subject_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::ViewProvenance => match &**inner {
+                    Expr::Ident(function_name, _) => self
+                        .ct_funcs
+                        .get(function_name)
+                        .and_then(|function| {
+                            function
+                                .return_view_provenance
+                                .as_ref()
+                                .and_then(|map| map.values().next())
+                                .map(crate::Comptime::build_view_provenance_info)
+                        })
+                        .or_else(|| {
+                            crate::Comptime::registered_fact_value(read, function_name, self.items)
+                        })
+                        .map(|value| (value.jet_type(), value)),
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::UnitScaleProvenance => match &**inner {
+                    Expr::Ident(type_name, _) => self
+                        .registry
+                        .unit_fact(type_name)
+                        .map(|fact| {
+                            (
+                                Type::Named("UnitScaleProvenanceInfo".to_string()),
+                                crate::Comptime::build_unit_scale_provenance_info(
+                                    &fact.scale_provenance,
+                                ),
+                            )
+                        })
+                        .or_else(|| {
+                            crate::Comptime::registered_fact_value(read, type_name, self.items)
+                                .map(|value| (value.jet_type(), value))
+                        }),
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::Maturity => match &**inner {
+                    Expr::Ident(function_name, _) => self
+                        .ct_funcs
+                        .get(function_name)
+                        .map(|function| {
+                            let maturity = function
+                                .maturity
+                                .unwrap_or(crate::AST::MaturityTag::Experimental);
+                            (
+                                Type::Named("MaturityInfo".to_string()),
+                                crate::Comptime::build_maturity_info(maturity),
+                            )
+                        })
+                        .or_else(|| {
+                            crate::Comptime::registered_fact_value(read, function_name, self.items)
+                                .map(|value| (value.jet_type(), value))
+                        }),
+                    _ => None,
+                },
+                read @ jet_foundation::Registry::FactRead::RegisteredPlane(_) => match &**inner {
+                    Expr::Ident(subject_name, _) => {
+                        crate::Comptime::registered_fact_value(read, subject_name, self.items)
+                            .map(|value| (value.jet_type(), value))
+                    }
+                    _ => None,
+                },
+                jet_foundation::Registry::FactRead::BuildProfile => self
+                    .modules
+                    .and_then(|modules| modules.get(self.module_idx))
+                    .and_then(|state| crate::Comptime::build_fact_value(&state.build_facts, read))
                     .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::UnitScaleProvenance => match &**inner {
-                Expr::Ident(type_name, _) => self
-                    .registry
-                    .unit_fact(type_name)
-                    .map(|fact| {
-                        (
-                            Type::Named("UnitScaleProvenanceInfo".to_string()),
-                            crate::Comptime::build_unit_scale_provenance_info(
-                                &fact.scale_provenance,
-                            ),
-                        )
-                    })
-                    .or_else(|| {
-                        crate::Comptime::registered_fact_value(
-                            read,
-                            type_name,
-                            self.items,
-                        )
-                        .map(|value| (value.jet_type(), value))
-                    }),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::Maturity => match &**inner {
-                Expr::Ident(function_name, _) => self
-                    .ct_funcs
-                    .get(function_name)
-                    .map(|function| {
-                        let maturity = function
-                            .maturity
-                            .unwrap_or(crate::AST::MaturityTag::Experimental);
-                        (
-                            Type::Named("MaturityInfo".to_string()),
-                            crate::Comptime::build_maturity_info(maturity),
-                        )
-                    })
-                    .or_else(|| {
-                        crate::Comptime::registered_fact_value(
-                            read,
-                            function_name,
-                            self.items,
-                        )
-                        .map(|value| (value.jet_type(), value))
-                    }),
-                _ => None,
-            },
-            read @ jet_foundation::Registry::FactRead::RegisteredPlane(_) => match &**inner {
-                Expr::Ident(subject_name, _) => crate::Comptime::registered_fact_value(
-                    read,
-                    subject_name,
-                    self.items,
-                )
-                .map(|value| (value.jet_type(), value)),
-                _ => None,
-            },
-            jet_foundation::Registry::FactRead::BuildProfile => self
-                .modules
-                .and_then(|modules| modules.get(self.module_idx))
-                .and_then(|state| crate::Comptime::build_fact_value(&state.build_facts, read))
-                .map(|value| (value.jet_type(), value)),
-            jet_foundation::Registry::FactRead::BuildPackageName
-            | jet_foundation::Registry::FactRead::BuildPackageVersion
-            | jet_foundation::Registry::FactRead::BuildOS
-            | jet_foundation::Registry::FactRead::BuildStampGit
-            | jet_foundation::Registry::FactRead::BuildStampDirty
-            | jet_foundation::Registry::FactRead::BuildStampToolchain
-            | jet_foundation::Registry::FactRead::BuildStampAt => None,
+                jet_foundation::Registry::FactRead::BuildPackageName
+                | jet_foundation::Registry::FactRead::BuildPackageVersion
+                | jet_foundation::Registry::FactRead::BuildOS
+                | jet_foundation::Registry::FactRead::BuildStampGit
+                | jet_foundation::Registry::FactRead::BuildStampDirty
+                | jet_foundation::Registry::FactRead::BuildStampToolchain
+                | jet_foundation::Registry::FactRead::BuildStampAt => None,
                 jet_foundation::Registry::FactRead::Layout
                 | jet_foundation::Registry::FactRead::Name
                 | jet_foundation::Registry::FactRead::Fields => unreachable!("handled above"),
@@ -657,10 +627,7 @@ impl<'a> Checker<'a> {
                 Some(ty)
             }
             Expr::Index {
-                base,
-                index,
-                span,
-                ..
+                base, index, span, ..
             } => {
                 self.fold_comptime_struct_field(base);
                 // The comptime projection probes `base` speculatively and
@@ -701,7 +668,8 @@ impl<'a> Checker<'a> {
                         (projected, declared_ty)
                     }
                     crate::Comptime::CtValue::Bytes(values) => {
-                        let projected = crate::Comptime::CtValue::Int(i64::from(*values.get(index)?));
+                        let projected =
+                            crate::Comptime::CtValue::Int(i64::from(*values.get(index)?));
                         let declared_ty = Some(Type::IntN {
                             signed: false,
                             bits: 8,
@@ -752,14 +720,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn default_err_value(
-        &mut self,
-        mut call: Call,
-        wrap_result: bool,
-    ) -> Expr {
+    pub(crate) fn default_err_value(&mut self, mut call: Call, wrap_result: bool) -> Expr {
         let span = Span::new(
             call.name_span.start,
-            call.args.last().map_or(call.name_span.end, |arg| arg.expr.span().end),
+            call.args
+                .last()
+                .map_or(call.name_span.end, |arg| arg.expr.span().end),
         );
         let mut message = None;
         let mut code = None;
@@ -768,7 +734,10 @@ impl<'a> Checker<'a> {
         if !(1..=3).contains(&call.args.len()) {
             self.diags.push(Diagnostic::error(
                 "E0104",
-                format!("`Err` takes a message and optional `code:` and `cause:`, got {} arguments", call.args.len()),
+                format!(
+                    "`Err` takes a message and optional `code:` and `cause:`, got {} arguments",
+                    call.args.len()
+                ),
                 "the default error stores one message, one optional code, and one optional cause"
                     .to_string(),
                 "write `Err(\"message\")`, then add `code:` or `cause:` labels if needed"
@@ -785,8 +754,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0767",
                         "`message` is the positional argument of `Err`".to_string(),
-                        "the short constructor starts with the error message"
-                            .to_string(),
+                        "the short constructor starts with the error message".to_string(),
                         "remove the label and write `Err(\"message\", ...)`".to_string(),
                         Some(label_span),
                     ));
@@ -1083,8 +1051,10 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0155",
                 "a `DateTime` literal cannot contain interpolation".to_string(),
-                "DateTime values are checked as complete RFC3339 literals before the program runs".to_string(),
-                "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly".to_string(),
+                "DateTime values are checked as complete RFC3339 literals before the program runs"
+                    .to_string(),
+                "write a complete `DateTime.{\"…\"}` literal, or parse a runtime String explicitly"
+                    .to_string(),
                 Some(*literal_span),
             ));
             return None;
@@ -1115,11 +1085,7 @@ impl<'a> Checker<'a> {
 
     /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
     /// same grammar gate used by the generated linear runtime.
-    pub(crate) fn rewrite_regex_literal(
-        &mut self,
-        e: &mut Expr,
-        span: Span,
-    ) -> Option<Type> {
+    pub(crate) fn rewrite_regex_literal(&mut self, e: &mut Expr, span: Span) -> Option<Type> {
         let old = std::mem::replace(e, Expr::Absent(span));
         let Expr::Str(parts, literal_span) = old else {
             *e = old;
@@ -1138,8 +1104,7 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0152",
                 "a `Regex` literal cannot contain interpolation".to_string(),
-                "the compiler must know the complete pattern before the program runs"
-                    .to_string(),
+                "the compiler must know the complete pattern before the program runs".to_string(),
                 "use a fixed `Regex.{\"...\"}` pattern, or build text and call `re.compile(text)`"
                     .to_string(),
                 Some(literal_span),
@@ -1150,10 +1115,7 @@ impl<'a> Checker<'a> {
             *e = Expr::Str(parts, literal_span);
             self.diags.push(Diagnostic::error(
                 "E0152",
-                format!(
-                    "this regex pattern is invalid at position {}",
-                    error.offset
-                ),
+                format!("this regex pattern is invalid at position {}", error.offset),
                 error.reason,
                 "fix the pattern at the reported position".to_string(),
                 Some(literal_span),
@@ -1217,11 +1179,7 @@ impl<'a> Checker<'a> {
         result
     }
 
-    pub(crate) fn infer_with_expected(
-        &mut self,
-        e: &mut Expr,
-        expected: &Type,
-    ) -> Option<Type> {
+    pub(crate) fn infer_with_expected(&mut self, e: &mut Expr, expected: &Type) -> Option<Type> {
         if crate::Sema::type_uses_default_int(expected) {
             self.uses_exact_int = true;
         }
@@ -1304,9 +1262,7 @@ impl<'a> Checker<'a> {
             // source type is known, then materialize it below.
             self.borrow_ctx = true;
         }
-        if default_copy
-            && matches!(e, Expr::Ident(name, _) if self.is_string_view(name))
-        {
+        if default_copy && matches!(e, Expr::Ident(name, _) if self.is_string_view(name)) {
             // String views keep `String` as their Jet type. Allow the read long
             // enough to turn it into the shared owning-copy node.
             self.allow_string_view_read = true;
@@ -1350,7 +1306,10 @@ impl<'a> Checker<'a> {
             self.record_memory_event(crate::Sema::MemoryEvent::new(
                 crate::Sema::MemoryEventKind::RetainRelease,
                 span,
-                format!("implicit copy of `{}` retains a shared reference", ty.show()),
+                format!(
+                    "implicit copy of `{}` retains a shared reference",
+                    ty.show()
+                ),
             ));
         } else if type_owns_heap(ty, self.registry) {
             self.record_memory_event(crate::Sema::MemoryEvent::new(
@@ -1363,7 +1322,10 @@ impl<'a> Checker<'a> {
     }
 
     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
-        if matches!(e, Expr::Field(..) | Expr::Index { .. } | Expr::MethodCall { .. }) {
+        if matches!(
+            e,
+            Expr::Field(..) | Expr::Index { .. } | Expr::MethodCall { .. }
+        ) {
             if let Some(ty) = self.fold_comptime_struct_field(e) {
                 return Some(ty);
             }
@@ -1384,8 +1346,8 @@ impl<'a> Checker<'a> {
         {
             if matches!(args.len(), 1 | 3) {
                 if let Expr::Ident(destination_name, _) = receiver.as_ref() {
-                    if let Some((destination_name, destination_fact)) = self
-                        .unit_fact_for_type(&Type::Named(destination_name.clone()))
+                    if let Some((destination_name, destination_fact)) =
+                        self.unit_fact_for_type(&Type::Named(destination_name.clone()))
                     {
                         let source_ty = self.infer(&mut args[0].expr);
                         if let Some((source_name, source_fact)) = source_ty
@@ -1429,12 +1391,7 @@ impl<'a> Checker<'a> {
                                     return Some(Type::Named(destination_name));
                                 }
                                 if rounded {
-                                    self.expect_core_arg(
-                                        method,
-                                        2,
-                                        &Type::Int,
-                                        &mut args[2],
-                                    );
+                                    self.expect_core_arg(method, 2, &Type::Int, &mut args[2]);
                                     if matches!(
                                         &args[2].expr,
                                         Expr::Unary(
@@ -1447,8 +1404,7 @@ impl<'a> Checker<'a> {
                                             "E0127",
                                             "rounded unit conversion needs nonnegative digits"
                                                 .to_string(),
-                                            "digits counts destination decimal places"
-                                                .to_string(),
+                                            "digits counts destination decimal places".to_string(),
                                             "write `digits: 0` or another nonnegative Int"
                                                 .to_string(),
                                             Some(args[2].expr.span()),
@@ -1625,10 +1581,7 @@ impl<'a> Checker<'a> {
             Expr::Call(call) => (call.name.clone(), call.name_span),
             _ => return,
         };
-        if self.no_prelude
-            || self.funcs.contains_key(&name)
-            || self.lookup(&name).is_some()
-        {
+        if self.no_prelude || self.funcs.contains_key(&name) || self.lookup(&name).is_some() {
             return;
         }
         let Some(entry) = CorePrelude::entry(&name) else {
@@ -1636,8 +1589,7 @@ impl<'a> Checker<'a> {
         };
         match entry.target {
             Target::Core { module, item } => {
-                let Some(alias) = self.text_head_core_alias(module)
-                else {
+                let Some(alias) = self.text_head_core_alias(module) else {
                     return;
                 };
                 let old = std::mem::replace(e, Expr::Absent(span));
@@ -1689,7 +1641,9 @@ impl<'a> Checker<'a> {
             {
                 let wrap = matches!(self.expected_type.as_ref(), Some(Type::Result { .. }));
                 let placeholder = Expr::Absent(call.name_span);
-                let Expr::Call(call) = std::mem::replace(e, placeholder) else { unreachable!() };
+                let Expr::Call(call) = std::mem::replace(e, placeholder) else {
+                    unreachable!()
+                };
                 Some(self.default_err_value(call, wrap))
             }
             _ => None,
@@ -1711,10 +1665,7 @@ impl<'a> Checker<'a> {
                     && call.args.len() == 1
                     && call.args[0].label.is_none() =>
             {
-                let is_ok = matches!(
-                    contextual_literal(&call.name),
-                    Some(ContextualLiteral::Ok)
-                );
+                let is_ok = matches!(contextual_literal(&call.name), Some(ContextualLiteral::Ok));
                 let arg = call.args.pop().unwrap().expr;
                 let span = Span::new(call.name_span.start, arg.span().end);
                 Some(if is_ok {
@@ -1775,9 +1726,7 @@ impl<'a> Checker<'a> {
                             }
                         },
                         (Some(ContextualLiteral::Ok), 1) => match args.pop().unwrap() {
-                            EnumLitArg::Positional(inner) => {
-                                Some(Expr::Ok(Box::new(inner), *span))
-                            }
+                            EnumLitArg::Positional(inner) => Some(Expr::Ok(Box::new(inner), *span)),
                             named @ EnumLitArg::Named { .. } => {
                                 args.push(named);
                                 None
@@ -1820,9 +1769,7 @@ impl<'a> Checker<'a> {
             // MethodCall node used by an explicit receiver.
             let method_call = match e {
                 Expr::CallValue { callee, .. } => match callee.as_ref() {
-                    Expr::Field(inner, method, method_span)
-                        if matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty()) =>
-                    {
+                    Expr::Field(inner, method, method_span) if matches!(inner.as_ref(), Expr::Ident(name, _) if name.is_empty()) => {
                         Some((method.clone(), *method_span, inner.span()))
                     }
                     _ => None,
@@ -1831,16 +1778,11 @@ impl<'a> Checker<'a> {
             };
             if let Some((method, method_span, receiver_span)) = method_call {
                 let span = e.span();
-                let Expr::CallValue { args, .. } =
-                    std::mem::replace(e, Expr::Absent(span))
-                else {
+                let Expr::CallValue { args, .. } = std::mem::replace(e, Expr::Absent(span)) else {
                     unreachable!("matched an implicit-subject call value");
                 };
                 *e = Expr::MethodCall {
-                    receiver: Box::new(Expr::Ident(
-                        Syntax::KW_IT.to_string(),
-                        receiver_span,
-                    )),
+                    receiver: Box::new(Expr::Ident(Syntax::KW_IT.to_string(), receiver_span)),
                     method,
                     method_span,
                     owner_type_args: Vec::new(),
@@ -1922,7 +1864,10 @@ impl<'a> Checker<'a> {
                     let chain = bare_member_chain_text(e);
                     self.diags.push(Diagnostic::from_row(
                         "E-SUBJECT-CALL",
-                        &[("expected", expected_name.as_str()), ("chain", chain.as_str())],
+                        &[
+                            ("expected", expected_name.as_str()),
+                            ("chain", chain.as_str()),
+                        ],
                         Some(e.span()),
                     ));
                     return None;
@@ -2003,9 +1948,7 @@ impl<'a> Checker<'a> {
                 self.push_scope();
                 let mut restore_moved = Vec::new();
                 for (name, ty) in bindings {
-                    if let Some(restored) =
-                        self.declare_condition_binding(&name, cond.span(), ty)
-                    {
+                    if let Some(restored) = self.declare_condition_binding(&name, cond.span(), ty) {
                         restore_moved.push(restored);
                     }
                 }
@@ -2049,9 +1992,10 @@ impl<'a> Checker<'a> {
                     .collect();
                 divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
                 for (name, use_span) in divergent_single_use {
-                    self.diags.push(
-                        crate::Sema::CheckerOwnership::e0141_unconsumed_branch(&name, use_span),
-                    );
+                    self.diags
+                        .push(crate::Sema::CheckerOwnership::e0141_unconsumed_branch(
+                            &name, use_span,
+                        ));
                 }
                 self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
                     &before,
@@ -2140,10 +2084,7 @@ impl<'a> Checker<'a> {
                     if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
                         self.diags.push(
                             crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
-                                &value,
-                                lo,
-                                hi,
-                                span,
+                                &value, lo, hi, span,
                             ),
                         );
                     }
@@ -2162,9 +2103,9 @@ impl<'a> Checker<'a> {
                     Some(Type::Int)
                 }
             }
-            // D-SG9/D-FLOATW1: a float literal is `Float` (f64) by default, but
-            // adopts `F32` when that width is expected here. Write the resolution
-            // back onto the AST so TIR lowering can read the width from the node.
+            // D-TYPE2-DEFAULT1: an untyped decimal literal is exact Decimal by default,
+            // but adopts Float/F32 when that carrier is expected here. Write the
+            // resolution back onto the AST so TIR lowering can read the width.
             // `value` is unread here: an untyped decimal is rebuilt from `raw`
             // below, and the machine-float path only resolves the width.
             Expr::Float(_value, span, is_f32, raw) => {
@@ -2219,12 +2160,8 @@ impl<'a> Checker<'a> {
                         } else {
                             Expr::Int(scale, *span, None, None)
                         };
-                        value = Expr::Binary(
-                            BinOp::Mul,
-                            Box::new(value),
-                            Box::new(multiplier),
-                            *span,
-                        );
+                        value =
+                            Expr::Binary(BinOp::Mul, Box::new(value), Box::new(multiplier), *span);
                     }
                     let constructor = Expr::MethodCall {
                         receiver: Box::new(Expr::Ident(
@@ -2255,8 +2192,7 @@ impl<'a> Checker<'a> {
                                 convention: AccessConvention::Read,
                                 expr: Expr::Str(
                                     vec![StrPart::Lit(
-                                        "time literal is outside Duration's i64 range"
-                                            .to_string(),
+                                        "time literal is outside Duration's i64 range".to_string(),
                                     )],
                                     *span,
                                 ),
@@ -2405,7 +2341,9 @@ impl<'a> Checker<'a> {
                                     if !is_displayable(&t, self.registry, self.trait_reg)
                                         && !self.is_unit_type(&t)
                                     {
-                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
+                                            &t,
+                                        ) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0915",
                                                 format!("secret-bearing `{}` has no `Display` implementation", t.name()),
@@ -2492,7 +2430,9 @@ impl<'a> Checker<'a> {
                                         _ => unreachable!("debug selector family"),
                                     };
                                     if !is_debuggable(&t, self.registry, self.trait_reg) {
-                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
+                                        if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(
+                                            &t,
+                                        ) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0112",
                                                 format!(
@@ -2505,12 +2445,12 @@ impl<'a> Checker<'a> {
                                             ));
                                             continue;
                                         }
-                                            self.diags.push(Diagnostic::error(
-                                                "E0112",
-                                                format!(
-                                                    "{} can't be shown with :{selector} yet",
-                                                    t.show()
-                                                ),
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't be shown with :{selector} yet",
+                                                t.show()
+                                            ),
                                             "debug interpolation needs a debuggable value"
                                                 .to_string(),
                                             "implement `Debug` or use a debuggable part"
@@ -2872,7 +2812,10 @@ impl<'a> Checker<'a> {
                         other => {
                             self.diags.push(Diagnostic::error(
                                 "E0505",
-                                format!("only lists and strings can be sliced, not {}", other.show()),
+                                format!(
+                                    "only lists and strings can be sliced, not {}",
+                                    other.show()
+                                ),
                                 "a Range projects a window from indexed storage".to_string(),
                                 "use `xs[range]` on a list or `s.slice(range)` on text".to_string(),
                                 Some(*span),
@@ -2885,10 +2828,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::Range {
-                start,
-                end,
-                span,
-                ..
+                start, end, span, ..
             } => self.infer_range(start, end, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
@@ -2928,18 +2868,17 @@ impl<'a> Checker<'a> {
                         if !super::exact_integer_fits(&value, interval.lo, interval.hi) {
                             self.diags.push(
                                 crate::Sema::Diagnostics::inline_range_literal_out_of_bounds(
-                                    &value,
-                                    lo,
-                                    hi,
-                                    *ispan,
+                                    &value, lo, hi, *ispan,
                                 ),
                             );
                         }
                         *width = None;
                         return Some(Type::InlineRange { base, lo, hi });
                     }
-                    if let (Expr::Int(n, ispan, width, raw), Some(Type::IntN { signed: true, bits })) =
-                        (inner.as_mut(), self.expected_type.clone())
+                    if let (
+                        Expr::Int(n, ispan, width, raw),
+                        Some(Type::IntN { signed: true, bits }),
+                    ) = (inner.as_mut(), self.expected_type.clone())
                     {
                         let v = super::exact_integer_literal(*n, raw.as_deref()).neg();
                         let interval = super::integer_width_interval(true, bits);
@@ -3022,7 +2961,9 @@ impl<'a> Checker<'a> {
                 let (op, span) = (*op, *span);
                 let mut replacement = None;
                 let ty = self.infer_binary(op, lhs, rhs, span, &mut replacement);
-                if let Some(replacement) = replacement { *e = replacement; }
+                if let Some(replacement) = replacement {
+                    *e = replacement;
+                }
                 ty
             }
             Expr::CompareChain {
@@ -3097,10 +3038,7 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = was_view_read;
                 let inner_t = inner_t?;
                 if self.type_contains_observable_clock(&inner_t) {
-                    self.record_effect(
-                        crate::Sema::Effects::Effect::Time.name(),
-                        *span,
-                    );
+                    self.record_effect(crate::Sema::Effects::Effect::Time.name(), *span);
                     if self.in_pure && self.det_suppress == 0 {
                         self.diags
                             .push(crate::Sema::e3403("Clock copy", Some(*span)));
@@ -3108,18 +3046,14 @@ impl<'a> Checker<'a> {
                 }
                 let copy_ty = owned_type_for_read_view(&inner_t).unwrap_or_else(|| inner_t.clone());
                 let resource = self.is_resource_type(&inner_t);
-                if resource
-                    || (!type_is_copy(&inner_t) && !self.is_cloneable_type(&copy_ty))
-                {
+                if resource || (!type_is_copy(&inner_t) && !self.is_cloneable_type(&copy_ty)) {
                     let cell_guard = matches!(
                         &inner_t,
                         Type::Apply { name, .. }
                             if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
                     );
                     let shown = match &inner_t {
-                        Type::Apply { name, args }
-                            if cell_guard && args.len() == 1 =>
-                        {
+                        Type::Apply { name, args } if cell_guard && args.len() == 1 => {
                             format!("{name}<{}>", args[0].name())
                         }
                         _ => inner_t.show(),
@@ -3307,15 +3241,11 @@ impl<'a> Checker<'a> {
                 if member == "indexes" {
                     self.borrow_ctx = true;
                     let base_ty = self.infer(inner)?;
-                    let is_seq = matches!(
-                        &base_ty,
-                        Type::List(_) | Type::FixedList { .. }
-                    ) || matches!(&base_ty, Type::Apply { name, .. } if name == "Iter");
+                    let is_seq = matches!(&base_ty, Type::List(_) | Type::FixedList { .. })
+                        || matches!(&base_ty, Type::Apply { name, .. } if name == "Iter");
                     if is_seq {
-                        let receiver = std::mem::replace(
-                            inner,
-                            Box::new(Expr::Ident(String::new(), span)),
-                        );
+                        let receiver =
+                            std::mem::replace(inner, Box::new(Expr::Ident(String::new(), span)));
                         *e = Expr::MethodCall {
                             receiver,
                             method: "indexes".to_string(),
@@ -3392,19 +3322,17 @@ impl<'a> Checker<'a> {
                         Some(Type::List(inner)) => {
                             Some(("List".to_string(), vec![(**inner).clone()]))
                         }
-                        Some(Type::Map { key, value, .. }) => Some((
-                            "Map".to_string(),
-                            vec![(**key).clone(), (**value).clone()],
-                        )),
+                        Some(Type::Map { key, value, .. }) => {
+                            Some(("Map".to_string(), vec![(**key).clone(), (**value).clone()]))
+                        }
                         Some(Type::Int) => Some(("Int".to_string(), Vec::new())),
                         Some(Type::Float) => Some(("Float".to_string(), Vec::new())),
                         Some(Type::Bool) => Some(("Bool".to_string(), Vec::new())),
                         Some(Type::String) => Some(("String".to_string(), Vec::new())),
                         Some(Type::Char) => Some(("Char".to_string(), Vec::new())),
-                        Some(Type::IntN { signed, bits }) => Some((
-                            crate::AST::int_spelling(*signed, *bits),
-                            Vec::new(),
-                        )),
+                        Some(Type::IntN { signed, bits }) => {
+                            Some((crate::AST::int_spelling(*signed, *bits), Vec::new()))
+                        }
                         Some(Type::Float32) => Some(("F32".to_string(), Vec::new())),
                         Some(Type::Tagged { inner, .. }) => match inner.as_ref() {
                             Type::Named(name) => Some((name.clone(), Vec::new())),
@@ -3602,9 +3530,9 @@ impl<'a> Checker<'a> {
                 // here so every later tier sees a local struct literal and never
                 // asks the foreign-import table to rediscover it.
                 let code_module_type = import_ns.as_ref().and_then(|namespace| {
-                    self.code_modules.get(namespace).map(|module| {
-                        crate::Sema::Bundle::module_type_name(module, type_name)
-                    })
+                    self.code_modules
+                        .get(namespace)
+                        .map(|module| crate::Sema::Bundle::module_type_name(module, type_name))
                 });
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): a struct literal for a type
                 // that owns heap data (directly or transitively) allocates.
@@ -3675,13 +3603,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): an enum literal for a type
                 // that owns heap data (directly or transitively) allocates.
-                Some(self.check_enum_lit(
-                    type_name,
-                    variant,
-                    args,
-                    *span,
-                    *variant_span,
-                ))
+                Some(self.check_enum_lit(type_name, variant, args, *span, *variant_span))
             }
             // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
             // Its type is exactly the inner's type; taint propagation + the E0721
@@ -3690,11 +3612,12 @@ impl<'a> Checker<'a> {
             Expr::Tainted(inner, tag, span) => {
                 let tag = tag.as_deref().unwrap_or("Input");
                 if !self.tag_is_declared(tag) {
-                    self.diags.push(crate::Sema::Diagnostics::undeclared_value_tag(
-                        tag,
-                        self.closest_declared_tag(tag).as_deref(),
-                        *span,
-                    ));
+                    self.diags
+                        .push(crate::Sema::Diagnostics::undeclared_value_tag(
+                            tag,
+                            self.closest_declared_tag(tag).as_deref(),
+                            *span,
+                        ));
                 }
                 self.infer(inner)
             }
@@ -3811,9 +3734,10 @@ impl<'a> Checker<'a> {
                             ok: Box::new(Type::Named("HTTPResponse".to_string())),
                             err: Box::new(Type::Named("HTTPError".to_string())),
                         })),
-                        effect_bound: None, return_view_provenance: None,
+                        effect_bound: None,
+                        return_view_provenance: None,
                         param_contract: None,
-                call_metadata: None,
+                        call_metadata: None,
                     }),
                     _ => self.expected_type.clone(),
                 };
@@ -3897,7 +3821,8 @@ impl<'a> Checker<'a> {
     /// head (or expected type), rewrite to ListLit / MapLit / StructLit / value,
     /// then re-infer. Never inserts a conversion.
     pub(crate) fn elaborate_typed_lit(&mut self, e: &mut Expr) -> Option<Type> {
-        let Expr::TypedLit { head, body, span } = std::mem::replace(e, Expr::Absent(Span::new(0, 0)))
+        let Expr::TypedLit { head, body, span } =
+            std::mem::replace(e, Expr::Absent(Span::new(0, 0)))
         else {
             unreachable!("elaborate_typed_lit only for TypedLit");
         };
@@ -4002,10 +3927,8 @@ impl<'a> Checker<'a> {
                 *e = *inner;
                 return self.rewrite_typed_text_literal(e, kind.source_name().to_string(), span);
             }
-            (
-                Type::Named(ref type_name),
-                TypedLitBody::Value(inner),
-            ) if type_name == Syntax::TYPE_REGEX =>
+            (Type::Named(ref type_name), TypedLitBody::Value(inner))
+                if type_name == Syntax::TYPE_REGEX =>
             {
                 *e = *inner;
                 return self.rewrite_regex_literal(e, span);
@@ -4089,8 +4012,7 @@ impl<'a> Checker<'a> {
 
     fn list_elem_needs_expected_type(elem: &Expr) -> bool {
         match elem {
-            Expr::StructLit { inferred: true, .. }
-            | Expr::TypedLit { head: None, .. } => true,
+            Expr::StructLit { inferred: true, .. } | Expr::TypedLit { head: None, .. } => true,
             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
                 Self::list_elem_needs_expected_type(inner)
             }
@@ -4229,7 +4151,11 @@ impl<'a> Checker<'a> {
                         let t = self.infer_owned_list_element(inner);
                         match t {
                             Some(Type::List(spread_elem)) => {
-                                self.check_type_assignable(&expected_inner, &spread_elem, *spread_span);
+                                self.check_type_assignable(
+                                    &expected_inner,
+                                    &spread_elem,
+                                    *spread_span,
+                                );
                             }
                             Some(other) => {
                                 self.diags.push(Diagnostic::error(
@@ -4318,9 +4244,7 @@ impl<'a> Checker<'a> {
         for (i, (elem, ty)) in elems.iter().zip(&elem_types).enumerate() {
             let Some(t) = ty else { continue };
             let spread_needs_conversion = matches!(elem, Expr::Spread(..)) && *t != first;
-            if spread_needs_conversion
-                || (*t != first && t.numeric_widening_to(&first).is_none())
-            {
+            if spread_needs_conversion || (*t != first && t.numeric_widening_to(&first).is_none()) {
                 self.diags.push(Diagnostic::error(
                     "E0504",
                     format!(
@@ -4388,7 +4312,6 @@ impl<'a> Checker<'a> {
         Some(tuple_ty)
     }
 
-
     pub(crate) fn infer_map_lit(
         &mut self,
         entries: &mut [(Expr, Expr)],
@@ -4407,7 +4330,8 @@ impl<'a> Checker<'a> {
                     key,
                     key_span,
                     value,
-                } = expected {
+                } = expected
+                {
                     return Some(Type::Map {
                         key,
                         key_span,
@@ -4450,15 +4374,15 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
-        if !self.map_key_type_eligible(&kt) {
-            self.diags.push(Diagnostic::error(
+            if !self.map_key_type_eligible(&kt) {
+                self.diags.push(Diagnostic::error(
                 "E0502",
                 format!("`{}` can't be a map key (D-MAP-KEY1)", kt.name()),
                 "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow D-MAP-KEY1; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible".to_string(),
                 "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately".to_string(),
                 Some(k.span()),
             ));
-        }
+            }
             if let Some(ref fk) = key_ty {
                 if kt != *fk {
                     self.diags.push(Diagnostic::error(
@@ -4530,9 +4454,7 @@ impl<'a> Checker<'a> {
                 method,
                 args,
                 ..
-            } if method == "raw" && args.is_empty() => {
-                self.proven_integer_interval(receiver)
-            }
+            } if method == "raw" && args.is_empty() => self.proven_integer_interval(receiver),
             Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
                 self.proven_integer_interval(inner)?.negated()
             }
@@ -4573,8 +4495,7 @@ impl<'a> Checker<'a> {
                             "layout field selector `.{field}` needs a `{}` value",
                             crate::Syntax::TYPE_LAYOUT_INFO
                         ),
-                        "typed `[.field]` selection is only defined on `T.@layout`"
-                            .to_string(),
+                        "typed `[.field]` selection is only defined on `T.@layout`".to_string(),
                         "use `T.@layout[.field]` for a reflected field fact".to_string(),
                         Some(*selector_span),
                     ));
@@ -4900,9 +4821,7 @@ impl<'a> Checker<'a> {
                 Some(Type::List(inner))
             }
             Type::String => Some(Type::String),
-            ty if ty.is_compute_tensor_family() => {
-                Some(Type::Named("Tensor".to_string()))
-            }
+            ty if ty.is_compute_tensor_family() => Some(Type::Named("Tensor".to_string())),
             other => {
                 self.diags.push(Diagnostic::error(
                     "E0505",
@@ -4957,7 +4876,13 @@ impl<'a> Checker<'a> {
                     let enum_name = leaf.clone();
                     **inner = Expr::Ident(enum_name.clone(), span);
                     let mut empty = Vec::new();
-                    return Some(self.check_enum_lit(&enum_name, member, &mut empty, span, Some(span)));
+                    return Some(self.check_enum_lit(
+                        &enum_name,
+                        member,
+                        &mut empty,
+                        span,
+                        Some(span),
+                    ));
                 }
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
                     let enum_name = match leaf.as_str() {
@@ -4969,7 +4894,13 @@ impl<'a> Checker<'a> {
                     if let Some(enum_name) = enum_name {
                         **inner = Expr::Ident(enum_name.to_string(), span);
                         let mut empty = Vec::new();
-                        return Some(self.check_enum_lit(enum_name, member, &mut empty, span, Some(span)));
+                        return Some(self.check_enum_lit(
+                            enum_name,
+                            member,
+                            &mut empty,
+                            span,
+                            Some(span),
+                        ));
                     }
                 }
                 if leaf == "State" {
@@ -5017,9 +4948,10 @@ impl<'a> Checker<'a> {
                         let ty = Type::Fn {
                             params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
                             ret: sig.return_type.clone().map(Box::new),
-                            effect_bound: None, return_view_provenance: None,
+                            effect_bound: None,
+                            return_view_provenance: None,
                             param_contract: None,
-                call_metadata: None,
+                            call_metadata: None,
                         };
                         self.diags.push(crate::Sema::FFI::e3203(&ty, span));
                         return Some(ty);
@@ -5058,12 +4990,10 @@ impl<'a> Checker<'a> {
             // spelling, and each projects the matching `TypeInfo` member, so
             // the fact answers the same type reflection already answers.
             if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
-                if self.is_known_enum(type_name) || self.struct_owner_module(type_name, None).is_some()
+                if self.is_known_enum(type_name)
+                    || self.struct_owner_module(type_name, None).is_some()
                 {
-                    if let Some(ty) = core_struct_field(
-                        crate::Syntax::TYPE_TYPE_INFO,
-                        projected,
-                    ) {
+                    if let Some(ty) = core_struct_field(crate::Syntax::TYPE_TYPE_INFO, projected) {
                         return Some(ty);
                     }
                 }
@@ -5098,13 +5028,8 @@ impl<'a> Checker<'a> {
                         ),
                     )
                 };
-                self.diags.push(Diagnostic::error(
-                    "E0302",
-                    what,
-                    why,
-                    fix,
-                    Some(span),
-                ));
+                self.diags
+                    .push(Diagnostic::error("E0302", what, why, fix, Some(span)));
                 return None;
             }
         }
@@ -5290,17 +5215,17 @@ impl<'a> Checker<'a> {
                     let subst = self.struct_subst_for_owner(owner_mod, leaf, args);
                     if let Some((_, _, fty)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
-                            if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, leaf, member)
-                            {
-                                self.diags.push(private_item(member, span));
-                                return None;
-                            } else if owner_mod != self.module_idx
-                                && Syntax::classify_identifier(member)
-                                    == Syntax::IdentifierClass::SoftPublic
-                            {
-                                self.diags.push(soft_public_use(member, span));
-                            }
+                        if owner_mod != self.module_idx
+                            && !self.field_is_pub_in(owner_mod, leaf, member)
+                        {
+                            self.diags.push(private_item(member, span));
+                            return None;
+                        } else if owner_mod != self.module_idx
+                            && Syntax::classify_identifier(member)
+                                == Syntax::IdentifierClass::SoftPublic
+                        {
+                            self.diags.push(soft_public_use(member, span));
+                        }
                         self.record_field_reference(owner_mod, leaf, member, span);
                         return Some(self.instantiate_type_for_owner(owner_mod, &fty, &subst));
                     }

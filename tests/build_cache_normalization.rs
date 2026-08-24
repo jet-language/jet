@@ -111,8 +111,16 @@ fn script_body_sensitive() {
     let a = "print(\"a\")\n";
     let b = "print(\"b\")\n";
     let c = "print(\"a\")\nprint(\"b\")\n";
-    assert_ne!(key(a), key(b), "a different script statement must change the key");
-    assert_ne!(key(a), key(c), "an added script statement must change the key");
+    assert_ne!(
+        key(a),
+        key(b),
+        "a different script statement must change the key"
+    );
+    assert_ne!(
+        key(a),
+        key(c),
+        "an added script statement must change the key"
+    );
 }
 
 #[test]

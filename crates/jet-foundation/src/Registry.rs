@@ -911,7 +911,9 @@ fn is_diagnostic_code(code: &str) -> bool {
     (!rest.is_empty() && matches!(*prefix, b'E' | b'L' | b'R' | b'W'))
         || (code.len() == 6
             && code.starts_with("JT")
-            && code.as_bytes()[2..].iter().all(|byte| byte.is_ascii_digit()))
+            && code.as_bytes()[2..]
+                .iter()
+                .all(|byte| byte.is_ascii_digit()))
 }
 
 fn is_snake_case_lint_name(name: &str) -> bool {
@@ -1583,12 +1585,10 @@ pub fn structure_rows() -> impl Iterator<Item = &'static RegistryRow> {
 /// table of registry names.
 pub fn structure_row(kind: crate::Names::StructureFactKind) -> Option<&'static RegistryRow> {
     structure_rows().find(|row| {
-        row.name
-            .rsplit_once('.')
-            .is_some_and(|(_, leaf)| {
-                leaf.replace('-', "")
-                    .eq_ignore_ascii_case(&kind.name().replace('-', ""))
-            })
+        row.name.rsplit_once('.').is_some_and(|(_, leaf)| {
+            leaf.replace('-', "")
+                .eq_ignore_ascii_case(&kind.name().replace('-', ""))
+        })
     })
 }
 

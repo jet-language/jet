@@ -380,7 +380,10 @@ fn mcu_firmware_build_writes_elf_map_audit_and_size_budget() {
         arts.audit_json.display()
     );
     let map = std::fs::read_to_string(&arts.map).unwrap();
-    assert!(map.contains("Reset_Handler") || map.contains(".text"), "{map}");
+    assert!(
+        map.contains("Reset_Handler") || map.contains(".text"),
+        "{map}"
+    );
     let linker = std::fs::read_to_string(&arts.linker_script).unwrap();
     assert!(linker.contains("MEMORY {"));
     assert!(linker.contains("flash (rx)"));
@@ -388,7 +391,16 @@ fn mcu_firmware_build_writes_elf_map_audit_and_size_budget() {
     assert!(arts.audit.contains("\"size_budget\""));
     assert!(arts.audit.contains("\"environment\":\"no-os\""));
     let bytes = std::fs::metadata(&arts.elf).unwrap().len();
-    assert!(bytes > 0 && bytes <= machine.memory.iter().filter(|r| r.kind == MemoryKind::Flash).map(|r| r.size.bytes).sum::<u64>());
+    assert!(
+        bytes > 0
+            && bytes
+                <= machine
+                    .memory
+                    .iter()
+                    .filter(|r| r.kind == MemoryKind::Flash)
+                    .map(|r| r.size.bytes)
+                    .sum::<u64>()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

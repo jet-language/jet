@@ -8,20 +8,19 @@
     clippy::all
 )]
 
-use crate::{JetDebug, JetDisplay, JetShow};
-use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
 use crate::Crypto::runtime::{
     jet_crypto_entropy_fill_for_host as jet_crypto_entropy_fill, JetCryptoSecretBytes,
 };
+use crate::Reactive::{jet_app_ws_register, jet_app_ws_unregister};
+use crate::{JetDebug, JetDisplay, JetShow};
 use jet_codegen::scheduler::{
     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_deadline_remaining_ms,
-    jet_scheduler_blocking_wait_enter,
-    jet_scheduler_blocking_wait_leave, jet_scheduler_io_wait, jet_scheduler_park_ms,
-    jet_scheduler_shielded, jet_scheduler_spawn, jet_scheduler_spawn_blocking_with_control,
-    jet_scheduler_task_cancelled, jet_scheduler_tcp_listener_io_wait,
-    jet_scheduler_wait_point_cancelled, jet_scheduler_wait_without_unwind, jet_std_time_now,
-    jet_task_deliver_cancel,
-    JetDeadlineGuard, JetSchedulerJoin, JetSchedulerResult, JetSchedulerWait, JetTaskControl,
+    jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave, jet_scheduler_io_wait,
+    jet_scheduler_park_ms, jet_scheduler_shielded, jet_scheduler_spawn,
+    jet_scheduler_spawn_blocking_with_control, jet_scheduler_task_cancelled,
+    jet_scheduler_tcp_listener_io_wait, jet_scheduler_wait_point_cancelled,
+    jet_scheduler_wait_without_unwind, jet_std_time_now, jet_task_deliver_cancel, JetDeadlineGuard,
+    JetSchedulerJoin, JetSchedulerResult, JetSchedulerWait, JetTaskControl,
 };
 #[cfg(unix)]
 use jet_codegen::scheduler::{
@@ -165,7 +164,7 @@ pub mod jet_std {
         pub params: Vec<(String, String)>,
     }
 
-    pub use crate::Encoding::json_rt::{JSON, JSONError};
+    pub use crate::Encoding::json_rt::{JSONError, JSON};
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct FieldError {
@@ -197,7 +196,10 @@ pub mod jet_std {
                 .collect()
         }
 
-        pub fn under<T>(seg: &str, result: Result<T, Vec<FieldError>>) -> Result<T, Vec<FieldError>> {
+        pub fn under<T>(
+            seg: &str,
+            result: Result<T, Vec<FieldError>>,
+        ) -> Result<T, Vec<FieldError>> {
             result.map_err(|errors| Self::under_errors(seg, errors))
         }
     }

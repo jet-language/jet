@@ -58,14 +58,40 @@ fresh off-device `nix build --no-link --json` batch:
 jetpack-nix-index verify-differential \
   --candidate <target.json.zst> \
   --oracle <fresh-nix-results.json> \
+  --channel nixpkgs-unstable \
+  --revision <40-hex-revision> \
   --system x86_64-linux \
   --report <run-report.json>
 ```
 
-The publication gate requires every candidate record to compare byte-for-byte:
-attrpath, system, version, `drvPath`, the complete output-name set, and every
-output path. Batches contain at most 256 attrs and use a fresh evaluator
-process. Any mismatch aborts publication.
+The oracle is the output of a second clean Nix evaluation (the checked-in
+`differential.nix` expression may be used to add attrpath and version to raw
+`nix build --json` output). The command binds the candidate's channel,
+revision, and system before comparing every record byte-for-byte: attrpath,
+version, `drvPath`, the complete output-name set, and every output path. Batches
+contain at most 256 attrs and use a fresh evaluator process. Any mismatch
+aborts publication.
+
+Build the signed channel manifest after all target sidecars exist:
+
+```text
+jetpack-nix-index manifest \
+  --channel nixpkgs-unstable \
+  --endpoint https://index.example.invalid/nixpkgs \
+  --generation 42 \
+  --issued-unix <publisher-time> \
+  --expires-unix <issued-plus-seven-days> \
+  --target-root <publication-staging> \
+  --output <publication-staging>/manifest.json
+```
+
+V1 refresh is whole-index. The manifest marks the newest twelve revisions per
+system discoverable, keeps older immutable targets addressable by exact
+revision, and expires after seven days. `publish.sh` uploads immutable targets
+and signatures first, then the manifest. Its signer and uploader must reject a
+changed remote object. Clients persist the highest accepted manifest generation
+and reject rollback or an equal-generation fork; an expired manifest blocks new
+index resolution but does not invalidate an already admitted Hangar closure.
 
 ## Coverage and retention
 

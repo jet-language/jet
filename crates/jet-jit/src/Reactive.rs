@@ -126,7 +126,10 @@ fn live_index(handle: i64) -> Option<usize> {
     usize::try_from(handle).ok()?.checked_sub(1)
 }
 
-fn live_query<'a>(rt: &'a crate::runtime_host::JitRuntime, handle: i64) -> Option<&'a JetLiveQuery> {
+fn live_query<'a>(
+    rt: &'a crate::runtime_host::JitRuntime,
+    handle: i64,
+) -> Option<&'a JetLiveQuery> {
     live_index(handle)
         .and_then(|index| rt.reactive.live_queries.get(index))
         .and_then(Option::as_ref)
@@ -136,7 +139,9 @@ fn jet_jit_app_live(footprint: i64, initial: i64) -> i64 {
     with_rt(|rt| {
         let footprint = rt.heap.clone_string(footprint).unwrap_or_default();
         let initial = rt.heap.clone_string(initial).unwrap_or_default();
-        rt.reactive.live_queries.push(Some(jet_app_live(footprint, initial)));
+        rt.reactive
+            .live_queries
+            .push(Some(jet_app_live(footprint, initial)));
         rt.reactive.live_queries.len() as i64
     })
 }
@@ -144,7 +149,9 @@ fn jet_jit_app_live(footprint: i64, initial: i64) -> i64 {
 fn jet_jit_app_subscribe(source: i64) -> i64 {
     with_rt(|rt| {
         let source = rt.heap.clone_string(source).unwrap_or_default();
-        rt.reactive.live_queries.push(Some(jet_app_subscribe(source)));
+        rt.reactive
+            .live_queries
+            .push(Some(jet_app_subscribe(source)));
         rt.reactive.live_queries.len() as i64
     })
 }
@@ -190,7 +197,9 @@ fn jet_jit_app_signal_push(query: i64, payload: i64) -> i64 {
 fn jet_jit_app_live_get(query: i64) -> i64 {
     with_rt(|rt| {
         let Some(query) = live_query(rt, query).cloned() else {
-            return rt.heap.alloc_string("LiveError(live query is closed)".to_string());
+            return rt
+                .heap
+                .alloc_string("LiveError(live query is closed)".to_string());
         };
         rt.heap.alloc_string(jet_app_live_get(&query))
     })
@@ -221,9 +230,7 @@ where
 
 fn jet_jit_reactive_signal(init: i64) -> i64 {
     with_rt(|rt| {
-        rt.reactive
-            .signals
-            .push(reactive_rt::JetSignal::new(init));
+        rt.reactive.signals.push(reactive_rt::JetSignal::new(init));
         rt.reactive.signals.len() as i64
     })
 }
@@ -248,14 +255,7 @@ fn jet_jit_reactive_set(handle: i64, value: i64) {
     });
 }
 
-fn jet_jit_reactive_derived(
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-) -> i64 {
+fn jet_jit_reactive_derived(fn_ptr: i64, n_caps: i64, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
     let cb = JitCb {
         fn_ptr: fn_ptr as u64,
         caps: [c0, c1, c2, c3],
@@ -278,14 +278,7 @@ fn jet_jit_reactive_derived_get(handle: i64) -> i64 {
     })
 }
 
-fn jet_jit_reactive_effect(
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-) -> i64 {
+fn jet_jit_reactive_effect(fn_ptr: i64, n_caps: i64, c0: i64, c1: i64, c2: i64, c3: i64) -> i64 {
     let cb = JitCb {
         fn_ptr: fn_ptr as u64,
         caps: [c0, c1, c2, c3],
@@ -298,14 +291,7 @@ fn jet_jit_reactive_effect(
     })
 }
 
-fn jet_jit_reactive_effect_rooted(
-    fn_ptr: i64,
-    n_caps: i64,
-    c0: i64,
-    c1: i64,
-    c2: i64,
-    c3: i64,
-) {
+fn jet_jit_reactive_effect_rooted(fn_ptr: i64, n_caps: i64, c0: i64, c1: i64, c2: i64, c3: i64) {
     let cb = JitCb {
         fn_ptr: fn_ptr as u64,
         caps: [c0, c1, c2, c3],
@@ -557,7 +543,12 @@ fn jet_jit_hook_on_priority(
         n_caps: n_caps.clamp(0, 4) as u8,
     };
     with_rt(|rt| {
-        let Some(hook) = rt.reactive.hooks.get(hook.saturating_sub(1) as usize).cloned() else {
+        let Some(hook) = rt
+            .reactive
+            .hooks
+            .get(hook.saturating_sub(1) as usize)
+            .cloned()
+        else {
             return;
         };
         let Some(scope) = rt
@@ -582,7 +573,9 @@ fn jet_jit_hook_on_priority(
             }
             .invoke_i64();
             Concurrency::with_runtime_mut(|rt| {
-                rt.heap.clone_string(sid).unwrap_or_else(|| format!("seen {n}"))
+                rt.heap
+                    .clone_string(sid)
+                    .unwrap_or_else(|| format!("seen {n}"))
             })
         });
     });
@@ -605,9 +598,11 @@ fn jet_jit_hook_run(hook: i64, payload: i64, fallback: i64) -> i64 {
 fn jet_jit_decision_hook_new(policy: i64) -> i64 {
     let _ = policy; // HookPolicy.FirstCancelElseTransform — default for example
     with_rt(|rt| {
-        rt.reactive.decision_hooks.push(reactive_rt::JetDecisionHook::new(
-            reactive_rt::JetHookPolicy::FirstCancelElseTransform,
-        ));
+        rt.reactive
+            .decision_hooks
+            .push(reactive_rt::JetDecisionHook::new(
+                reactive_rt::JetHookPolicy::FirstCancelElseTransform,
+            ));
         rt.reactive.decision_hooks.len() as i64
     })
 }
@@ -927,11 +922,6 @@ host_fns! {
     app_live_show: "jet_jit_app_live_show" => jet_jit_app_live_show: unary;
     app_live_stats: "jet_jit_app_live_stats" => jet_jit_app_live_stats: nullary;
 }
-
-
-
-
-
 
 #[allow(dead_code)]
 fn _arc_keepalive() {

@@ -1,12 +1,8 @@
-
 use jet_foundation::MemSentry::{jet_sentry_check, jet_sentry_reset, jet_sentry_scope};
 
 #[test]
 fn dev_sentry_faults_feed_the_shared_memory_ledger_without_engine_policy() {
-    let root = std::env::temp_dir().join(format!(
-        "jet_sentry_ledger_{}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("jet_sentry_ledger_{}", std::process::id()));
     let ledger = root.join("ledger.jsonl");
     std::fs::create_dir_all(&root).unwrap();
     std::env::set_var("JET_MEMORY_LEDGER", &ledger);

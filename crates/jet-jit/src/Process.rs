@@ -313,9 +313,8 @@ fn jet_jit_process_run(cmd_list: i64) -> i64 {
 
 fn jet_jit_process_run_with_authority(cmd_list: i64, _authority: i64) -> i64 {
     let spec = process_prelude::spec_new(clone_string_list(cmd_list));
-    let authority_wire = Concurrency::with_runtime_mut(|rt| {
-        crate::Collections::authority_wire(rt, _authority)
-    });
+    let authority_wire =
+        Concurrency::with_runtime_mut(|rt| crate::Collections::authority_wire(rt, _authority));
     let spec = process_prelude::spec_under_wire(spec, &authority_wire);
     match process_prelude::spec_run(&spec) {
         Ok(result) => outcome_to_result(result),
@@ -371,7 +370,9 @@ fn jet_jit_process_spec_output_limit(spec: i64, limit: i64) -> i64 {
 
 fn jet_jit_process_spec_cpu_time_limit(spec: i64, timeout: i64) -> i64 {
     let timeout = process_duration(timeout);
-    update_spec(spec, |spec| process_prelude::spec_cpu_time_limit(spec, &timeout))
+    update_spec(spec, |spec| {
+        process_prelude::spec_cpu_time_limit(spec, &timeout)
+    })
 }
 
 fn jet_jit_process_spec_memory_limit(spec: i64, limit: i64) -> i64 {
@@ -379,7 +380,9 @@ fn jet_jit_process_spec_memory_limit(spec: i64, limit: i64) -> i64 {
 }
 
 fn jet_jit_process_spec_open_file_limit(spec: i64, limit: i64) -> i64 {
-    update_spec(spec, |spec| process_prelude::spec_open_file_limit(spec, limit))
+    update_spec(spec, |spec| {
+        process_prelude::spec_open_file_limit(spec, limit)
+    })
 }
 
 fn jet_jit_process_spec_run(spec: i64) -> i64 {
@@ -403,9 +406,8 @@ fn jet_jit_process_spec_run_checked(spec: i64) -> i64 {
 }
 
 fn jet_jit_process_spec_under(spec: i64, authority: i64) -> i64 {
-    let authority_wire = Concurrency::with_runtime_mut(|rt| {
-        crate::Collections::authority_wire(rt, authority)
-    });
+    let authority_wire =
+        Concurrency::with_runtime_mut(|rt| crate::Collections::authority_wire(rt, authority));
     update_spec(spec, |spec| {
         process_prelude::spec_under_wire(spec, &authority_wire)
     })
@@ -650,9 +652,7 @@ fn process_child_unit(
     }
     let idx = (child as usize).saturating_sub(1);
     let result = Concurrency::with_runtime_mut(|rt| {
-        rt.process_children
-            .get(idx)
-            .map(|child| operation(child))
+        rt.process_children.get(idx).map(|child| operation(child))
     });
     match result {
         Some(Ok(())) => result_ok(0),

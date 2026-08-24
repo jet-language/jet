@@ -1,57 +1,57 @@
+use super::core_types::json_ty;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::suggest_field;
 use crate::Syntax;
 use crate::AST::Type;
-use super::core_types::json_ty;
 impl<'a> Checker<'a> {
-        pub(crate) fn check_core_json_lit(
-            &mut self,
-            variant: &str,
-            args: &mut [crate::AST::CallArg],
-            span: Span,
-        ) -> Option<Type> {
-            let json = json_ty();
-            let expected = match variant {
-                "Null" => Vec::new(),
-                "Bool" => vec![Type::Bool],
-                "Int" => vec![Type::Int],
-                "Float" => vec![Type::Float],
-                "Text" => vec![Type::String],
-                "Array" => vec![Type::List(Box::new(json.clone()))],
-                "Object" => vec![Type::Map {
-                    key: Box::new(Type::String),
-                    key_span: None,
-                    value: Box::new(json.clone()),
-                }],
-                _ => {
-                    // No typed edit here: this dynamic enum literal exposes
-                    // only the whole literal span, so replacement would erase
-                    // its type and payload.
-                    let candidates = ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"]
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>();
-                    let mut fix = "check the variant name".to_string();
-                    if let Some(s) = suggest_field(variant, &candidates) {
-                        fix = format!("did you mean `{}`?", s);
-                    }
-                    self.diags.push(Diagnostic::error(
-                        "E0304",
-                        format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
-                        "the dynamic `DataTree` value exposes Null/Bool/Int/Float/Text/Array/Object"
-                            .to_string(),
-                        fix,
-                        Some(span),
-                    ));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return Some(json);
+    pub(crate) fn check_core_json_lit(
+        &mut self,
+        variant: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let json = json_ty();
+        let expected = match variant {
+            "Null" => Vec::new(),
+            "Bool" => vec![Type::Bool],
+            "Int" => vec![Type::Int],
+            "Float" => vec![Type::Float],
+            "Text" => vec![Type::String],
+            "Array" => vec![Type::List(Box::new(json.clone()))],
+            "Object" => vec![Type::Map {
+                key: Box::new(Type::String),
+                key_span: None,
+                value: Box::new(json.clone()),
+            }],
+            _ => {
+                // No typed edit here: this dynamic enum literal exposes
+                // only the whole literal span, so replacement would erase
+                // its type and payload.
+                let candidates = ["Null", "Bool", "Int", "Float", "Text", "Array", "Object"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
+                let mut fix = "check the variant name".to_string();
+                if let Some(s) = suggest_field(variant, &candidates) {
+                    fix = format!("did you mean `{}`?", s);
                 }
-            };
-            if args.len() != expected.len() {
                 self.diags.push(Diagnostic::error(
+                    "E0304",
+                    format!("`{}` has no variant `{}`", Syntax::TYPE_DATA, variant),
+                    "the dynamic `DataTree` value exposes Null/Bool/Int/Float/Text/Array/Object"
+                        .to_string(),
+                    fix,
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(json);
+            }
+        };
+        if args.len() != expected.len() {
+            self.diags.push(Diagnostic::error(
                     "E0306",
                     format!(
                         "`{}.{}` expects {} value{}, got {}",
@@ -65,62 +65,62 @@ impl<'a> Checker<'a> {
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
-            }
-            for (i, arg) in args.iter_mut().enumerate() {
-                if let Some(want) = expected.get(i) {
-                    self.expect_core_arg_consuming(variant, i, want, arg);
-                } else {
-                    self.infer(&mut arg.expr);
-                }
-            }
-            Some(json)
         }
-    
-        /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)`
-        /// — the tagged SQL parameter/column value construction. Mirrors
-        /// `check_core_json_lit` exactly (same dynamic-value mechanism, SQL-shaped
-        /// variants); `Int` stays `Type::Int` (64-bit), never widened through `Float`.
-        pub(crate) fn check_core_dbvalue_lit(
-            &mut self,
-            variant: &str,
-            args: &mut [crate::AST::CallArg],
-            span: Span,
-        ) -> Option<Type> {
-            let dbvalue = Type::Named(Syntax::TYPE_DB_VALUE.to_string());
-            let expected = match variant {
-                "Null" => Vec::new(),
-                "Int" => vec![Type::Int],
-                "Float" => vec![Type::Float],
-                "Text" => vec![Type::String],
-                "Bool" => vec![Type::Bool],
-                _ => {
-                    // No typed edit here: this dynamic enum literal exposes
-                    // only the whole literal span, so replacement would erase
-                    // its type and payload.
-                    let candidates = ["Null", "Int", "Float", "Text", "Bool"]
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect::<Vec<_>>();
-                    let mut fix = "check the variant name".to_string();
-                    if let Some(s) = suggest_field(variant, &candidates) {
-                        fix = format!("did you mean `{}`?", s);
-                    }
-                    self.diags.push(Diagnostic::error(
-                        "E0304",
-                        format!("`{}` has no variant `{}`", Syntax::TYPE_DB_VALUE, variant),
-                        "`DBValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool"
-                            .to_string(),
-                        fix,
-                        Some(span),
-                    ));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    return Some(dbvalue);
+        for (i, arg) in args.iter_mut().enumerate() {
+            if let Some(want) = expected.get(i) {
+                self.expect_core_arg_consuming(variant, i, want, arg);
+            } else {
+                self.infer(&mut arg.expr);
+            }
+        }
+        Some(json)
+    }
+
+    /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)`
+    /// — the tagged SQL parameter/column value construction. Mirrors
+    /// `check_core_json_lit` exactly (same dynamic-value mechanism, SQL-shaped
+    /// variants); `Int` stays `Type::Int` (64-bit), never widened through `Float`.
+    pub(crate) fn check_core_dbvalue_lit(
+        &mut self,
+        variant: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let dbvalue = Type::Named(Syntax::TYPE_DB_VALUE.to_string());
+        let expected = match variant {
+            "Null" => Vec::new(),
+            "Int" => vec![Type::Int],
+            "Float" => vec![Type::Float],
+            "Text" => vec![Type::String],
+            "Bool" => vec![Type::Bool],
+            _ => {
+                // No typed edit here: this dynamic enum literal exposes
+                // only the whole literal span, so replacement would erase
+                // its type and payload.
+                let candidates = ["Null", "Int", "Float", "Text", "Bool"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>();
+                let mut fix = "check the variant name".to_string();
+                if let Some(s) = suggest_field(variant, &candidates) {
+                    fix = format!("did you mean `{}`?", s);
                 }
-            };
-            if args.len() != expected.len() {
                 self.diags.push(Diagnostic::error(
+                    "E0304",
+                    format!("`{}` has no variant `{}`", Syntax::TYPE_DB_VALUE, variant),
+                    "`DBValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool"
+                        .to_string(),
+                    fix,
+                    Some(span),
+                ));
+                for a in args.iter_mut() {
+                    self.infer(&mut a.expr);
+                }
+                return Some(dbvalue);
+            }
+        };
+        if args.len() != expected.len() {
+            self.diags.push(Diagnostic::error(
                     "E0306",
                     format!(
                         "`{}.{}` expects {} value{}, got {}",
@@ -134,15 +134,14 @@ impl<'a> Checker<'a> {
                     "check the variant payload".to_string(),
                     Some(span),
                 ));
-            }
-            for (i, arg) in args.iter_mut().enumerate() {
-                if let Some(want) = expected.get(i) {
-                    self.expect_core_arg_consuming(variant, i, want, arg);
-                } else {
-                    self.infer(&mut arg.expr);
-                }
-            }
-            Some(dbvalue)
         }
-    
+        for (i, arg) in args.iter_mut().enumerate() {
+            if let Some(want) = expected.get(i) {
+                self.expect_core_arg_consuming(variant, i, want, arg);
+            } else {
+                self.infer(&mut arg.expr);
+            }
+        }
+        Some(dbvalue)
+    }
 }

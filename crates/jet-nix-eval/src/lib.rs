@@ -17,8 +17,8 @@
 
 extern crate alloc;
 
-mod JSON;
 mod Evaluator;
+mod JSON;
 
 mod Authority {
     #![allow(dead_code)] // Ordered slices B-F consume this authority.
@@ -362,13 +362,22 @@ pub enum EvaluationError {
 impl fmt::Display for EvaluationError {
     fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InputTooLarge => write!(output, "foreign flake exceeds the 1 MiB evaluator limit"),
-            Self::UnsupportedSystem(system) => {
-                write!(output, "native flake evaluation does not support system `{system}`")
+            Self::InputTooLarge => {
+                write!(output, "foreign flake exceeds the 1 MiB evaluator limit")
             }
-            Self::Unsupported(reason) => write!(output, "unsupported foreign flake expression: {reason}"),
+            Self::UnsupportedSystem(system) => {
+                write!(
+                    output,
+                    "native flake evaluation does not support system `{system}`"
+                )
+            }
+            Self::Unsupported(reason) => {
+                write!(output, "unsupported foreign flake expression: {reason}")
+            }
             Self::Invalid(reason) => write!(output, "invalid foreign flake expression: {reason}"),
-            Self::ResourceLimit(reason) => write!(output, "foreign flake evaluator limit exceeded: {reason}"),
+            Self::ResourceLimit(reason) => {
+                write!(output, "foreign flake evaluator limit exceeded: {reason}")
+            }
         }
     }
 }
@@ -603,7 +612,11 @@ impl ValidatedOracleManifest {
         }
 
         let nix = child_object(root, "nix")?;
-        exact_keys(nix, &["version", "tag_object", "source_commit", "builds"], "nix")?;
+        exact_keys(
+            nix,
+            &["version", "tag_object", "source_commit", "builds"],
+            "nix",
+        )?;
         let builds_object = child_object(nix, "builds")?;
         let mut builds = BTreeMap::new();
         for (system, value) in builds_object {
@@ -645,7 +658,11 @@ impl ValidatedOracleManifest {
     fn validate_pin(&self) -> Result<()> {
         exact("nix.version", &self.nix_version, NIX_VERSION)?;
         exact("nix.tag_object", &self.nix_tag_object, NIX_TAG_OBJECT)?;
-        exact("nix.source_commit", &self.nix_source_commit, NIX_SOURCE_COMMIT)?;
+        exact(
+            "nix.source_commit",
+            &self.nix_source_commit,
+            NIX_SOURCE_COMMIT,
+        )?;
         exact("nixpkgs.rev", &self.nixpkgs_revision, NIXPKGS_REVISION)?;
         if self.nixpkgs_last_modified != NIXPKGS_LAST_MODIFIED {
             return Err(BoundaryError::Manifest(format!(
@@ -843,9 +860,7 @@ fn optional_sri(parent: &BTreeMap<String, JSONValue>, key: &'static str) -> Resu
         JSONValue::Null => Ok(None),
         JSONValue::Str(value) => {
             canonical_sha256_sri(value).map_err(|_| {
-                BoundaryError::Manifest(format!(
-                    "`{key}` must be canonical SHA-256 SRI"
-                ))
+                BoundaryError::Manifest(format!("`{key}` must be canonical SHA-256 SRI"))
             })?;
             Ok(Some(value.clone()))
         }
@@ -855,11 +870,7 @@ fn optional_sri(parent: &BTreeMap<String, JSONValue>, key: &'static str) -> Resu
     }
 }
 
-fn exact_keys(
-    parent: &BTreeMap<String, JSONValue>,
-    expected: &[&str],
-    path: &str,
-) -> Result<()> {
+fn exact_keys(parent: &BTreeMap<String, JSONValue>, expected: &[&str], path: &str) -> Result<()> {
     let actual: Vec<&str> = parent.keys().map(String::as_str).collect();
     let mut expected = expected.to_vec();
     expected.sort_unstable();
@@ -884,12 +895,7 @@ fn exact(field: &str, actual: &str, expected: &str) -> Result<()> {
     Ok(())
 }
 
-fn compare_identity(
-    system: &str,
-    field: &'static str,
-    expected: &str,
-    actual: &str,
-) -> Result<()> {
+fn compare_identity(system: &str, field: &'static str, expected: &str, actual: &str) -> Result<()> {
     if expected != actual {
         return Err(BoundaryError::OracleIdentityMismatch {
             system: system.to_string(),

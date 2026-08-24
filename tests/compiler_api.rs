@@ -52,8 +52,14 @@ fn single_bar_is_alternatives_only_and_flow_pipe_has_no_foreign_guess() {
 
     let pipe_closure = jet::Compiler::parse_source("fn run() {\n    f :: |x| x + 1\n}\n");
     assert!(
-        pipe_closure.diagnostics.iter().any(|diag| diag.code == "E0003")
-            && pipe_closure.diagnostics.iter().all(|diag| diag.code != "E0033"),
+        pipe_closure
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "E0003")
+            && pipe_closure
+                .diagnostics
+                .iter()
+                .all(|diag| diag.code != "E0033"),
         "pipe-closure-shaped input must be ordinary E0003: {:?}",
         pipe_closure.diagnostics
     );
@@ -80,9 +86,8 @@ fn single_bar_is_alternatives_only_and_flow_pipe_has_no_foreign_guess() {
         alternatives.diagnostics
     );
 
-    let boolean_or = jet::Compiler::parse_source(
-        "fn run() {\n    if true || false { print(\"ok\") }\n}\n",
-    );
+    let boolean_or =
+        jet::Compiler::parse_source("fn run() {\n    if true || false { print(\"ok\") }\n}\n");
     assert!(
         boolean_or.diagnostics.is_empty(),
         "`||` keeps its boolean-or meaning: {:?}",
@@ -145,7 +150,9 @@ fn compiler_api_json_mirrors_are_schema_versioned() {
     let source = "fn run() { print(\"ok\") }\n";
     let lex = jet::Compiler::lex_source_json(source);
     assert!(lex.starts_with("{\"schema\":\"jet.report/v1\""));
-    assert!(lex.contains("\"compiler\":{\"schema_version\":1,\"api_version\":1,\"operation\":\"lex\""));
+    assert!(
+        lex.contains("\"compiler\":{\"schema_version\":1,\"api_version\":1,\"operation\":\"lex\"")
+    );
     assert!(lex.contains("\"tokens\":["));
     let parse = jet::Compiler::parse_source_json(source);
     assert!(parse.contains("\"operation\":\"parse\""));
@@ -155,10 +162,11 @@ fn compiler_api_json_mirrors_are_schema_versioned() {
     let check = jet::Compiler::check_file_json(&path);
     assert!(check.contains("\"operation\":\"check\""));
     assert!(check.contains("\"semantic_index\":{\"schema_version\":1"));
-    assert!(!check.contains("semantic_index\\\""), "semantic facts must not be JSON strings");
-    let map = jet::Compiler::source_map_json(
-        "// jet:source-map source=input.jet\n// jet:line 3\n",
+    assert!(
+        !check.contains("semantic_index\\\""),
+        "semantic facts must not be JSON strings"
     );
+    let map = jet::Compiler::source_map_json("// jet:source-map source=input.jet\n// jet:line 3\n");
     assert!(map.contains("\"operation\":\"source_map\""));
     assert!(map.contains("\"generated_line\":2"));
 }
@@ -210,7 +218,10 @@ fn compiler_check_failure_keeps_semantic_index_absent() {
             type_name: "CompilerSyntaxTree".to_string(),
             fields: vec![
                 ("schema_version".to_string(), jet::AST::CtValue::Int(1)),
-                ("source".to_string(), jet::AST::CtValue::Str(source.to_string())),
+                (
+                    "source".to_string(),
+                    jet::AST::CtValue::Str(source.to_string()),
+                ),
             ],
         }],
         jet::Diagnostics::Span::new(0, 0),
@@ -230,7 +241,11 @@ fn compiler_api_cli_returns_the_same_json_envelope() {
         .args(["inspect", "compiler", "parse", path.to_str().unwrap()])
         .output()
         .expect("run compiler inspection command");
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"schema\":\"jet.report/v1\""));
     assert!(stdout.contains("\"operation\":\"parse\""));
@@ -274,7 +289,9 @@ fn compiler_api_is_compile_time_only() {
     )
     .expect_err("the compiler API must not become a runtime capability");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0956"),
         "expected compile-time-only diagnostic, got {diagnostics:?}"
     );
     assert!(
@@ -309,7 +326,10 @@ fn compiler_api_failures_are_typed_and_schema_checked() {
         type_name: "CompilerSyntaxTree".to_string(),
         fields: vec![
             ("schema_version".to_string(), jet::AST::CtValue::Int(999)),
-            ("source".to_string(), jet::AST::CtValue::Str("fn run() {}".to_string())),
+            (
+                "source".to_string(),
+                jet::AST::CtValue::Str("fn run() {}".to_string()),
+            ),
         ],
     };
     let stale = jet::Compiler::eval_core_call(
@@ -320,7 +340,10 @@ fn compiler_api_failures_are_typed_and_schema_checked() {
     )
     .unwrap()
     .unwrap();
-    assert!(matches!(stale, jet::AST::CtValue::Failed(jet::AST::CtReport::Told(_))));
+    assert!(matches!(
+        stale,
+        jet::AST::CtValue::Failed(jet::AST::CtReport::Told(_))
+    ));
 }
 
 #[test]
@@ -342,7 +365,9 @@ fn an_unselected_runtime_named_build_cannot_use_the_compiler_api() {
     )
     .expect_err("an ordinary runtime function named build must not gain build authority");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0956"),
         "expected compile-time-only diagnostic, got {diagnostics:?}"
     );
 }

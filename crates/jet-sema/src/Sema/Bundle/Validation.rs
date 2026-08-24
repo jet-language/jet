@@ -16,10 +16,16 @@ pub(super) fn qualified_effect_facts(
     jet_foundation::Facts::ReachabilityResult,
 ) {
     let mut locations = HashMap::<String, Vec<String>>::new();
-    let aliases = modules.iter().map(|(alias, _)| alias.as_str()).collect::<HashSet<_>>();
+    let aliases = modules
+        .iter()
+        .map(|(alias, _)| alias.as_str())
+        .collect::<HashSet<_>>();
     for (alias, summaries) in modules {
         for key in summaries.keys() {
-            locations.entry(key.clone()).or_default().push(format!("{alias}::{key}"));
+            locations
+                .entry(key.clone())
+                .or_default()
+                .push(format!("{alias}::{key}"));
         }
     }
     let mut qualified = HashMap::new();
@@ -28,12 +34,21 @@ pub(super) fn qualified_effect_facts(
         for (key, summary) in summaries {
             let mut summary = summary.clone();
             let resolve_edge = |edge: &String| {
-                if edge == "__jet_panic__" { return edge.clone(); }
-                if local_keys.contains(edge) { return format!("{alias}::{edge}"); }
-                if let Some((module, symbol)) = edge.split_once('.') {
-                    if aliases.contains(module) { return format!("{module}::{symbol}"); }
+                if edge == "__jet_panic__" {
+                    return edge.clone();
                 }
-                locations.get(edge).and_then(|values| (values.len() == 1).then(|| values[0].clone())).unwrap_or_else(|| edge.clone())
+                if local_keys.contains(edge) {
+                    return format!("{alias}::{edge}");
+                }
+                if let Some((module, symbol)) = edge.split_once('.') {
+                    if aliases.contains(module) {
+                        return format!("{module}::{symbol}");
+                    }
+                }
+                locations
+                    .get(edge)
+                    .and_then(|values| (values.len() == 1).then(|| values[0].clone()))
+                    .unwrap_or_else(|| edge.clone())
             };
             summary.edges = summary.edges.iter().map(&resolve_edge).collect();
             for region in &mut summary.regions {
@@ -92,7 +107,10 @@ mod effect_qualification_tests {
             ..Default::default()
         };
         let modules = vec![
-            ("main".to_string(), HashMap::from([("root".to_string(), root)])),
+            (
+                "main".to_string(),
+                HashMap::from([("root".to_string(), root)]),
+            ),
             (
                 "left".to_string(),
                 HashMap::from([("same".to_string(), EffectSummary::default())]),
@@ -132,16 +150,32 @@ pub(super) fn taint_check_item(
     match item {
         Item::Func(f) => {
             let new = check_func_taint(
-                f, None, scrubbers, facts, returns, return_types, field_tags, field_types,
-                core_imports, diags.as_slice(),
+                f,
+                None,
+                scrubbers,
+                facts,
+                returns,
+                return_types,
+                field_tags,
+                field_types,
+                core_imports,
+                diags.as_slice(),
             );
             diags.extend(new);
         }
         Item::Impl(i) => {
             for m in &i.methods {
                 let new = check_func_taint(
-                    m, Some(&i.type_name), scrubbers, facts, returns, return_types, field_tags,
-                    field_types, core_imports, diags.as_slice(),
+                    m,
+                    Some(&i.type_name),
+                    scrubbers,
+                    facts,
+                    returns,
+                    return_types,
+                    field_tags,
+                    field_types,
+                    core_imports,
+                    diags.as_slice(),
                 );
                 diags.extend(new);
             }
@@ -149,16 +183,32 @@ pub(super) fn taint_check_item(
         Item::Struct(s) => {
             for m in &s.methods {
                 let new = check_func_taint(
-                    m, Some(&s.name), scrubbers, facts, returns, return_types, field_tags,
-                    field_types, core_imports, diags.as_slice(),
+                    m,
+                    Some(&s.name),
+                    scrubbers,
+                    facts,
+                    returns,
+                    return_types,
+                    field_tags,
+                    field_types,
+                    core_imports,
+                    diags.as_slice(),
                 );
                 diags.extend(new);
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
                     let new = check_func_taint(
-                        m, Some(&s.name), scrubbers, facts, returns, return_types, field_tags,
-                        field_types, core_imports, diags.as_slice(),
+                        m,
+                        Some(&s.name),
+                        scrubbers,
+                        facts,
+                        returns,
+                        return_types,
+                        field_tags,
+                        field_types,
+                        core_imports,
+                        diags.as_slice(),
                     );
                     diags.extend(new);
                 }
@@ -167,8 +217,16 @@ pub(super) fn taint_check_item(
         Item::Enum(e) => {
             for m in &e.methods {
                 let new = check_func_taint(
-                    m, Some(&e.name), scrubbers, facts, returns, return_types, field_tags,
-                    field_types, core_imports, diags.as_slice(),
+                    m,
+                    Some(&e.name),
+                    scrubbers,
+                    facts,
+                    returns,
+                    return_types,
+                    field_tags,
+                    field_types,
+                    core_imports,
+                    diags.as_slice(),
                 );
                 diags.extend(new);
             }
@@ -320,7 +378,9 @@ fn type_mentions_encoding_surface(ty: &Type) -> bool {
             params.iter().any(type_mentions_encoding_surface)
                 || ret.as_deref().is_some_and(type_mentions_encoding_surface)
         }
-        Type::Tuple(fields) => fields.iter().any(|(_, t)| type_mentions_encoding_surface(t)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, t)| type_mentions_encoding_surface(t)),
         Type::Union(members) => members.iter().any(type_mentions_encoding_surface),
         Type::Int
         | Type::Float
@@ -336,7 +396,9 @@ fn type_mentions_encoding_surface(ty: &Type) -> bool {
 
 /// A function/method signature (params + return) names an encoding surface type.
 fn func_sig_mentions_encoding_surface(f: &Func) -> bool {
-    f.params.iter().any(|p| type_mentions_encoding_surface(&p.ty))
+    f.params
+        .iter()
+        .any(|p| type_mentions_encoding_surface(&p.ty))
         || f.return_type
             .as_ref()
             .is_some_and(type_mentions_encoding_surface)
@@ -360,14 +422,18 @@ fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule
     module.items.iter().any(|item| match item {
         Item::Func(f) => func_sig_mentions_encoding_surface(f),
         Item::Struct(s) => {
-            s.fields.iter().any(|f| type_mentions_encoding_surface(&f.ty))
+            s.fields
+                .iter()
+                .any(|f| type_mentions_encoding_surface(&f.ty))
                 || s.methods.iter().any(func_sig_mentions_encoding_surface)
                 || s.trait_impls
                     .iter()
                     .any(|b| b.methods.iter().any(func_sig_mentions_encoding_surface))
         }
         Item::Enum(e) => {
-            e.variants.iter().any(|v| variant_payload_mentions(&v.payload))
+            e.variants
+                .iter()
+                .any(|v| variant_payload_mentions(&v.payload))
                 || e.methods.iter().any(func_sig_mentions_encoding_surface)
                 || e.trait_impls
                     .iter()
@@ -380,8 +446,12 @@ fn module_annotations_mention_encoding_surface(module: &crate::AST::LoadedModule
                     .any(|(_, _, ty)| type_mentions_encoding_surface(ty))
         }
         Item::Trait(t) => t.methods.iter().any(|m| {
-            m.params.iter().any(|p| type_mentions_encoding_surface(&p.ty))
-                || m.return_type.as_ref().is_some_and(type_mentions_encoding_surface)
+            m.params
+                .iter()
+                .any(|p| type_mentions_encoding_surface(&p.ty))
+                || m.return_type
+                    .as_ref()
+                    .is_some_and(type_mentions_encoding_surface)
         }),
         Item::TypeAlias(a) => type_mentions_encoding_surface(&a.target),
         _ => false,
@@ -548,8 +618,7 @@ fn author_facing_diagnostics(
     mut diagnostics: Vec<Diagnostic>,
 ) -> Vec<Diagnostic> {
     if compiler_generated {
-        diagnostics
-            .retain(|d| matches!(d.severity, crate::Diagnostics::Severity::Error));
+        diagnostics.retain(|d| matches!(d.severity, crate::Diagnostics::Severity::Error));
     }
     diagnostics
 }
@@ -572,25 +641,17 @@ fn callable_policy_targets(items: &[crate::AST::Item]) -> Vec<crate::AST::Func> 
     let mut targets = Vec::new();
     for item in items {
         match item {
-            Item::Func(function) if has_callable_policy(function) => {
-                targets.push(function.clone())
-            }
+            Item::Func(function) if has_callable_policy(function) => targets.push(function.clone()),
             Item::Struct(definition) => {
                 collect_callable_policy_functions(definition.methods.clone(), &mut targets);
                 for implementation in &definition.trait_impls {
-                    collect_callable_policy_functions(
-                        implementation.methods.clone(),
-                        &mut targets,
-                    );
+                    collect_callable_policy_functions(implementation.methods.clone(), &mut targets);
                 }
             }
             Item::Enum(definition) => {
                 collect_callable_policy_functions(definition.methods.clone(), &mut targets);
                 for implementation in &definition.trait_impls {
-                    collect_callable_policy_functions(
-                        implementation.methods.clone(),
-                        &mut targets,
-                    );
+                    collect_callable_policy_functions(implementation.methods.clone(), &mut targets);
                 }
             }
             Item::Impl(implementation) => {
@@ -645,9 +706,7 @@ fn collect_callable_policy_apply_uses(
                 let policy_names = chain
                     .policies
                     .iter()
-                    .filter(|policy| {
-                        !crate::AST::CallablePolicyChain::is_builtin(&policy.name)
-                    })
+                    .filter(|policy| !crate::AST::CallablePolicyChain::is_builtin(&policy.name))
                     .map(|policy| policy.name.clone())
                     .collect::<Vec<_>>();
                 if policy_names.is_empty() {
@@ -887,22 +946,25 @@ pub(crate) fn check_module_bodies(
             // provenance across a signature exactly like `View`/`ViewMut`.
             Type::Apply { name, args }
                 if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
-                    && args.len() == 1 => true,
+                    && args.len() == 1 =>
+            {
+                true
+            }
             Type::Named(name) => {
                 seen.insert(name.clone())
                     && registry.struct_fields(name).is_some_and(|fields| {
-                        fields.iter().any(|(_, _, field_ty)| {
-                            contains_view(registry, field_ty, seen)
-                        })
+                        fields
+                            .iter()
+                            .any(|(_, _, field_ty)| contains_view(registry, field_ty, seen))
                     })
             }
             Type::Apply { name, args } => {
                 args.iter().any(|arg| contains_view(registry, arg, seen))
                     || (seen.insert(name.clone())
                         && registry.struct_fields(name).is_some_and(|fields| {
-                            fields.iter().any(|(_, _, field_ty)| {
-                                contains_view(registry, field_ty, seen)
-                            })
+                            fields
+                                .iter()
+                                .any(|(_, _, field_ty)| contains_view(registry, field_ty, seen))
                         }))
             }
             Type::Option(inner)
@@ -931,9 +993,12 @@ pub(crate) fn check_module_bodies(
         }
     }
     view_jobs.retain(|job| {
-        job.function.return_type.as_ref().is_some_and(|return_type| {
-            contains_view(&st.registry, return_type, &mut HashSet::new())
-        })
+        job.function
+            .return_type
+            .as_ref()
+            .is_some_and(|return_type| {
+                contains_view(&st.registry, return_type, &mut HashSet::new())
+            })
     });
     view_jobs.sort_by(|left, right| left.key.cmp(&right.key));
     let trait_job_counts = view_jobs.iter().fold(
@@ -948,10 +1013,8 @@ pub(crate) fn check_module_bodies(
         },
     );
     for _ in 0..=view_jobs.len() {
-        let mut trait_candidates = HashMap::<
-            (String, String),
-            Vec<crate::AST::ViewProvenanceMap>,
-        >::new();
+        let mut trait_candidates =
+            HashMap::<(String, String), Vec<crate::AST::ViewProvenanceMap>>::new();
         for job in &view_jobs {
             let mut function = job.function.clone();
             let mut scratch_summaries = HashMap::new();
@@ -1138,7 +1201,10 @@ pub(crate) fn check_module_bodies(
                         // Generated serde methods temporarily carry inherited,
                         // inferred bounds solely for sema. Their Rust generics
                         // belong on the enclosing impl, not on the method.
-                        m.type_params = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) {
+                        m.type_params = if matches!(
+                            block.trait_name.as_str(),
+                            crate::Generics::ENCODE | crate::Generics::DECODE
+                        ) {
                             Vec::new()
                         } else {
                             own_params
@@ -1306,14 +1372,14 @@ pub(crate) fn check_module_bodies(
                     return_type_span: None,
                     return_view_provenance: None,
                     declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+                    gc_return: false,
+                    gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
-                reactive_upgrades: Vec::new(),
+                    reactive_upgrades: Vec::new(),
                     is_replayable: false,
                     replayable_span: None,
                     is_job: false,
@@ -1377,28 +1443,32 @@ pub(crate) fn check_module_bodies(
                             // emits this function's local summary.
                             let previous = summaries.remove(&f.name);
                             let pending_start = pending_diagnostics_out.len();
-                            diags.extend(check_func_body_bundle_scoped(
-                                f,
-                                module_idx,
-                                states,
-                                effect_facts,
-                                None,
-                                &ct_funcs,
-                                &ct_externs,
-                                &ct_base_dir,
-                                &ct_globals,
-                                freestanding,
-                                gates,
-                                summaries,
-                                embed_inputs_out,
-                                global_addr_taken,
-                                no_prelude,
-                                name_ledger,
-                                pending_diagnostics_out,
-                                Some(&cm.name),
-                            ).0);
+                            diags.extend(
+                                check_func_body_bundle_scoped(
+                                    f,
+                                    module_idx,
+                                    states,
+                                    effect_facts,
+                                    None,
+                                    &ct_funcs,
+                                    &ct_externs,
+                                    &ct_base_dir,
+                                    &ct_globals,
+                                    freestanding,
+                                    gates,
+                                    summaries,
+                                    embed_inputs_out,
+                                    global_addr_taken,
+                                    no_prelude,
+                                    name_ledger,
+                                    pending_diagnostics_out,
+                                    Some(&cm.name),
+                                )
+                                .0,
+                            );
                             for pending in &mut pending_diagnostics_out[pending_start..] {
-                                pending.function_key = jet_foundation::Names::member_name(&cm.name, &f.name);
+                                pending.function_key =
+                                    jet_foundation::Names::member_name(&cm.name, &f.name);
                             }
                             if let Some(summary) = summaries.remove(&f.name) {
                                 summaries.insert(
@@ -1437,20 +1507,23 @@ pub(crate) fn check_module_bodies(
                         root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+                        variadic_bound_list: None,
+                        declared_view_from_names: None,
+                        public_label: None,
+                        zone: crate::AST::ParamZone::Either,
                     }],
                     return_type: Some(Type::Named(ec.to_ty.clone())),
                     return_type_span: Some(ec.to_span),
                     return_view_provenance: None,
                     declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+                    gc_return: false,
+                    gc_scope: false,
                     is_unsafe: false,
                     unsafe_reason: None,
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
-                reactive_upgrades: Vec::new(),
+                    reactive_upgrades: Vec::new(),
                     is_replayable: false,
                     replayable_span: None,
                     is_job: false,
@@ -2032,11 +2105,31 @@ fn check_func_body_bundle_scoped(
     for (active, name, span) in [
         (f.is_pure, crate::Syntax::KW_PURE, f.name_span),
         (f.is_sanitizer, crate::Syntax::KW_SANITIZER, f.name_span),
-        (f.is_unsafe, crate::Syntax::KW_UNSAFE, f.unsafe_span.unwrap_or(f.name_span)),
-        (f.is_replayable, crate::Syntax::MARKER_REPLAYABLE, f.replayable_span.unwrap_or(f.name_span)),
-        (f.is_must_use, crate::Syntax::MARKER_MUST_USE, f.must_use_span.unwrap_or(f.name_span)),
-        (f.is_inline, crate::Syntax::MARKER_INLINE, f.inline_span.unwrap_or(f.name_span)),
-        (f.is_inline_always, crate::Syntax::MARKER_INLINE, f.inline_span.unwrap_or(f.name_span)),
+        (
+            f.is_unsafe,
+            crate::Syntax::KW_UNSAFE,
+            f.unsafe_span.unwrap_or(f.name_span),
+        ),
+        (
+            f.is_replayable,
+            crate::Syntax::MARKER_REPLAYABLE,
+            f.replayable_span.unwrap_or(f.name_span),
+        ),
+        (
+            f.is_must_use,
+            crate::Syntax::MARKER_MUST_USE,
+            f.must_use_span.unwrap_or(f.name_span),
+        ),
+        (
+            f.is_inline,
+            crate::Syntax::MARKER_INLINE,
+            f.inline_span.unwrap_or(f.name_span),
+        ),
+        (
+            f.is_inline_always,
+            crate::Syntax::MARKER_INLINE,
+            f.inline_span.unwrap_or(f.name_span),
+        ),
         (f.is_reactive, crate::Syntax::KW_REACTIVE, f.name_span),
     ] {
         if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
@@ -2059,9 +2152,7 @@ fn check_func_body_bundle_scoped(
         // window and the caller may edit through it.
         if let Some(inferred) = f.return_view_provenance.as_ref() {
             for (slot, inferred_prov) in inferred {
-                let Some(declared_prov) = declared
-                    .get(slot)
-                    .or_else(|| declared.get(&Vec::new()))
+                let Some(declared_prov) = declared.get(slot).or_else(|| declared.get(&Vec::new()))
                 else {
                     ck.diags.push(Diagnostic::error(
                         "E2305",
@@ -2140,9 +2231,9 @@ fn check_func_body_bundle_scoped(
                         .iter()
                         .any(|(_, access)| *access == ViewAccess::Write);
                 } else {
-                    declared_prov.mutable = leaves.iter().any(|(path, access)| {
-                        path == slot && *access == ViewAccess::Write
-                    });
+                    declared_prov.mutable = leaves
+                        .iter()
+                        .any(|(path, access)| path == slot && *access == ViewAccess::Write);
                 }
             }
             f.return_view_provenance = Some(merged);
@@ -2151,9 +2242,10 @@ fn check_func_body_bundle_scoped(
         }
     }
     if let Some(owner) = owner_type {
-        if let (Some(signature), Some(provenance)) =
-            (st.registry.method(owner, &f.name), f.return_view_provenance.clone())
-        {
+        if let (Some(signature), Some(provenance)) = (
+            st.registry.method(owner, &f.name),
+            f.return_view_provenance.clone(),
+        ) {
             let _ = signature.return_view_provenance.set(provenance);
         }
     } else {
@@ -2291,8 +2383,12 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Transact { body, .. }
                 | Stmt::Switched { body, .. } => walk(body, names),
-                Stmt::Switch { arms, else_body, .. }
-                | Stmt::ComptimeSwitch { arms, else_body, .. } => {
+                Stmt::Switch {
+                    arms, else_body, ..
+                }
+                | Stmt::ComptimeSwitch {
+                    arms, else_body, ..
+                } => {
                     for arm in arms.iter_mut() {
                         walk(&mut arm.body, names);
                     }
@@ -2339,10 +2435,18 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         effect_bound: (sig.is_pure || sig.is_foreign_thread_safe).then(Vec::new),
         param_contract: (!sig.param_call.is_empty()).then(|| sig.param_call.clone()),
         call_metadata: Some(crate::AST::FunctionCallMetadata {
-            names: sig.param_info.iter().map(|(name, _)| name.clone()).collect(),
+            names: sig
+                .param_info
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect(),
             defaults: sig.defaults.clone(),
             variadic: sig.param_variadic.clone(),
-            conventions: sig.params.iter().map(|(convention, _)| *convention).collect(),
+            conventions: sig
+                .params
+                .iter()
+                .map(|(convention, _)| *convention)
+                .collect(),
             policies: sig.callable_policies.clone(),
         }),
         return_view_provenance: sig.return_view_provenance.get(),
@@ -2359,7 +2463,9 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
                     | (Type::Option(_), Type::Option(_))
                     | (Type::Result { .. }, Type::Result { .. }) => true,
                     (
-                        Type::Apply { name: want_name, .. },
+                        Type::Apply {
+                            name: want_name, ..
+                        },
                         Type::Apply { name: got_name, .. },
                     ) => want_name == got_name,
                     (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
@@ -2415,11 +2521,7 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
                             ) | (
                                 crate::AST::ParamZone::LabelOnly,
                                 crate::AST::ParamZone::LabelOnly | crate::AST::ParamZone::Either
-                            )
-                                | (
-                                    crate::AST::ParamZone::Either,
-                                    crate::AST::ParamZone::Either
-                                )
+                            ) | (crate::AST::ParamZone::Either, crate::AST::ParamZone::Either)
                         );
                         zone_accepts
                             && (*want_zone == crate::AST::ParamZone::PositionalOnly
@@ -2428,9 +2530,7 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
                 )
         }
     };
-    return_compatible
-        && Type::obligations_satisfy(want, got)
-        && contract_compatible
+    return_compatible && Type::obligations_satisfy(want, got) && contract_compatible
 }
 
 #[cfg(test)]
@@ -2449,7 +2549,7 @@ mod callable_contract_tests {
                     .map(|(label, zone)| (label.to_string(), zone))
                     .collect()
             }),
-                call_metadata: None,
+            call_metadata: None,
             return_view_provenance: None,
         }
     }

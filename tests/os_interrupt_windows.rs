@@ -13,7 +13,10 @@ use std::time::{Duration, Instant};
 unsafe extern "system" {
     fn FreeConsole() -> i32;
     fn AllocConsole() -> i32;
-    fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
+    fn SetConsoleCtrlHandler(
+        handler: Option<unsafe extern "system" fn(u32) -> i32>,
+        add: i32,
+    ) -> i32;
     fn GenerateConsoleCtrlEvent(event: u32, process_group: u32) -> i32;
 }
 
@@ -36,16 +39,29 @@ fn run() {
     fs::write(&source, src).unwrap();
     let shown = source.to_string_lossy();
     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, src, &diags))
+        panic!(
+            "front end rejected fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
     });
     let rust = dir.join("interrupt.rs");
     let binary = dir.join("interrupt.exe");
     fs::write(&rust, out.rust).unwrap();
     let built = Command::new("rustc")
-        .args(["--edition", "2021", rust.to_str().unwrap(), "-o", binary.to_str().unwrap()])
+        .args([
+            "--edition",
+            "2021",
+            rust.to_str().unwrap(),
+            "-o",
+            binary.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
-    assert!(built.status.success(), "rustc failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    assert!(
+        built.status.success(),
+        "rustc failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
     binary
 }
 
@@ -61,7 +77,11 @@ fn windows_console_ctrl_c_runs_all_handlers_in_order() {
     unsafe {
         FreeConsole();
         assert_ne!(AllocConsole(), 0, "could not allocate private test console");
-        assert_ne!(SetConsoleCtrlHandler(None, 1), 0, "could not protect test driver");
+        assert_ne!(
+            SetConsoleCtrlHandler(None, 1),
+            0,
+            "could not protect test driver"
+        );
     }
 
     let binary = compile_interrupt_program(&dir);

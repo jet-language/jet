@@ -9,8 +9,7 @@ mod tir_support;
 use std::fs;
 
 use tir_support::{
-    build_and_run, build_and_run_full, have_rustc, run_default_multi,
-    strip_vetted_prelude_modules,
+    build_and_run, build_and_run_full, have_rustc, run_default_multi, strip_vetted_prelude_modules,
 };
 
 fn run_direct(name: &str, src: &str, force_interpreter: bool) -> (i32, String, String) {
@@ -20,18 +19,17 @@ fn run_direct(name: &str, src: &str, force_interpreter: bool) -> (i32, String, S
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
-    let result = match jet::Interpreter::dev_iteration(
-        path.to_str().unwrap(),
-        false,
-        force_interpreter,
-    ) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => (exit_code, stdout, stderr),
-        RunOutcome::Problems(diags) => panic!("direct tier rejected compute view source: {diags:?}"),
-    };
+    let result =
+        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => (exit_code, stdout, stderr),
+            RunOutcome::Problems(diags) => {
+                panic!("direct tier rejected compute view source: {diags:?}")
+            }
+        };
     let _ = fs::remove_dir_all(&dir);
     result
 }
@@ -125,7 +123,10 @@ fn run() {
         "explicit_copy_vs_implicit_clone_aot",
         src,
     );
-    assert_ne!(code, 0, "an implicit Tensor clone must retain shared storage");
+    assert_ne!(
+        code, 0,
+        "an implicit Tensor clone must retain shared storage"
+    );
     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
     assert!(
         stderr.contains("Tensor mutable view requires exclusive backing storage"),
@@ -137,18 +138,30 @@ fn run() {
         "main.jet",
         &[("main.jet", src)],
     );
-    assert_ne!(code, 0, "an implicit Tensor clone must retain shared storage");
+    assert_ne!(
+        code, 0,
+        "an implicit Tensor clone must retain shared storage"
+    );
     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
     assert!(
         stderr.contains("Tensor mutable view requires exclusive backing storage"),
         "resident JIT used the wrong Tensor clone policy:\n{stderr}"
     );
-    assert!(stderr.contains("tier1 native"), "resident rejection left tier1:\n{stderr}");
-    assert!(!stderr.contains("tier0 interp"), "resident rejection entered tier0:\n{stderr}");
+    assert!(
+        stderr.contains("tier1 native"),
+        "resident rejection left tier1:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("tier0 interp"),
+        "resident rejection entered tier0:\n{stderr}"
+    );
 
     jet_jit::reset_jit_trace_for_test();
     let (code, stdout, stderr) = run_direct("compute_tensor_copy_clone_resident", src, false);
-    assert_ne!(code, 0, "an implicit Tensor clone must retain shared storage");
+    assert_ne!(
+        code, 0,
+        "an implicit Tensor clone must retain shared storage"
+    );
     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
     assert!(
         stderr.contains("Tensor mutable view requires exclusive backing storage"),
@@ -158,7 +171,10 @@ fn run() {
 
     let (code, stdout, stderr) =
         run_forced_interpreter("compute_tensor_copy_clone_interpreter", src);
-    assert_ne!(code, 0, "an implicit Tensor clone must retain shared storage");
+    assert_ne!(
+        code, 0,
+        "an implicit Tensor clone must retain shared storage"
+    );
     assert_eq!(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n");
     assert!(
         stderr.contains("Tensor mutable view requires exclusive backing storage"),
@@ -303,11 +319,8 @@ fn run() {
         "empty Tensor window AOT coverage requires rustc; do not skip this proof"
     );
     for (name, src) in cases {
-        let (code, stdout, stderr) = build_and_run_full(
-            "compute_tensor_empty_window_aot",
-            name,
-            src,
-        );
+        let (code, stdout, stderr) =
+            build_and_run_full("compute_tensor_empty_window_aot", name, src);
         assert_ne!(code, 0, "an empty Tensor element operation must fail");
         assert_eq!(stdout, "true\n0\n");
         assert!(
@@ -326,8 +339,14 @@ fn run() {
             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
         );
-        assert!(stderr.contains("tier1 native"), "empty-window case left tier1:\n{stderr}");
-        assert!(!stderr.contains("tier0 interp"), "empty-window case entered tier0:\n{stderr}");
+        assert!(
+            stderr.contains("tier1 native"),
+            "empty-window case left tier1:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("tier0 interp"),
+            "empty-window case entered tier0:\n{stderr}"
+        );
 
         jet_jit::reset_jit_trace_for_test();
         let (code, stdout, stderr) = run_direct(

@@ -53,16 +53,12 @@ mod Archive;
 pub use Archive::*;
 mod Nar;
 pub use Nar::*;
-// Card #2156 landed the signed Nix binary-cache admission path. Its consumer
-// is card #2158, which wires it into NixProvider; until that lands parts of
-// the surface are unreachable and deny(warnings) treats them as dead. Remove
-// this allow with #2158 -- it must not outlive that card.
-#[allow(dead_code)]
 pub(crate) mod NixCache;
+#[cfg(test)]
+pub(crate) use NixCache::encode_zstd_deterministic;
 #[allow(unused_imports)]
 pub(crate) use NixCache::{
-    admit_nix_closure, AdmittedNixClosure, AdmittedNixObject, NixCacheError, NixCacheErrorKind,
-    NixOutputRequest, StoreError,
+    admit_nix_closure, AdmittedNixClosure, AdmittedNixObject, NixOutputRequest, StoreError,
 };
 mod Broker;
 pub use Broker::*;

@@ -14,7 +14,6 @@ trait JetDebug {
     fn jet_debug(&self) -> String;
 }
 
-
 /// D-FAIL-CONV2=A: included error fragments render failure text through this seam.
 trait JetDisplay {
     fn jet_display(&self) -> String;
@@ -85,9 +84,8 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
 }
 
 fn jet_scheduler_runtime_stop(msg: &str) -> ! {
-    let report = jet_foundation::Outcome::jet_render_runtime_stop(
-        "E3001", "", 0, "", "", 1, 1, msg, "",
-    );
+    let report =
+        jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, msg, "");
     if jet_scheduler_panic_should_unwind() {
         panic!("{}", report.rendered);
     }
@@ -113,9 +111,8 @@ fn jet_runtime_caught_stop(message: &str) {
         }
         return;
     }
-    let report = jet_foundation::Outcome::jet_render_runtime_stop(
-        "E3001", "", 0, "", "", 1, 1, message, "",
-    );
+    let report =
+        jet_foundation::Outcome::jet_render_runtime_stop("E3001", "", 0, "", "", 1, 1, message, "");
     eprint!("{}", report.rendered);
 }
 
@@ -244,7 +241,11 @@ fn live_query_rerun_publishes_and_reconnect_replays_latest() {
         let call = rerun_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         Ok(format!("v{}", call + 1))
     });
-    assert!(query.error.is_empty(), "query registration failed: {:?}", query.error);
+    assert!(
+        query.error.is_empty(),
+        "query registration failed: {:?}",
+        query.error
+    );
 
     let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let delivered_sink = delivered.clone();
@@ -252,7 +253,11 @@ fn live_query_rerun_publishes_and_reconnect_replays_latest() {
         &query,
         std::sync::Arc::new(move |value| delivered_sink.lock().unwrap().push(value)),
     );
-    assert!(query.error.is_empty(), "sink binding failed: {:?}", query.error);
+    assert!(
+        query.error.is_empty(),
+        "sink binding failed: {:?}",
+        query.error
+    );
     assert_eq!(jet_app_live_get(&query), "v1");
 
     assert_eq!(jet_app_invalidate(footprint.clone()), 1);
@@ -314,7 +319,11 @@ fn live_query_commit_delivers_to_sink_bound_during_rerun() {
         &query,
         std::sync::Arc::new(move |value| old_values_sink.lock().unwrap().push(value)),
     );
-    assert!(query.error.is_empty(), "initial sink binding failed: {:?}", query.error);
+    assert!(
+        query.error.is_empty(),
+        "initial sink binding failed: {:?}",
+        query.error
+    );
 
     let invalidation_footprint = footprint.clone();
     let invalidator = std::thread::spawn(move || jet_app_invalidate(invalidation_footprint));
@@ -326,7 +335,11 @@ fn live_query_commit_delivers_to_sink_bound_during_rerun() {
         &query,
         std::sync::Arc::new(move |value| new_values_sink.lock().unwrap().push(value)),
     );
-    assert!(query.error.is_empty(), "canonical sink rebinding failed: {:?}", query.error);
+    assert!(
+        query.error.is_empty(),
+        "canonical sink rebinding failed: {:?}",
+        query.error
+    );
 
     rerun_release.wait();
     assert_eq!(invalidator.join().unwrap(), 1);
@@ -504,9 +517,7 @@ fn direct_ws_consumers_include_client_core_first() {
                         line += 1;
                     }
                     if *byte == b'"'
-                        && (0..hashes).all(|offset| {
-                            bytes.get(cursor + 1 + offset) == Some(&b'#')
-                        })
+                        && (0..hashes).all(|offset| bytes.get(cursor + 1 + offset) == Some(&b'#'))
                     {
                         index = cursor + 1 + hashes;
                         break;
@@ -664,8 +675,7 @@ fn client_and_server_echo_text_over_live_sockets() {
     jet_ws_send_text(&client, &"ping".to_string()).expect("client send");
     let reply = loop {
         let message = jet_ws_recv(&client).expect("client recv");
-        if jet_ws_message_is_text(&message)
-            && jet_ws_message_text(&message).unwrap() == "echo:ping"
+        if jet_ws_message_is_text(&message) && jet_ws_message_text(&message).unwrap() == "echo:ping"
         {
             break message;
         }

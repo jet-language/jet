@@ -1,5 +1,5 @@
-use crate::AST::Type;
 use super::core_types::decode_error_ty;
+use crate::AST::Type;
 
 /// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
 /// yields `T [FieldError]!` so a `?` chain composes with no mapping ceremony
@@ -87,5 +87,8 @@ pub fn reflect_method_return(type_name: &str, method: &str, n_args: usize) -> Op
 }
 
 pub fn is_reflect_type_name(name: &str) -> bool {
-    matches!(name, "Value" | "Field" | "TypeInfo" | "FieldInfo" | "MethodInfo")
+    matches!(
+        name,
+        "Value" | "Field" | "TypeInfo" | "FieldInfo" | "MethodInfo"
+    )
 }

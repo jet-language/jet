@@ -1,14 +1,14 @@
+use super::JSON::{self, JSON as JSONValue};
 use super::{
     DerivationEvaluation, DerivationOutputEvaluation, DevShellEvaluation, EvaluationError,
 };
-use super::JSON::{self, JSON as JSONValue};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::{Rc, Weak};
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::fmt;
 use core::mem;
@@ -39,7 +39,10 @@ enum Error {
     Invalid(String),
     ResourceLimit(String),
     Missing(String),
-    Type { expected: &'static str, actual: &'static str },
+    Type {
+        expected: &'static str,
+        actual: &'static str,
+    },
     Cycle,
 }
 
@@ -172,16 +175,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn push(&mut self, token: Token) -> Result<(), Error> {
-        let estimated_memory = self
-            .source
-            .len()
-            .saturating_mul(4)
-            .saturating_add(
-                self.tokens
-                    .len()
-                    .saturating_add(1)
-                    .saturating_mul(TOKEN_MEMORY_ESTIMATE_BYTES),
-            );
+        let estimated_memory = self.source.len().saturating_mul(4).saturating_add(
+            self.tokens
+                .len()
+                .saturating_add(1)
+                .saturating_mul(TOKEN_MEMORY_ESTIMATE_BYTES),
+        );
         if estimated_memory > super::EVALUATOR_MEMORY_BYTES {
             return Err(Error::ResourceLimit(
                 "foreign flake evaluator memory budget exceeded".into(),
@@ -324,7 +323,10 @@ impl<'a> Lexer<'a> {
                 .source
                 .as_bytes()
                 .get(self.position + 1)
-                .is_some_and(u8::is_ascii_digit) => Token::Integer(self.integer()?),
+                .is_some_and(u8::is_ascii_digit) =>
+            {
+                Token::Integer(self.integer()?)
+            }
             b'0'..=b'9' => Token::Integer(self.integer()?),
             value if value.is_ascii_alphabetic() || value == b'_' => {
                 Token::Identifier(self.identifier())
@@ -480,8 +482,7 @@ fn interpolated_parts(source: &str) -> Result<Option<Vec<StringTokenPart>>, Erro
     let mut literal = String::new();
     let mut parts = None;
     while position < source.len() {
-        if source.as_bytes()[position] == b'$'
-            && source.as_bytes().get(position + 1) == Some(&b'{')
+        if source.as_bytes()[position] == b'$' && source.as_bytes().get(position + 1) == Some(&b'{')
         {
             let parts = parts.get_or_insert_with(Vec::new);
             if !literal.is_empty() {
@@ -596,15 +597,15 @@ fn skip_double_string(source: &str, position: &mut usize) -> Result<(), Error> {
             _ => *position += next_char_len(source, *position)?,
         }
     }
-    Err(Error::Syntax("unterminated string interpolation expression".into()))
+    Err(Error::Syntax(
+        "unterminated string interpolation expression".into(),
+    ))
 }
 
 fn skip_indented_string(source: &str, position: &mut usize) -> Result<(), Error> {
     *position += 2;
     while *position + 1 < source.len() {
-        if source.as_bytes()[*position] == b'\''
-            && source.as_bytes()[*position + 1] == b'\''
-        {
+        if source.as_bytes()[*position] == b'\'' && source.as_bytes()[*position + 1] == b'\'' {
             *position += 2;
             return Ok(());
         }
@@ -737,13 +738,11 @@ impl Parser {
                 Token::NotEqual => Some(false),
                 _ => None,
             };
-            let Some(equal) = equal else { return Ok(expression) };
+            let Some(equal) = equal else {
+                return Ok(expression);
+            };
             self.position += 1;
-            expression = Expr::Equal(
-                Box::new(expression),
-                Box::new(self.merge()?),
-                equal,
-            );
+            expression = Expr::Equal(Box::new(expression), Box::new(self.merge()?), equal);
         }
     }
 
@@ -781,7 +780,9 @@ impl Parser {
         while matches!(self.peek(), Token::Dot) {
             self.position += 1;
             let Token::Identifier(field) = self.bump() else {
-                return Err(Error::Syntax("field selector requires an identifier".into()));
+                return Err(Error::Syntax(
+                    "field selector requires an identifier".into(),
+                ));
             };
             expression = Expr::Select(Box::new(expression), field);
         }
@@ -812,7 +813,10 @@ impl Parser {
                 self.expect_right_paren()?;
                 Ok(expression)
             }
-            token => Err(Error::Syntax(format!("unexpected token {}", token_name(&token)))),
+            token => Err(Error::Syntax(format!(
+                "unexpected token {}",
+                token_name(&token)
+            ))),
         }
     }
 
@@ -937,7 +941,9 @@ impl Parser {
         while matches!(self.peek(), Token::Dot) {
             self.position += 1;
             let Token::Identifier(part) = self.bump() else {
-                return Err(Error::Syntax("attribute key path requires an identifier".into()));
+                return Err(Error::Syntax(
+                    "attribute key path requires an identifier".into(),
+                ));
             };
             key.push('.');
             key.push_str(&part);
@@ -1202,7 +1208,9 @@ impl EnvironmentFrame {
         let (fuel, arena, base_path) = {
             let parent = parent.borrow();
             let Some(arena) = parent.arena.upgrade() else {
-                return Err(Error::Invalid("foreign flake evaluation arena expired".into()));
+                return Err(Error::Invalid(
+                    "foreign flake evaluation arena expired".into(),
+                ));
             };
             (parent.fuel.clone(), arena, parent.base_path.clone())
         };
@@ -1225,7 +1233,10 @@ enum Value {
     Bool(bool),
     Integer(i64),
     String(String),
-    StringContext { value: String, contexts: Vec<String> },
+    StringContext {
+        value: String,
+        contexts: Vec<String>,
+    },
     Path(String),
     Package(String),
     PackageNamespace {
@@ -1374,7 +1385,11 @@ pub(super) fn evaluate_derivation_output(
         Ok(output) => output,
         Err(Error::Missing(_)) => resolve_path(
             root,
-            &["legacyPackages".into(), system.to_string(), attribute.to_string()],
+            &[
+                "legacyPackages".into(),
+                system.to_string(),
+                attribute.to_string(),
+            ],
             system,
             &arena,
         )
@@ -1472,10 +1487,12 @@ fn evaluate_expr(
         Expr::Let(bindings, body) => {
             let child = EnvironmentFrame::child(environment)?;
             for (name, value) in bindings {
-                if child.borrow_mut().bindings.insert(
-                    name.clone(),
-                    Thunk::expression(value.clone(), &child),
-                ).is_some() {
+                if child
+                    .borrow_mut()
+                    .bindings
+                    .insert(name.clone(), Thunk::expression(value.clone(), &child))
+                    .is_some()
+                {
                     return Err(Error::Invalid(format!("duplicate let binding `{name}`")));
                 }
             }
@@ -1606,7 +1623,9 @@ fn resolve_path_literal(raw: &str, base: &str) -> Result<String, Error> {
         }
     }
     if components.is_empty() {
-        return Err(Error::Invalid("path value names the flake root directory".into()));
+        return Err(Error::Invalid(
+            "path value names the flake root directory".into(),
+        ));
     }
     let path = components.join("/");
     if path.len() > MAX_PATH_BYTES {
@@ -1650,14 +1669,12 @@ fn evaluate_import(path: &str, arena: &Rc<EvaluationArena>) -> Result<Value, Err
     arena.imports.set(imports + 1);
     arena.active_imports.borrow_mut().push(active_path);
     let result = (|| {
-        let request = arena
-            .active_flakes
-            .borrow()
-            .last()
-            .map_or_else(|| path.to_string(), |flake| format!("@flake-import:{flake}\n{path}"));
-        let source = authority(&request).map_err(|reason| {
-            Error::Invalid(format!("could not import `{path}`: {reason}"))
-        })?;
+        let request = arena.active_flakes.borrow().last().map_or_else(
+            || path.to_string(),
+            |flake| format!("@flake-import:{flake}\n{path}"),
+        );
+        let source = authority(&request)
+            .map_err(|reason| Error::Invalid(format!("could not import `{path}`: {reason}")))?;
         if source.len() > MAX_STRING_BYTES {
             return Err(Error::ResourceLimit(format!(
                 "imported `{path}` exceeds {MAX_STRING_BYTES} bytes"
@@ -1803,8 +1820,10 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
     let mut unsupported = Vec::new();
     for field in &shell_fields {
         let field = field.split('.').next().unwrap_or(field);
-        if !matches!(field, "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook")
-            && !unsupported.iter().any(|existing| existing == field)
+        if !matches!(
+            field,
+            "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook"
+        ) && !unsupported.iter().any(|existing| existing == field)
         {
             unsupported.push(field.to_string());
         }
@@ -1813,9 +1832,11 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
         match hook.force()? {
             Value::String(value) if value.trim().is_empty() => {}
             Value::StringContext { value, .. } if value.trim().is_empty() => {}
-            Value::String(_) | Value::StringContext { .. } | Value::Integer(_) | Value::Bool(_) | Value::Null => {
-                unsupported.push("shellHook".into())
-            }
+            Value::String(_)
+            | Value::StringContext { .. }
+            | Value::Integer(_)
+            | Value::Bool(_)
+            | Value::Null => unsupported.push("shellHook".into()),
             _ => unsupported.push("shellHook".into()),
         }
     }
@@ -1830,10 +1851,7 @@ fn project_shell(shell: Value, system: &str) -> Result<DevShellEvaluation, Error
 }
 
 fn package_name(raw: &str) -> Result<String, Error> {
-    let name = raw
-        .rsplit(['.', '/'])
-        .next()
-        .unwrap_or(raw);
+    let name = raw.rsplit(['.', '/']).next().unwrap_or(raw);
     if name.is_empty() || name.len() > MAX_PACKAGE_NAME_BYTES {
         return Err(Error::Unsupported(format!("invalid package name `{raw}`")));
     }
@@ -1950,9 +1968,7 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
                 ));
             };
             let target = authority(&format!("@target:{field}")).map_err(|reason| {
-                Error::Unsupported(format!(
-                    "cross target {field} is not authorized: {reason}"
-                ))
+                Error::Unsupported(format!("cross target {field} is not authorized: {reason}"))
             })?;
             if !super::REQUIRED_SYSTEMS.contains(&target.as_str()) {
                 return Err(Error::Unsupported(format!(
@@ -2047,9 +2063,7 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
                 "head" => Some(NativeFunction::Builtin(Builtin::Head)),
                 "tail" => Some(NativeFunction::Builtin(Builtin::Tail)),
                 "concatLists" => Some(NativeFunction::Builtin(Builtin::ConcatLists)),
-                "concatStringsSep" => {
-                    Some(NativeFunction::Builtin(Builtin::ConcatStringsSep))
-                }
+                "concatStringsSep" => Some(NativeFunction::Builtin(Builtin::ConcatStringsSep)),
                 "map" => Some(NativeFunction::Builtin(Builtin::Map)),
                 "filter" => Some(NativeFunction::Builtin(Builtin::Filter)),
                 "replaceStrings" => Some(NativeFunction::Builtin(Builtin::ReplaceStrings)),
@@ -2066,9 +2080,7 @@ fn try_select(value: Value, field: &str) -> Result<Option<Thunk>, Error> {
                 "fetchTree" => Some(NativeFunction::Fetch("fetchTree")),
                 "fetchGit" => Some(NativeFunction::Fetch("fetchGit")),
                 "getFlake" => Some(NativeFunction::GetFlake),
-                "currentSystem" => return Ok(Some(Thunk::value(Value::String(
-                    system,
-                )))),
+                "currentSystem" => return Ok(Some(Thunk::value(Value::String(system)))),
                 "storeDir" => return Ok(Some(Thunk::value(Value::String("/nix/store".into())))),
                 _ => None,
             };
@@ -2099,7 +2111,9 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
     match function {
         Value::Function(function) => {
             let Some(function_environment) = function.environment.upgrade() else {
-                return Err(Error::Invalid("foreign flake function scope expired".into()));
+                return Err(Error::Invalid(
+                    "foreign flake function scope expired".into(),
+                ));
             };
             let environment = EnvironmentFrame::child(&function_environment)?;
             match &function.pattern {
@@ -2119,7 +2133,10 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
                     };
                     for (name, default) in fields {
                         if let Some(value) = attr_field(&arguments, name) {
-                            let _ = environment.borrow_mut().bindings.insert(name.clone(), value);
+                            let _ = environment
+                                .borrow_mut()
+                                .bindings
+                                .insert(name.clone(), value);
                         } else if let Some(default) = default {
                             let _ = environment.borrow_mut().bindings.insert(
                                 name.clone(),
@@ -2148,8 +2165,7 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
             let value = argument.force()?;
             match value {
                 Value::Path(path) => evaluate_import(&path, arena),
-                Value::PackageNamespace { .. }
-                | Value::PackageOverlay { .. } => Ok(Value::Native(
+                Value::PackageNamespace { .. } | Value::PackageOverlay { .. } => Ok(Value::Native(
                     NativeFunction::ImportPackage(Box::new(value)),
                 )),
                 value => Err(Error::Type {
@@ -2188,12 +2204,8 @@ fn apply(function: Value, argument: Thunk, arena: &Rc<EvaluationArena>) -> Resul
             let overlay = argument.force()?;
             apply_overlay(base, overlay, arena)
         }
-        Value::Native(NativeFunction::Fetch(kind)) => {
-            apply_fetch(kind, argument.force()?, arena)
-        }
-        Value::Native(NativeFunction::GetFlake) => {
-            apply_external_flake(argument.force()?, arena)
-        }
+        Value::Native(NativeFunction::Fetch(kind)) => apply_fetch(kind, argument.force()?, arena),
+        Value::Native(NativeFunction::GetFlake) => apply_external_flake(argument.force()?, arena),
         Value::Native(NativeFunction::ToString) => {
             let value = argument.force()?;
             let (value, contexts) = stringify_value(&value)?;
@@ -2394,11 +2406,7 @@ fn project_external_flake(root: Value, arena: &Rc<EvaluationArena>) -> Result<Va
 /// Apply one bounded Nix overlay. The evaluator keeps the package namespace
 /// lazy: the overlay only replaces explicitly named attributes, while every
 /// untouched package still resolves through the canonical namespace.
-fn apply_overlay(
-    base: Value,
-    overlay: Value,
-    arena: &Rc<EvaluationArena>,
-) -> Result<Value, Error> {
+fn apply_overlay(base: Value, overlay: Value, arena: &Rc<EvaluationArena>) -> Result<Value, Error> {
     let (prefix, previous, authority) = package_parts(&base)?;
     let final_fields = Rc::new(RefCell::new(previous));
     let final_view = Value::PackageOverlay {
@@ -2564,12 +2572,8 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
                     "fixed-output derivations must declare exactly the `out` output".into(),
                 ));
             }
-            let algo = output_hash_algo
-                .clone()
-                .unwrap_or_else(|| "sha256".into());
-            let mode = output_hash_mode
-                .clone()
-                .unwrap_or_else(|| "flat".into());
+            let algo = output_hash_algo.clone().unwrap_or_else(|| "sha256".into());
+            let mode = output_hash_mode.clone().unwrap_or_else(|| "flat".into());
             let method_algo = match mode.as_str() {
                 "flat" => algo,
                 "recursive" => format!("r:{algo}"),
@@ -2602,7 +2606,10 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         "outputHashMode",
         "__ignoreNulls",
     ];
-    let ignore_nulls = matches!(field_value(fields, "__ignoreNulls")?, Some(Value::Bool(true)));
+    let ignore_nulls = matches!(
+        field_value(fields, "__ignoreNulls")?,
+        Some(Value::Bool(true))
+    );
     for (field, thunk) in fields {
         if ignored.contains(&field.as_str()) || output_names.iter().any(|name| name == field) {
             continue;
@@ -2619,7 +2626,9 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
         let (text, contexts) = stringify_value(&value)?;
         record_derivation_contexts(&contexts, &mut input_sources)?;
         if env.insert(field.clone(), text).is_some() {
-            return Err(Error::Invalid(format!("duplicate derivation field `{field}`")));
+            return Err(Error::Invalid(format!(
+                "duplicate derivation field `{field}`"
+            )));
         }
         if env.len() > MAX_DERIVATION_ENV {
             return Err(Error::ResourceLimit(format!(
@@ -2675,7 +2684,9 @@ fn derivation_from_fields(fields: &BTreeMap<String, Thunk>) -> Result<Derivation
 }
 
 fn field_value(fields: &BTreeMap<String, Thunk>, name: &str) -> Result<Option<Value>, Error> {
-    attr_field(fields, name).map(|value| value.force()).transpose()
+    attr_field(fields, name)
+        .map(|value| value.force())
+        .transpose()
 }
 
 fn required_string_field(fields: &BTreeMap<String, Thunk>, name: &str) -> Result<String, Error> {
@@ -2753,7 +2764,9 @@ fn validate_derivation_output_name(name: &str) -> Result<(), Error> {
         || name.contains('=')
         || name.bytes().any(|byte| byte.is_ascii_control())
     {
-        return Err(Error::Invalid(format!("invalid derivation output name `{name}`")));
+        return Err(Error::Invalid(format!(
+            "invalid derivation output name `{name}`"
+        )));
     }
     Ok(())
 }
@@ -2910,7 +2923,9 @@ fn apply_builtin(
             });
             Ok(Value::String(directory.into()))
         }
-        Builtin::StringLength => Ok(Value::Integer(plain_string(argument)?.chars().count() as i64)),
+        Builtin::StringLength => Ok(Value::Integer(
+            plain_string(argument)?.chars().count() as i64
+        )),
         Builtin::ToJSON => Ok(Value::String(encode_json(&value_to_json(&argument, 0)?)?)),
         Builtin::FromJSON => {
             let text = plain_string(argument)?;
@@ -3043,7 +3058,10 @@ fn apply_partial(
             if contexts.is_empty() {
                 Ok(Value::String(output))
             } else {
-                Ok(Value::StringContext { value: output, contexts })
+                Ok(Value::StringContext {
+                    value: output,
+                    contexts,
+                })
             }
         }
         NativeOperation::ReplaceStrings => {
@@ -3077,7 +3095,10 @@ fn apply_partial(
             if contexts.is_empty() {
                 Ok(Value::String(output))
             } else {
-                Ok(Value::StringContext { value: output, contexts })
+                Ok(Value::StringContext {
+                    value: output,
+                    contexts,
+                })
             }
         }
         NativeOperation::Substring => {
@@ -3133,7 +3154,9 @@ fn string_list(value: Value) -> Result<Vec<String>, Error> {
 
 fn value_to_json(value: &Value, depth: usize) -> Result<JSONValue, Error> {
     if depth > MAX_EVAL_DEPTH {
-        return Err(Error::ResourceLimit("JSON value is too deeply nested".into()));
+        return Err(Error::ResourceLimit(
+            "JSON value is too deeply nested".into(),
+        ));
     }
     match value {
         Value::Null => Ok(JSONValue::Null),
@@ -3145,7 +3168,11 @@ fn value_to_json(value: &Value, depth: usize) -> Result<JSONValue, Error> {
         | Value::Package(value) => Ok(JSONValue::Str(value.clone())),
         Value::List(values) => values
             .iter()
-            .map(|value| value.force().and_then(|value| value_to_json(&value, depth + 1)))
+            .map(|value| {
+                value
+                    .force()
+                    .and_then(|value| value_to_json(&value, depth + 1))
+            })
             .collect::<Result<Vec<_>, _>>()
             .map(JSONValue::Array),
         Value::AttrSet(fields) => {
@@ -3177,7 +3204,9 @@ fn value_to_json(value: &Value, depth: usize) -> Result<JSONValue, Error> {
 
 fn json_to_value(value: JSONValue, depth: usize) -> Result<Value, Error> {
     if depth > MAX_EVAL_DEPTH {
-        return Err(Error::ResourceLimit("JSON value is too deeply nested".into()));
+        return Err(Error::ResourceLimit(
+            "JSON value is too deeply nested".into(),
+        ));
     }
     match value {
         JSONValue::Null => Ok(Value::Null),
@@ -3265,8 +3294,7 @@ fn encode_json_string(value: &str) -> String {
 fn merge(left: Value, right: Value) -> Result<Value, Error> {
     if matches!(
         &left,
-        Value::PackageNamespace { .. }
-            | Value::PackageOverlay { .. }
+        Value::PackageNamespace { .. } | Value::PackageOverlay { .. }
     ) {
         let Value::AttrSet(fields) = right else {
             return Err(Error::Type {
@@ -3317,10 +3345,9 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::Integer(left), Value::Integer(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
-        (
-            Value::StringContext { value: left, .. },
-            Value::StringContext { value: right, .. },
-        ) => left == right,
+        (Value::StringContext { value: left, .. }, Value::StringContext { value: right, .. }) => {
+            left == right
+        }
         (Value::String(left), Value::StringContext { value: right, .. })
         | (Value::StringContext { value: left, .. }, Value::String(right)) => left == right,
         (Value::Package(left), Value::Package(right)) => left == right,
@@ -3328,18 +3355,10 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         | (Value::String(string), Value::Package(package)) => {
             package.rsplit(['.', '/', ':']).next() == Some(string.as_str())
         }
-        (
-            Value::Package(package),
-            Value::StringContext {
-                value: string, ..
-            },
-        )
-        | (
-            Value::StringContext {
-                value: string, ..
-            },
-            Value::Package(package),
-        ) => package.rsplit(['.', '/', ':']).next() == Some(string.as_str()),
+        (Value::Package(package), Value::StringContext { value: string, .. })
+        | (Value::StringContext { value: string, .. }, Value::Package(package)) => {
+            package.rsplit(['.', '/', ':']).next() == Some(string.as_str())
+        }
         _ => false,
     }
 }
@@ -3366,10 +3385,7 @@ fn value_name(value: &Value) -> &'static str {
 
 fn flake_arguments(system: &str, arena: &Rc<EvaluationArena>) -> Value {
     let mut fields = BTreeMap::new();
-    let _ = fields.insert(
-        "self".into(),
-        Thunk::value(Value::AttrSet(BTreeMap::new())),
-    );
+    let _ = fields.insert("self".into(), Thunk::value(Value::AttrSet(BTreeMap::new())));
     let _ = fields.insert(
         "nixpkgs".into(),
         Thunk::value(Value::PackageNamespace {
@@ -3384,6 +3400,9 @@ fn flake_arguments(system: &str, arena: &Rc<EvaluationArena>) -> Value {
             authority: arena.import_authority.clone(),
         }),
     );
-    let _ = fields.insert("system".into(), Thunk::value(Value::String(system.to_string())));
+    let _ = fields.insert(
+        "system".into(),
+        Thunk::value(Value::String(system.to_string())),
+    );
     Value::AttrSet(fields)
 }

@@ -163,14 +163,15 @@ fn hostile(extra: &[(&str, &str)]) -> Vec<(String, String)> {
 
 fn run_hostile(bin: &Path, cwd: &Path, extra: &[(&str, &str)]) -> RunResult {
     let owned = hostile(extra);
-    let refs: Vec<_> = owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let refs: Vec<_> = owned
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     run_bin(bin, cwd, &refs)
 }
 
 fn lcg(state: &mut u64) -> u64 {
-    *state = state
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1);
+    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
     *state
 }
 
@@ -197,10 +198,7 @@ fn recorded_chunk_plans(seed: u64, input_len: usize) -> Vec<Vec<usize>> {
         if sizes.iter().sum::<usize>() < input_len {
             sizes.push(input_len);
         }
-        assert!(
-            !sizes.is_empty(),
-            "plan {plan_i} empty for seed {seed:#x}"
-        );
+        assert!(!sizes.is_empty(), "plan {plan_i} empty for seed {seed:#x}");
         plans.push(sizes);
     }
     plans
@@ -387,16 +385,17 @@ fn padded_cbor_text(target_len: usize) -> Vec<u8> {
 }
 
 fn assert_same(label: &str, baseline: &RunResult, got: &RunResult) {
-    assert_eq!(got.exit, baseline.exit, "{label} exit drift: {}", got.stderr);
+    assert_eq!(
+        got.exit, baseline.exit,
+        "{label} exit drift: {}",
+        got.stderr
+    );
     assert_eq!(
         got.stdout, baseline.stdout,
         "{label} stdout drift\nbase={:?}\ngot ={:?}",
         baseline.stdout, got.stdout
     );
-    assert_eq!(
-        got.stderr, baseline.stderr,
-        "{label} stderr drift"
-    );
+    assert_eq!(got.stderr, baseline.stderr, "{label} stderr drift");
 }
 
 fn prove_every_byte_split(
@@ -492,11 +491,7 @@ fn encoding_variance_every_split_chunk_plans_limits_and_reps() {
     for (name, bytes, src_fn) in &cases {
         let input = dir.join(format!("{name}_small.in"));
         fs::write(&input, bytes).unwrap();
-        let input_rel = input
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
+        let input_rel = input.file_name().unwrap().to_string_lossy().into_owned();
         let bin = compile_aot(dir, &format!("{name}_small"), &src_fn(&input_rel));
         let baseline = run_bin(&bin, dir, &[]);
         assert_eq!(
@@ -552,7 +547,13 @@ fn encoding_variance_every_split_chunk_plans_limits_and_reps() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    write_evidence("715-c6-chunk-plans.tsv", &format!("# seed={VARIANCE_SEED:#x} len={}\n{plans_record}\n", large.len()));
+    write_evidence(
+        "715-c6-chunk-plans.tsv",
+        &format!(
+            "# seed={VARIANCE_SEED:#x} len={}\n{plans_record}\n",
+            large.len()
+        ),
+    );
     prove_chunk_plans("json-large", &large_bin, dir, &plans, &large_base, &mut log);
 
     // --- limit−1 / limit / limit+1 / overflow on a fixed JSON blob ---
@@ -667,11 +668,17 @@ fn run() {
         dir,
         &[("JET_ENC_HOSTILE_WRITE_PLAN", "1,1,1,1")],
     );
-    assert_same("overflow-write-plan", overflow_base.as_ref().unwrap(), &overflow_host);
+    assert_same(
+        "overflow-write-plan",
+        overflow_base.as_ref().unwrap(),
+        &overflow_host,
+    );
     log.push_str("overflow write max_total=0 + WRITE_PLAN ok\n");
 
     evidence.push_str(&log);
-    evidence.push_str("C6_RESULT=met on linux-x86_64 AOT; other native platforms not present in this env\n");
+    evidence.push_str(
+        "C6_RESULT=met on linux-x86_64 AOT; other native platforms not present in this env\n",
+    );
     write_evidence("715-c6-evidence.txt", &evidence);
     eprintln!("{evidence}");
 }

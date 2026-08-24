@@ -3,9 +3,9 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, build_and_run_full, have_rustc, run_default_multi};
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use std::fs;
+use tir_support::{build_and_run, build_and_run_full, have_rustc, run_default_multi};
 
 const OUTER_GROUP_HELPER: &str = r#"
 struct Gate { step: Int }
@@ -44,10 +44,8 @@ fn error_codes(source: &str) -> Vec<String> {
 }
 
 fn interpreter_outcome(name: &str, source: &str) -> RunOutcome {
-    let path = std::env::temp_dir().join(format!(
-        "jet_taskgroup_{name}_{}.jet",
-        std::process::id()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("jet_taskgroup_{name}_{}.jet", std::process::id()));
     fs::write(&path, source).unwrap();
     dev_iteration(path.to_str().unwrap(), false, true)
 }
@@ -70,10 +68,7 @@ fn assert_jit_compiles(name: &str, source: &str) {
             let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
                 .into_iter()
                 .filter(|diagnostic| {
-                    matches!(
-                        diagnostic.severity,
-                        jet::Diagnostics::Severity::Error
-                    )
+                    matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
                 })
                 .collect::<Vec<_>>();
             assert!(errors.is_empty(), "{errors:?}");
@@ -187,10 +182,7 @@ fn run() {}
 #[test]
 fn taskgroup_type_is_second_class() {
     for (source, expected) in [
-        (
-            "struct Bad { group: Group }\nfn run() {}\n",
-            &["E1110"][..],
-        ),
+        ("struct Bad { group: Group }\nfn run() {}\n", &["E1110"][..]),
         // D-CONC-GROUP1=A: the parameter positions widened, so the positions
         // that stay banned must teach with the E1110 family instead of the bare
         // "there is no type called `Group`" fall-through (E0119).
@@ -202,14 +194,8 @@ fn taskgroup_type_is_second_class() {
             "struct Bad { step: Int\n    fn bad(self) Group { return 0 }\n}\nfn run() {}\n",
             &["E1110", "E0113"][..],
         ),
-        (
-            "fn run() { group: Group :: 0 }\n",
-            &["E0003"][..],
-        ),
-        (
-            "fn run() { f :: (group: Group) -> 0 }\n",
-            &["E0119"][..],
-        ),
+        ("fn run() { group: Group :: 0 }\n", &["E0003"][..]),
+        ("fn run() { f :: (group: Group) -> 0 }\n", &["E0119"][..]),
         (
             "fn bad(group: Group) { alias :: group }\nfn run() {}\n",
             &["E0120"][..],
@@ -365,12 +351,7 @@ fn run() {
     }
 }
 
-fn assert_native_wait_exit(
-    name: &str,
-    source: &str,
-    stderr_text: &str,
-    expected_stdout: &str,
-) {
+fn assert_native_wait_exit(name: &str, source: &str, stderr_text: &str, expected_stdout: &str) {
     assert_jit_compiles(name, source);
     let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
     assert_ne!(code, 0, "{stderr}");
@@ -396,9 +377,7 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
         } => {
             assert_eq!(exit_code, 0, "interpreter: {stderr}");
             assert!(
-                stderr
-                    .lines()
-                    .all(|line| line.contains("tier0 interp")),
+                stderr.lines().all(|line| line.contains("tier0 interp")),
                 "interpreter diagnostics: {stderr}"
             );
             stdout
@@ -596,8 +575,7 @@ fn run() {
     print(all + race + any + group)
 }
 "#;
-    jet::compile(free_selectors)
-        .expect("`all`, `race`, `any`, and `group` are free identifiers");
+    jet::compile(free_selectors).expect("`all`, `race`, `any`, and `group` are free identifiers");
 }
 
 #[test]
@@ -622,7 +600,8 @@ fn run() {
     print("after")
 }
 "#;
-    let (interpreted_stdout, interpreted_stderr) = match interpreter_outcome("early_return", source) {
+    let (interpreted_stdout, interpreted_stderr) = match interpreter_outcome("early_return", source)
+    {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -636,8 +615,11 @@ fn run() {
     assert_eq!(interpreted_stdout, "after\n");
     assert_eq!(interpreted_stderr, "");
 
-    let (code, stdout, stderr) =
-        run_default_multi("taskgroup_early_return", "main.jet", &[("main.jet", source)]);
+    let (code, stdout, stderr) = run_default_multi(
+        "taskgroup_early_return",
+        "main.jet",
+        &[("main.jet", source)],
+    );
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "after\n", "{stderr}");
     assert!(

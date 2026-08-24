@@ -33,9 +33,9 @@ fn registered_lane_arity(name: &str) -> Option<usize> {
         .knowledge_vector()
         .facts(crate::Registry::type_plane("Measure"))
         .find_map(|fact| match fact {
-            crate::AST::KnowledgeFact::Measure(measure) if measure.kind() == "lane" => {
-                measure.literal_value().and_then(|value| usize::try_from(value).ok())
-            }
+            crate::AST::KnowledgeFact::Measure(measure) if measure.kind() == "lane" => measure
+                .literal_value()
+                .and_then(|value| usize::try_from(value).ok()),
             _ => None,
         })
 }
@@ -270,8 +270,7 @@ pub fn is_layout_axis_type(name: &str) -> bool {
 /// D-LAYOUT1: the full closed layout-value family (axis types + the
 /// `Constraint`/`Layout` handles).
 pub fn is_layout_type(name: &str) -> bool {
-    is_layout_axis_type(name)
-        || matches!(name, "Constraint" | "Layout")
+    is_layout_axis_type(name) || matches!(name, "Constraint" | "Layout")
 }
 
 /// D-LAYOUT1: the axis a value belongs to, for cross-axis checking. Plain
@@ -407,12 +406,8 @@ pub fn precise_binop_result(op: crate::AST::BinOp, lt: &str, rt: &str) -> Option
         {
             Some(Type::Named(crate::Syntax::TYPE_COMPLEX.to_string()))
         }
-        BinOp::Eq | BinOp::Ne if same && is_decimal_type_name(lt) => {
-            Some(Type::Bool)
-        }
-        BinOp::Eq | BinOp::Ne if same && lt == crate::Syntax::TYPE_FRACTION => {
-            Some(Type::Bool)
-        }
+        BinOp::Eq | BinOp::Ne if same && is_decimal_type_name(lt) => Some(Type::Bool),
+        BinOp::Eq | BinOp::Ne if same && lt == crate::Syntax::TYPE_FRACTION => Some(Type::Bool),
         _ => None,
     }
 }

@@ -1,65 +1,65 @@
-use crate::AST::Type;
+use super::alloc_ptrs::result_ty;
+use super::serde_diags::wrong_core_arity;
 use crate::Diagnostics::Span;
 use crate::Sema::Checker;
 use crate::Sema::Effects::Effect;
-use super::alloc_ptrs::result_ty;
-use super::serde_diags::wrong_core_arity;
+use crate::AST::Type;
 impl<'a> Checker<'a> {
-        /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
-        /// String` argument elaboration shared by the typed plugin calls — a
-        /// plugin export name plus a homogeneous scalar argument list.
-        fn check_plugin_call_args(
-            &mut self,
-            name: &str,
-            arg_ty: &Type,
-            args: &mut [crate::AST::CallArg],
-            span: Span,
-        ) {
-            if args.len() != 2 {
-                self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
-                }
-                return;
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `(name: String, args: [T]) -> T ?
+    /// String` argument elaboration shared by the typed plugin calls — a
+    /// plugin export name plus a homogeneous scalar argument list.
+    fn check_plugin_call_args(
+        &mut self,
+        name: &str,
+        arg_ty: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
+        if args.len() != 2 {
+            self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+            for a in args.iter_mut() {
+                self.infer(&mut a.expr);
             }
-            let list_ty = Type::List(Box::new(arg_ty.clone()));
-            self.expect_core_arg(name, 0, &Type::String, &mut args[0]);
-            self.expect_core_arg(name, 1, &list_ty, &mut args[1]);
+            return;
         }
-    
-        /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): instance methods on a `Plugin` handle
-        /// (produced by `core.plugin`'s `load`). Typed calls are fallible
-        /// (`? String`, naming a missing export or a param/type mismatch against
-        /// the plugin's actual `.wit` signature) — the sandboxed loader never
-        /// crashes the host program, it reports (I2).
-        pub(crate) fn check_plugin_method(
-            &mut self,
-            method: &str,
-            args: &mut [crate::AST::CallArg],
-            span: Span,
-        ) -> Option<Option<Type>> {
-            match method {
-                "call" => {
-                    self.check_plugin_call_args("call", &Type::Float, args, span);
-                    self.record_effect(Effect::Exec.name(), span);
-                    Some(Some(result_ty(Type::Float, Type::String)))
-                }
-                "call_int" => {
-                    self.check_plugin_call_args("call_int", &Type::Int, args, span);
-                    self.record_effect(Effect::Exec.name(), span);
-                    Some(Some(result_ty(Type::Int, Type::String)))
-                }
-                "call_bool" => {
-                    self.check_plugin_call_args("call_bool", &Type::Bool, args, span);
-                    self.record_effect(Effect::Exec.name(), span);
-                    Some(Some(result_ty(Type::Bool, Type::String)))
-                }
-                "call_text" => {
-                    self.check_plugin_call_args("call_text", &Type::String, args, span);
-                    self.record_effect(Effect::Exec.name(), span);
-                    Some(Some(result_ty(Type::String, Type::String)))
-                }
-                _ => None,
+        let list_ty = Type::List(Box::new(arg_ty.clone()));
+        self.expect_core_arg(name, 0, &Type::String, &mut args[0]);
+        self.expect_core_arg(name, 1, &list_ty, &mut args[1]);
+    }
+
+    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): instance methods on a `Plugin` handle
+    /// (produced by `core.plugin`'s `load`). Typed calls are fallible
+    /// (`? String`, naming a missing export or a param/type mismatch against
+    /// the plugin's actual `.wit` signature) — the sandboxed loader never
+    /// crashes the host program, it reports (I2).
+    pub(crate) fn check_plugin_method(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        match method {
+            "call" => {
+                self.check_plugin_call_args("call", &Type::Float, args, span);
+                self.record_effect(Effect::Exec.name(), span);
+                Some(Some(result_ty(Type::Float, Type::String)))
             }
+            "call_int" => {
+                self.check_plugin_call_args("call_int", &Type::Int, args, span);
+                self.record_effect(Effect::Exec.name(), span);
+                Some(Some(result_ty(Type::Int, Type::String)))
+            }
+            "call_bool" => {
+                self.check_plugin_call_args("call_bool", &Type::Bool, args, span);
+                self.record_effect(Effect::Exec.name(), span);
+                Some(Some(result_ty(Type::Bool, Type::String)))
+            }
+            "call_text" => {
+                self.check_plugin_call_args("call_text", &Type::String, args, span);
+                self.record_effect(Effect::Exec.name(), span);
+                Some(Some(result_ty(Type::String, Type::String)))
+            }
+            _ => None,
         }
+    }
 }

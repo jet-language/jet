@@ -260,7 +260,10 @@ fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     let log_text = fs::read_to_string(&log).unwrap();
     assert!(log_text.contains("\"kind\":\"rename\""), "{log_text}");
     assert!(log_text.contains("\"kind\":\"ast_rewrite\""), "{log_text}");
-    assert!(log_text.contains("\"rule_id\":\"rename-report\""), "{log_text}");
+    assert!(
+        log_text.contains("\"rule_id\":\"rename-report\""),
+        "{log_text}"
+    );
     let undo = Command::new(jet())
         .args(["inspect", "codemod", "undo", log.to_str().unwrap()])
         .output()
@@ -515,10 +518,20 @@ fn semantic_rename_uses_resolved_reference_identity_not_spelling() {
     fs::write(&object, "{\"version\":2,\"name\":\"Identity\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":1}]}\n").unwrap();
 
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         fs::read_to_string(source).unwrap(),
         "fn summarize() { print(\"function\") }\nfn run() { report :: 7\nprint(report) }\n"
@@ -539,10 +552,20 @@ fn typed_ast_rewrite_matches_only_compiler_owned_node_class() {
     fs::write(&object, "{\"version\":2,\"name\":\"Types\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"type\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":1}]}\n").unwrap();
 
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         fs::read_to_string(source).unwrap(),
         "fn helper(value: Float) {}\nfn run() { print(\"Int stays text\") }\n"
@@ -567,7 +590,11 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
         .arg("--dry-run")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("simple-types: 4 matches"), "{stdout}");
     assert!(stdout.contains("alias-target: 1 matches"), "{stdout}");
@@ -586,10 +613,20 @@ fn typed_ast_repeated_capture_backtracking_keeps_original_binding() {
     let object = project.join("repeat.codemod.json");
     fs::write(&object, "{\"version\":2,\"name\":\"Repeat\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"repeat\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"pair($value, $value)\",\"replace\":\"same($value)\",\"matches\":1}]}\n").unwrap();
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let after = fs::read_to_string(source).unwrap();
     assert!(after.contains("pair(1, 2)"));
     assert!(after.contains("same(3)"));
@@ -604,10 +641,20 @@ fn typed_ast_variadic_capture_consumes_one_compiler_list_slot() {
     let object = project.join("variadic.codemod.json");
     fs::write(&object, "{\"version\":2,\"name\":\"Variadic\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"append\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"[$values...]\",\"replace\":\"[$values..., 4]\",\"matches\":1}]}\n").unwrap();
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(fs::read_to_string(source).unwrap().contains("[1, 2, 3, 4]"));
 }
 
@@ -629,7 +676,8 @@ fn typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("not a valid Jet expr template") || stderr.contains("matched 0, expected 1"),
+        stderr.contains("not a valid Jet expr template")
+            || stderr.contains("matched 0, expected 1"),
         "{stderr}"
     );
     assert_eq!(fs::read_to_string(source).unwrap(), before);
@@ -644,14 +692,25 @@ fn transaction_rejects_swapped_temp_inode_before_destination_rename() {
     let before = fs::read(&source).unwrap();
     let crashed = Command::new(jet())
         .env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1")
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
     assert_eq!(crashed.status.code(), Some(87));
     let temp = fs::read_dir(source.parent().unwrap())
         .unwrap()
         .map(|entry| entry.unwrap().path())
-        .find(|path| path.file_name().unwrap().to_string_lossy().starts_with(".jet-codemod-"))
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".jet-codemod-")
+        })
         .expect("staged temp must remain after simulated crash");
     fs::remove_file(&temp).unwrap();
     fs::write(&temp, b"hostile replacement\n").unwrap();
@@ -677,7 +736,13 @@ fn transaction_rejects_destination_parent_directory_swap() {
     let before = fs::read(&source).unwrap();
     let crashed = Command::new(jet())
         .env("JET_CODEMOD_CRASH_AFTER_JOURNAL", "1")
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
     assert_eq!(crashed.status.code(), Some(87));
@@ -712,10 +777,20 @@ fn directory_lock_ignores_hostile_hardlinked_lock_filename() {
     hard_link(&sentinel, codemods.join("codemod.lock")).unwrap();
 
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "apply", object.to_str().unwrap(), "--yes"])
+        .args([
+            "inspect",
+            "codemod",
+            "apply",
+            object.to_str().unwrap(),
+            "--yes",
+        ])
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(fs::read(&sentinel).unwrap(), b"must remain unchanged\n");
 }
 
@@ -733,7 +808,10 @@ fn undo_rejects_log_symlinks_and_destination_hardlink_aliases_before_reading() {
     fs::write(&a, "fn run() {}\n").unwrap();
     hard_link(&a, &b).unwrap();
     let bytes = fs::read(&a).unwrap();
-    let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let hex = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let hash = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
     let real = logs.join("Alias.log.json");
     fs::write(&real, format!("{{\"schema\":2,\"name\":\"Alias\",\"project\":\"{}\",\"files\":[{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}},{{\"path\":\"{}\",\"before_hash\":\"{}\",\"after_hash\":\"{}\",\"before_bytes\":\"{}\",\"after_bytes\":\"{}\"}}]}}\n", project.display(), a.display(), hash, hash, hex, hex, b.display(), hash, hash, hex, hex)).unwrap();
@@ -803,7 +881,10 @@ fn recovery_rejects_hostile_journal_paths_without_touching_outside_file() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("escapes retained project"), "{stderr}");
     assert_eq!(fs::read(&outside).unwrap(), b"outside bytes\n");
-    assert!(journal_path.exists(), "hostile journal must remain for inspection");
+    assert!(
+        journal_path.exists(),
+        "hostile journal must remain for inspection"
+    );
 }
 
 #[test]
@@ -821,8 +902,19 @@ fn dry_run_diff_preserves_eof_newline_truth() {
         .arg("--dry-run")
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.matches("\\ No newline at end of file").count(), 2, "{stdout}");
-    assert_eq!(fs::read(source).unwrap(), b"fn report() {}\nfn run() { report() }");
+    assert_eq!(
+        stdout.matches("\\ No newline at end of file").count(),
+        2,
+        "{stdout}"
+    );
+    assert_eq!(
+        fs::read(source).unwrap(),
+        b"fn report() {}\nfn run() { report() }"
+    );
 }

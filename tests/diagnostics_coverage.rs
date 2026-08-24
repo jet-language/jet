@@ -167,7 +167,12 @@ fn jit_collections_use_ice_for_internals_and_canonical_runtime_messages() {
     let direct_messages: Vec<_> = runtime_stop_calls(&source)
         .into_iter()
         .filter_map(|args| args.get(2).copied())
-        .filter(|wording| wording.trim_start_matches('&').trim_start().starts_with('"'))
+        .filter(|wording| {
+            wording
+                .trim_start_matches('&')
+                .trim_start()
+                .starts_with('"')
+        })
         .collect();
     assert!(
         direct_messages.is_empty(),
@@ -193,7 +198,10 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         })
         .collect::<Vec<_>>();
-    assert!(!active_runtime.is_empty(), "registry must publish runtime rows");
+    assert!(
+        !active_runtime.is_empty(),
+        "registry must publish runtime rows"
+    );
 
     for row in active_runtime {
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
@@ -216,8 +224,7 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     }
 
     for row in rows.iter().filter(|row| {
-        row.stage != "runtime"
-            || row.status != jet_foundation::Registry::DiagnosticStatus::Active
+        row.stage != "runtime" || row.status != jet_foundation::Registry::DiagnosticStatus::Active
     }) {
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             row.code,
@@ -327,10 +334,13 @@ fn every_registered_lint_has_a_unique_snake_case_name() {
             name
         );
         assert!(names.insert(name), "lint name `{name}` is duplicated");
-        assert!(codes.insert(lint.code), "lint code `{}` is duplicated", lint.code);
+        assert!(
+            codes.insert(lint.code),
+            "lint code `{}` is duplicated",
+            lint.code
+        );
         assert_eq!(
-            jet_foundation::Registry::diagnostic(lint.code)
-                .map(|row| row.severity),
+            jet_foundation::Registry::diagnostic(lint.code).map(|row| row.severity),
             Some(jet_foundation::Diagnostics::Severity::Lint),
             "lint `{}` is not a registered lint diagnostic row",
             lint.code
@@ -364,11 +374,7 @@ fn rendered_lint_keeps_code_beside_name() {
     );
 }
 
-fn assert_ui_snapshot_matches_row(
-    code: &str,
-    holes: &[(&str, &str)],
-    fixture: &str,
-) {
+fn assert_ui_snapshot_matches_row(code: &str, holes: &[(&str, &str)], fixture: &str) {
     let row = jet_foundation::Registry::diagnostic(code)
         .unwrap_or_else(|| panic!("{code} must stay registered"));
     let rendered = row.render(holes);
@@ -408,8 +414,14 @@ fn retired_bench_command_snapshot_keeps_registered_teaching_code() {
         "E2101 must remain a retired teaching diagnostic"
     );
     let snapshot = read(&root().join("tests/ui/bench_command_retired_e2101.stderr"));
-    assert!(snapshot.contains("Error [E2101]"), "snapshot lost E2101: {snapshot}");
-    assert!(snapshot.contains("`bench`"), "snapshot lost retired spelling: {snapshot}");
+    assert!(
+        snapshot.contains("Error [E2101]"),
+        "snapshot lost E2101: {snapshot}"
+    );
+    assert!(
+        snapshot.contains("`bench`"),
+        "snapshot lost retired spelling: {snapshot}"
+    );
     assert!(
         snapshot.contains("jet test --measure"),
         "snapshot lost canonical fix: {snapshot}"
@@ -418,9 +430,8 @@ fn retired_bench_command_snapshot_keeps_registered_teaching_code() {
 
 /// Whether a code is marked retired in the typed row source.
 fn is_retired(code: &str, _diag_md: &str) -> bool {
-    jet_foundation::Registry::diagnostic(code).is_some_and(|row| {
-        row.status == jet_foundation::Registry::DiagnosticStatus::Retired
-    })
+    jet_foundation::Registry::diagnostic(code)
+        .is_some_and(|row| row.status == jet_foundation::Registry::DiagnosticStatus::Retired)
 }
 
 fn staged_card_number(reason: &str) -> Option<u32> {
@@ -546,11 +557,7 @@ fn coverage_baseline_rejects_removal_addition_and_substitution() {
         )
     );
     assert_eq!(
-        coverage_baseline_failure(
-            baseline.iter().copied(),
-            &code_set(&baseline),
-            &emitted,
-        ),
+        coverage_baseline_failure(baseline.iter().copied(), &code_set(&baseline), &emitted,),
         None
     );
 }
@@ -804,7 +811,10 @@ fn word_shaped_codes_are_registered_and_explainable() {
     let live = jet::Explain::live_codes();
     for code in expected {
         assert!(registered.contains(code), "scanner missed {code}");
-        assert!(live.iter().any(|live_code| live_code == code), "explain missed {code}");
+        assert!(
+            live.iter().any(|live_code| live_code == code),
+            "explain missed {code}"
+        );
     }
 }
 
@@ -1079,9 +1089,8 @@ fn coverage_left() -> BTreeSet<String> {
         .into_iter()
         .filter(|code| emitted.contains(code))
         .filter(|code| {
-            jet_foundation::Registry::diagnostic(code).is_some_and(|row| {
-                row.status == jet_foundation::Registry::DiagnosticStatus::Active
-            })
+            jet_foundation::Registry::diagnostic(code)
+                .is_some_and(|row| row.status == jet_foundation::Registry::DiagnosticStatus::Active)
         })
         .filter(|code| !exclusions.contains(code))
         .collect()
@@ -1219,7 +1228,11 @@ fn runtime_user_error_codes_use_jet_panic_voice() {
     );
     for path in paths {
         let text = read(&path);
-        let rel = path.strip_prefix(root()).unwrap_or(&path).display().to_string();
+        let rel = path
+            .strip_prefix(root())
+            .unwrap_or(&path)
+            .display()
+            .to_string();
         for (idx, line) in text.lines().enumerate() {
             if line.contains("panic!(\"E") {
                 failures.push(format!(

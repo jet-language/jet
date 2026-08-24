@@ -1,8 +1,8 @@
 //! D-NOTEBOOK-DOC1=D — mergeable `.jetnb` source truth, cache, ipynb, `.jet` export.
 
 use super::trust::{quarantine_outputs, MimeBundle, POLICY_VERSION};
-use jet_foundation::JSON::{parse_json, JSONValue};
 use jet_foundation::PerformanceBudget::CanonicalJson;
+use jet_foundation::JSON::{parse_json, JSONValue};
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -136,7 +136,8 @@ impl JetNotebook {
         if changed {
             self.cells[idx].source = source;
             self.invalidate_from(cell_id);
-            self.merge_conflicts.retain(|conflict| conflict.cell_id != cell_id);
+            self.merge_conflicts
+                .retain(|conflict| conflict.cell_id != cell_id);
         }
         Ok(())
     }
@@ -189,12 +190,7 @@ impl JetNotebook {
         material.push_str(POLICY_VERSION);
         material.push('\0');
         let mut seen = BTreeSet::new();
-        fn walk(
-            nb: &JetNotebook,
-            id: &str,
-            seen: &mut BTreeSet<String>,
-            material: &mut String,
-        ) {
+        fn walk(nb: &JetNotebook, id: &str, seen: &mut BTreeSet<String>, material: &mut String) {
             if !seen.insert(id.to_string()) {
                 return;
             }
@@ -367,7 +363,10 @@ fn notebook_to_json(nb: &JetNotebook) -> Result<CanonicalJson, String> {
         .iter()
         .map(|conflict| {
             CanonicalJson::object([
-                ("cell_id".into(), CanonicalJson::String(conflict.cell_id.clone())),
+                (
+                    "cell_id".into(),
+                    CanonicalJson::String(conflict.cell_id.clone()),
+                ),
                 (
                     "ours_source".into(),
                     CanonicalJson::String(conflict.ours_source.clone()),
@@ -380,7 +379,10 @@ fn notebook_to_json(nb: &JetNotebook) -> Result<CanonicalJson, String> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     CanonicalJson::object([
-        ("schema".into(), CanonicalJson::integer(nb.schema.to_string())?),
+        (
+            "schema".into(),
+            CanonicalJson::integer(nb.schema.to_string())?,
+        ),
         ("format".into(), CanonicalJson::String("jetnb".into())),
         (
             "environment_hash".into(),
@@ -439,7 +441,10 @@ fn bundle_to_json(bundle: &MimeBundle) -> Result<CanonicalJson, String> {
             CanonicalJson::String(bundle.text_plain.clone()),
         ),
         ("mime".into(), CanonicalJson::Array(mime)),
-        ("quarantined".into(), CanonicalJson::Bool(bundle.quarantined)),
+        (
+            "quarantined".into(),
+            CanonicalJson::Bool(bundle.quarantined),
+        ),
         (
             "widget_id".into(),
             match &bundle.widget_id {
@@ -512,7 +517,10 @@ fn notebook_from_json(json: &CanonicalJson) -> Result<JetNotebook, String> {
     for cell in cells {
         let cell = cell_from_json(cell)?;
         if cell.id.is_empty() || !ids.insert(cell.id.clone()) {
-            return Err(format!("jetnb has duplicate or empty cell id `{}`", cell.id));
+            return Err(format!(
+                "jetnb has duplicate or empty cell id `{}`",
+                cell.id
+            ));
         }
         nb.cells.push(cell);
     }
@@ -539,10 +547,14 @@ fn notebook_from_json(json: &CanonicalJson) -> Result<JetNotebook, String> {
                 return Err(format!("output cache key `{k}` does not match its entry"));
             }
             let execution_count = match entry.get("execution_count") {
-                Some(CanonicalJson::Integer(n)) => n
-                    .parse()
-                    .map_err(|_| format!("output cache entry `{k}` has an invalid execution count"))?,
-                _ => return Err(format!("output cache entry `{k}` is missing execution count")),
+                Some(CanonicalJson::Integer(n)) => n.parse().map_err(|_| {
+                    format!("output cache entry `{k}` has an invalid execution count")
+                })?,
+                _ => {
+                    return Err(format!(
+                        "output cache entry `{k}` is missing execution count"
+                    ))
+                }
             };
             let bundle = match entry.get("bundle") {
                 Some(b) => bundle_from_json(b)?,
@@ -747,9 +759,8 @@ pub fn merge_by_id(base: &JetNotebook, theirs: &JetNotebook) -> JetNotebook {
         seen.insert(cell.id.clone());
         if let Some(t) = their_map.get(cell.id.as_str()) {
             let t = *t;
-            let same_source = cell.kind == t.kind
-                && cell.source == t.source
-                && cell.depends_on == t.depends_on;
+            let same_source =
+                cell.kind == t.kind && cell.source == t.source && cell.depends_on == t.depends_on;
             let mut merged = cell.clone();
             if same_source {
                 // Source identity is the merge fact. Prefer an output whose
@@ -792,16 +803,19 @@ pub fn merge_by_id(base: &JetNotebook, theirs: &JetNotebook) -> JetNotebook {
     }
     out.output_cache = base.output_cache.clone();
     for (k, v) in &theirs.output_cache {
-        out.output_cache.entry(k.clone()).or_insert_with(|| v.clone());
+        out.output_cache
+            .entry(k.clone())
+            .or_insert_with(|| v.clone());
     }
     out
 }
 
 pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
-    let json = CanonicalJson::parse_canonical(text.as_bytes())
-        .or_else(|_| parse_json(text).map(json_value_to_canonical).map_err(|_| {
-            "ipynb is not valid JSON; export a complete Jupyter notebook".to_string()
-        }))?;
+    let json = CanonicalJson::parse_canonical(text.as_bytes()).or_else(|_| {
+        parse_json(text)
+            .map(json_value_to_canonical)
+            .map_err(|_| "ipynb is not valid JSON; export a complete Jupyter notebook".to_string())
+    })?;
     let CanonicalJson::Object(root) = json else {
         return Err("ipynb root must be an object".into());
     };
@@ -834,7 +848,9 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
                 CellKind::Markdown
             }
             other => {
-                loss.push(format!("unsupported cell type `{other}` imported as Markdown"));
+                loss.push(format!(
+                    "unsupported cell type `{other}` imported as Markdown"
+                ));
                 CellKind::Markdown
             }
         };
@@ -989,10 +1005,8 @@ pub fn export_ipynb(nb: &JetNotebook) -> Result<(String, LossReport), String> {
                     if !out.bundle.quarantined {
                         for (mime, value) in &out.bundle.mime {
                             if mime != "text/plain" {
-                                data_fields.push((
-                                    mime.clone(),
-                                    CanonicalJson::String(value.clone()),
-                                ));
+                                data_fields
+                                    .push((mime.clone(), CanonicalJson::String(value.clone())));
                             }
                         }
                     } else {

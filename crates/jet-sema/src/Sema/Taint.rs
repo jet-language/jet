@@ -130,9 +130,9 @@ impl<'a> TaintCtx<'a> {
             .iter_kind(jet_foundation::Facts::FactKind::Tag)
             .filter(|fact| {
                 fact.from.iter().any(|source| {
-                    destinations.iter().any(|destination| {
-                        jet_foundation::Facts::fact_covers(source, destination)
-                    })
+                    destinations
+                        .iter()
+                        .any(|destination| jet_foundation::Facts::fact_covers(source, destination))
                 })
             })
             .map(|fact| fact.name.clone())
@@ -209,11 +209,18 @@ impl<'a> TaintCtx<'a> {
             Expr::Ident(name, _) => self.local_types.get(name).cloned(),
             Expr::StructLit { type_name, .. } => Some(type_name.clone()),
             Expr::Call(call) => self.return_types.get(&call.name).cloned(),
-            Expr::MethodCall { recv_type, method, .. } => recv_type
+            Expr::MethodCall {
+                recv_type, method, ..
+            } => recv_type
                 .as_ref()
                 .and_then(|owner| self.return_types.get(&format!("{owner}::{method}")))
                 .cloned(),
-            Expr::Field(base, field, _) | Expr::OptField { base, member: field, .. } => {
+            Expr::Field(base, field, _)
+            | Expr::OptField {
+                base,
+                member: field,
+                ..
+            } => {
                 let owner = self.type_of(base)?;
                 self.field_types.get(&(owner, field.clone())).cloned()
             }
@@ -250,7 +257,13 @@ impl<'a> TaintCtx<'a> {
                 }
                 tags
             }
-            Expr::MethodCall { receiver, method, recv_type, args, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                recv_type,
+                args,
+                ..
+            } => {
                 let mut tags = self.tags_of(receiver);
                 tags.extend(self.union(args.iter().map(|argument| &argument.expr)));
                 let destinations = self.method_destinations(receiver, method, recv_type.as_deref());
@@ -287,7 +300,11 @@ impl<'a> TaintCtx<'a> {
                 tags
             }
             Expr::Binary(_, left, right, _)
-            | Expr::Range { start: left, end: right, .. } => self.union([left.as_ref(), right.as_ref()]),
+            | Expr::Range {
+                start: left,
+                end: right,
+                ..
+            } => self.union([left.as_ref(), right.as_ref()]),
             Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
                 self.union(operands)
             }
@@ -351,9 +368,9 @@ impl<'a> TaintCtx<'a> {
                 }
                 tags
             }
-            Expr::MapLit(entries, _) => self.union(
-                entries.iter().flat_map(|(key, value)| [key, value]),
-            ),
+            Expr::MapLit(entries, _) => {
+                self.union(entries.iter().flat_map(|(key, value)| [key, value]))
+            }
             Expr::TupleLit(fields, _, _) => self.union(fields.iter().map(|(_, value)| value)),
             Expr::StructLit { fields, .. } => {
                 let mut tags = self.union(fields.iter().map(|(_, _, value)| value));
@@ -377,7 +394,9 @@ impl<'a> TaintCtx<'a> {
                 StrPart::Interp(value, _) => Some(value.as_ref()),
                 _ => None,
             })),
-            Expr::OrFallback { value, fallback, .. } => {
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
                 let mut tags = self.tags_of(value);
                 if let OrFallback::Value(other) | OrFallback::Return(Some(other), _) = fallback {
                     tags.extend(self.tags_of(other));
@@ -385,9 +404,11 @@ impl<'a> TaintCtx<'a> {
                 tags
             }
             Expr::PatternTest { subject, .. } => self.tags_of(subject),
-            Expr::If { then_value, else_value, .. } => {
-                self.union([then_value.as_ref(), else_value.as_ref()])
-            }
+            Expr::If {
+                then_value,
+                else_value,
+                ..
+            } => self.union([then_value.as_ref(), else_value.as_ref()]),
             Expr::PtrFromAddr { addr, .. } => self.tags_of(addr),
             Expr::Int(..)
             | Expr::Float(..)
@@ -396,7 +417,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
-        | Expr::NoElse(_)
+            | Expr::NoElse(_)
             | Expr::Lambda(_)
             | Expr::UnitLit { .. }
             | Expr::ComptimeName { .. }
@@ -410,11 +431,14 @@ impl<'a> TaintCtx<'a> {
             self.facts
                 .get(jet_foundation::Facts::FactKind::Tag, tag)
                 .and_then(|fact| {
-                fact.deny.iter().any(|deny| {
-                    destinations.iter().any(|destination| {
-                        jet_foundation::Facts::fact_covers(deny, destination)
-                    })
-                }).then(|| tag.clone())
+                    fact.deny
+                        .iter()
+                        .any(|deny| {
+                            destinations.iter().any(|destination| {
+                                jet_foundation::Facts::fact_covers(deny, destination)
+                            })
+                        })
+                        .then(|| tag.clone())
                 })
         })
     }
@@ -625,7 +649,9 @@ impl<'a> TaintCtx<'a> {
 
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
-            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => self.check_expr(e),
+            Stmt::Expr(e) | Stmt::Yield(e, _) | Stmt::DeferClose { close: e, .. } => {
+                self.check_expr(e)
+            }
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => self.check_expr(e),
             Stmt::Val(b) => {
                 self.check_expr(&b.init);
@@ -639,11 +665,10 @@ impl<'a> TaintCtx<'a> {
                     }
                 } else if !b.name.is_empty() {
                     self.set_tags(&b.name, tags);
-                    if let Some(type_name) = b
-                        .ty
-                        .as_ref()
-                        .and_then(Self::type_name)
-                        .or_else(|| self.type_of(&b.init))
+                    if let Some(type_name) =
+                        b.ty.as_ref()
+                            .and_then(Self::type_name)
+                            .or_else(|| self.type_of(&b.init))
                     {
                         self.local_types.set(&b.name, type_name);
                     }
@@ -684,7 +709,12 @@ impl<'a> TaintCtx<'a> {
                 ..
             } => {
                 let collection_tags = match kind {
-                    ForKind::Range { start, end, step, exclusive: _ } => {
+                    ForKind::Range {
+                        start,
+                        end,
+                        step,
+                        exclusive: _,
+                    } => {
                         self.check_expr(start);
                         self.check_expr(end);
                         if let Some(s) = step {
@@ -694,7 +724,9 @@ impl<'a> TaintCtx<'a> {
                     }
                     ForKind::In { collection, step } => {
                         self.check_expr(collection);
-                        if let Some(step) = step { self.check_expr(step); }
+                        if let Some(step) = step {
+                            self.check_expr(step);
+                        }
                         self.tags_of(collection)
                     }
                 };
@@ -767,7 +799,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Shield { body, .. }
             | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
@@ -814,8 +846,16 @@ impl<'a> TaintCtx<'a> {
     /// Join every path that meets here. Suspicion spreads: a value tainted on
     /// any path stays tainted after the paths meet.
     fn merge_tags(&mut self, before: &TaintFacts, paths: &[TaintFacts]) {
-        self.locals = Facts::merge_paths(&before.0, &paths.iter().map(|p| p.0.clone()).collect::<Vec<_>>(), &mut Vec::new());
-        self.local_types = Facts::merge_paths(&before.1, &paths.iter().map(|p| p.1.clone()).collect::<Vec<_>>(), &mut Vec::new());
+        self.locals = Facts::merge_paths(
+            &before.0,
+            &paths.iter().map(|p| p.0.clone()).collect::<Vec<_>>(),
+            &mut Vec::new(),
+        );
+        self.local_types = Facts::merge_paths(
+            &before.1,
+            &paths.iter().map(|p| p.1.clone()).collect::<Vec<_>>(),
+            &mut Vec::new(),
+        );
     }
 
     fn snapshot(&self) -> TaintFacts {
@@ -1021,11 +1061,7 @@ pub fn collect_return_tag_facts(
     }
 }
 
-pub fn collect_function_paths(
-    module: &str,
-    items: &[Item],
-    paths: &mut BTreeSet<String>,
-) {
+pub fn collect_function_paths(module: &str, items: &[Item], paths: &mut BTreeSet<String>) {
     let mut register = |owner: Option<&str>, name: &str| {
         let local = owner
             .map(|owner| format!("{owner}.{name}"))
@@ -1093,7 +1129,11 @@ pub fn register_builtin_tag_facts(facts: &mut jet_foundation::Facts::FactRegistr
             jet_foundation::Facts::FactKind::Tag,
             origin,
             std::iter::empty(),
-            ["SQL.raw".to_string(), "HTML.raw".to_string(), "Sh.raw".to_string()],
+            [
+                "SQL.raw".to_string(),
+                "HTML.raw".to_string(),
+                "Sh.raw".to_string(),
+            ],
             [source.to_string()],
         );
     }
@@ -1129,10 +1169,7 @@ pub fn collect_tag_facts(
     diags: &mut Vec<Diagnostic>,
     declarations_only: bool,
 ) {
-    fn closest<'a>(
-        name: &str,
-        candidates: impl IntoIterator<Item = &'a str>,
-    ) -> Option<&'a str> {
+    fn closest<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
         let mut best: Option<(&'a str, usize)> = None;
         let mut ambiguous = false;
         for candidate in candidates {
@@ -1191,9 +1228,7 @@ pub fn collect_tag_facts(
                 format!("`#Scrub({tag})` does not match this function signature"),
                 "a scrubber consumes a value carrying that tag and returns a value without it"
                     .to_string(),
-                format!(
-                    "accept a `#{tag} T` parameter and return the untagged result"
-                ),
+                format!("accept a `#{tag} T` parameter and return the untagged result"),
                 Some(function.name_span),
             ));
             return;
@@ -1252,10 +1287,7 @@ pub fn collect_tag_facts(
                 if crate::Sema::Effects::parse_effect_name(source).is_none()
                     && !known_sources.contains(source)
                 {
-                    let suggestion = closest(
-                        source,
-                        known_sources.iter().map(String::as_str),
-                    );
+                    let suggestion = closest(source, known_sources.iter().map(String::as_str));
                     let fix = suggestion.map_or_else(
                         || "use a known effect or a declared function path".to_string(),
                         |candidate| format!("did you mean `{candidate}`?"),
@@ -1282,13 +1314,9 @@ pub fn collect_tag_facts(
 
     for item in items {
         match item {
-            Item::Func(function) => register_scrubber(
-                function,
-                function.name.clone(),
-                facts,
-                scrubbers,
-                diags,
-            ),
+            Item::Func(function) => {
+                register_scrubber(function, function.name.clone(), facts, scrubbers, diags)
+            }
             Item::Impl(i) => {
                 for m in &i.methods {
                     register_scrubber(

@@ -1,9 +1,9 @@
 use super::alloc_ptrs::result_ty;
 use super::serde_diags::wrong_core_arity;
-use crate::AST::{Expr, Item, ProgramBundle, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Effects::{Effect, EffectSet, EffectSummary};
 use crate::Sema::Checker;
+use crate::Sema::Effects::{Effect, EffectSet, EffectSummary};
+use crate::AST::{Expr, Item, ProgramBundle, StrPart, Type};
 use std::collections::{HashMap, HashSet};
 
 fn service_error_ty() -> Type {
@@ -101,12 +101,8 @@ impl<'a> Checker<'a> {
         let result_string = || service_result_ty(Type::String);
         let result_int = || service_result_ty(Type::Int);
         let workflow = || Type::Named("ServiceWorkflow".to_string());
-        let workflow_id = || {
-            Type::Union(vec![
-                Type::Int,
-                Type::Named("ServiceWorkflow".to_string()),
-            ])
-        };
+        let workflow_id =
+            || Type::Union(vec![Type::Int, Type::Named("ServiceWorkflow".to_string())]);
         let task_outcome = || Type::Named("TaskOutcome".to_string());
         let task_status = || Type::Named("TaskStatus".to_string());
 
@@ -193,9 +189,9 @@ impl<'a> Checker<'a> {
                     match literal_string_list(&args[1].expr) {
                         Some(workers)
                             if !workers.is_empty()
-                                && workers.iter().all(|name| {
-                                    jet_foundation::ServiceTree::valid_name(name)
-                                }) => {}
+                                && workers
+                                    .iter()
+                                    .all(|name| jet_foundation::ServiceTree::valid_name(name)) => {}
                         Some(_) | None => invalid_service_value(
                             self,
                             "group worker topology",
@@ -272,13 +268,23 @@ impl<'a> Checker<'a> {
             }
             "mailbox_depth" | "restarts" => {
                 if self.service_method_arity(&format!("ServiceTree.{method}"), args, 1, span) {
-                    self.expect_core_arg(&format!("ServiceTree.{method}"), 0, &endpoint, &mut args[0]);
+                    self.expect_core_arg(
+                        &format!("ServiceTree.{method}"),
+                        0,
+                        &endpoint,
+                        &mut args[0],
+                    );
                 }
                 result_int()
             }
             "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker" => {
                 if self.service_method_arity(&format!("ServiceTree.{method}"), args, 1, span) {
-                    self.expect_core_arg(&format!("ServiceTree.{method}"), 0, &endpoint, &mut args[0]);
+                    self.expect_core_arg(
+                        &format!("ServiceTree.{method}"),
+                        0,
+                        &endpoint,
+                        &mut args[0],
+                    );
                 }
                 result_unit()
             }
@@ -302,15 +308,35 @@ impl<'a> Checker<'a> {
                         &Type::Named("ServiceStateStore".to_string()),
                         &mut args[0],
                     );
-                    self.expect_core_arg(&format!("ServiceTree.{method}"), 1, &Type::String, &mut args[1]);
-                    self.expect_core_arg(&format!("ServiceTree.{method}"), 2, &Type::Int, &mut args[2]);
-                    self.expect_core_arg(&format!("ServiceTree.{method}"), 3, &Type::String, &mut args[3]);
+                    self.expect_core_arg(
+                        &format!("ServiceTree.{method}"),
+                        1,
+                        &Type::String,
+                        &mut args[1],
+                    );
+                    self.expect_core_arg(
+                        &format!("ServiceTree.{method}"),
+                        2,
+                        &Type::Int,
+                        &mut args[2],
+                    );
+                    self.expect_core_arg(
+                        &format!("ServiceTree.{method}"),
+                        3,
+                        &Type::String,
+                        &mut args[3],
+                    );
                 }
                 result_unit()
             }
             "commit_snapshot" | "append_event" => {
                 if self.service_method_arity(&format!("ServiceTree.{method}"), args, 1, span) {
-                    self.expect_core_arg(&format!("ServiceTree.{method}"), 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        &format!("ServiceTree.{method}"),
+                        0,
+                        &Type::String,
+                        &mut args[0],
+                    );
                 }
                 result_unit()
             }
@@ -324,7 +350,12 @@ impl<'a> Checker<'a> {
             }
             "workflow_start" => {
                 if self.service_method_arity("ServiceTree.workflow_start", args, 2, span) {
-                    self.expect_core_arg("ServiceTree.workflow_start", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_start",
+                        0,
+                        &Type::String,
+                        &mut args[0],
+                    );
                     self.expect_core_arg("ServiceTree.workflow_start", 1, &Type::Int, &mut args[1]);
                     require_service_name(self, "workflow name", &args[0].expr);
                     if literal_int(&args[1].expr).is_some_and(|version| version <= 0) {
@@ -340,29 +371,64 @@ impl<'a> Checker<'a> {
             }
             "workflow_step" => {
                 if self.service_method_arity("ServiceTree.workflow_step", args, 2, span) {
-                    self.expect_core_arg("ServiceTree.workflow_step", 0, &workflow_id(), &mut args[0]);
-                    self.expect_core_arg("ServiceTree.workflow_step", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_step",
+                        0,
+                        &workflow_id(),
+                        &mut args[0],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_step",
+                        1,
+                        &Type::String,
+                        &mut args[1],
+                    );
                 }
                 result_unit()
             }
             "workflow_activity" => {
                 if self.service_method_arity("ServiceTree.workflow_activity", args, 4, span) {
-                    self.expect_core_arg("ServiceTree.workflow_activity", 0, &workflow_id(), &mut args[0]);
-                    self.expect_core_arg("ServiceTree.workflow_activity", 1, &Type::String, &mut args[1]);
-                    self.expect_core_arg("ServiceTree.workflow_activity", 2, &Type::String, &mut args[2]);
-                    self.expect_core_arg("ServiceTree.workflow_activity", 3, &Type::Int, &mut args[3]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity",
+                        0,
+                        &workflow_id(),
+                        &mut args[0],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity",
+                        1,
+                        &Type::String,
+                        &mut args[1],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity",
+                        2,
+                        &Type::String,
+                        &mut args[2],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity",
+                        3,
+                        &Type::Int,
+                        &mut args[3],
+                    );
                 }
                 service_result_ty(task_status())
             }
             "workflow_activity_retry" => {
-                if self.service_method_arity(
-                    "ServiceTree.workflow_activity_retry",
-                    args,
-                    3,
-                    span,
-                ) {
-                    self.expect_core_arg("ServiceTree.workflow_activity_retry", 0, &workflow_id(), &mut args[0]);
-                    self.expect_core_arg("ServiceTree.workflow_activity_retry", 1, &Type::String, &mut args[1]);
+                if self.service_method_arity("ServiceTree.workflow_activity_retry", args, 3, span) {
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity_retry",
+                        0,
+                        &workflow_id(),
+                        &mut args[0],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity_retry",
+                        1,
+                        &Type::String,
+                        &mut args[1],
+                    );
                     self.expect_core_arg(
                         "ServiceTree.workflow_activity_retry",
                         2,
@@ -379,8 +445,18 @@ impl<'a> Checker<'a> {
                     3,
                     span,
                 ) {
-                    self.expect_core_arg("ServiceTree.workflow_activity_complete", 0, &workflow_id(), &mut args[0]);
-                    self.expect_core_arg("ServiceTree.workflow_activity_complete", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity_complete",
+                        0,
+                        &workflow_id(),
+                        &mut args[0],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_activity_complete",
+                        1,
+                        &Type::String,
+                        &mut args[1],
+                    );
                     self.expect_core_arg(
                         "ServiceTree.workflow_activity_complete",
                         2,
@@ -392,27 +468,52 @@ impl<'a> Checker<'a> {
             }
             "workflow_history" => {
                 if self.service_method_arity("ServiceTree.workflow_history", args, 1, span) {
-                    self.expect_core_arg("ServiceTree.workflow_history", 0, &workflow_id(), &mut args[0]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_history",
+                        0,
+                        &workflow_id(),
+                        &mut args[0],
+                    );
                 }
                 result_string()
             }
             "workflow_outcome" => {
                 if self.service_method_arity("ServiceTree.workflow_outcome", args, 1, span) {
-                    self.expect_core_arg("ServiceTree.workflow_outcome", 0, &workflow_id(), &mut args[0]);
+                    self.expect_core_arg(
+                        "ServiceTree.workflow_outcome",
+                        0,
+                        &workflow_id(),
+                        &mut args[0],
+                    );
                 }
                 service_result_ty(task_outcome())
             }
             "directory_register" => {
                 if self.service_method_arity("ServiceTree.directory_register", args, 2, span) {
-                    self.expect_core_arg("ServiceTree.directory_register", 0, &Type::String, &mut args[0]);
-                    self.expect_core_arg("ServiceTree.directory_register", 1, &endpoint, &mut args[1]);
+                    self.expect_core_arg(
+                        "ServiceTree.directory_register",
+                        0,
+                        &Type::String,
+                        &mut args[0],
+                    );
+                    self.expect_core_arg(
+                        "ServiceTree.directory_register",
+                        1,
+                        &endpoint,
+                        &mut args[1],
+                    );
                     require_service_name(self, "directory name", &args[0].expr);
                 }
                 result_unit()
             }
             "directory_resolve" => {
                 if self.service_method_arity("ServiceTree.directory_resolve", args, 1, span) {
-                    self.expect_core_arg("ServiceTree.directory_resolve", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        "ServiceTree.directory_resolve",
+                        0,
+                        &Type::String,
+                        &mut args[0],
+                    );
                     require_service_name(self, "directory name", &args[0].expr);
                 }
                 result_endpoint()
@@ -455,8 +556,18 @@ impl<'a> Checker<'a> {
             }
             "activity" => {
                 if self.service_method_arity("ServiceWorkflow.activity", args, 2, span) {
-                    self.expect_core_arg("ServiceWorkflow.activity", 0, &Type::String, &mut args[0]);
-                    self.expect_core_arg("ServiceWorkflow.activity", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg(
+                        "ServiceWorkflow.activity",
+                        0,
+                        &Type::String,
+                        &mut args[0],
+                    );
+                    self.expect_core_arg(
+                        "ServiceWorkflow.activity",
+                        1,
+                        &Type::String,
+                        &mut args[1],
+                    );
                 }
                 result_string()
             }
@@ -575,8 +686,12 @@ impl<'a> Checker<'a> {
             }
             "retain" => {
                 if args.len() != 1 {
-                    self.diags
-                        .push(wrong_core_arity("ServiceRuntime.retain", 1, args.len(), span));
+                    self.diags.push(wrong_core_arity(
+                        "ServiceRuntime.retain",
+                        1,
+                        args.len(),
+                        span,
+                    ));
                     for arg in args.iter_mut() {
                         self.infer(&mut arg.expr);
                     }

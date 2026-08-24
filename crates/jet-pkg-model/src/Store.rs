@@ -92,8 +92,7 @@ fn home_dir() -> PathBuf {
             .unwrap_or_else(|| PathBuf::from("."));
     }
     #[cfg(not(windows))]
-    environment_path("HOME")
-        .unwrap_or_else(|| PathBuf::from("."))
+    environment_path("HOME").unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn environment_path(name: &str) -> Option<PathBuf> {
@@ -105,7 +104,10 @@ fn environment_path(name: &str) -> Option<PathBuf> {
 fn user_data_root() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
-        return home_dir().join("Library").join("Application Support").join("Jet");
+        return home_dir()
+            .join("Library")
+            .join("Application Support")
+            .join("Jet");
     }
     #[cfg(windows)]
     {
@@ -227,7 +229,11 @@ impl StoreEntry {
         field("identity_platform", &self.cache_identity.platform, false);
         field("references", &references, true);
         field("named_outputs", &named_outputs, true);
-        field("platform_artifact_kind", &self.platform_artifact_kind, false);
+        field(
+            "platform_artifact_kind",
+            &self.platform_artifact_kind,
+            false,
+        );
         field("producer_record", &self.producer_record, false);
         field("receipt", &self.receipt, false);
         field("realized_at", &realized_at, false);
@@ -425,7 +431,12 @@ pub struct ParsedMeta {
 
 pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
     let j = JSON::parse(text).ok()?;
-    let get = |k: &str| j.get(k).and_then(JSONValue::as_str).map(str::to_string).ok();
+    let get = |k: &str| {
+        j.get(k)
+            .and_then(JSONValue::as_str)
+            .map(str::to_string)
+            .ok()
+    };
     let name = get("name")?;
     let reference = get("ref")?;
     let out = get("out")?;
@@ -495,7 +506,10 @@ mod tests {
         } else {
             "hangar"
         };
-        assert_eq!(roots.hangar_dir(), PathBuf::from("/tmp/jet-root").join(expected_leaf));
+        assert_eq!(
+            roots.hangar_dir(),
+            PathBuf::from("/tmp/jet-root").join(expected_leaf)
+        );
     }
 
     #[test]
@@ -506,5 +520,4 @@ mod tests {
         };
         assert_eq!(roots.hangar_dir(), PathBuf::from("/tmp/jet-root/hangar"));
     }
-
 }

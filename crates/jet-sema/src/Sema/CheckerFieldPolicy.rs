@@ -238,9 +238,9 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
                 rewrite_field_refs(&mut a.expr, names, receiver);
             }
         }
-        Expr::Field(inner, _, _)
-        | Expr::Tainted(inner, _, _)
-        | Expr::Present(inner, _) => rewrite_field_refs(inner, names, receiver),
+        Expr::Field(inner, _, _) | Expr::Tainted(inner, _, _) | Expr::Present(inner, _) => {
+            rewrite_field_refs(inner, names, receiver)
+        }
         Expr::Try(inner, _, _, note) => {
             rewrite_field_refs(inner, names, receiver);
             if let Some(note) = note {
@@ -250,7 +250,11 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
         Expr::MemberSpread { base, .. } | Expr::OptField { base, .. } => {
             rewrite_field_refs(base, names, receiver)
         }
-        Expr::MethodCall { receiver: recv, args, .. } => {
+        Expr::MethodCall {
+            receiver: recv,
+            args,
+            ..
+        } => {
             rewrite_field_refs(recv, names, receiver);
             for a in args {
                 rewrite_field_refs(&mut a.expr, names, receiver);
@@ -261,7 +265,11 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             rewrite_field_refs(index, names, receiver);
         }
         Expr::Slice {
-            base, start, end, range, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             rewrite_field_refs(base, names, receiver);
             if let Some(range) = range {
@@ -392,7 +400,10 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         ty_span: span,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        public_label: None,
+        zone: crate::AST::ParamZone::Either,
     };
 
     Func {
@@ -403,21 +414,21 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         name: f.name.clone(),
         name_span: span,
         meta: None,
-                    type_params: vec![],
+        type_params: vec![],
         head_pattern: None,
         params: vec![self_param],
         return_type: Some(f.ty.clone()),
         return_type_span: Some(f.ty_span),
         return_view_provenance: None,
         declared_return_view_provenance: None,
-            gc_return: false,
-            gc_scope: false,
+        gc_return: false,
+        gc_scope: false,
         is_unsafe: false,
         unsafe_reason: None,
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
-                reactive_upgrades: Vec::new(),
+        reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_job: false,

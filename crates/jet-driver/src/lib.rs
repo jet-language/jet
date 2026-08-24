@@ -46,8 +46,8 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     })
 }
 
-pub mod Compile;
 pub mod BudgetView;
+pub mod Compile;
 pub mod Driver;
 pub mod FixEngine;
 pub mod Foreign;
@@ -62,21 +62,22 @@ pub mod QueryService;
 // (provider/network/shell). `PluginExport` is driver-only (plugin export
 // API-freeze validation via Sema) and was never used by `jetpack` itself, so
 // it lives directly in this crate instead of the shared model.
-pub mod PluginExport;
-pub mod LibraryExport;
-pub mod CompilerExtensionHook;
 pub mod BuildPluginHook;
+pub mod CompilerExtensionHook;
+pub mod LibraryExport;
+pub mod PluginExport;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: `EffectBudget`/`LintPolicy` are
 // pure policy computation over the manifest/effect-fixpoint data (no
 // network/provider/shell), so they live in the shared read-only model too —
 // the root `jet` package needs them for `build`/`run`'s effect-budget
 // summary and lint-policy enforcement without depending on the full
 // `jetpack` engine for that.
-pub use jet_pkg_model::{
-    AdaBind, CBind, CFFI, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FFI, FortranBind, GoBind, JavaBind, JavaScriptBind, LuaBind, Package, PascalBind, PerlBind, PhpBind, Policy, PythonBind, RBind, RubyBind, PowerShellBind, TclBind, LintPolicy, Lock, Manifest, ScriptDeps,
-    Store,
-    OctaveBind,
-};
 pub use jet_pkg_model::Authority;
 pub use jet_pkg_model::JetLib::{JetLibArtifact, JetLibStamp};
+pub use jet_pkg_model::{
+    AdaBind, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FortranBind,
+    GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package,
+    PascalBind, PerlBind, PhpBind, Policy, PowerShellBind, PythonBind, RBind, RubyBind, ScriptDeps,
+    Store, TclBind, CFFI, FFI,
+};
 pub use Compile::{bundle_uses_unsafe, Abilities, CompileOutput};

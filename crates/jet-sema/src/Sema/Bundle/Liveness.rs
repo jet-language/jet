@@ -2,12 +2,13 @@
 //! ledger. The pass does not inspect generated code or ask an execution tier
 //! to discover reachability.
 
-use crate::AST::{Func, ImportKind, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::AST::{Func, ImportKind, Item, ProgramBundle};
 use jet_foundation::App::AppGraph;
-use jet_foundation::Names::{NameAlias, NameDeclaration, NameLedger, NameVisibility, StructureFact,
-    StructureFactKind};
+use jet_foundation::Names::{
+    NameAlias, NameDeclaration, NameLedger, NameVisibility, StructureFact, StructureFactKind,
+};
 
 struct LivenessCandidate {
     code: &'static str,
@@ -119,7 +120,8 @@ fn collect_unused_imports(
                 let Some(alias) = ledger.alias(module_idx, &binding.local) else {
                     continue;
                 };
-                if alias.span.start >= alias.span.end || alias_used(ledger, &module.display, alias) {
+                if alias.span.start >= alias.span.end || alias_used(ledger, &module.display, alias)
+                {
                     continue;
                 }
                 let span = import_binding_span(&module.source, &binding);
@@ -250,9 +252,7 @@ fn collect_unreachable_exports(
 }
 
 fn ignored_name(name: &str) -> bool {
-    name.is_empty()
-        || name.starts_with('_')
-        || name.starts_with(Syntax::GENERATED_NAME_PREFIX)
+    name.is_empty() || name.starts_with('_') || name.starts_with(Syntax::GENERATED_NAME_PREFIX)
 }
 
 fn rename_edit(span: Span, name: &str) -> crate::Diagnostics::TextEdit {
@@ -287,18 +287,12 @@ fn removable_private_function(function: &Func) -> bool {
 /// simple module form, the explicit alias. Member-list aliases retain the
 /// original member span only. Recover the local identifier from the bounded
 /// import source so a fix never replaces the imported target path.
-fn import_binding_span(
-    source: &str,
-    binding: &crate::AST::ImportBinding<'_>,
-) -> Span {
+fn import_binding_span(source: &str, binding: &crate::AST::ImportBinding<'_>) -> Span {
     let original = binding.item_span.unwrap_or(binding.module_alias_span);
     if let Some(alias) = binding.alias {
-        if let Some((start, end)) = identifier_after_as(
-            source,
-            original.end,
-            binding.import_span.end,
-            alias,
-        ) {
+        if let Some((start, end)) =
+            identifier_after_as(source, original.end, binding.import_span.end, alias)
+        {
             return Span::new(start, end);
         }
     }
@@ -388,11 +382,12 @@ fn display_name(declaration: &NameDeclaration) -> String {
 }
 
 fn alias_used(ledger: &NameLedger, source: &str, alias: &NameAlias) -> bool {
-    ledger.references().iter().any(|((module, _, _), reference)| {
-        module == source
-            && reference.kind == "import_alias"
-            && reference.def_span == alias.span
-    })
+    ledger
+        .references()
+        .iter()
+        .any(|((module, _, _), reference)| {
+            module == source && reference.kind == "import_alias" && reference.def_span == alias.span
+        })
 }
 
 fn private_function_used(
@@ -407,20 +402,19 @@ fn private_function_used(
     else {
         return false;
     };
-    let function_span = find_function_by_name_span(
-        &bundle.modules[declaration.module].items,
-        declaration.span,
-    )
-    .map(|function| function.span);
-    ledger.references().iter().any(|((source, start, end), reference)| {
-        source == target_path
-            && reference.module_path == target_path
-            && reference.kind == "function"
-            && reference.def_span == declaration.span
-            && !function_span.is_some_and(|span| {
-                *start >= span.start && *end <= span.end
-            })
-    })
+    let function_span =
+        find_function_by_name_span(&bundle.modules[declaration.module].items, declaration.span)
+            .map(|function| function.span);
+    ledger
+        .references()
+        .iter()
+        .any(|((source, start, end), reference)| {
+            source == target_path
+                && reference.module_path == target_path
+                && reference.kind == "function"
+                && reference.def_span == declaration.span
+                && !function_span.is_some_and(|span| *start >= span.start && *end <= span.end)
+        })
 }
 
 fn declaration_reached_from_package(
@@ -431,22 +425,25 @@ fn declaration_reached_from_package(
     let Some(target_module) = bundle.modules.get(declaration.module) else {
         return false;
     };
-    ledger.references().iter().any(|((source, _, _), reference)| {
-        let Some(source_idx) = bundle
-            .modules
-            .iter()
-            .position(|module| module.display == *source)
-        else {
-            return false;
-        };
-        source_idx != declaration.module
-            && ledger
-                .module(source_idx)
-                .zip(ledger.module(declaration.module))
-                .is_some_and(|(source, target)| source.package == target.package)
-            && reference.module_path == target_module.display
-            && reference.def_span == declaration.span
-    })
+    ledger
+        .references()
+        .iter()
+        .any(|((source, _, _), reference)| {
+            let Some(source_idx) = bundle
+                .modules
+                .iter()
+                .position(|module| module.display == *source)
+            else {
+                return false;
+            };
+            source_idx != declaration.module
+                && ledger
+                    .module(source_idx)
+                    .zip(ledger.module(declaration.module))
+                    .is_some_and(|(source, target)| source.package == target.package)
+                && reference.module_path == target_module.display
+                && reference.def_span == declaration.span
+        })
 }
 
 fn alias_reached_from_package(
@@ -460,7 +457,10 @@ fn alias_reached_from_package(
     ledger.aliases().any(|consumer| {
         consumer.module != alias.module
             && consumer.target_module == Some(alias.module)
-            && consumer.target.rsplit_once('.').map_or(false, |(_, leaf)| leaf == alias.name)
+            && consumer
+                .target
+                .rsplit_once('.')
+                .map_or(false, |(_, leaf)| leaf == alias.name)
             && ledger
                 .module(consumer.module)
                 .is_some_and(|module| module.package == owner.package)
@@ -476,10 +476,9 @@ fn function_is_root(
     declaration: &NameDeclaration,
     app_graph: Option<&AppGraph>,
 ) -> bool {
-    let Some(function) = find_function_by_name_span(
-        &bundle.modules[declaration.module].items,
-        declaration.span,
-    ) else {
+    let Some(function) =
+        find_function_by_name_span(&bundle.modules[declaration.module].items, declaration.span)
+    else {
         return false;
     };
     if function.is_job

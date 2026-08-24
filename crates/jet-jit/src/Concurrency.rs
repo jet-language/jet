@@ -3,20 +3,16 @@
 use jet_codegen::scheduler::{
     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_all, jet_scheduler_any,
     jet_scheduler_classify_unwind, jet_scheduler_current_task_trace,
-    jet_scheduler_deliver_shield_exit, jet_scheduler_race,
-    jet_scheduler_propagate_deadline,
-    jet_scheduler_panic_should_unwind,
+    jet_scheduler_deliver_shield_exit, jet_scheduler_panic_should_unwind,
+    jet_scheduler_propagate_deadline, jet_scheduler_race, jet_scheduler_select_int_channels_tagged,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
-    jet_scheduler_select_int_channels_tagged,
-    jet_scheduler_try_select_int_channels_tagged,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
-    jet_scheduler_task_completion_register,
-    jet_std_time_duration_to_millis,
-    jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
-    jet_scheduler_task_group_wait, jet_scheduler_yield_now, jet_task_delay_ms_defaulted,
-    jet_task_interval_ms_defaulted,
-    jet_task_join_deadline_check, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
-    JetSchedulerWait, JetShieldExit, JetStream, JetTaskControl, ParkSlot,
+    jet_scheduler_spawn_blocking_with_control, jet_scheduler_task_completion_register,
+    jet_scheduler_task_group_wait, jet_scheduler_try_select_int_channels_tagged,
+    jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, jet_std_time_duration_to_millis,
+    jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted, jet_task_join_deadline_check,
+    JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait, JetShieldExit,
+    JetStream, JetTaskControl, ParkSlot,
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
@@ -185,10 +181,9 @@ where
         }
         JetSchedulerWait::Ready(Err(failure)) => {
             let result = with_runtime_mut(|rt| {
-                let payload = jet_codegen::task_group::jet_task_failure_abi(
-                    failure,
-                    |reason| rt.heap.alloc_string(reason) as u64,
-                );
+                let payload = jet_codegen::task_group::jet_task_failure_abi(failure, |reason| {
+                    rt.heap.alloc_string(reason) as u64
+                });
                 crate::runtime_host::alloc_jit_result(rt, false, payload)
             });
             WAIT_VALUE.with(|slot| slot.set(result));
@@ -254,7 +249,6 @@ fn published_task_control(runtime: usize, task: usize) -> Option<Arc<JetTaskCont
     }
     control
 }
-
 
 fn jet_jit_wait_value() -> i64 {
     WAIT_VALUE.with(|slot| slot.get())
@@ -476,10 +470,7 @@ fn deliver_wait_status(status: JetSchedulerWait<()>) {
         JetSchedulerWait::Panicked(message) => {
             if message.starts_with("Stop [E") {
                 with_runtime_mut(|rt| {
-                    rt.set_rendered_runtime_stop(
-                        message,
-                        jet_foundation::ExitCodes::RUNTIME_PANIC,
-                    )
+                    rt.set_rendered_runtime_stop(message, jet_foundation::ExitCodes::RUNTIME_PANIC)
                 });
             } else {
                 host_fault(&message);
@@ -515,8 +506,7 @@ fn jet_jit_channel_new() -> i64 {
 fn jet_jit_channel_bounded(capacity: i64) -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
-        rt.channels
-            .push(JetSchedulerChannel::bounded(capacity));
+        rt.channels.push(JetSchedulerChannel::bounded(capacity));
         id
     })
 }
@@ -527,8 +517,7 @@ fn jet_jit_generator_channel_new() -> i64 {
         let channel = rt.next_stream_channel;
         rt.next_stream_channel -= 1;
         rt.stream_consumers.insert(channel, consumer);
-        rt.stream_producers
-            .insert(channel, Arc::new(producer));
+        rt.stream_producers.insert(channel, Arc::new(producer));
         channel
     })
 }
@@ -579,9 +568,7 @@ fn jet_jit_time_now() -> i64 {
 /// `#Context(deadline: …)` enter.
 fn jet_jit_deadline_push(deadline_ms: i64) {
     DEADLINE_STACK.with(|stack| {
-        stack
-            .borrow_mut()
-            .push(jet_ctx_push_deadline(deadline_ms));
+        stack.borrow_mut().push(jet_ctx_push_deadline(deadline_ms));
     });
 }
 
@@ -731,10 +718,7 @@ fn jet_jit_generator_channel_receive_status(ch: i64) -> i64 {
         // dispatch the EOF branch before observing the trap.
         if let Some(report) = consumer.failure_report() {
             with_runtime_mut(|rt| {
-                rt.set_rendered_runtime_stop(
-                    report,
-                    jet_foundation::ExitCodes::RUNTIME_PANIC,
-                )
+                rt.set_rendered_runtime_stop(report, jet_foundation::ExitCodes::RUNTIME_PANIC)
             });
         } else {
             trap_panic("stream producer failed");
@@ -769,11 +753,9 @@ fn jet_jit_channel_receive_status(ch: i64) -> i64 {
         host_fault("jit channel receive: bad handle");
         return JitWaitStatus::Panicked as i64;
     };
-    wait_status(|| {
-        match chan.receive() {
-            Some(v) => v + 1,
-            None => 0,
-        }
+    wait_status(|| match chan.receive() {
+        Some(v) => v + 1,
+        None => 0,
     })
 }
 
@@ -783,13 +765,11 @@ fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
         host_fault("jit channel receive: bad handle");
         return JitWaitStatus::Panicked as i64;
     };
-    wait_status(|| {
-        match chan.receive() {
-            Some(v) => v,
-            None => {
-                with_runtime_mut(|rt| rt.set_trap("channel closed"));
-                0
-            }
+    wait_status(|| match chan.receive() {
+        Some(v) => v,
+        None => {
+            with_runtime_mut(|rt| rt.set_trap("channel closed"));
+            0
         }
     })
 }
@@ -1512,8 +1492,8 @@ host_fns! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
     use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
     #[test]
     fn lexical_close_drains_a_child_registered_during_drain() {
@@ -1575,7 +1555,11 @@ mod tests {
                     jet_jit_task_group_register(group, nested);
                 }));
                 ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
-                if result.is_err() { -1 } else { 0 }
+                if result.is_err() {
+                    -1
+                } else {
+                    0
+                }
             },
             control.clone(),
         );
@@ -1592,8 +1576,14 @@ mod tests {
             !nested_acquired.load(Ordering::Acquire),
             "nested child acquired a permit after lexical close began"
         );
-        assert!(runtime.tasks[nested as usize].is_none(), "nested child was not drained");
-        assert!(runtime.task_groups[group as usize].is_none(), "group slot was not removed");
+        assert!(
+            runtime.tasks[nested as usize].is_none(),
+            "nested child was not drained"
+        );
+        assert!(
+            runtime.task_groups[group as usize].is_none(),
+            "group slot was not removed"
+        );
 
         ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
     }

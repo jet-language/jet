@@ -162,16 +162,12 @@ mod tests {
         let mut context = BuildContext::new();
         let mut target_spec = TargetSpec::new();
         for index in 0..MAX_ACTIONS {
-            let mut spec = ActionSpec::cached(["true"])
-                .with_outputs([format!("out/{index}")]);
+            let mut spec = ActionSpec::cached(["true"]).with_outputs([format!("out/{index}")]);
             if index > 0 {
                 spec = spec.with_inputs([format!("out/{}", index - 1)]);
             }
             let action = context
-                .action(
-                    format!("scale-{index}"),
-                    spec,
-                )
+                .action(format!("scale-{index}"), spec)
                 .expect("the declared action budget must be usable");
             target_spec = target_spec.with_action(action);
         }

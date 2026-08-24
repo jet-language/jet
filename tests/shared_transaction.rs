@@ -36,6 +36,12 @@ fn shared_plain_access_repl_uses_the_same_value_surface() {
         ],
         None,
     );
-    assert!(output.contains("1 : Int"), "REPL shared access drifted: {output}");
-    assert!(!output.contains("E1116"), "REPL used the retired closure form: {output}");
+    assert!(
+        output.contains("1 : Int"),
+        "REPL shared access drifted: {output}"
+    );
+    assert!(
+        !output.contains("E1116"),
+        "REPL used the retired closure form: {output}"
+    );
 }

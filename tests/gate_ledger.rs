@@ -86,8 +86,7 @@ fn knowledge_tier_web_source() -> &'static str {
 // meaning across every compiler-facing and hosted tier. Reuse the ratified
 // range example and its golden output; this matrix adds the missing per-tier
 // proof without creating a second numeric example or spelling.
-const NUMBER_GRID_EXAMPLE: &str =
-    include_str!("../examples/features/types/range_types.jet");
+const NUMBER_GRID_EXAMPLE: &str = include_str!("../examples/features/types/range_types.jet");
 const NUMBER_GRID_EXPECTED: &str =
     include_str!("../examples/features/expected/types/range_types.out");
 const NUMBER_GRID_WEB_SOURCE: &str = r#"#Target(Web)
@@ -109,28 +108,38 @@ fn have_tool(name: &str) -> bool {
 
 fn have_wasm_target() -> bool {
     Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
 
-fn checked_number_grid_bundle(
-    tag: &str,
-) -> (common::Scratch, jet::AST::ProgramBundle) {
+fn checked_number_grid_bundle(tag: &str) -> (common::Scratch, jet::AST::ProgramBundle) {
     let scratch = common::Scratch::new(tag);
     let entry = scratch.join("range_types.jet");
     fs::write(&entry, NUMBER_GRID_EXAMPLE).unwrap();
     let shown = entry.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("number-grid example must load");
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(diagnostics.is_empty(), "number-grid sema failed: {diagnostics:#?}");
+    assert!(
+        diagnostics.is_empty(),
+        "number-grid sema failed: {diagnostics:#?}"
+    );
     (scratch, bundle)
 }
 
 fn assert_inline_int_range(ty: &jet::AST::Type, lo: i64, hi: i64) {
     match ty {
-        jet::AST::Type::InlineRange { base, lo: actual_lo, hi: actual_hi } => {
+        jet::AST::Type::InlineRange {
+            base,
+            lo: actual_lo,
+            hi: actual_hi,
+        } => {
             assert_eq!(base.as_ref(), &jet::AST::Type::Int);
             assert_eq!((*actual_lo, *actual_hi), (lo, hi));
         }
@@ -162,7 +171,11 @@ fn assert_tier_text(text: &str) {
 }
 
 fn assert_knowledge_ledger(json: &str) {
-    assert!(json.starts_with("{\"schema\":\"jet.report/v1\"") && json.contains("\"gates\":{\"entries\":["), "{json}");
+    assert!(
+        json.starts_with("{\"schema\":\"jet.report/v1\"")
+            && json.contains("\"gates\":{\"entries\":["),
+        "{json}"
+    );
     for subject in [
         "approx",
         "wrapping",
@@ -177,8 +190,16 @@ fn assert_knowledge_ledger(json: &str) {
             "missing {subject} in {json}"
         );
     }
-    assert_eq!(json.matches("\"kind\":\"state_transition\"").count(), 2, "{json}");
-    assert_eq!(json.matches("\"kind\":\"taint_scrub\"").count(), 1, "{json}");
+    assert_eq!(
+        json.matches("\"kind\":\"state_transition\"").count(),
+        2,
+        "{json}"
+    );
+    assert_eq!(
+        json.matches("\"kind\":\"taint_scrub\"").count(),
+        1,
+        "{json}"
+    );
     assert_eq!(
         json.matches("\"kind\":\"precision_demotion\"").count(),
         5,
@@ -191,9 +212,15 @@ fn assert_knowledge_ledger(json: &str) {
     let precision = json
         .find("\"kind\":\"precision_demotion\"")
         .expect("precision row");
-    assert!(scrub < state && state < precision, "knowledge rows drifted: {json}");
+    assert!(
+        scrub < state && state < precision,
+        "knowledge rows drifted: {json}"
+    );
     assert!(json.contains("\"span\":{\"start\":"), "{json}");
-    assert!(json.contains("\"reason\":\"#Transition(Pending, Confirmed)\""), "{json}");
+    assert!(
+        json.contains("\"reason\":\"#Transition(Pending, Confirmed)\""),
+        "{json}"
+    );
     assert!(json.contains("tier.jet:"), "{json}");
 }
 
@@ -212,7 +239,10 @@ fn full_and_filtered_views_keep_one_provenance_ledger() {
         &scratch.path,
         &["inspect", "gates", "--json", "gates.jet"],
     ));
-    assert!(json.starts_with("{\"schema_version\":1,\"entries\":["), "{json}");
+    assert!(
+        json.starts_with("{\"schema_version\":1,\"entries\":["),
+        "{json}"
+    );
     assert!(json.contains("\"provenance\":["), "{json}");
     assert!(json.contains("test unsafe reason"), "{json}");
 
@@ -287,9 +317,15 @@ authority = .{ holds: { allow: [IO], deny: [Exec] }, grants: { "image-codec": [F
         "authority.trust.services.stripe",
         "authority.providers.nix",
     ] {
-        assert!(json.contains(&format!("\"subject\":\"{subject}\"")), "{subject}: {json}");
+        assert!(
+            json.contains(&format!("\"subject\":\"{subject}\"")),
+            "{subject}: {json}"
+        );
     }
-    assert!(json.contains(".jet/lock"), "lock authority provenance missing: {json}");
+    assert!(
+        json.contains(".jet/lock"),
+        "lock authority provenance missing: {json}"
+    );
 }
 
 #[test]
@@ -307,7 +343,10 @@ fn source_gate_kinds_keep_their_written_reasons() {
         "duty_drop",
         "precision_demotion",
     ] {
-        assert!(json.contains(&format!("\"kind\":\"{kind}\"")), "{kind}: {json}");
+        assert!(
+            json.contains(&format!("\"kind\":\"{kind}\"")),
+            "{kind}: {json}"
+        );
     }
     for subject in ["approx", "wrapping", "from_meter_rounded"] {
         let marker = format!("\"subject\":\"{subject}\"");
@@ -322,7 +361,10 @@ fn source_gate_kinds_keep_their_written_reasons() {
     }
     assert!(json.contains("intentional result discard"), "{json}");
     assert!(json.contains("#Scrub(Input)"), "{json}");
-    assert!(json.contains("\"subject\":\"from_meter_rounded\""), "{json}");
+    assert!(
+        json.contains("\"subject\":\"from_meter_rounded\""),
+        "{json}"
+    );
     assert!(json.contains("source-gates.jet:"), "{json}");
 }
 
@@ -333,8 +375,9 @@ fn range_knowledge_gate_has_three_tier_example_parity() {
     let release = stdout(&run(root, &["run", "--release", example]));
     let default = stdout(&run(root, &["run", example]));
     let interpret = stdout(&run(root, &["run", "--interpret", example]));
-    let expected = fs::read_to_string(root.join("examples/features/expected/types/range_types.out"))
-        .expect("range_types golden output");
+    let expected =
+        fs::read_to_string(root.join("examples/features/expected/types/range_types.out"))
+            .expect("range_types golden output");
     assert_eq!(release, expected);
     assert_eq!(default, expected);
     assert_eq!(interpret, expected);
@@ -343,7 +386,11 @@ fn range_knowledge_gate_has_three_tier_example_parity() {
 #[test]
 fn ledger_json_and_generated_rust_are_stable_across_two_builds() {
     let scratch = common::Scratch::new("gate-stability");
-    fs::write(scratch.join("plain.jet"), "fn run() { print(\"stable\") }\n").unwrap();
+    fs::write(
+        scratch.join("plain.jet"),
+        "fn run() { print(\"stable\") }\n",
+    )
+    .unwrap();
 
     let rust_a = stdout(&run(&scratch.path, &["emit", "--rust", "plain.jet"]));
     stdout(&run(&scratch.path, &["build", "plain.jet"]));
@@ -360,7 +407,10 @@ fn ledger_json_and_generated_rust_are_stable_across_two_builds() {
     ));
 
     assert_eq!(rust_a, rust_b, "ledger inspection changed generated Rust");
-    assert_eq!(rust_a, rust_after_ledger, "ledger inspection changed generated Rust");
+    assert_eq!(
+        rust_a, rust_after_ledger,
+        "ledger inspection changed generated Rust"
+    );
     assert_eq!(ledger_a, ledger_b, "ledger JSON changed between builds");
 }
 
@@ -374,24 +424,36 @@ fn structure_inspection_is_read_only_and_structure_facts_erase_before_runtime() 
     let release_before = stdout(&run(root, &["run", "--release", example]));
 
     let structure = stdout(&run(root, &["inspect", "structure", example]));
-    let structure_json = stdout(&run(
-        root,
-        &["inspect", "structure", "--json", example],
-    ));
+    let structure_json = stdout(&run(root, &["inspect", "structure", "--json", example]));
     for fact in ["import-edge", "lifecycle", "liveness"] {
         assert!(structure.contains(fact), "missing {fact}: {structure}");
-        assert!(structure_json.contains(fact), "missing {fact}: {structure_json}");
+        assert!(
+            structure_json.contains(fact),
+            "missing {fact}: {structure_json}"
+        );
     }
     assert!(structure.contains("provenance"), "{structure}");
-    assert!(structure_json.contains("\"provenance\""), "{structure_json}");
+    assert!(
+        structure_json.contains("\"provenance\""),
+        "{structure_json}"
+    );
 
     let rust_after = stdout(&run(root, &["emit", "--rust", example]));
     let run_after = stdout(&run(root, &["run", example]));
     let release_after = stdout(&run(root, &["run", "--release", example]));
 
-    assert_eq!(rust_before, rust_after, "structure inspection changed AOT Rust");
-    assert_eq!(run_before, run_after, "structure inspection changed JIT output");
-    assert_eq!(release_before, release_after, "structure inspection changed AOT output");
+    assert_eq!(
+        rust_before, rust_after,
+        "structure inspection changed AOT Rust"
+    );
+    assert_eq!(
+        run_before, run_after,
+        "structure inspection changed JIT output"
+    );
+    assert_eq!(
+        release_before, release_after,
+        "structure inspection changed AOT output"
+    );
     for erased in [
         "Structure.Liveness",
         "Structure.Lifecycle",
@@ -399,7 +461,10 @@ fn structure_inspection_is_read_only_and_structure_facts_erase_before_runtime() 
         "policy allow",
         "manifest rule edit",
     ] {
-        assert!(!rust_before.contains(erased), "structure policy leaked into Rust: {erased}");
+        assert!(
+            !rust_before.contains(erased),
+            "structure policy leaked into Rust: {erased}"
+        );
     }
 }
 
@@ -415,17 +480,14 @@ fn heavy_numeric_kind_is_summarized_after_security_rows() {
 
     let human = stdout(&run(
         &scratch.path,
-        &[
-            "inspect",
-            "gates",
-            "--gate",
-            "unsafe=allow",
-            "heavy.jet",
-        ],
+        &["inspect", "gates", "--gate", "unsafe=allow", "heavy.jet"],
     ));
     let security = human.find("build_flag:").expect(&human);
     let numeric = human.find("precision_demotion: 20 entries").expect(&human);
-    assert!(security < numeric, "security rows must precede numeric summary: {human}");
+    assert!(
+        security < numeric,
+        "security rows must precede numeric summary: {human}"
+    );
 }
 
 #[test]
@@ -451,7 +513,13 @@ fn i9_parser_tier_keeps_all_knowledge_plane_gate_sources() {
         &["inspect", "compiler", "parse", "tier.jet"],
     ));
     assert!(parsed.contains("\"operation\":\"parse\""), "{parsed}");
-    for gate in ["approx", "wrapping", "from_half_rounded", "#Transition", "#Scrub"] {
+    for gate in [
+        "approx",
+        "wrapping",
+        "from_half_rounded",
+        "#Transition",
+        "#Scrub",
+    ] {
         assert!(parsed.contains(gate), "missing {gate} in {parsed}");
     }
 }
@@ -466,10 +534,16 @@ fn i9_sema_tier_reads_the_same_gate_ledger() {
     ));
     assert!(ledger.contains("\"schema_version\":1"), "{ledger}");
     assert!(ledger.contains("\"kind\":\"dependency_grant\""), "{ledger}");
-    assert!(ledger.contains("\"kind\":\"precision_demotion\""), "{ledger}");
+    assert!(
+        ledger.contains("\"kind\":\"precision_demotion\""),
+        "{ledger}"
+    );
     assert!(ledger.contains("\"subject\":\"approx\""), "{ledger}");
     assert!(ledger.contains("\"subject\":\"wrapping\""), "{ledger}");
-    assert!(ledger.contains("\"subject\":\"from_meter_rounded\""), "{ledger}");
+    assert!(
+        ledger.contains("\"subject\":\"from_meter_rounded\""),
+        "{ledger}"
+    );
 }
 
 #[test]
@@ -518,10 +592,7 @@ fn i9_jit_and_dev_tiers_keep_the_fixture_behavior() {
     let scratch = common::Scratch::new("gate-tier-jit-dev");
     write_tier_fixture(&scratch.path);
     assert_tier_output(run(&scratch.path, &["run", "tier.jet"]));
-    assert_tier_output(run(
-        &scratch.path,
-        &["dev", "tier.jet", "--watch=off"],
-    ));
+    assert_tier_output(run(&scratch.path, &["dev", "tier.jet", "--watch=off"]));
 }
 
 #[test]
@@ -559,7 +630,10 @@ fn i9_repl_tier_keeps_the_fixture_behavior() {
     let output = child.wait_with_output().expect("finish REPL");
     let text = stdout(&output);
     assert_tier_text(&text);
-    assert!(text.contains("loaded"), "expected REPL fixture load, got {text}");
+    assert!(
+        text.contains("loaded"),
+        "expected REPL fixture load, got {text}"
+    );
 }
 
 #[test]
@@ -569,21 +643,17 @@ fn i9_web_tier_keeps_the_fixture_buildable() {
         return;
     }
     let scratch = common::Scratch::new("gate-tier-web");
-    fs::write(
-        scratch.join("web.jet"),
-        knowledge_tier_web_source(),
-    )
-    .unwrap();
-    let _ = stdout(&run(
-        &scratch.path,
-        &["build", "--target=web", "web.jet"],
-    ));
+    fs::write(scratch.join("web.jet"), knowledge_tier_web_source()).unwrap();
+    let _ = stdout(&run(&scratch.path, &["build", "--target=web", "web.jet"]));
 }
 
 #[test]
 fn i9_number_grid_parser_keeps_int_ranges_as_one_surface() {
     let (tokens, diagnostics) = jet::Lexer::lex(NUMBER_GRID_EXAMPLE);
-    assert!(diagnostics.is_empty(), "number-grid lexer diagnostics: {diagnostics:?}");
+    assert!(
+        diagnostics.is_empty(),
+        "number-grid lexer diagnostics: {diagnostics:?}"
+    );
     let program = jet::Parser::parse(&tokens).expect("number-grid example must parse");
 
     let severity = program
@@ -656,7 +726,11 @@ fn i9_number_grid_aot_keeps_the_golden_behavior() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = stdout(&run(
         root,
-        &["run", "--release", "examples/features/types/range_types.jet"],
+        &[
+            "run",
+            "--release",
+            "examples/features/types/range_types.jet",
+        ],
     ));
     assert_eq!(output, NUMBER_GRID_EXPECTED);
 }
@@ -714,12 +788,14 @@ fn i9_number_grid_repl_keeps_the_inline_range_behavior() {
 
 #[test]
 fn i9_number_grid_web_keeps_the_shared_runtime_behavior() {
-    let output = jet::compile_web_with_path(
-        NUMBER_GRID_WEB_SOURCE,
-        "tests/fixtures/number_grid_web.jet",
-    )
-    .unwrap_or_else(|diagnostics| panic!("number-grid web source was rejected: {diagnostics:#?}"));
-    let web = output.web.expect("number-grid web target must produce artifacts");
+    let output =
+        jet::compile_web_with_path(NUMBER_GRID_WEB_SOURCE, "tests/fixtures/number_grid_web.jet")
+            .unwrap_or_else(|diagnostics| {
+                panic!("number-grid web source was rejected: {diagnostics:#?}")
+            });
+    let web = output
+        .web
+        .expect("number-grid web target must produce artifacts");
     assert!(web.js_app.contains("function jet_inline_range_from_int"));
     assert!(web.wasm_rust.contains("jet_inline_range_from_int"));
 

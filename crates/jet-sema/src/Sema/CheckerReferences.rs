@@ -15,7 +15,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn note_unused_binding(&mut self, name: &str, span: Span, parameter: bool) {
         if Self::unused_name_is_intentional(name)
             || span.start >= span.end
-            || self.unused_bindings.iter().any(|binding| binding.span == span)
+            || self
+                .unused_bindings
+                .iter()
+                .any(|binding| binding.span == span)
         {
             return;
         }
@@ -40,7 +43,9 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn mark_default_parameter_references(&mut self, params: &[crate::AST::Param]) {
         for param in params {
-            let Some(default) = &param.default else { continue };
+            let Some(default) = &param.default else {
+                continue;
+            };
             let mut copy = default.clone();
             copy.for_each_expr_mut(|node| match node {
                 Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
@@ -57,8 +62,8 @@ impl<'a> Checker<'a> {
             if self.unused_binding_refs.contains(&binding.span) {
                 continue;
             }
-            self.name_ledger.record_structure_fact(
-                jet_foundation::Names::StructureFact::new(
+            self.name_ledger
+                .record_structure_fact(jet_foundation::Names::StructureFact::new(
                     jet_foundation::Names::StructureFactKind::Liveness,
                     binding.name.clone(),
                     self.module_path.to_string(),
@@ -70,8 +75,7 @@ impl<'a> Checker<'a> {
                         "binding is never read"
                     },
                     Some("_name".to_string()),
-                ),
-            );
+                ));
             let code = if binding.parameter { "L0102" } else { "L0101" };
             let name = binding.name.as_str();
             let diagnostic = Diagnostic::from_row(code, &[("name", name)], Some(binding.span))
@@ -166,21 +170,28 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn record_local_reference(&mut self, span: Span, info: &LocalInfo) {
         self.unused_binding_refs.insert(info.def_span);
-        let kind = if info.param_conv.is_some() { "param" } else { "local" };
+        let kind = if info.param_conv.is_some() {
+            "param"
+        } else {
+            "local"
+        };
         let module_path = self.module_path.to_string();
         self.record_reference_anchor(span, &module_path, kind, info.def_span);
     }
 
     pub(crate) fn record_function_reference(&mut self, module_idx: usize, name: &str, span: Span) {
-        let target = self.name_ledger.declaration(module_idx, name).map(|declaration| {
-            (
-                self.name_ledger
-                    .module_path(module_idx)
-                    .unwrap_or(self.module_path)
-                    .to_string(),
-                declaration.span,
-            )
-        });
+        let target = self
+            .name_ledger
+            .declaration(module_idx, name)
+            .map(|declaration| {
+                (
+                    self.name_ledger
+                        .module_path(module_idx)
+                        .unwrap_or(self.module_path)
+                        .to_string(),
+                    declaration.span,
+                )
+            });
         if let Some((module_path, def_span)) = target {
             let identity = self.name_ledger.semantic_identity(module_idx, name);
             self.record_reference_anchor_with_identity(
@@ -198,15 +209,18 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn record_const_reference(&mut self, name: &str, span: Span) {
-        let target = self.name_ledger.declaration(self.module_idx, name).map(|declaration| {
-            (
-                self.name_ledger
-                    .module_path(self.module_idx)
-                    .unwrap_or(self.module_path)
-                    .to_string(),
-                declaration.span,
-            )
-        });
+        let target = self
+            .name_ledger
+            .declaration(self.module_idx, name)
+            .map(|declaration| {
+                (
+                    self.name_ledger
+                        .module_path(self.module_idx)
+                        .unwrap_or(self.module_path)
+                        .to_string(),
+                    declaration.span,
+                )
+            });
         if let Some((module_path, def_span)) = target {
             let identity = self.name_ledger.semantic_identity(self.module_idx, name);
             self.record_reference_anchor_with_identity(
@@ -255,7 +269,9 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
         let (import_ns, leaf) = Self::split_type_name(type_name);
-        let Some(owner) = self.struct_owner_module(leaf, import_ns) else { return };
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return;
+        };
         let name = format!("{leaf}.{method}");
         let target = self
             .name_ledger
@@ -276,7 +292,8 @@ impl<'a> Checker<'a> {
                 .declaration(owner, &name)
                 .or_else(|| self.name_ledger.declaration(self.module_idx, &name))
                 .and_then(|declaration| {
-                    self.name_ledger.semantic_identity(declaration.module, &name)
+                    self.name_ledger
+                        .semantic_identity(declaration.module, &name)
                 });
             self.record_reference_anchor_with_identity(
                 span,
@@ -288,18 +305,27 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn record_field_reference(&mut self, owner: usize, type_name: &str, member: &str, span: Span) {
+    pub(crate) fn record_field_reference(
+        &mut self,
+        owner: usize,
+        type_name: &str,
+        member: &str,
+        span: Span,
+    ) {
         let (_, leaf) = Self::split_type_name(type_name);
         let name = format!("{leaf}.{member}");
-        let target = self.name_ledger.declaration(owner, &name).map(|declaration| {
-            (
-                self.name_ledger
-                    .module_path(declaration.module)
-                    .unwrap_or(self.module_path)
-                    .to_string(),
-                declaration.span,
-            )
-        });
+        let target = self
+            .name_ledger
+            .declaration(owner, &name)
+            .map(|declaration| {
+                (
+                    self.name_ledger
+                        .module_path(declaration.module)
+                        .unwrap_or(self.module_path)
+                        .to_string(),
+                    declaration.span,
+                )
+            });
         if let Some((module_path, def_span)) = target {
             let identity = self.name_ledger.semantic_identity(owner, &name);
             self.record_reference_anchor_with_identity(
@@ -379,14 +405,10 @@ fn binding_by_span<'a>(body: &'a [Stmt], span: Span) -> Option<&'a crate::AST::B
 
 fn literal_without_effects(expr: &Expr) -> bool {
     match expr.without_parens() {
-        Expr::Str(parts, _) => parts
-            .iter()
-            .all(|part| matches!(part, StrPart::Lit(_))),
-        Expr::Int(..)
-        | Expr::Float(..)
-        | Expr::Bool(..)
-        | Expr::Char(..)
-        | Expr::Absent(..) => true,
+        Expr::Str(parts, _) => parts.iter().all(|part| matches!(part, StrPart::Lit(_))),
+        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) | Expr::Absent(..) => {
+            true
+        }
         _ => false,
     }
 }

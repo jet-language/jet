@@ -55,15 +55,16 @@ fn mime_and_email_have_one_semantic_home() {
 
     let kernel = "JetStd/Mime.rs";
     assert!(codegen.contains(kernel), "AOT must embed {kernel}");
-    assert!(core_calls.contains(kernel), "comptime/interpreter must include {kernel}");
+    assert!(
+        core_calls.contains(kernel),
+        "comptime/interpreter must include {kernel}"
+    );
     assert!(
         codegen.contains("CoreLib/Email.rs"),
         "AOT must embed email kernel"
     );
     let jit = read("crates/jet-jit/src/Net.rs");
-    assert!(
-        read("crates/jet-comptime/src/Comptime/EmailAdapter.rs").contains("CoreLib/Email.rs")
-    );
+    assert!(read("crates/jet-comptime/src/Comptime/EmailAdapter.rs").contains("CoreLib/Email.rs"));
     assert!(jit.contains("CoreLib/Email.rs"));
     assert!(jit.contains("CoreLib/JetStd/UrlMime.rs"));
 
@@ -99,8 +100,14 @@ fn sketches_have_one_semantic_home() {
         "TDIGEST_DELTA",
         "x ^= x << 13",
     ] {
-        assert!(!pure.contains(fingerprint), "comptime copied `{fingerprint}`");
-        assert!(!core.contains(fingerprint), "Core.rs copied `{fingerprint}`");
+        assert!(
+            !pure.contains(fingerprint),
+            "comptime copied `{fingerprint}`"
+        );
+        assert!(
+            !core.contains(fingerprint),
+            "Core.rs copied `{fingerprint}`"
+        );
         assert!(!jit.contains(fingerprint), "JIT copied `{fingerprint}`");
     }
     assert!(!build.contains("write_sketch_rt"));
@@ -171,9 +178,18 @@ fn civil_time_and_duration_have_one_semantic_home() {
         "RFC3339 datetime needs Z or an offset",
         "value.checked_mul(scale)",
     ] {
-        assert!(!pure.contains(fingerprint), "comptime copied `{fingerprint}`");
-        assert!(!old_core.contains(fingerprint), "Core.rs copied `{fingerprint}`");
-        assert!(!jit_time.contains(fingerprint), "JIT copied `{fingerprint}`");
+        assert!(
+            !pure.contains(fingerprint),
+            "comptime copied `{fingerprint}`"
+        );
+        assert!(
+            !old_core.contains(fingerprint),
+            "Core.rs copied `{fingerprint}`"
+        );
+        assert!(
+            !jit_time.contains(fingerprint),
+            "JIT copied `{fingerprint}`"
+        );
     }
     assert!(!jit_build.contains("write_time_rt"));
 }
@@ -251,18 +267,25 @@ fn measurement_has_one_semantic_home() {
     }
 
     let pure = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
-    let aot = read(
-        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs",
-    );
+    let aot = read("crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
     let jit = read("crates/jet-jit/src/jit/runtime_host.rs");
     for fingerprint in [
         "left_uncertainty * left_uncertainty",
         "self.uncertainty * self.uncertainty",
         "jet_codegen::Comptime::Builtins::apply_method",
     ] {
-        assert!(!pure.contains(fingerprint), "comptime copied `{fingerprint}`");
-        assert!(!aot.contains(fingerprint), "AOT wrapper copied `{fingerprint}`");
-        assert!(!jit.contains(fingerprint), "JIT wrapper copied `{fingerprint}`");
+        assert!(
+            !pure.contains(fingerprint),
+            "comptime copied `{fingerprint}`"
+        );
+        assert!(
+            !aot.contains(fingerprint),
+            "AOT wrapper copied `{fingerprint}`"
+        );
+        assert!(
+            !jit.contains(fingerprint),
+            "JIT wrapper copied `{fingerprint}`"
+        );
     }
 
     let docs = read("docs/reference/core-library.md")
@@ -273,7 +296,10 @@ fn measurement_has_one_semantic_home() {
         "first-order linear propagation with uncorrelated inputs",
         "Correlated errors are out of scope",
     ] {
-        assert!(docs.contains(statement), "measurement docs omit `{statement}`");
+        assert!(
+            docs.contains(statement),
+            "measurement docs omit `{statement}`"
+        );
     }
 }
 
@@ -376,9 +402,7 @@ fn round_three_value_kernels_have_one_semantic_home() {
     let data_fmt = read("crates/jet-codegen/src/Prelude/CoreLib/Top/DataFmt.rs");
     assert!(!data_fmt.contains("fn jet_fmt_number"));
 
-    assert!(
-        read("crates/jet-comptime/src/Comptime/Builtins.rs").contains("Core/Loadable.rs")
-    );
+    assert!(read("crates/jet-comptime/src/Comptime/Builtins.rs").contains("Core/Loadable.rs"));
 
     let text = read("crates/jet-comptime/src/Comptime/TextLite.rs");
     assert!(!text.contains("fn nfd_inner"));

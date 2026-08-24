@@ -7,9 +7,11 @@ use std::time::Instant;
 use jet_codegen::Codegen::TIR::{JitProgram, TFunc, TFuncKind};
 use jet_foundation::AST::{ProgramBundle, Type};
 
-use super::api_debug::{cranelift_host_supported, classify_jit_gap};
-use super::safety::{entry_return_supported, resident_safe_func_detail, resident_safe_spawn_lambda};
+use super::api_debug::{classify_jit_gap, cranelift_host_supported};
 use super::gap::JitGap;
+use super::safety::{
+    entry_return_supported, resident_safe_func_detail, resident_safe_spawn_lambda,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
@@ -58,10 +60,7 @@ pub fn record_trace(rows: Vec<TierRow>) {
                 Tier::Interp => "tier0 interp",
             };
             if row.reason.is_empty() {
-                eprintln!(
-                    "{:<24} {tier} ({:.3}ms)",
-                    row.function, row.millis
-                );
+                eprintln!("{:<24} {tier} ({:.3}ms)", row.function, row.millis);
             } else {
                 eprintln!(
                     "{:<24} {tier} ({}) ({:.3}ms)",
@@ -95,11 +94,8 @@ fn marshallable_ty(ty: &Type) -> bool {
         | Type::String
         | Type::Bool
         | Type::Char => true,
-        Type::Apply { name, .. }
-            if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => true,
-        Type::Named(n) if matches!(n.as_str(), "Int" | "String" | "Bool" | "Char" | "Unit") => {
-            true
-        }
+        Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_CHECKED_TEXT => true,
+        Type::Named(n) if matches!(n.as_str(), "Int" | "String" | "Bool" | "Char" | "Unit") => true,
         _ => false,
     }
 }
@@ -225,15 +221,11 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
     };
     let entry_shape_ok = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
         program.funcs.iter().any(|f| {
-            f.name == "run"
-                && f.params.len() == 1
-                && entry_return_supported(f.ret.as_ref())
+            f.name == "run" && f.params.len() == 1 && entry_return_supported(f.ret.as_ref())
         })
     } else {
         program.funcs.iter().any(|f| {
-            f.name == program.entry
-                && f.params.is_empty()
-                && entry_return_supported(f.ret.as_ref())
+            f.name == program.entry && f.params.is_empty() && entry_return_supported(f.ret.as_ref())
         })
     };
 

@@ -17,7 +17,7 @@
 
 use jet_pkg_model::CompilerExtension::{
     decode_and_validate_response, message_exposes_rustc, parse_analyze_result, parse_load_result,
-    AnalyzeResponse, Ability, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
+    Ability, AnalyzeResponse, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
     SymbolFact, TypeFact, TypedSnapshot,
 };
 #[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]

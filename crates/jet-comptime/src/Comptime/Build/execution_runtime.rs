@@ -177,7 +177,6 @@ pub fn native_sandbox_status() -> NativeSandboxStatus {
                     .to_string(),
         };
     }
-
 }
 
 /// Run one executable action through the shared native sandbox. `source_dir`
@@ -238,9 +237,7 @@ pub fn run_native_sandboxed(
             jet_process_sandbox::WindowsSandboxError::Unsupported(detail) => {
                 NativeSandboxError::Unsupported(detail)
             }
-            jet_process_sandbox::WindowsSandboxError::Io(detail) => {
-                NativeSandboxError::Io(detail)
-            }
+            jet_process_sandbox::WindowsSandboxError::Io(detail) => NativeSandboxError::Io(detail),
         })
         .map(|result| NativeSandboxOutput {
             output: result.output,
@@ -260,7 +257,6 @@ pub fn run_native_sandboxed(
                 .to_string(),
         ));
     }
-
 }
 
 /// Execute the canonical action graph through the platform-native child
