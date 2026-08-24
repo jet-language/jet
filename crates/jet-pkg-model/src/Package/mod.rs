@@ -989,33 +989,6 @@ impl PackageFacts {
                 .map(|parent| parent.as_os_str().is_empty() || parent == Path::new("."))
                 .unwrap_or(true)
         });
-        if let Some(role_name) = crate::Syntax::command_role_file(command) {
-            let role_path = Path::new(role_name);
-            if let Some(role_file) = files.iter().find(|file| file.relative == role_path) {
-                let role_entries = self
-                    .discover_function_entries_from_files(
-                        resolver,
-                        std::slice::from_ref(role_file),
-                        command,
-                        false,
-                        false,
-                    )
-                    .map_err(|error| format!("{}: {error}", self.origin))?;
-                if !role_entries.is_empty() {
-                    if role_entries.len() > 1 {
-                        let locations = role_entries
-                            .iter()
-                            .map(|(file, line)| format!("{}:{line}", file.path.display()))
-                            .collect::<Vec<_>>()
-                            .join(" and ");
-                        return Err(format!(
-                            "two `{command}` command overrides for the package: {locations}"
-                        ));
-                    }
-                    return Ok(role_entries.into_iter().next().map(|(file, _)| file));
-                }
-            }
-        }
         let entries = self
             .discover_function_entries_from_files(resolver, &files, command, false, false)
             .map_err(|error| format!("{}: {error}", self.origin))?;

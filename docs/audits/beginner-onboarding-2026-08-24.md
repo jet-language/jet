@@ -66,6 +66,7 @@ and compiler/runtime cache state, not the network install.
 | bare and explicit entry resolution | `Source/main.rs` resolver; fresh `jet run` and `jet run run.jet` both print `hello, world` |
 | edit, invalid source, diagnostic, explain, and recovery | fresh CLI smoke: edited output, E0102 with `Fix:`, `jet explain E0102`, and recovered output |
 | missing, ambiguous, legacy, and stale layouts | `tests/pkg.rs::cli_run_migrates_all_retired_entry_layouts`, `cli_run_reports_ambiguous_retired_entry_layout`; fresh missing-entry, E1226, and migration probes |
+| unsupported host, install failure, and offline recovery | `tests/onboarding_recovery.rs::install_host_and_offline_failures_have_recovery` checks both recovery guides and the real `jet self doctor` missing-tool report, including the offline registry note and L2101 retry path |
 | capstone output and golden | `examples/features/basics/first_hour.jet`, `first_hour_expert.jet`, and `tests/golden.rs` |
 
 The fresh binary also passed the complete scaffold edit/check/test/diagnose/

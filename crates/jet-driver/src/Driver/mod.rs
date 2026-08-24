@@ -1286,6 +1286,13 @@ pub struct BuildRunOptions {
     /// Optional host-owned remote builder binding. Source and CLI input cannot
     /// construct an endpoint or credential; `None` is always local.
     pub remote: Option<crate::Comptime::Build::RemoteBuildBinding>,
+    /// D-CMDOVERRIDE1=A: a bare/package build may discover `fn build` across
+    /// the package; an explicit file or `--show-default` keeps that function
+    /// selection inside the requested file.
+    pub package_scope: bool,
+    /// D-CMDOVERRIDE1=A: `--show-default` disables both package and local
+    /// command-function selection.
+    pub build_override: bool,
 }
 
 impl Default for BuildRunOptions {
@@ -1305,6 +1312,8 @@ impl Default for BuildRunOptions {
             profile: "dev".to_string(),
             setting_overrides: BTreeMap::new(),
             remote: None,
+            package_scope: true,
+            build_override: true,
         }
     }
 }
@@ -2192,6 +2201,8 @@ fn build_query_options() -> BuildRunOptions {
         profile: "dev".to_string(),
         setting_overrides: BTreeMap::new(),
         remote: None,
+        package_scope: true,
+        build_override: true,
     }
 }
 
@@ -2271,6 +2282,8 @@ pub struct FrontEndInputs {
     pub web_target: bool,
     pub plugin_target: bool,
     pub cross_target: Option<String>,
+    pub package_scope: bool,
+    pub build_override: bool,
 }
 
 impl FrontEndInputs {
@@ -2287,6 +2300,8 @@ impl FrontEndInputs {
             web_target: options.web_target,
             plugin_target: options.plugin_target,
             cross_target: options.cross_target.clone(),
+            package_scope: options.package_scope,
+            build_override: options.build_override,
         }
     }
 }
@@ -2510,8 +2525,12 @@ fn prepare_build_front_end_on_compiler_stack(
         .iter()
         .map(|module| module.path.clone())
         .collect::<Vec<_>>();
-    let package_entry = package_build_entry_source(&bundle.project_root)?;
-    let package_manifest_entry = direct_package_overlay.is_some();
+    let package_entry = if inputs.build_override && inputs.package_scope {
+        package_build_entry_source(&bundle.project_root)?
+    } else {
+        None
+    };
+    let package_manifest_entry = inputs.build_override && direct_package_overlay.is_some();
     let has_package_entry = package_entry.is_some() || package_manifest_entry;
     let active_os = crate::Syntax::OSTarget::active(inputs.cross_target.as_deref());
     let entry_path = std::path::Path::new(file);
@@ -2580,15 +2599,19 @@ fn prepare_build_front_end_on_compiler_stack(
         &build_stamp,
     )?;
     bundle.web_partition_enforced = inputs.web_target;
-    let local_build_indices = bundle.modules[bundle.entry]
-        .items
-        .iter()
-        .enumerate()
-        .filter_map(|(index, item)| {
-            matches!(item, crate::AST::Item::Func(func) if func.name == "build")
-                .then_some(index)
-        })
-        .collect::<Vec<_>>();
+    let local_build_indices = if inputs.build_override {
+        bundle.modules[bundle.entry]
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                matches!(item, crate::AST::Item::Func(func) if func.name == "build")
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     if local_build_indices.len() > 1 {
         return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
     }
@@ -2643,15 +2666,19 @@ fn prepare_build_front_end_on_compiler_stack(
             bundle.web_partition_enforced = inputs.web_target;
         }
     }
-    let local_build_indices = bundle.modules[bundle.entry]
-        .items
-        .iter()
-        .enumerate()
-        .filter_map(|(index, item)| {
-            matches!(item, crate::AST::Item::Func(func) if func.name == "build")
-                .then_some(index)
-        })
-        .collect::<Vec<_>>();
+    let local_build_indices = if inputs.build_override {
+        bundle.modules[bundle.entry]
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                matches!(item, crate::AST::Item::Func(func) if func.name == "build")
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     if local_build_indices.len() > 1 {
         return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
     }

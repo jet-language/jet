@@ -4,15 +4,15 @@ Date: 2026-08-24
 
 Scope: decision audit only. This report does not change behavior, edit `env.jet`, or create work.
 
-Revision note: the first version treated `fn env(...)` as a general command whose boundary was any behavior it could perform. The owner proposed a pure producer instead: `fn env(ctx: EnvContext) -> Environment -[]>`. This revision assesses that design. It keeps the return value as the declarative boundary and separates it from an effectful alternative.
+Revision note: the first version treated `fn env(...)` as a general command whose boundary was any behavior it could perform. The owner proposed a pure producer instead: `fn env(ctx: EnvContext) Environment -[]>`. This revision assesses that design. It keeps the return value as the declarative boundary and separates it from an effectful alternative.
 
 ## Recommendation
 
 Adopt one package-wide pure producer:
 
 ```jet
-fn env(ctx: EnvContext) -> Environment -[]> {
-    return Environment{ }
+fn env(ctx: EnvContext) Environment -[]> {
+    return Environment{}
 }
 ```
 
@@ -33,7 +33,7 @@ The real decision is therefore:
 | Option | Boundary | Consequence |
 |---|---|---|
 | Keep today's structural surface | A typed plan, but with package sugar and incomplete fields | Safest and easiest to edit, but cannot replace this repository's flake |
-| Add pure `fn env(ctx: EnvContext) -> Environment -[]>` | Bounded evaluation over recorded inputs, followed by a complete typed value | Makes the one-language model visible and scales to large composition without weakening trust or cache identity |
+| Add pure `fn env(ctx: EnvContext) Environment -[]>` | Bounded evaluation over recorded inputs, followed by a complete typed value | Makes the one-language model visible and scales to large composition without weakening trust or cache identity |
 | Add effectful `fn env` | Any behavior granted by its effect row and context | Matches `BuildContext` authority more closely, but creates a trust-preview cycle and undefined offline/cache semantics |
 
 The second option is recommended. A new restricted configuration language would add another mechanism even though Jet already has a pure, fuel-bounded comptime evaluator (`crates/jet-comptime/src/Comptime/mod.rs:1-16`).
@@ -91,7 +91,7 @@ $ for n in 328 329 402 404 405 407 469 842 843; do node plugins/tower/tower.mjs 
 "plan": "...Use one typed system model from source through plan, proof, activation, and inspection. Activation must be transactional and explainable..."
 ```
 
-The shipped model shows both the scale and the current weakness. `SystemPlan` has only `target`, `packages`, `services`, and string-valued `options` (`crates/jet-env-model/src/ModuleEval/Types.rs:289-314`). Evaluation accepts only those four fields and slices option values back out of source text (`crates/jet-env-model/src/ModuleEval/System.rs:30-89`). JetOS consumers then recover structure by matching string prefixes. Storage reads keys such as `storage.disk.main.device` and `storage.filesystem.root.type` (`crates/jetpack/src/JetOS/module_storage_workload.rs:48-93`). User realization does the same for home, shell, packages, services, and files (`crates/jetpack/src/JetOS/user_flatpak_perf.rs:13-102`).
+The `jetos` crate is currently a thin command dispatcher into Jetpack (`crates/jetos/src/main.rs:1-18`), so the shared Jetpack modules contain the system planner and realization model. That shipped model shows both the scale and the current weakness. `SystemPlan` has only `target`, `packages`, `services`, and string-valued `options` (`crates/jet-env-model/src/ModuleEval/Types.rs:289-314`). Evaluation accepts only those four fields and slices option values back out of source text (`crates/jet-env-model/src/ModuleEval/System.rs:30-89`). JetOS consumers then recover structure by matching string prefixes. Storage reads keys such as `storage.disk.main.device` and `storage.filesystem.root.type` (`crates/jetpack/src/JetOS/module_storage_workload.rs:48-93`). User realization does the same for home, shell, packages, services, and files (`crates/jetpack/src/JetOS/user_flatpak_perf.rs:13-102`).
 
 That surface will strain under the Epoch 9 model regardless of source shape. A large system needs functions for reusable profiles, target conditions, and composition. The repository's own Nix flake already uses functions and local bindings to derive wrappers, paths, packages, and per-system outputs (`flake.nix:9-35,62-90`). The JetOS evidence therefore strengthens the owner's producer proposal. One pure entry can compose a dev shell and system outputs through normal Jet code. It cannot make string options acceptable or move activation into evaluation.
 
@@ -292,7 +292,7 @@ If the owner chooses environment-as-code, the greenfield rule still requires one
 
 Under the recommendation, one coherent migration would:
 
-1. Add the package-wide `fn env(ctx: EnvContext) -> Environment -[]>` contract and optional `@env.jet` home. More than one candidate is an error. No candidate returns the stock empty `Environment`.
+1. Add the package-wide `fn env(ctx: EnvContext) Environment -[]>` contract and optional `@env.jet` home. More than one candidate is an error. No candidate returns the stock empty `Environment`.
 2. Define the immutable context and evaluation-input receipt. Preserve finite fuel and reject every non-empty effect row.
 3. Define the complete typed `Environment` result in the staged parity order above. Make packages an ordinary computed field, not static sugar (`crates/jet-env-model/src/ModuleEval/mod.rs:6-15`).
 4. Keep `package.jet` as the Package root. Require explicit imports into the producer. Do not auto-import every discovered module.
@@ -391,8 +391,8 @@ The local entry probe stopped at sandbox-sensitive Hangar migration `E2604`, so 
 use "./environment/tools" as tools
 use "./environment/workstation" as workstation
 
-fn env(ctx: EnvContext) -> Environment -[]> {
-    browser_tools :: if ctx.target.os == .Linux { tools.linux_browsers } else { [] }
+fn env(ctx: EnvContext) Environment -[]> {
+    browser_tools :: if ctx.target.os == .Linux -> tools.linux_browsers else -> []
 
     return Environment{
         tools: tools.default + browser_tools,
@@ -429,7 +429,7 @@ environment: Environment{
 
 #### Option B — Pure `fn env` returns `Environment`
 
-Add one package-wide `fn env(ctx: EnvContext) -> Environment -[]>`. Its optional home is `@env.jet`. The function uses explicit imports and the fuel-bounded evaluator. It receives immutable recorded inputs and returns one complete typed value. It can describe wrappers, actions, systems, and hardware profiles, but it cannot run or probe them.
+Add one package-wide `fn env(ctx: EnvContext) Environment -[]>`. Its optional home is `@env.jet`. The function uses explicit imports and the fuel-bounded evaluator. It receives immutable recorded inputs and returns one complete typed value. It can describe wrappers, actions, systems, and hardware profiles, but it cannot run or probe them.
 
 Technical detail: this option amends `D-ROLEFILE1=A` from four marked homes to five. Discovery scans the package for one matching function. A duplicate is an error. No function selects the stock empty `Environment`. `package.jet` remains the Package root. Automatic module imports are rejected because pre-trust inspection needs an explicit source closure. Every observed context input enters the evaluation receipt. `jet add` and `jet remove` use one semantic literal anchor or refuse. `jet bridge flake` emits this direct producer form and a loss report. The old directive and `module env.*` authoring paths retire in the same migration.
 
@@ -437,7 +437,7 @@ Technical detail: this option amends `D-ROLEFILE1=A` from four marked homes to f
 // @env.jet
 use "./environment/common" as common
 
-fn env(ctx: EnvContext) -> Environment -[]> {
+fn env(ctx: EnvContext) Environment -[]> {
     return common.environment(ctx)
 }
 ```
@@ -450,11 +450,11 @@ Technical detail: Jet must define a pre-evaluation sandbox, effect receipts, ter
 
 ```jet
 // @env.jet
-fn env(ctx: EnvContext) -> Environment -[FS, Net, Exec]> {
+fn env(ctx: EnvContext) Environment -[FS, Net, Exec]> {
     root :: ctx.exec(["git", "rev-parse", "--show-toplevel"])
     hardware :: ctx.probe_hardware()
     catalog :: ctx.fetch("https://packages.example/catalog")
-    return Environment{ project_root: root, hardware, tools: catalog.default_tools }
+    return Environment{ project_root: root, hardware: hardware, tools: catalog.default_tools }
 }
 ```
 

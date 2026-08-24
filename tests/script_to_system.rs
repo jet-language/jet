@@ -5,7 +5,8 @@
 //! journey document. The source bytes and dependency lock are checked across
 //! the structural transition.
 
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
@@ -15,6 +16,74 @@ use common::{jetpack_bin, Scratch};
 
 const EXPECTED_STDOUT: &[u8] =
     include_bytes!("../examples/continuity/script_to_system/expected.out");
+const RECEIPT_NAME: &str = "script-to-system.tsv";
+
+fn receipt_path(cache: &Path) -> PathBuf {
+    cache.join(RECEIPT_NAME)
+}
+
+fn start_receipt(cache: &Path) {
+    fs::write(
+        receipt_path(cache),
+        format!(
+            "version=1\thost={}\tarch={}\n",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ),
+    )
+    .expect("create the script-to-system receipt");
+}
+
+fn record_receipt(
+    cache: &Path,
+    event: &str,
+    label: &str,
+    elapsed: Duration,
+    status: &str,
+    detail: &str,
+) {
+    let detail = detail.replace('\t', " ").replace('\n', " ");
+    let line = format!(
+        "event={event}\tlabel={label}\telapsed_ms={}\tstatus={status}\tdetail={detail}\n",
+        elapsed.as_millis()
+    );
+    OpenOptions::new()
+        .append(true)
+        .open(receipt_path(cache))
+        .expect("open the script-to-system receipt")
+        .write_all(line.as_bytes())
+        .expect("write the script-to-system receipt");
+    eprint!("script-to-system receipt {line}");
+}
+
+fn edit_file(cache: &Path, root: &Path, label: &str, path: &Path, contents: &str) {
+    let started = Instant::now();
+    fs::write(path, contents).unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    record_receipt(
+        cache,
+        "edit",
+        label,
+        started.elapsed(),
+        "ok",
+        &format!("path={}", relative.display()),
+    );
+}
+
+fn record_artifact(cache: &Path, root: &Path, path: &Path) {
+    let started = Instant::now();
+    let metadata =
+        fs::metadata(path).unwrap_or_else(|error| panic!("stat {}: {error}", path.display()));
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    record_receipt(
+        cache,
+        "artifact",
+        "final-output",
+        started.elapsed(),
+        "ok",
+        &format!("path={} bytes={}", relative.display(), metadata.len()),
+    );
+}
 
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -44,6 +113,23 @@ fn run_jet(root: &Path, cache: &Path, label: &str, args: &[&str]) -> (Duration, 
         "script-to-system action={label} elapsed_ms={} status={}",
         elapsed.as_millis(),
         output.status
+    );
+    let event = if label.contains("build") {
+        "build"
+    } else {
+        "action"
+    };
+    record_receipt(
+        cache,
+        event,
+        label,
+        elapsed,
+        if output.status.success() {
+            "ok"
+        } else {
+            "failed"
+        },
+        &format!("argv={args:?} exit={:?}", output.status.code()),
     );
     (elapsed, output)
 }
@@ -83,6 +169,15 @@ fn script_to_system_continuity_preserves_one_source() {
     assert!(!scratch.join("target").exists());
 
     fs::create_dir_all(&cache).unwrap();
+    start_receipt(&cache);
+    record_receipt(
+        &cache,
+        "action",
+        "clean-start",
+        Duration::ZERO,
+        "ok",
+        "root=run.jet-only",
+    );
     let source_before = fs::read(scratch.join("run.jet")).unwrap();
     let direct = run_jet_ok(
         &scratch.path,
@@ -104,17 +199,30 @@ fn script_to_system_continuity_preserves_one_source() {
     assert!(scratch.join("package.jet").is_file());
     assert_eq!(fs::read(scratch.join("run.jet")).unwrap(), source_before);
 
+    let support_started = Instant::now();
     fs::create_dir_all(scratch.join("support")).unwrap();
-    fs::write(
-        scratch.join("support/package.jet"),
+    record_receipt(
+        &cache,
+        "action",
+        "create-support-package",
+        support_started.elapsed(),
+        "ok",
+        "path=support",
+    );
+    edit_file(
+        &cache,
+        &scratch.path,
+        "support-package",
+        &scratch.join("support/package.jet"),
         "name: \"support\"\nversion: \"0.1.0\"\n",
-    )
-    .unwrap();
-    fs::write(
-        scratch.join("support/support.jet"),
+    );
+    edit_file(
+        &cache,
+        &scratch.path,
+        "support-source",
+        &scratch.join("support/support.jet"),
         "pub fn spare() Int -> 7\n",
-    )
-    .unwrap();
+    );
     run_jet_ok(
         &scratch.path,
         &cache,
@@ -125,13 +233,16 @@ fn script_to_system_continuity_preserves_one_source() {
     let package_after_add = fs::read_to_string(scratch.join("package.jet")).unwrap();
     assert!(package_after_add.contains("support: ./support"));
 
-    fs::write(
-        scratch.join("package.jet"),
-        format!(
-            "{package_after_add}\nsettings: .{{\n    default_minutes: Int = 1,\n}}\nenvironments: .{{\n    development: Environment{{ tools: [\"git\"] }},\n}}\noutputs: .{{\n    app: .Executable{{ name: \"pulse\", entry: run }},\n    api: .Service{{ name: \"pulse-api\", entry: serve }},\n}}\n"
-        ),
-    )
-    .unwrap();
+    let package_config = format!(
+        "{package_after_add}\nsettings: .{{\n    default_minutes: Int = 1,\n}}\nenvironments: .{{\n    development: Environment{{ tools: [\"git\"] }},\n}}\noutputs: .{{\n    app: .Executable{{ name: \"pulse\", entry: run }},\n    api: .Service{{ name: \"pulse-api\", entry: serve }},\n}}\n"
+    );
+    edit_file(
+        &cache,
+        &scratch.path,
+        "package-config",
+        &scratch.join("package.jet"),
+        &package_config,
+    );
 
     let package_before_install = fs::read(scratch.join("package.jet")).unwrap();
     let install_started = Instant::now();
@@ -155,6 +266,14 @@ fn script_to_system_continuity_preserves_one_source() {
         install_started.elapsed().as_millis(),
         installed.status
     );
+    record_receipt(
+        &cache,
+        "failure",
+        "tool-install",
+        install_started.elapsed(),
+        "expected-failure",
+        "code=E1272 package-unchanged=true",
+    );
     assert!(
         !installed.status.success(),
         "jetpack tool install unexpectedly succeeded:\n{}",
@@ -168,6 +287,14 @@ fn script_to_system_continuity_preserves_one_source() {
     assert_eq!(
         fs::read(scratch.join("package.jet")).unwrap(),
         package_before_install
+    );
+    record_receipt(
+        &cache,
+        "recovery",
+        "after-tool-install",
+        install_started.elapsed(),
+        "ok",
+        "package-unchanged=true next=test",
     );
 
     let test = run_jet_ok(&scratch.path, &cache, "test", &["test", "run.jet"]);
@@ -203,14 +330,32 @@ fn script_to_system_continuity_preserves_one_source() {
         .join("build")
         .join(format!("run{}", std::env::consts::EXE_SUFFIX));
     assert!(executable.is_file(), "missing {}", executable.display());
+    let native_started = Instant::now();
     let native = Command::new(&executable)
         .output()
         .unwrap_or_else(|error| panic!("built executable could not start: {error}"));
+    record_receipt(
+        &cache,
+        "action",
+        "run-native-executable",
+        native_started.elapsed(),
+        if native.status.success() {
+            "ok"
+        } else {
+            "failed"
+        },
+        &format!(
+            "path={} exit={:?}",
+            executable.display(),
+            native.status.code()
+        ),
+    );
     assert!(
         native.status.success(),
         "built executable failed: {native:?}"
     );
     assert_eq!(native.stdout, EXPECTED_STDOUT);
+    record_artifact(&cache, &scratch.path, &executable);
 
     let package_before_library = fs::read_to_string(scratch.join("package.jet")).unwrap();
     let package_with_library = package_before_library.replace(
@@ -218,7 +363,13 @@ fn script_to_system_continuity_preserves_one_source() {
         "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n",
     );
     assert_ne!(package_with_library, package_before_library);
-    fs::write(scratch.join("package.jet"), package_with_library).unwrap();
+    edit_file(
+        &cache,
+        &scratch.path,
+        "package-library-output",
+        &scratch.join("package.jet"),
+        &package_with_library,
+    );
 
     run_jet_ok(
         &scratch.path,
@@ -238,6 +389,7 @@ fn script_to_system_continuity_preserves_one_source() {
             "missing library artifact {}",
             artifact.display()
         );
+        record_artifact(&cache, &scratch.path, &artifact);
     }
     let shared = if cfg!(target_os = "macos") {
         target.join("libpulse.dylib")
@@ -247,16 +399,20 @@ fn script_to_system_continuity_preserves_one_source() {
         target.join("libpulse.so")
     };
     assert!(shared.is_file(), "missing {}", shared.display());
+    record_artifact(&cache, &scratch.path, &shared);
     let header = fs::read_to_string(target.join("pulse.h")).unwrap();
     assert!(header.contains("int64_t seconds(int64_t p0);"));
+    record_artifact(&cache, &scratch.path, &target.join("pulse.h"));
 
     #[cfg(unix)]
     if let Some(cc) = cc() {
-        fs::write(
-            scratch.join("foreign.c"),
+        edit_file(
+            &cache,
+            &scratch.path,
+            "foreign-host-source",
+            &scratch.join("foreign.c"),
             "#include \"pulse.h\"\n#include <stdio.h>\nint main(void) { printf(\"%lld\\n\", (long long)seconds(1)); return 0; }\n",
-        )
-        .unwrap();
+        );
         let foreign_binary = scratch.join("foreign");
         let mut compile = Command::new(cc);
         compile
@@ -269,17 +425,52 @@ fn script_to_system_continuity_preserves_one_source() {
         if cfg!(target_os = "linux") {
             compile.args(["-ldl", "-lpthread", "-lm"]);
         }
+        let compile_started = Instant::now();
         let result = compile.output().expect("C compiler should start");
+        record_receipt(
+            &cache,
+            "action",
+            "compile-foreign-host",
+            compile_started.elapsed(),
+            if result.status.success() {
+                "ok"
+            } else {
+                "failed"
+            },
+            &format!(
+                "path={} exit={:?}",
+                foreign_binary.display(),
+                result.status.code()
+            ),
+        );
         assert!(
             result.status.success(),
             "foreign host compile failed:\n{}",
             compiler_text(&result)
         );
+        let foreign_started = Instant::now();
         let foreign = Command::new(&foreign_binary)
             .output()
             .expect("foreign host should start");
+        record_receipt(
+            &cache,
+            "action",
+            "run-foreign-host",
+            foreign_started.elapsed(),
+            if foreign.status.success() {
+                "ok"
+            } else {
+                "failed"
+            },
+            &format!(
+                "path={} exit={:?}",
+                foreign_binary.display(),
+                foreign.status.code()
+            ),
+        );
         assert!(foreign.status.success(), "foreign host failed: {foreign:?}");
         assert_eq!(foreign.stdout, EXPECTED_STDOUT);
+        record_artifact(&cache, &scratch.path, &foreign_binary);
     } else {
         eprintln!("note: foreign host proof skipped because no C compiler is available");
     }
@@ -307,6 +498,7 @@ fn script_to_system_continuity_preserves_one_source() {
         fs::read(scratch.join(".jet/lock")).unwrap(),
         lock_before_transition
     );
+    record_artifact(&cache, &scratch.path, &scratch.join("package/env.jet"));
 
     let split_run = run_jet_ok(
         &scratch.path,
@@ -321,6 +513,7 @@ fn script_to_system_continuity_preserves_one_source() {
         "fold-env",
         &["fold", "package/env.jet"],
     );
+    let recovery_started = Instant::now();
     assert_eq!(
         fs::read(scratch.join("package.jet")).unwrap(),
         package_before_split
@@ -331,6 +524,14 @@ fn script_to_system_continuity_preserves_one_source() {
         lock_before_transition
     );
     assert_eq!(fs::read(scratch.join("run.jet")).unwrap(), source_before);
+    record_receipt(
+        &cache,
+        "recovery",
+        "fold-rollback",
+        recovery_started.elapsed(),
+        "ok",
+        "package-source-lock-restored=true",
+    );
 
     let rollback_run = run_jet_ok(
         &scratch.path,
@@ -339,4 +540,42 @@ fn script_to_system_continuity_preserves_one_source() {
         &["run", "run.jet", "--", "--minutes", "1"],
     );
     assert_eq!(rollback_run.stdout, EXPECTED_STDOUT);
+
+    for artifact in [
+        scratch.join("run.jet"),
+        scratch.join("package.jet"),
+        scratch.join(".jet/lock"),
+        executable,
+        target.join("libpulse.a"),
+        target.join("pulse.h"),
+        target.join("pulse.jetlib"),
+    ] {
+        record_artifact(&cache, &scratch.path, &artifact);
+    }
+
+    let receipt = fs::read_to_string(receipt_path(&cache)).unwrap();
+    for event in ["action", "edit", "build", "failure", "recovery", "artifact"] {
+        assert!(
+            receipt.contains(&format!("event={event}\t")),
+            "receipt has no {event} event:\n{receipt}"
+        );
+    }
+    for label in ["aot-build", "native-library-build"] {
+        assert!(
+            receipt.contains(&format!("label={label}\t")),
+            "receipt has no {label} latency row:\n{receipt}"
+        );
+    }
+    assert!(
+        receipt.starts_with(&format!(
+            "version=1\thost={}\tarch={}\n",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )),
+        "receipt host identity missing:\n{receipt}"
+    );
+    eprintln!(
+        "script-to-system receipt-path={}",
+        receipt_path(&cache).display()
+    );
 }

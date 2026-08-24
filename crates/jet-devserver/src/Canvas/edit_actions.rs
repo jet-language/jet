@@ -2196,17 +2196,33 @@ fn branch_exec_insertion(
         ));
     }
     let full = stmt_text_span(src, last);
-    if line_start(src, last.span().start) != line_start(src, full.start)
-        || full.end > owner.end
-    {
-        return Err(edit_error(
-            "ambiguous",
-            "Canvas needs a multiline source-backed branch body to converge",
-        ));
-    }
+    let inline = full.end > owner.end;
+    let (offset, indent) = if inline {
+        let last_end = match last {
+            Stmt::Expr(expr) => source_expression_span(src, expr).end,
+            _ => stmt_source_span(last).end,
+        };
+        let Some(close) = find_unquoted_char(src, last_end, '}')
+            .filter(|offset| *offset < owner.end)
+        else {
+            return Err(edit_error(
+                "ambiguous",
+                "Canvas could not locate the source-backed branch body boundary",
+            ));
+        };
+        // The formatter may keep a one-statement branch on the declaration line.
+        // Insert a new line before its closing brace, then let the formatter
+        // restore the canonical block layout.
+        (
+            close,
+            format!("\n{}    ", indentation_at(src, owner.start)),
+        )
+    } else {
+        (full.end, indentation_at(src, full.start))
+    };
     Ok(ExecInsertion {
-        offset: full.end,
-        indent: indentation_at(src, full.start),
+        offset,
+        indent,
         owner,
         branch: true,
     })

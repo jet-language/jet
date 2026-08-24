@@ -1593,6 +1593,8 @@ fn main() {
                 &program_args,
                 mode,
                 record_name.as_deref(),
+                true,
+                true,
             );
             return;
         }
@@ -2684,6 +2686,10 @@ fn main() {
                                     &program_args,
                                     mode,
                                     record_name.as_deref(),
+                                    cmd != "build"
+                                        || !jet_argv.iter().any(|arg| arg == "--show-default"),
+                                    cmd != "build"
+                                        || !jet_argv.iter().any(|arg| arg == "--show-default"),
                                 );
                                 return;
                             }
@@ -2959,6 +2965,11 @@ fn main() {
                 &program_args,
                 mode,
                 record_name.as_deref(),
+                cmd != "build"
+                    || (Path::new(target).is_dir()
+                        && !jet_argv.iter().any(|arg| arg == "--show-default")),
+                cmd != "build"
+                    || !jet_argv.iter().any(|arg| arg == "--show-default"),
             );
         }
     }

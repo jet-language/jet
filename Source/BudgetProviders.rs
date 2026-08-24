@@ -899,7 +899,17 @@ fn source_files(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
 fn source_tree_digest(root: &Path) -> Result<String, String> {
     let files = source_files(root)?;
     let mut frame = Vec::new();
+    let mut total = 0u64;
     for (relative, path) in files {
+        let length = std::fs::metadata(&path)
+            .map_err(|error| format!("cannot inspect compile workload source: {error}"))?
+            .len();
+        total = total
+            .checked_add(length)
+            .ok_or_else(|| "compile workload source byte count overflowed".to_string())?;
+        if total > COMPILE_MAX_PROJECT_BYTES {
+            return Err("compile workload exceeds the 64 MiB project limit".into());
+        }
         let bytes = std::fs::read(path).map_err(|error| format!("cannot read compile workload source: {error}"))?;
         frame.extend_from_slice(&(relative.len() as u64).to_be_bytes());
         frame.extend_from_slice(relative.as_bytes());
@@ -912,7 +922,11 @@ fn source_tree_digest(root: &Path) -> Result<String, String> {
 fn source_tree_bytes(root: &Path) -> Result<u128, String> {
     source_files(root)?.into_iter().try_fold(0u128, |total, (_, path)| {
         let bytes = std::fs::metadata(path).map_err(|error| format!("cannot inspect compile workload source: {error}"))?.len() as u128;
-        total.checked_add(bytes).ok_or_else(|| "compile workload source byte count overflowed".to_string())
+        let total = total.checked_add(bytes).ok_or_else(|| "compile workload source byte count overflowed".to_string())?;
+        if total > COMPILE_MAX_PROJECT_BYTES as u128 {
+            return Err("compile workload exceeds the 64 MiB project limit".into());
+        }
+        Ok(total)
     })
 }
 
@@ -1361,6 +1375,16 @@ mod tests {
         std::fs::write(root.join("package.jet"),"name: \"profile\"\nversion: \"0.1.0\"\n").unwrap();std::fs::write(root.join("src/run.jet"),"fn run() {}\n").unwrap();
         let error=compiler_probe_workload(&root,&root.join("src/run.jet"),"Clean","cli","unsupported",None).unwrap_err();
         assert!(error.contains("profile `unsupported` is unsupported"),"{error}");
+        let _=std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compiler_probe_rejects_pathological_source_before_hashing(){
+        let root=temporary("compile-oversized-source");std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("package.jet"),"name: \"large\"\nversion: \"0.1.0\"\n").unwrap();
+        let source=root.join("src/run.jet");let file=std::fs::File::create(&source).unwrap();file.set_len(COMPILE_MAX_PROJECT_BYTES+1).unwrap();
+        let error=compiler_probe_workload(&root,&source,"Clean","cli","dev",None).unwrap_err();
+        assert!(error.contains("64 MiB project limit"),"{error}");
         let _=std::fs::remove_dir_all(root);
     }
 

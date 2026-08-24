@@ -3061,6 +3061,55 @@ mod stale_manifest_name_tests {
     }
 
     #[test]
+    fn staged_frontend_production_path_preserves_success_and_failure() {
+        let dir = tempdir("staged-frontend-production");
+        let entry = dir.join("main.jet");
+        let dependency = dir.join("dep.jet");
+        let entry_source = "module dep;\nfn run() Int -> { return dep.value() }\n";
+        let valid_dependency = "pub fn value() Int -> { return 7 }\n";
+        fs::write(&entry, entry_source).unwrap();
+        fs::write(&dependency, valid_dependency).unwrap();
+
+        let overlays = [
+            (entry.as_path(), entry_source),
+            (dependency.as_path(), valid_dependency),
+        ];
+        let (loaded, _, diagnostics) = load_entry_with_overlays_and_dependencies_with_diagnostics(
+            entry.to_str().unwrap(),
+            &overlays,
+            true,
+        );
+        assert!(loaded.is_ok(), "valid staged batch failed: {diagnostics:?}");
+        assert!(
+            diagnostics.is_empty(),
+            "valid staged batch diagnosed: {diagnostics:?}"
+        );
+
+        let invalid_dependency = "pub fn value() Int -> { return 7 }\n::\n";
+        let invalid_overlays = [
+            (entry.as_path(), entry_source),
+            (dependency.as_path(), invalid_dependency),
+        ];
+        let (loaded, _, diagnostics) = load_entry_with_overlays_and_dependencies_with_diagnostics(
+            entry.to_str().unwrap(),
+            &invalid_overlays,
+            true,
+        );
+        assert!(
+            loaded.is_err(),
+            "malformed staged batch unexpectedly loaded"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.diagnostic.code == "E0003"),
+            "malformed staged batch lost parser diagnostic: {diagnostics:?}"
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn finds_pack_jet() {
         let dir = tempdir("pack");
         fs::write(dir.join("pack.jet"), "").unwrap();

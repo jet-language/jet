@@ -27,6 +27,11 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+fn repo_text(rel: &str) -> String {
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel))
+        .unwrap_or_else(|error| panic!("read {rel}: {error}"))
+}
+
 fn write_package(dir: &Path, name: &str) {
     fs::write(dir.join("package.jet"), format!("name: \"{name}\"\n")).unwrap();
 }
@@ -261,4 +266,65 @@ fn entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts() {
         stderr(&stale_recovered)
     );
     assert_eq!(stdout(&stale_recovered), "stale\n");
+}
+
+#[test]
+fn install_host_and_offline_failures_have_recovery() {
+    let guide = repo_text("docs/first-hour.md");
+    let exercises = repo_text("docs/diagnostic-recovery.md");
+    for phrase in [
+        "x86_64 Linux and x86_64 macOS",
+        "platform-specific project track",
+        "Installation fails",
+        "repeat the install command",
+        "Do not continue with a partial install",
+        "The first install is offline",
+        "reconnect and repeat the install",
+        "The host is unsupported",
+    ] {
+        assert!(
+            guide.contains(phrase),
+            "first-hour recovery lost {phrase:?}"
+        );
+    }
+    for phrase in [
+        "uname -s",
+        "uname -m",
+        "nix --version",
+        "Recover install and host failures",
+        "If the install fails because the network is offline",
+        "If the install succeeds but `jet` is not found",
+        "shell and run `jet version`",
+    ] {
+        assert!(
+            exercises.contains(phrase),
+            "diagnostic recovery lost {phrase:?}"
+        );
+    }
+
+    let missing_tools = common::Scratch::new("onboarding-install-offline");
+    let doctor = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["self", "doctor"])
+        .current_dir(&missing_tools.path)
+        .env("NO_COLOR", "1")
+        .env("PATH", &missing_tools.path)
+        .output()
+        .expect("jet self doctor should start after an install failure");
+    let report = stdout(&doctor);
+    assert!(
+        !doctor.status.success(),
+        "missing toolchain unexpectedly passed"
+    );
+    for phrase in [
+        "rustc: not found on PATH",
+        "Fix: install Rust",
+        "registry: skipped (offline; pass --online to check)",
+        "Warning [L2101]",
+        "run `jet self doctor` again",
+    ] {
+        assert!(
+            report.contains(phrase),
+            "doctor recovery lost {phrase:?}:\n{report}"
+        );
+    }
 }

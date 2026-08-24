@@ -25,14 +25,22 @@ TIME_BIN=${TIME_BIN:-}
 if [ -z "$TIME_BIN" ]; then
     TIME_BIN=$(type -P time 2>/dev/null || true)
 fi
+TIMEOUT_BIN=${TIMEOUT_BIN:-}
+if [ -z "$TIMEOUT_BIN" ]; then
+    TIMEOUT_BIN=$(type -P timeout 2>/dev/null || true)
+fi
 SAMPLES=20
 WARMUPS=1
+TRIAL_DEADLINE_SECONDS=120
+MAX_CORPUS_FILE_BYTES=$((64 * 1024 * 1024))
 LATENCY_REGRESSION_PCT=15
 MEMORY_REGRESSION_PCT=15
 VARIANCE_BUDGET_PCT=100
 TAB=$(printf '\t')
+REPORT_VERSION=3
 
 [ -x "$TIME_BIN" ] || { echo "missing GNU time: $TIME_BIN" >&2; exit 1; }
+[ -x "$TIMEOUT_BIN" ] || { echo "missing timeout: $TIMEOUT_BIN" >&2; exit 1; }
 [ -f "$CORPUS" ] || { echo "missing compiler-speed corpus: $CORPUS" >&2; exit 1; }
 [ -x "$ROOT/target/debug/jet" ] || {
     echo "missing fresh compiler binary: $ROOT/target/debug/jet" >&2
@@ -71,6 +79,18 @@ require_relative_file() {
             ;;
     esac
     [ -f "$ROOT/$1" ] || { echo "missing corpus file: $1" >&2; exit 1; }
+}
+
+check_corpus_file_size() {
+    corpus_path=$1
+    corpus_bytes=$(wc -c < "$ROOT/$corpus_path" | tr -d '[:space:]')
+    case "$corpus_bytes" in
+        ''|*[!0-9]*) echo "unavailable corpus file size: $corpus_path" >&2; exit 1 ;;
+    esac
+    [ "$corpus_bytes" -le "$MAX_CORPUS_FILE_BYTES" ] || {
+        echo "pathological corpus input exceeds ${MAX_CORPUS_FILE_BYTES} bytes: $corpus_path ($corpus_bytes)" >&2
+        exit 1
+    }
 }
 
 machine_os=$(uname -s 2>/dev/null || echo unknown)
@@ -133,6 +153,10 @@ check_corpus() {
         require_relative_file "$corpus_expected"
         require_relative_file "$corpus_edit"
         require_relative_file "$corpus_edit_expected"
+        check_corpus_file_size "$corpus_program"
+        check_corpus_file_size "$corpus_expected"
+        check_corpus_file_size "$corpus_edit"
+        check_corpus_file_size "$corpus_edit_expected"
         actual_hash=$(sha256 "$ROOT/$corpus_program")
         [ "$actual_hash" = "$corpus_source_hash" ] || {
             echo "corpus source changed: $corpus_program ($corpus_source_hash -> $actual_hash)" >&2
@@ -214,7 +238,22 @@ run_timed() {
     timed_stdout=$2
     timed_stderr=$3
     shift 3
-    "$TIME_BIN" -f '%e\t%M' -o "$timed_stats" "$@" >"$timed_stdout" 2>"$timed_stderr"
+    "$TIME_BIN" -f '%e\t%M' -o "$timed_stats" \
+        "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" "$@" \
+        >"$timed_stdout" 2>"$timed_stderr"
+}
+
+report_trial_failure() {
+    trial_status=$1
+    trial_work=$2
+    trial_stderr=$3
+    if [ "$trial_status" -eq 124 ] || [ "$trial_status" -eq 137 ]; then
+        echo "pathological compiler workload exceeded ${TRIAL_DEADLINE_SECONDS}s: $trial_work/run.jet" >&2
+    else
+        echo "compiler workload failed: $trial_work/run.jet (exit $trial_status)" >&2
+    fi
+    sed -n '1,120p' "$trial_stderr" >&2 || true
+    exit 1
 }
 
 read_timed_stats() {
@@ -274,11 +313,7 @@ run_jit_trial() {
     else
         trial_status=$?
     fi
-    [ "$trial_status" -eq 0 ] || {
-        echo "JIT run failed: $trial_work/run.jet (exit $trial_status)" >&2
-        sed -n '1,120p' "$trial_output.stderr" >&2 || true
-        exit 1
-    }
+    [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.stderr"
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
     trial_timing_file="$trial_work/timing/jet-timing.json"
     append_timing_phases "$trial_timing_file" "$trial_phases"
@@ -287,6 +322,8 @@ run_jit_trial() {
         1) ;;
         *) trial_cache_hit=0 ;;
     esac
+    TRIAL_CACHE_HIT=$trial_cache_hit
+    TRIAL_CACHE_MISSES=$((1 - trial_cache_hit))
     append_cache_miss "$trial_phases" "$trial_cache_hit"
     read_timed_stats "$trial_stats"
 }
@@ -309,30 +346,28 @@ run_aot_trial() {
     else
         trial_status=$?
     fi
-    [ "$trial_status" -eq 0 ] || {
-        echo "optimized AOT build failed: $trial_work/run.jet (exit $trial_status)" >&2
-        sed -n '1,120p' "$trial_output.build.stderr" >&2 || true
-        exit 1
-    }
+    [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.build.stderr"
     [ -x "$trial_work/build/run" ] || { echo "missing AOT artifact: $trial_work/build/run" >&2; exit 1; }
-    if "$trial_work/build/run" >"$trial_output.stdout" 2>"$trial_output.stderr"; then
+    if "$TIMEOUT_BIN" --signal=TERM --kill-after=5s "${TRIAL_DEADLINE_SECONDS}s" \
+        "$trial_work/build/run" >"$trial_output.stdout" 2>"$trial_output.stderr"; then
         trial_status=0
     else
         trial_status=$?
     fi
-    [ "$trial_status" -eq 0 ] || {
-        echo "optimized AOT artifact failed: $trial_work/run.jet (exit $trial_status)" >&2
-        sed -n '1,120p' "$trial_output.stderr" >&2 || true
-        exit 1
-    }
+    [ "$trial_status" -eq 0 ] || report_trial_failure "$trial_status" "$trial_work" "$trial_output.stderr"
     check_trial_output "$trial_work" "$trial_output.stdout" "$trial_output.stderr"
     append_timing_phases "$trial_work/timing/jet-timing.json" "$trial_phases"
     append_timing_phases "$trial_work/timing/build/jet-timing-backend.json" "$trial_phases"
-    aot_cache_hits=$(grep -c 'cache hit' "$trial_output.build.stderr" || true)
-    aot_cache_misses=$(grep -c 'cache miss' "$trial_output.build.stderr" || true)
+    aot_cache_hits=$(grep -c '\[build\] cache hit -> reused cached binary' "$trial_output.build.stderr" || true)
+    aot_cache_misses=$(grep -c '\[build\] cache miss -> compiling' "$trial_output.build.stderr" || true)
+    TRIAL_CACHE_HITS=$aot_cache_hits
+    TRIAL_CACHE_MISSES=$aot_cache_misses
     printf '%s%s%s\n' cache_hit "$TAB" "$aot_cache_hits" >> "$trial_phases"
     printf '%s%s%s\n' cache_miss "$TAB" "$aot_cache_misses" >> "$trial_phases"
-    TRIAL_LINKER=$(sed -n 's/.*\[build\] linker[[:space:]]*->[[:space:]]*//p' "$trial_output.build.stderr" | tail -n1)
+    trial_linker=$(sed -n 's/.*\[build\] linker[[:space:]]*->[[:space:]]*//p' "$trial_output.build.stderr" | tail -n1)
+    if [ -n "$trial_linker" ]; then
+        TRIAL_LINKER=$trial_linker
+    fi
     TRIAL_LINKER=${TRIAL_LINKER:-unavailable}
     TRIAL_ARTIFACT_BYTES=$(wc -c < "$trial_work/build/run" | tr -d ' ')
     read_timed_stats "$trial_stats"
@@ -352,6 +387,47 @@ variance_file() {
             if (count == 0 || median == 0) exit 1
             printf "%.0f\n", ((maximum - minimum) * 100) / median
         }'
+}
+
+check_cache_state() {
+    cache_program=$1
+    cache_state=$2
+    cache_kind=$3
+    cache_stage=$4
+    if [ "$cache_stage" = "jit-fast" ]; then
+        cache_hits=$TRIAL_CACHE_HIT
+    else
+        cache_hits=$TRIAL_CACHE_HITS
+    fi
+    case "$cache_kind" in
+        clean|edit)
+            [ "$cache_hits" -eq 0 ] && [ "$TRIAL_CACHE_MISSES" -gt 0 ] || {
+                echo "cache invalidation hidden for $cache_program/$cache_state: expected miss, hits=$cache_hits misses=$TRIAL_CACHE_MISSES" >&2
+                exit 1
+            }
+            ;;
+        no-change)
+            [ "$cache_hits" -gt 0 ] && [ "$TRIAL_CACHE_MISSES" -eq 0 ] || {
+                echo "no-change cache reuse missing for $cache_program/$cache_state: hits=$cache_hits misses=$TRIAL_CACHE_MISSES" >&2
+                exit 1
+            }
+            ;;
+        *)
+            echo "unknown compiler-speed cache state: $cache_kind" >&2
+            exit 1
+            ;;
+    esac
+}
+
+restore_edit_fixture() {
+    edit_work=$1
+    edit_cache=$2
+    edit_warm_cache=$3
+    edit_program=$4
+    edit_expected=$5
+    rm -rf "$edit_work/build" "$edit_work/cache" "$edit_work/timing" "$edit_work/jet-timing.json"
+    cp -R "$edit_warm_cache" "$edit_cache"
+    prepare_fixture "$edit_work" "$edit_program" "$edit_expected"
 }
 
 phase_average() {
@@ -386,6 +462,7 @@ measure_state() {
     state_phases="$state_root/phases.tsv"
     state_reference_stdout="$outputs_dir/$state_id.stdout"
     state_reference_stderr="$outputs_dir/$state_id.stderr"
+    TRIAL_LINKER=
     mkdir -p "$state_root"
     : > "$state_latency"
     : > "$state_memory"
@@ -410,7 +487,9 @@ measure_state() {
             run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases"
         fi
         if [ "$state_kind" = "edit" ]; then
-            prepare_fixture "$state_work" "$state_edit_program" "$state_edit_expected"
+            state_warm_cache="$state_root/warm-cache"
+            rm -rf "$state_warm_cache"
+            cp -R "$state_cache" "$state_warm_cache"
         fi
     fi
     # Warmup proves that the path can run. Phase totals below describe only
@@ -423,6 +502,10 @@ measure_state() {
             sample_work="$state_root/sample-$sample_index"
             sample_cache="$sample_work/cache"
             prepare_fixture "$sample_work" "$state_program" "$state_expected"
+        elif [ "$state_kind" = "edit" ]; then
+            restore_edit_fixture "$state_work" "$state_cache" "$state_warm_cache" "$state_edit_program" "$state_edit_expected"
+            sample_work="$state_work"
+            sample_cache="$state_cache"
         else
             sample_work="$state_work"
             sample_cache="$state_cache"
@@ -434,6 +517,7 @@ measure_state() {
         else
             run_aot_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases"
         fi
+        check_cache_state "$state_program" "$state_name" "$state_kind" "$state_stage"
         if [ "$sample_index" -eq 1 ]; then
             cp "$sample_output.stdout" "$state_reference_stdout"
             cp "$sample_output.stderr" "$state_reference_stderr"
@@ -449,6 +533,10 @@ measure_state() {
     state_latency_median=$(median_file "$state_latency")
     state_memory_max=$(sort -n "$state_memory" | tail -n1)
     state_variance=$(variance_file "$state_latency")
+    if [ "$state_variance" -gt "$VARIANCE_BUDGET_PCT" ]; then
+        echo "unstable compiler-speed benchmark: $state_program/$state_name variance=${state_variance}% budget=${VARIANCE_BUDGET_PCT}%" >&2
+        exit 1
+    fi
     if [ "$state_stage" = "jit-fast" ]; then
         state_backend="cranelift"
         state_linker="none"
@@ -547,7 +635,8 @@ while IFS="$TAB" read -r program expected source_hash expected_hash edit_program
 done < "$CORPUS"
 
 print_table() {
-    printf 'compiler-speed corpus=%s corpus_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s compiler_sha256=%s kernel=%s governor=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s\n' \
+    printf 'compiler-speed version=%s corpus=%s corpus_sha256=%s stage=matrix machine=%s target=%s rustc=%s llvm=%s rustc_vv_sha256=%s compiler_sha256=%s kernel=%s governor=%s memory_bytes=%s profiles=jit-fast,aot-release backends=cranelift,rustc-llvm warmups=%s samples=%s\n' \
+        "$REPORT_VERSION" \
         "$corpus_count" "$corpus_sha" "$machine" "$machine_target" "$machine_rustc" \
         "$machine_llvm" "$machine_rustc_vv_sha" "$compiler_sha256" "$machine_kernel" "$machine_governor" "$machine_memory" "$WARMUPS" "$SAMPLES"
     printf '%-54s %-25s %-16s %16s %16s %10s %-64s\n' \
@@ -560,7 +649,7 @@ print_table() {
 }
 
 as_json() {
-    printf '{"schema":"jet.compiler-speed","version":3,"corpus_sha256":%s,"stage":"matrix",' "$(json_q "$corpus_sha")"
+    printf '{"schema":"jet.compiler-speed","version":%s,"corpus_sha256":%s,"stage":"matrix",' "$REPORT_VERSION" "$(json_q "$corpus_sha")"
     printf '"machine":{"arch":%s,"compiler_sha256":%s,"cpus":%s,"governor":%s,"hostname":%s,"kernel":%s,"llvm":%s,"memory_bytes":%s,"os":%s,"rustc":%s,"rustc_vv_sha256":%s,"target":%s},' \
         "$(json_q "$machine_arch")" "$(json_q "$compiler_sha256")" "$machine_cpus" \
         "$(json_q "$machine_governor")" "$(json_q "$machine_host")" "$(json_q "$machine_kernel")" \

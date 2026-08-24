@@ -41,8 +41,18 @@ pub(crate) const SOURCE_MAP_MARKER: &str = concat!("//# __jet_", "source_map");
 // programs, but the digest cache must not become another unbounded cache.
 const CORELIB_DIGEST_CACHE_LIMIT: usize = 32;
 static CACHED_RUNTIME_FINGERPRINT: OnceLock<String> = OnceLock::new();
-static CORELIB_EMISSION_FINGERPRINTS: OnceLock<Mutex<BTreeMap<Vec<String>, String>>> =
-    OnceLock::new();
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct CoreEmissionFingerprintKey {
+    used_core: Vec<String>,
+    active_os: String,
+    force_corelib: bool,
+    test_harness: bool,
+}
+
+static CORELIB_EMISSION_FINGERPRINTS: OnceLock<
+    Mutex<BTreeMap<CoreEmissionFingerprintKey, String>>,
+> = OnceLock::new();
 
 #[macro_export]
 macro_rules! jet_generated_format {
@@ -1083,53 +1093,80 @@ fn force_corelib_prelude(bundle: &ProgramBundle) -> bool {
     uses_stream(bundle)
 }
 
-fn needs_embedded_runtime(bundle: &ProgramBundle) -> bool {
-    core_needs_embedded_runtime(&bundle.used_core) || force_corelib_prelude(bundle)
+/// The exact R10 Core closure that rides in its content-addressed rlib. Keep
+/// this assembler shared by emission and cache identity: hashing only the
+/// JetStd kernel would let scheduler/UI/app edits reuse the wrong digest.
+fn core_runtime_body(bundle: &ProgramBundle, test_harness: bool) -> String {
+    let force_corelib = force_corelib_prelude(bundle);
+    core_runtime_body_for(
+        &bundle.used_core,
+        bundle.active_os,
+        force_corelib,
+        test_harness,
+    )
+}
+
+fn core_runtime_body_for(
+    used_core: &std::collections::HashSet<String>,
+    active_os: Syntax::OSTarget,
+    force_corelib: bool,
+    test_harness: bool,
+) -> String {
+    if !force_corelib && !core_needs_embedded_runtime(used_core) {
+        return String::new();
+    }
+    let mut body = String::new();
+    if test_harness {
+        push_corelib_prelude_for_test_harness(&mut body, used_core, force_corelib);
+    } else {
+        push_corelib_prelude(&mut body, used_core, force_corelib);
+    }
+    body.push_str(scheduler_prelude_for_emit(uses_native_scheduler_for(used_core)));
+    body.push_str(UI_PRELUDE);
+    if uses_gtk_backend_for(used_core, active_os) {
+        body.push_str(UI_GTK_PRELUDE);
+    }
+    push_app_preludes(&mut body, used_core);
+    body
 }
 
 /// The R10 Core closure rides in its own content-addressed rlib. This includes
 /// scheduler/UI/app templates: Core calls them, so splitting only the kernel
 /// would create a circular dependency or force an inline fallback.
 fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: bool) {
-    if !needs_embedded_runtime(bundle) {
+    let body = core_runtime_body(bundle, test_harness);
+    if body.is_empty() {
         return;
     }
     out.push_str(CACHED_CORE_BEGIN);
-    let force = force_corelib_prelude(bundle);
-    if test_harness {
-        push_corelib_prelude_for_test_harness(out, &bundle.used_core, force);
-    } else {
-        push_corelib_prelude(out, &bundle.used_core, force);
-    }
-    out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
-    out.push_str(UI_PRELUDE);
-    if uses_gtk_backend(bundle) {
-        out.push_str(UI_GTK_PRELUDE);
-    }
-    push_app_preludes(out, &bundle.used_core);
+    out.push_str(&body);
     out.push_str(CACHED_CORE_END);
 }
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
 /// compiler/runtime fragments a program will link. The cache key is the sorted
-/// used-Core closure, so two programs with the same relevant closure reuse the
-/// digest while a changed closure gets a distinct identity. The bounded cache
-/// is process-local; the emitted source remains the source of truth.
+/// used-Core closure plus every input to the shared Core-body assembler. The
+/// bounded cache is process-local; the emitted source remains the source of
+/// truth.
 pub fn corelib_emission_fingerprint(
-    used_core: &std::collections::HashSet<String>,
+    bundle: &ProgramBundle,
+    test_harness: bool,
 ) -> String {
-    let mut cache_key = used_core.iter().cloned().collect::<Vec<_>>();
-    cache_key.sort_unstable();
+    let mut used_core = bundle.used_core.iter().cloned().collect::<Vec<_>>();
+    used_core.sort_unstable();
+    let cache_key = CoreEmissionFingerprintKey {
+        used_core,
+        active_os: bundle.active_os.name().to_string(),
+        force_corelib: force_corelib_prelude(bundle),
+        test_harness,
+    };
     let cache = CORELIB_EMISSION_FINGERPRINTS.get_or_init(|| Mutex::new(BTreeMap::new()));
     if let Some(fingerprint) = cache.lock().unwrap().get(&cache_key).cloned() {
         return fingerprint;
     }
 
-    let mut body = String::new();
-    if core_needs_embedded_runtime(used_core) {
-        push_corelib_prelude_body(&mut body, used_core, false);
-    }
-    let fingerprint = corelib_emission_identity(&body, used_core);
+    let body = core_runtime_body(bundle, test_harness);
+    let fingerprint = corelib_emission_identity(&body, &bundle.used_core);
     let mut entries = cache.lock().unwrap();
     if entries.len() >= CORELIB_DIGEST_CACHE_LIMIT {
         if let Some(oldest) = entries.keys().next().cloned() {
@@ -1579,7 +1616,7 @@ const STREAM_PRELUDE_RAW: &str = include_str!("../Prelude/Stream.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
 /// D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. Emitted only when
-/// a program constructs `core.ui.gtk_backend()` (`uses_gtk_backend`), so no
+/// a program constructs `core.ui.gtk_backend()` (`uses_gtk_backend_for`), so no
 /// other program carries the gtk `extern "C"` surface or needs `-lgtk-4`.
 const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 /// c-devserver (owner-directed 2026-07-01): `core.web.devserver` — the
@@ -1866,8 +1903,8 @@ fn scheduler_prelude_for_emit(native_io: bool) -> &'static str {
     }
 }
 
-fn uses_native_scheduler(bundle: &ProgramBundle) -> bool {
-    bundle.used_core.iter().any(|usage| {
+fn uses_native_scheduler_for(used_core: &std::collections::HashSet<String>) -> bool {
+    used_core.iter().any(|usage| {
         [
             "core.tasks",
             "core.net",
@@ -3014,6 +3051,12 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
 
+    fn core_fingerprint(used_core: &HashSet<String>, test_harness: bool) -> String {
+        let mut bundle = checked_generic_bundle("fn run() {}", "core-fingerprint");
+        bundle.used_core = used_core.clone();
+        corelib_emission_fingerprint(&bundle, test_harness)
+    }
+
     #[test]
     fn gc_runtime_source_is_shared_by_aot_and_jit() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -3046,14 +3089,39 @@ mod tests {
         let files = HashSet::from(["core.files::read".to_string()]);
         let net = HashSet::from(["core.net::tcp_connect".to_string()]);
         assert_ne!(
-            corelib_emission_fingerprint(&files),
-            corelib_emission_fingerprint(&net),
+            core_fingerprint(&files, false),
+            core_fingerprint(&net, false),
             "native cache identity must include the relevant Core closure"
         );
         assert_eq!(
-            corelib_emission_fingerprint(&files),
-            corelib_emission_fingerprint(&files),
+            core_fingerprint(&files, false),
+            core_fingerprint(&files, false),
             "the same relevant Core closure must reuse one stable digest"
+        );
+    }
+
+    #[test]
+    fn core_digest_covers_the_complete_emitted_core_block() {
+        let files = HashSet::from(["core.files::read".to_string()]);
+        let mut bundle = checked_generic_bundle("fn run() {}", "core-fingerprint-block");
+        bundle.used_core = files.clone();
+        let body = core_runtime_body(&bundle, false);
+        let mut emitted = String::new();
+        push_core_runtime(&mut emitted, &bundle, false);
+        assert!(emitted.contains(scheduler_prelude_for_emit(true)));
+        assert!(emitted.contains(UI_PRELUDE));
+        assert!(emitted.contains(body.as_str()));
+        assert_eq!(
+            corelib_emission_fingerprint(&bundle, false),
+            corelib_emission_identity(&body, &files),
+            "the relevant digest must hash the exact Core body that gets emitted"
+        );
+
+        let testing = HashSet::from(["core.testing".to_string()]);
+        assert_ne!(
+            core_fingerprint(&testing, false),
+            core_fingerprint(&testing, true),
+            "test-harness Core emission must have its own digest"
         );
     }
 
@@ -3099,15 +3167,15 @@ mod tests {
             "http usage must emit HTTP templates"
         );
 
-        let files_fp = corelib_emission_fingerprint(&files_only);
-        let net_fp = corelib_emission_fingerprint(&net_only);
+        let files_fp = core_fingerprint(&files_only, false);
+        let net_fp = core_fingerprint(&net_only, false);
         assert_ne!(
             files_fp, net_fp,
             "R10 cache identity must differ when Top-module reachability differs"
         );
         assert_eq!(
             files_fp,
-            corelib_emission_fingerprint(&files_only),
+            core_fingerprint(&files_only, false),
             "R10 fingerprint must be stable for the same used_core set"
         );
 
@@ -4748,9 +4816,12 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is
 /// Linux-only). The `.Linux` dispatch arm's construction is likewise folded out
 /// of `main` on those targets, so nothing references it.
-fn uses_gtk_backend(bundle: &ProgramBundle) -> bool {
-    bundle.active_os == Syntax::OSTarget::Linux
-        && bundle.used_core.iter().any(|u| u == "core.ui::gtk_backend")
+fn uses_gtk_backend_for(
+    used_core: &std::collections::HashSet<String>,
+    active_os: Syntax::OSTarget,
+) -> bool {
+    active_os == Syntax::OSTarget::Linux
+        && used_core.iter().any(|u| u == "core.ui::gtk_backend")
 }
 
 /// `Prelude/CoreLib/Top/EncodingCodecs.rs` reads the package edition as

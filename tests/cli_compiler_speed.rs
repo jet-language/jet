@@ -59,6 +59,18 @@ mod production_path {
             .any(|window| window[0] == flag && window[1] == value)
     }
 
+    fn build(scratch: &Scratch) -> std::process::Output {
+        Command::new(jet())
+            .args(["build", "main.jet", "--profile=debug", "--verbose"])
+            .current_dir(&scratch.path)
+            .env("JET_CACHE_DIR", scratch.join("build-cache"))
+            .env("JET_RUNTIME_CACHE_DIR", scratch.join("runtime-cache"))
+            .env("JET_RUNTIME_CACHE_STATS", "1")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    }
+
     #[test]
     fn production_build_uses_clean_rustc_flags_and_explicit_linker() {
         let scratch = Scratch::new("compiler-speed-production");
@@ -161,6 +173,116 @@ mod production_path {
         assert!(
             !stderr.contains("internal compiler error"),
             "missing linker reached ICE rail:\n{stderr}"
+        );
+    }
+
+    #[test]
+    fn production_build_reuses_and_repairs_stdlib_objects() {
+        let scratch = Scratch::new("compiler-speed-runtime-cache");
+        fs::write(
+            scratch.join("main.jet"),
+            r#"use core.files as files
+
+fn run() {
+    print("first")
+    print(files.exists("main.jet"))
+}
+"#,
+        )
+        .unwrap();
+
+        let cold = build(&scratch);
+        assert_eq!(
+            cold.status.code(),
+            Some(0),
+            "cold production build failed:\n{}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        let first = Command::new(scratch.join("build/main"))
+            .current_dir(&scratch.path)
+            .output()
+            .unwrap();
+        assert_eq!(first.status.code(), Some(0));
+        assert_eq!(first.stdout, b"first\ntrue\n");
+        assert!(
+            String::from_utf8_lossy(&cold.stderr).contains("jet-runtime-cache store"),
+            "cold build did not expose a runtime object store:\n{}",
+            String::from_utf8_lossy(&cold.stderr)
+        );
+        assert!(
+            fs::read_dir(scratch.join("runtime-cache"))
+                .unwrap()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path().join("libjet_runtime_core.rlib"))
+                .any(|path| path.is_file()),
+            "Core use did not publish the reusable Core object"
+        );
+
+        fs::write(
+            scratch.join("main.jet"),
+            r#"use core.files as files
+
+fn run() {
+    print("changed")
+    print(files.exists("main.jet"))
+}
+"#,
+        )
+        .unwrap();
+        let warm = build(&scratch);
+        assert_eq!(
+            warm.status.code(),
+            Some(0),
+            "warm production build failed:\n{}",
+            String::from_utf8_lossy(&warm.stderr)
+        );
+        let changed = Command::new(scratch.join("build/main"))
+            .current_dir(&scratch.path)
+            .output()
+            .unwrap();
+        assert_eq!(changed.status.code(), Some(0));
+        assert_eq!(changed.stdout, b"changed\ntrue\n");
+        assert!(
+            String::from_utf8_lossy(&warm.stderr).contains("jet-runtime-cache hit"),
+            "changed program did not reuse the stdlib object:\n{}",
+            String::from_utf8_lossy(&warm.stderr)
+        );
+
+        let runtime_rlib = fs::read_dir(scratch.join("runtime-cache"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join("libjet_runtime.rlib"))
+            .find(|path| path.is_file())
+            .expect("cold build published a runtime object");
+        fs::write(&runtime_rlib, b"corrupt runtime object").unwrap();
+        fs::write(
+            scratch.join("main.jet"),
+            r#"use core.files as files
+
+fn run() {
+    print("repaired")
+    print(files.exists("main.jet"))
+}
+"#,
+        )
+        .unwrap();
+        let repaired = build(&scratch);
+        assert_eq!(
+            repaired.status.code(),
+            Some(0),
+            "corrupt-cache build failed:\n{}",
+            String::from_utf8_lossy(&repaired.stderr)
+        );
+        let repaired_output = Command::new(scratch.join("build/main"))
+            .current_dir(&scratch.path)
+            .output()
+            .unwrap();
+        assert_eq!(repaired_output.status.code(), Some(0));
+        assert_eq!(repaired_output.stdout, b"repaired\ntrue\n");
+        assert!(
+            String::from_utf8_lossy(&repaired.stderr).contains("jet-runtime-cache store"),
+            "corrupt cache was not repaired visibly:\n{}",
+            String::from_utf8_lossy(&repaired.stderr)
         );
     }
 }

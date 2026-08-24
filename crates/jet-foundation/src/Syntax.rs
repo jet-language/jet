@@ -127,7 +127,7 @@
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
 // and ordinary call punctuation, with the receiver resolved by sema.
-// D-SCRIPT-ENTRY1=A adds no token: byte-zero `#!...` is OS launch metadata;
+// D-SCRIPT-ENTRY1=A adds no token: byte-zero `#!/...` is OS launch metadata;
 // the lexer skips the opaque line.
 // D-SUBJECT-CALL1=A adds no token: bare lower-case `.member` chains reuse the
 // existing dot punctuation and lower to ordinary one-parameter lambdas.

@@ -115,11 +115,19 @@ fn terminal_editor_state_matrix() {
         "non-TTY help failed:\n{}",
         stderr(&palette)
     );
-    assert!(stdout(&palette).contains("jet run"));
+    assert!(stdout(&palette).contains("Build & Run"));
     assert!(
         !stdout(&palette).contains('\u{1b}'),
         "NO_COLOR leaked into help"
     );
+    let search = jet(&["?", "run", "--color=never"], &project);
+    assert!(
+        search.status.success(),
+        "non-TTY help search failed:\n{}",
+        stderr(&search)
+    );
+    assert!(stdout(&search).contains("jet run"));
+    assert!(!stdout(&search).contains('\u{1b}'), "NO_COLOR leaked into search");
 
     let first_run = jet(&["run"], &project);
     assert!(

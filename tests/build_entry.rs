@@ -40,6 +40,8 @@ fn opts() -> BuildRunOptions {
         profile: "dev".to_string(),
         setting_overrides: std::collections::BTreeMap::new(),
         remote: None,
+        package_scope: true,
+        build_override: true,
     }
 }
 

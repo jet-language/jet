@@ -6475,7 +6475,8 @@ Card #1372.
 **2026-08-04 — D-SCRIPT-ENTRY1=A:** A lone Jet file may start with the exact
 OS launch line `#!/usr/bin/env jet`. The lexer skips the byte-zero line as
 opaque operating-system metadata, so it adds no Jet token, CLI flag, project
-file, or second script language. A `#!` anywhere else is rejected with E0042.
+file, or second script language. Existing `#!Name` type markers remain Jet
+syntax; a misplaced OS shebang line beginning `#!/` is rejected with E0042.
 Card #1412.
 
 **2026-08-04 — D-ZIPPAD1:** `zip`, `zip_short`, and `zip_pad` share one

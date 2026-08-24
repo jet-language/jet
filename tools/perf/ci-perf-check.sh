@@ -30,6 +30,7 @@ json_number() {
 }
 
 baseline_corpus=$(json_string corpus_sha256)
+baseline_version=$(json_number version)
 baseline_stage=$(json_string stage)
 baseline_os=$(json_string os)
 baseline_arch=$(json_string arch)
@@ -48,9 +49,10 @@ memory_budget=$(json_number memory_regression_pct)
 variance_budget=$(json_number variance_pct)
 baseline_samples=$(json_number samples)
 baseline_warmups=$(json_number warmups)
-for value in "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
+for value in "$baseline_version" "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
     [ -n "$value" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
 done
+[ "$baseline_version" -eq 3 ] || { echo "unsupported compiler-speed baseline version: $baseline_version" >&2; exit 1; }
 
 case "$THRESH" in
     "") latency_threshold=$latency_budget; memory_threshold=$memory_budget ;;
@@ -60,6 +62,7 @@ esac
 
 CURRENT=$(TMPDIR=${TMPDIR:-"$HOME/.cache/jet-test-scratch"} "$PERF_DIR/dashboard.sh")
 metadata=$(printf '%s\n' "$CURRENT" | sed -n '1p')
+current_version=$(printf '%s\n' "$metadata" | sed -n 's/.*version=\([^ ]*\).*/\1/p')
 current_corpus=$(printf '%s\n' "$metadata" | sed -n 's/.*corpus_sha256=\([^ ]*\).*/\1/p')
 current_stage=$(printf '%s\n' "$metadata" | sed -n 's/.*stage=\([^ ]*\).*/\1/p')
 current_machine=$(printf '%s\n' "$metadata" | sed -n 's/.*machine=\([^ ]*\).*/\1/p')
@@ -89,6 +92,7 @@ check_identity() {
 }
 
 check_identity corpus "$current_corpus" "$baseline_corpus"
+check_identity report-version "$current_version" "$baseline_version"
 check_identity stage "$current_stage" "$baseline_stage"
 check_identity OS "$current_os" "$baseline_os"
 check_identity architecture "$current_arch" "$baseline_arch"
@@ -166,6 +170,9 @@ while read -r row_program row_state row_stage row_latency row_memory row_varianc
     case "$row_phases" in
         *phases=*source=*cache_hits=*cache_misses=*top_cause=*backend=*linker=*artifact_bytes=*) ;;
         *) echo "missing phase totals for $row_program/$row_state" >&2; FAIL=1 ;;
+    esac
+    case "$row_phases" in
+        *linker=unavailable*) echo "missing linker identity for $row_program/$row_state" >&2; FAIL=1 ;;
     esac
 done < "$CURRENT_ROWS"
 

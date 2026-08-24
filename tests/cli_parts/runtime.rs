@@ -465,7 +465,10 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
         "name: \"command-role-home\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
-    fs::write(dir.join("run.jet"), "fn run() { print(\"stock\") }\n").unwrap();
+    // Keep the role package free of a second `fn run`; D-CMDOVERRIDE1 treats
+    // the role home and an ordinary package override as a duplicate, not as
+    // precedence. The stock-path proof below uses a separate package.
+    fs::write(dir.join("run.jet"), "fn helper() {}\n").unwrap();
     fs::write(
         dir.join("@run.jet"),
         "fn run() { print(\"role\") }\n",
@@ -497,9 +500,22 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     assert!(file_scope_stdout.contains("file scope"), "{file_scope_stdout}");
     assert!(!file_scope_stdout.contains("role\n"), "{file_scope_stdout}");
 
+    let stock_dir = dir.join("stock");
+    fs::create_dir_all(&stock_dir).unwrap();
+    fs::write(
+        stock_dir.join("package.jet"),
+        "name: \"command-role-stock\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(stock_dir.join("run.jet"), "fn run() { print(\"stock\") }\n").unwrap();
+    fs::write(
+        stock_dir.join("@run.jet"),
+        "fn run() { print(\"role\") }\n",
+    )
+    .unwrap();
     let stock = Command::new(jet())
         .args(["run", "--show-default"])
-        .current_dir(&dir)
+        .current_dir(&stock_dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -528,6 +544,7 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     )
     .unwrap();
     fs::write(duplicate.join("run.jet"), "fn run() {}\n").unwrap();
+    fs::write(duplicate.join("@run.jet"), "fn run() {}\n").unwrap();
     fs::write(duplicate.join("a.jet"), "fn run() {}\n").unwrap();
     fs::write(duplicate.join("b.jet"), "fn run() {}\n").unwrap();
     let duplicate = Command::new(jet())

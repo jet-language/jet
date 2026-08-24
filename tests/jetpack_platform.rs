@@ -9,6 +9,11 @@ use std::fs;
 
 mod common;
 
+// Card #1415 criterion 5: the same scratch journey runs in this existing
+// native Linux/macOS/Windows matrix, so each host emits its own receipt.
+#[path = "script_to_system.rs"]
+mod script_to_system;
+
 #[path = "support/jetpack_fixtures.rs"]
 mod jetpack_fixtures;
 use jetpack_fixtures::*;

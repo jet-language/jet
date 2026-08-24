@@ -48,10 +48,10 @@ fn lex_raw_with_policy(
         allow_reserved_identifiers,
         config_surface,
     };
-    // D-SCRIPT-ENTRY1=A: the operating system owns a byte-zero shebang line.
+    // D-SCRIPT-ENTRY1=A: the operating system owns a byte-zero `#!/...` line.
     // Advance the real source cursor so every later token keeps its original
     // byte span and line number.
-    if src.as_bytes().starts_with(b"#!") {
+    if src.as_bytes().starts_with(b"#!/") {
         while lx.i < lx.chars.len() && lx.at(lx.i) != '\n' {
             lx.i += 1;
         }
@@ -237,9 +237,9 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            // D-SCRIPT-ENTRY1=A: only byte-zero `#!` is launch metadata. A
-            // later marker is rejected, and its OS-owned line stays opaque.
-            if c == '#' && self.at(self.i + 1) == '!' {
+            // D-SCRIPT-ENTRY1=A: only a `#!/...` line is launch metadata. The
+            // existing `#!Name` type-marker form remains Jet syntax.
+            if c == '#' && self.at(self.i + 1) == '!' && self.at(self.i + 2) == '/' {
                 let start = self.pos(self.i);
                 self.diags.push(Diagnostic::from_row(
                     "E0042",

@@ -312,6 +312,8 @@ pub(crate) fn run_compile_cmd(
     program_args: &[&String],
     mode: OutputMode,
     record_name: Option<&str>,
+    package_scope: bool,
+    build_override: bool,
 ) {
     // D-BUILD-DEFAULT1/D-BUILDPROFILE1: profile selection. Precedence:
     // --freestanding > --small > --release/--profile=<name> > command default.
@@ -683,7 +685,7 @@ pub(crate) fn run_compile_cmd(
         && output_name.is_none()
         && (cmd == "build" || selects_build_entry)
     {
-        jet::prepare_programmable_build_front_end(
+        jet::prepare_programmable_build_front_end_scoped(
             file,
             locked,
             is_web,
@@ -691,6 +693,8 @@ pub(crate) fn run_compile_cmd(
             cross_target,
             profile.budget_name(),
             setting_overrides,
+            package_scope,
+            build_override,
         )
         .ok()
     } else {
@@ -776,7 +780,7 @@ pub(crate) fn run_compile_cmd(
             setting_overrides,
         )
     } else if cmd == "build" && emit_generated {
-        jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings(
+        jet::compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
             file,
             build_grants,
             freestanding,
@@ -789,9 +793,11 @@ pub(crate) fn run_compile_cmd(
             profile.budget_name(),
             setting_overrides,
             build_front_end.take(),
+            package_scope,
+            build_override,
         )
     } else if cmd == "build" || selects_build_entry {
-        jet::compile_programmable_build_opts_with_builder_and_profile_and_settings(
+        jet::compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
             file,
             build_grants,
             freestanding,
@@ -804,6 +810,8 @@ pub(crate) fn run_compile_cmd(
             profile.budget_name(),
             setting_overrides,
             build_front_end.take(),
+            package_scope,
+            build_override,
         )
     } else if is_web {
         jet::compile_web_with_gates_and_settings(file, gates, setting_overrides)
@@ -3910,7 +3918,10 @@ fn native_cache_key_for_program(
     })).collect();
     let dependency_interfaces = dependency_interface_fingerprint(bundle);
     let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint();
-    let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(&bundle.used_core);
+    let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint(
+        bundle,
+        mode_tag.starts_with("test"),
+    );
     let manifest = manifest_fingerprint(file)?;
     let salt = native_cache_salt(
         toolchain_identity,
@@ -4931,9 +4942,15 @@ pub(crate) fn build(
         ) {
             Ok(prepared) => {
                 if verbose {
+                    let status = if prepared.cache_hit() {
+                        "cache hit"
+                    } else if prepared.is_split() {
+                        "cache store"
+                    } else {
+                        "bypassed (inline fallback)"
+                    };
                     step(format!(
-                        "runtime   -> {}",
-                        if prepared.cache_hit() { "cache hit" } else { "cache store" }
+                        "runtime   -> {status}"
                     ));
                 }
                 prepared

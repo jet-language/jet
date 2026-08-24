@@ -456,6 +456,40 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
     setting_overrides: &BTreeMap<String, String>,
     prepared: Option<Driver::PreparedBuildFrontEnd>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        true,
+        true,
+    )
+}
+
+pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_scoped(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -470,6 +504,8 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings(
         profile,
         setting_overrides,
         prepared,
+        package_scope,
+        build_override,
     )
 }
 
@@ -567,6 +603,40 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
     setting_overrides: &BTreeMap<String, String>,
     prepared: Option<Driver::PreparedBuildFrontEnd>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
+    compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
+        file,
+        grants,
+        freestanding,
+        gates,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        remote_builder,
+        profile,
+        setting_overrides,
+        prepared,
+        true,
+        true,
+    )
+}
+
+pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_and_settings_scoped(
+    file: &str,
+    grants: &[String],
+    freestanding: bool,
+    gates: Policy::GateSet,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    remote_builder: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
+) -> Result<CompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
         grants,
@@ -581,6 +651,8 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         profile,
         setting_overrides,
         prepared,
+        package_scope,
+        build_override,
     )
 }
 
@@ -608,6 +680,30 @@ pub fn prepare_programmable_build_front_end(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
+    prepare_programmable_build_front_end_scoped(
+        file,
+        locked,
+        web_target,
+        plugin_target,
+        cross_target,
+        profile,
+        setting_overrides,
+        true,
+        true,
+    )
+}
+
+pub fn prepare_programmable_build_front_end_scoped(
+    file: &str,
+    locked: bool,
+    web_target: bool,
+    plugin_target: bool,
+    cross_target: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    package_scope: bool,
+    build_override: bool,
+) -> Result<Driver::PreparedBuildFrontEnd, Vec<Diagnostic>> {
     let inputs = Driver::FrontEndInputs {
         file: file.to_string(),
         profile: profile.to_string(),
@@ -616,6 +712,8 @@ pub fn prepare_programmable_build_front_end(
         web_target,
         plugin_target,
         cross_target: cross_target.map(str::to_string),
+        package_scope,
+        build_override,
     };
     with_compiler_stack(move || {
         let mut prepared = Driver::prepare_build_front_end(inputs)?;
@@ -679,6 +777,8 @@ pub fn check_programmable_build_for_tier(
                 profile: profile.to_string(),
                 setting_overrides: setting_overrides.clone(),
                 remote: None,
+                package_scope: true,
+                build_override: true,
             },
             Some(prepared),
         )
@@ -700,6 +800,8 @@ fn compile_programmable_build_opts_inner(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     prepared: Option<Driver::PreparedBuildFrontEnd>,
+    package_scope: bool,
+    build_override: bool,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -732,12 +834,14 @@ fn compile_programmable_build_opts_inner(
                 remote,
                 profile,
                 setting_overrides,
+                package_scope,
+                build_override,
                 checked_workspace,
             );
         }
         let mut prepared = prepared;
         if prepared.is_none() {
-            prepared = Some(prepare_programmable_build_front_end(
+            prepared = Some(prepare_programmable_build_front_end_scoped(
                 file,
                 locked,
                 web_target,
@@ -745,6 +849,8 @@ fn compile_programmable_build_opts_inner(
                 cross_target,
                 profile,
                 setting_overrides,
+                package_scope,
+                build_override,
             )?);
         }
         let grants = resolve_build_grants(file, grants)?;
@@ -769,6 +875,8 @@ fn compile_programmable_build_opts_inner(
                 profile: profile.to_string(),
                 setting_overrides: setting_overrides.clone(),
                 remote,
+                package_scope,
+                build_override,
             },
             prepared,
         )?;
@@ -796,6 +904,8 @@ fn compile_workspace_build_opts(
     remote: Option<Comptime::Build::RemoteBuildBinding>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    package_scope: bool,
+    build_override: bool,
     checked_workspace: (
         jet_driver::Authority::AuthorityResolver,
         jetpack::WorkspaceFile::WorkspaceSource,
@@ -884,6 +994,8 @@ fn compile_workspace_build_opts(
                 profile: profile.to_string(),
                 setting_overrides: BTreeMap::new(),
                 remote: remote.clone(),
+                package_scope: true,
+                build_override: true,
             },
         )?;
         if emit_generated {
@@ -961,6 +1073,8 @@ fn compile_workspace_build_opts(
             profile: profile.to_string(),
             setting_overrides: setting_overrides.clone(),
             remote,
+            package_scope,
+            build_override,
         },
     )?;
     if emit_generated {

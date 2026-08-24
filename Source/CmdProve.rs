@@ -2292,7 +2292,7 @@ fn load_checked_proof_bundle(entry: &str) -> Option<jet::AST::ProgramBundle> {
 
 fn proof_core_abi(bundle: Option<&jet::AST::ProgramBundle>, source_digest: &str) -> String {
     let emission = bundle
-        .map(|bundle| jet::Codegen::corelib_emission_fingerprint(&bundle.used_core))
+        .map(|bundle| jet::Codegen::corelib_emission_fingerprint(bundle, false))
         .unwrap_or_else(|| "unavailable".to_string());
     proof_digest(
         "jet-proof-core-abi-v2",

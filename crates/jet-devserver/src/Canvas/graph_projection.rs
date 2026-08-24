@@ -138,12 +138,24 @@ fn canvas_callable_callee(
     bundle: &AST::ProgramBundle,
     declaration: &jet_foundation::Names::NameDeclaration,
 ) -> String {
-    let leaf = declaration
-        .name
+    let module_alias = bundle
+        .modules
+        .get(declaration.module)
+        .map(|module| module.alias.as_str())
+        .unwrap_or("");
+    let source_path = source_item_path(
+        &bundle.name_ledger,
+        declaration.module,
+        module_alias,
+        &declaration.name,
+        declaration.span,
+        &[],
+    );
+    let leaf = source_path
         .rsplit_once('.')
-        .map_or(declaration.name.as_str(), |(_, leaf)| leaf);
+        .map_or(source_path.as_str(), |(_, leaf)| leaf);
     if declaration.module == bundle.entry {
-        return declaration.name.clone();
+        return source_path;
     }
 
     if let Some(alias) = bundle.name_ledger.aliases().find(|alias| {
@@ -158,11 +170,11 @@ fn canvas_callable_callee(
         return alias.name.clone();
     }
 
-    let module_alias = bundle
-        .modules
-        .get(declaration.module)
-        .map(|module| module.alias.as_str())
-        .unwrap_or(leaf);
+    let module_alias = if module_alias.is_empty() {
+        leaf
+    } else {
+        module_alias
+    };
     let prefix = bundle
         .name_ledger
         .aliases()
@@ -173,10 +185,7 @@ fn canvas_callable_callee(
         })
         .map(|alias| alias.name.as_str())
         .unwrap_or(module_alias);
-    // `declaration.name` is the checked relative path inside the imported
-    // module. Keep it intact: reducing it to `leaf` changes
-    // `h.tools.square` into the different callee `h.square`.
-    format!("{prefix}.{}", declaration.name)
+    format!("{prefix}.{source_path}")
 }
 
 fn enum_catalog_json(bundle: &AST::ProgramBundle) -> String {

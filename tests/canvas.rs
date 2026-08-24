@@ -1454,6 +1454,52 @@ fn run() {
 }
 
 #[test]
+fn canvas_exec_convergence_accepts_formatter_collapsed_inline_branch_body() {
+    let path = write_fixture(
+        "convergence_inline_branch",
+        r#"fn converge(flag: Bool) {
+    value :: 1
+    done :: value
+    if flag {
+        print(value)
+        finish(done)
+    } else {
+        print(value)
+    }
+}
+
+fn finish(value: Int) {
+    print(value)
+}
+
+fn run() {
+    converge(true)
+}
+"#,
+    );
+    let formatted = jet::format_source(&fs::read_to_string(&path).unwrap()).expect("format fixture");
+    fs::write(&path, formatted).unwrap();
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("inline convergence graph");
+    let graph_id = graph_id_for_title(&graph, "converge");
+    let (from_start, from_end) = source_span_near(&graph, "\"title\":\"if\"");
+    let (target_start, target_end) = source_span_near(&graph, "\"title\":\"finish\"");
+    let source = fs::read_to_string(&path).unwrap();
+    let request = format!(
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"source_edit\":\"exec_convergence\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"from_pin_name\":\"else\",\"from_start\":{},\"from_end\":{},\"target_start\":{},\"target_end\":{},\"strategy\":\"extract\",\"function\":\"shared_finish\"}}",
+        jet::Canvas::source_revision(&source),
+        graph_id,
+        from_start,
+        from_end,
+        target_start,
+        target_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &request).expect("inline convergence");
+    let after = fs::read_to_string(&path).unwrap();
+    assert_eq!(after.matches("shared_finish(done)").count(), 2, "{after}");
+    assert_eq!(after, jet::format_source(&after).expect("formatted inline convergence"));
+}
+
+#[test]
 fn canvas_projection_dedupes_variable_getters_with_fanout() {
     let path = write_fixture(
         "getter_fanout",
