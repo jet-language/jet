@@ -87,6 +87,52 @@ jobs:
           cargo test -p jet-codegen iocp_wake_cancel_deadline_stale_scale_and_cleanup -- --nocapture
           cargo test --test scheduler_native -- --nocapture
 
+  # D-PLATFORM-EVIDENCE1=D: a criterion that names a platform closes per
+  # platform row, and only a job that actually exercises that platform's
+  # behaviour counts. The generic host jobs above deliberately do NOT close
+  # these rows: a Windows runner that never touches ConPTY proves nothing
+  # about ConPTY. Each step below is the matching evidence for one named row.
+  native-session-matrix:
+    name: Native sessions and sandbox (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Card #1186 rows: native PTY fixtures on every supported platform.
+      - name: Process sessions native fixtures
+        run: cargo test --test process_sessions -- --nocapture
+
+      # Card #1182 row: ConPTY is Windows-only, so only this row can close it.
+      - name: Windows ConPTY session backend
+        if: matrix.os == 'windows-latest'
+        run: cargo test --test process_sessions conpty -- --nocapture
+
+      # Card #891 row: AppContainer isolation is a Windows facility.
+      - name: Windows AppContainer build sandbox isolation
+        if: matrix.os == 'windows-latest'
+        run: cargo test --test build_sandbox -- --nocapture
+
+      # Card #891 rows: the Unix sandbox path on its own platforms.
+      - name: Unix build sandbox isolation
+        if: matrix.os != 'windows-latest'
+        run: cargo test --test build_sandbox -- --nocapture
+
+      # Card #1173 rows: the agent corpus on its frozen OS matrix. The corpus
+      # doc excludes Windows, so that row needs an owner exclusion, not a job.
+      - name: Agent workload corpus
+        if: matrix.os != 'windows-latest'
+        run: cargo test --test agent_workloads -- --nocapture
+
   # c730: named strict JIT↔AOT parity job. Matrix = every host where native
   # Cranelift JIT is supported today (x86_64 only). aarch64 / Apple Silicon /
   # Windows ARM leave the matrix with named reason in the report artifact
