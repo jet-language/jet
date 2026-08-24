@@ -38,6 +38,7 @@ where
         let readlink = find_helper("readlink");
         let sort = find_helper("sort");
         let ln = find_helper("ln");
+        let true_binary = find_helper("true");
         let test_binary = std::env::current_exe().expect("current test executable");
         let bootstrap_root =
             std::env::temp_dir().join(format!("jet-no-nix-bootstrap-{}", std::process::id()));
@@ -45,6 +46,17 @@ where
         let bootstrap_unshare = patch_interpreter(&unshare, &bootstrap_root.join("unshare"));
         let bootstrap_mount = patch_interpreter(&mount, &bootstrap_root.join("mount"));
         let bootstrap_shell = patch_interpreter(&shell, &bootstrap_root.join("sh"));
+        // Derive the jetpack binary from the running test executable rather
+        // than `crate::common`: this harness is included by test roots that do
+        // not carry that module, and depending on it breaks their build.
+        let subject_binary = test_binary
+            .parent()
+            .and_then(|deps| deps.parent())
+            .map(|profile| profile.join("jetpack"))
+            .filter(|candidate| candidate.exists())
+            .expect("jetpack binary beside the test executable");
+        let subject_binary = &subject_binary;
+        let bootstrap_subject = patch_interpreter(subject_binary, &bootstrap_root.join("jetpack"));
         let script = r#"set -eu
 unshare="$1"
 mount="$2"
@@ -64,6 +76,8 @@ bootstrap_shell="${14}"
 # closure has to be staged as well. Without it the process cannot load its
 # interpreter and dies with ENOENT before any package resolution happens.
 subject_binary="${15}"
+subject_image="${16:-}"
+true_binary="${17:-}"
 scratch_root="${TMPDIR:-/tmp}"
 host_nix="$scratch_root/jet-no-nix-host-$$"
 runtime_stage="$scratch_root/jet-no-nix-runtime-$$"
@@ -100,6 +114,7 @@ runtime_roots="$(
     store_roots /bin
     store_roots /bin/sh
     store_roots /run/current-system/sw
+    [ -n "$true_binary" ] && store_roots "$true_binary"
     for helper in "$unshare" "$mount" "$umount" "$shell" "$mkdir" "$ldd" "$readlink" "$sort" "$ln"; do
         store_roots "$helper"
     done
@@ -152,6 +167,13 @@ for runtime in $runtime_roots; do
         fi
     done
 done
+if [ -n "$subject_image" ]; then
+    "$mount_real" --bind "$subject_image" "$subject_binary"
+fi
+if [ -n "$true_binary" ]; then
+    true_real="$($readlink -f "$true_binary")"
+    "$ln" -s "$(stage_path "$true_real")" "$runtime_stage/usr/bin/true"
+fi
 if [ -n "$bootstrap_unshare" ]; then
     "$ln" -s "$bootstrap_unshare" "$runtime_stage/usr/bin/unshare"
 fi
@@ -208,7 +230,9 @@ fi
             )
             .arg(bootstrap_mount.as_deref().unwrap_or_else(|| Path::new("")))
             .arg(bootstrap_shell.as_deref().unwrap_or_else(|| Path::new("")))
-            .arg(crate::common::jetpack_bin().as_os_str())
+            .arg(subject_binary.as_os_str())
+            .arg(bootstrap_subject.as_deref().unwrap_or_else(|| Path::new("")))
+            .arg(true_binary.as_os_str())
             .env(CHILD_MARKER, "1");
         let status = command
             .status()
@@ -225,27 +249,27 @@ fi
 fn patch_interpreter(source: &Path, destination: &Path) -> Option<PathBuf> {
     let mut bytes = fs::read(source).ok()?;
     let replacement = b"/proc/self/fd/9";
-    let mut offset = 0;
-    let mut patched = false;
-    while offset < bytes.len() {
+    let marker = b"/nix/store/";
+    let mut search_from = 0;
+    loop {
+        let offset = search_from
+            + bytes[search_from..]
+                .windows(marker.len())
+                .position(|part| part == marker)?;
         let end = bytes[offset..]
             .iter()
             .position(|byte| *byte == 0)
             .map_or(bytes.len(), |length| offset + length);
         let value = &bytes[offset..end];
-        if value.starts_with(b"/nix/store/") && value.windows(8).any(|part| part == b"ld-linux") {
+        if value.windows(8).any(|part| part == b"ld-linux") {
             if replacement.len() >= value.len() {
                 return None;
             }
             bytes[offset..end].fill(0);
             bytes[offset..offset + replacement.len()].copy_from_slice(replacement);
-            patched = true;
             break;
         }
-        offset = end.saturating_add(1);
-    }
-    if !patched {
-        return None;
+        search_from = end.saturating_add(1);
     }
     fs::write(destination, bytes).ok()?;
     fs::set_permissions(destination, fs::metadata(source).ok()?.permissions()).ok()?;

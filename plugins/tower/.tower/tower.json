@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2168,
-    "rev": 44167,
+    "nextNum": 2188,
+    "rev": 44229,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18,7 +18,6 @@
         "radar-cards",
         "radar-remaining",
         "radar-frozen",
-        "radar-sq",
         "radar:e4",
         "radar:e9",
         "radar:e3",
@@ -26,9 +25,11 @@
         "radar:e8",
         "radar:e12",
         "radar:e11",
-        "board-ideas",
         "radar:e10",
-        "radar:e7"
+        "radar:e7",
+        "board-ideas",
+        "radar-sq",
+        "radar:e5"
       ]
     },
     "completionCursor": "2026-08-24T22:24:53.493Z"
@@ -144606,6 +144607,2089 @@
       "updated": "2026-08-24T21:50:22.585Z",
       "updatedBy": "Main",
       "completedAt": "2026-08-24T21:50:22.585Z"
+    },
+    {
+      "id": "cldqlgbu",
+      "num": 2168,
+      "title": "Choose one command that opens Canvas",
+      "body": "Canvas is now reachable only through `jet dev <file> --target=web` and the `/canvas` route. This card chooses one direct command surface. The result must keep Canvas as a lens on the resident `jet dev` session, not a second compiler or runtime.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-CANVAS-CMD1 as the only command that opens Canvas.\n2. Add that command to the canonical CLI registry, help, completions, and man output.\n3. Route it into the existing resident dev session and Canvas service. Do not add a second watch loop.\n4. Keep plain `jet dev` behavior unchanged when Canvas is not requested.\n5. Add command, lifecycle, and error-path coverage. Update the Canvas entry documentation.",
+      "checkSteps": "Run the chosen command on a native hello program. Canvas opens once, edits the same source, and stops cleanly with Ctrl-C.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One canonical CLI form opens Canvas for a checked Jet source, and no alias or second command form remains.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:09.054Z"
+        },
+        {
+          "n": 2,
+          "text": "The command appears with the same spelling and meaning in help, shell completions, man output, and usage diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:09.054Z"
+        },
+        {
+          "n": 3,
+          "text": "Canvas attaches to the same resident session, source revision, last-good program, debugger, and `#Persist` state as `jet dev`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:09.054Z"
+        },
+        {
+          "n": 4,
+          "text": "Plain `jet dev` keeps its current terminal loop and does not open or serve Canvas unless the chosen surface requests it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:09.054Z"
+        },
+        {
+          "n": 5,
+          "text": "Ctrl-C, browser close, source-not-found, and browser-launch failure have deterministic exits and clear recovery text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:09.054Z"
+        },
+        {
+          "n": 6,
+          "text": "CLI integration tests prove the chosen form and reject every losing spelling from D-CANVAS-CMD1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:09.054Z"
+        }
+      ],
+      "refs": [
+        "D-RUN-SESSION1",
+        "D-CANVAS-RAD1"
+      ],
+      "tags": [
+        "canvas",
+        "cli",
+        "dev-loop"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:04.054Z",
+      "updated": "2026-08-24T23:12:49.369Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cmtyww5f",
+      "num": 2169,
+      "title": "Make Canvas target-independent with an automatic local port",
+      "body": "Canvas is a source editor and dev-session lens. It is not a web compilation target. The current route exists only in the web dev host, even though the host already scans `127.0.0.1:8080..=8089` when no port is given. This card separates the Canvas control server from the program target and makes the local endpoint automatic.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-CANVAS-TARGET1 for target and endpoint behavior.\n2. Move target-neutral Canvas routes behind a control host that any dev session can start.\n3. Bind loopback only by default and choose an available port without a required flag.\n4. Keep explicit host or port controls expert-only, authenticated, and fail-closed.\n5. Prove native, web, game, and non-runnable library sources open the same source-backed Canvas facts.\n6. Update CLI help and security documentation.",
+      "checkSteps": "Open the same source once as native and once as web. The Canvas graph stays the same while each program uses its own target.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canvas opens for native, web, game, service, library, and build sources without requiring `--target=web`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.023Z"
+        },
+        {
+          "n": 2,
+          "text": "The source target still controls program compilation and preview behavior; opening Canvas never changes the target.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.023Z"
+        },
+        {
+          "n": 3,
+          "text": "With no endpoint flags, Canvas binds only to loopback, selects an available port, opens the exact URL, and reports it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.023Z"
+        },
+        {
+          "n": 4,
+          "text": "An explicit occupied or invalid port fails with one registered diagnostic that names the port and a safe fix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.023Z"
+        },
+        {
+          "n": 5,
+          "text": "Non-loopback exposure requires an explicit expert opt-in and a session secret; default CORS and request checks reject other origins.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.023Z"
+        },
+        {
+          "n": 6,
+          "text": "Native and web integration tests read and edit the same graph schema through the target-neutral control host.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.023Z"
+        }
+      ],
+      "refs": [
+        "D-CANVAS-RAD1",
+        "D-RUN-SESSION1"
+      ],
+      "tags": [
+        "canvas",
+        "cli",
+        "security"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:18.096Z",
+      "updated": "2026-08-24T23:12:49.749Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cnnczx0n",
+      "num": 2170,
+      "title": "Unify Canvas, app preview, and custom dev servers in one session",
+      "body": "A web application can need its own dev server and route policy while Canvas edits the same project. Native and game programs also need Canvas without pretending to be web apps. This card defines one resident session with separate app and tool lenses, plus one visual editor path for web, native, and game work.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-CANVAS-SESSION1 for the session and listener topology.\n2. Give the resident dev session one identity, revision stream, last-good program, and transaction log.\n3. Attach the app preview, custom web server, Canvas, debugger, and source editor as lenses on that session.\n4. Keep app routes and ports separate from reserved tool transport. Add an explicit bridge for preview selection and events.\n5. Preserve source truth across graph, visual layout, and text edits.\n6. Exercise reconnect, compile-error, stale-revision, custom-server, and target-switch states.\n7. Present the real browser state matrix for owner acceptance.",
+      "checkSteps": "Open one web app with a custom server and one native app. Check project, preview, graph, code, error, and reconnect states at desktop and narrow widths.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canvas, text editing, debugger controls, and app preview report one session id, source revision, generation, and last-good program.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        },
+        {
+          "n": 2,
+          "text": "A custom web dev server keeps its own host, port, routes, middleware, and reload policy without shadowing Canvas transport routes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        },
+        {
+          "n": 3,
+          "text": "Canvas can preview or inspect web, native, and game programs through target-specific adapters without a second source model.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        },
+        {
+          "n": 4,
+          "text": "Graph edits, visual layout edits, and text edits use one transaction history with conflict checks, undo, and stale-revision refusal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        },
+        {
+          "n": 5,
+          "text": "A failed rebuild keeps the last good preview and graph, shows current diagnostics, and reconnects without losing accepted edits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        },
+        {
+          "n": 6,
+          "text": "Browser scenarios cover default web serving, a custom web server, native preview, game preview, disconnect, reconnect, and two clients.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        },
+        {
+          "n": 7,
+          "text": "Owner visual acceptance confirms that project, preview, graph, and code views make the active target and connection state clear.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:10.551Z"
+        }
+      ],
+      "refs": [
+        "D-RUN-SESSION1",
+        "D-CANVAS-RAD1",
+        "D-NATIVEUI-DEV1"
+      ],
+      "tags": [
+        "canvas",
+        "dev-loop",
+        "web-ui"
+      ],
+      "parentId": null,
+      "needsAcceptance": true,
+      "created": "2026-08-24T22:55:24.226Z",
+      "updated": "2026-08-24T23:12:50.126Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "co323ahi",
+      "num": 2171,
+      "title": "Make the Murmur3 port as readable as C without weaker arithmetic",
+      "body": "The card named a missing `murmur3_x86_64` path. The live port is `examples/features/ports/murmur3_x86_32/run.jet`. Its fixed-width safety is stronger than C, but repeated `wrapping(...)`, manual little-endian loads, and conversions hide the algorithm. The end state must match C readability without making overflow implicit.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-WRAP-SCOPE1 for an explicit, bounded wrapping-arithmetic surface.\n2. Add or reuse type-owned little-endian byte loading and rotation APIs. Do not add algorithm-specific helpers.\n3. Rewrite the x86_32 port with one visible arithmetic policy and ordinary typed operations.\n4. Keep default fixed-width arithmetic trapping everywhere outside the chosen opt-in.\n5. Compare the Jet and reference C versions by algorithm step, source size, and visible safety gates.\n6. Run the published vectors on default `jet run` and AOT.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The card and example consistently name `murmur3_x86_32`; no missing x86_64 path remains in the plan or checks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        },
+        {
+          "n": 2,
+          "text": "Every wrapping operation is covered by one explicit bounded opt-in, and fixed-width arithmetic still traps by default elsewhere.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        },
+        {
+          "n": 3,
+          "text": "Little-endian block reads use a general type-owned Core API with bounds checking and identical meaning on every execution tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        },
+        {
+          "n": 4,
+          "text": "The Jet source follows the C algorithm step for step without repeated conversion noise or per-operation wrapping wrappers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        },
+        {
+          "n": 5,
+          "text": "A side-by-side review finds no hidden overflow, unchecked indexing, pointer access, host-endian assumption, or `#Unsafe` region.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        },
+        {
+          "n": 6,
+          "text": "All reference vectors, tail lengths zero through three, unaligned input, and nonzero seeds match on default `jet run` and AOT.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        },
+        {
+          "n": 7,
+          "text": "The rewritten Jet algorithm is no longer longer than the reference C algorithm after comments and test harnesses are excluded.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:11.366Z"
+        }
+      ],
+      "refs": [
+        "D-NUMOPS1",
+        "D-INTBIG1"
+      ],
+      "tags": [
+        "numeric",
+        "stdlib",
+        "examples"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:31.706Z",
+      "updated": "2026-08-24T23:14:20.275Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cp3zupnt",
+      "num": 2172,
+      "title": "Make fallible signatures read as success plus typed failure",
+      "body": "`fn good() Int String!` means an `Int` success or a `String` failure under the current suffix law. The example name is hard to parse, `String` does not explain a failure domain, and no `Result` word appears. Two owner choices remain: what may wear `!`, and whether the suffix alone makes fallibility clear.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-ERROR-TYPE1 and D-FALLIBLE-VISIBLE1.\n2. Apply both outcomes to the signature grammar, sema type rules, formatter, and function types.\n3. Replace primitive text failures in teaching examples with a named error type or the ratified equivalent.\n4. Rename `refutable_test_bind.jet` to a plain task-focused name and update all indexes and goldens.\n5. Add teaching diagnostics for invalid error suffixes and confused optional versus fallible signatures.\n6. Prove optional success, typed failure, unions, unit failure, propagation, and deconstruction on all applicable tiers.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A function signature names its success value and failure contract exactly as both ratified ballots require.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        },
+        {
+          "n": 2,
+          "text": "The error suffix cannot silently turn an unrelated success type into the failure type; invalid cases get one registered teaching diagnostic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        },
+        {
+          "n": 3,
+          "text": "Optional success and fallible return stay distinct: `?` means absence only, and examples show optional plus fallible together.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        },
+        {
+          "n": 4,
+          "text": "The renamed example uses a named failure domain, states the success type, and contains no unexplained `Int String!` teaching line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        },
+        {
+          "n": 5,
+          "text": "Function declarations, aliases, fields, parameters, function values, unions, and unit-fallible forms use one suffix grammar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        },
+        {
+          "n": 6,
+          "text": "Default `jet run`, AOT, JIT, and interpreter proofs agree for success, absence, typed failure, propagation, and pattern binding.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        },
+        {
+          "n": 7,
+          "text": "The formatter and diagnostics make the success and failure boundary readable without an implicit or hidden carrier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.104Z"
+        }
+      ],
+      "refs": [
+        "D-ERRSUFFIX1",
+        "D-ERRSIGIL1",
+        "D-FAIL-CARRIER1"
+      ],
+      "tags": [
+        "syntax",
+        "errors",
+        "examples"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:42.647Z",
+      "updated": "2026-08-24T23:14:21.047Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cq5blslq",
+      "num": 2173,
+      "title": "Make common Result handling compact and clear",
+      "body": "Jet has a one-line success test and a full arm table, but handling both `.Ok` and `.Err` still takes four physical lines in common examples. D-ERR-DECON1 only covers `??` fallback blocks. This card chooses a compact, exhaustive form without creating a second Result mechanism.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-RESULT-DECON2 for the compact exhaustive form.\n2. Reuse ordinary enum patterns, payload binding, and branch typing in parser and sema.\n3. Define canonical formatter layout for one-line, two-line, long, commented, and nested cases.\n4. Keep D-CHOOSE-TEST1 for one-sided tests and D-ERR-DECON1 for fallback control flow.\n5. Migrate representative Result examples and diagnostics.\n6. Prove payload typing, exhaustiveness, effects, early exits, and value results on all execution tiers.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A fitting `.Ok(value)` plus `.Err(error)` handler uses at most two physical lines in canonical formatted source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        },
+        {
+          "n": 2,
+          "text": "The compact form is exhaustive, binds each payload once, preserves source order, and cannot drop a failure silently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        },
+        {
+          "n": 3,
+          "text": "One-sided success or failure checks keep the existing one-line `subject == pattern -> body` form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        },
+        {
+          "n": 4,
+          "text": "The new surface lowers through the existing enum-pattern branch mechanism and does not add a second Result carrier or handler API.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        },
+        {
+          "n": 5,
+          "text": "The formatter has deterministic layouts for short, long, commented, nested, value-yielding, and diverging handlers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        },
+        {
+          "n": 6,
+          "text": "Diagnostics name a missing arm, duplicate arm, wrong payload type, and non-exhaustive value handler with source spans.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        },
+        {
+          "n": 7,
+          "text": "Examples and goldens prove statement and value forms on default `jet run`, AOT, JIT, and interpreter paths.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:12.786Z"
+        }
+      ],
+      "refs": [
+        "D-CHOOSE-TEST1",
+        "D-ERR-DECON1",
+        "D-FMTCOLLAPSE1"
+      ],
+      "tags": [
+        "syntax",
+        "errors",
+        "patterns"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:47.080Z",
+      "updated": "2026-08-24T23:14:21.460Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cr8bdkzb",
+      "num": 2174,
+      "title": "Indent a block when Enter expands it",
+      "body": "When a user inserts a newline inside `{ ... }`, the existing content stays at the old column. Jet supports document and range formatting but does not advertise LSP on-type formatting. The fix belongs in the language server so every editor gets the same brace-aware behavior.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "1. Add `textDocument/onTypeFormatting` support for newline and closing brace triggers.\n2. Compute edits from the parsed or token-aware brace context, not raw brace counts.\n3. Indent the moved content by four spaces and outdent a closing brace to its matching block.\n4. Do nothing inside strings, typed text, comments, or malformed contexts that lack a safe local edit.\n5. Add protocol tests for empty, inline, nested, commented, and incomplete blocks.\n6. Update editor capability documentation.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "No owner choice remains. The card now has a complete plan and observable exit criteria."
+        },
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The LSP advertises on-type formatting for newline and `}` and returns standard text edits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        },
+        {
+          "n": 2,
+          "text": "Pressing Enter inside `{ statement }` moves and indents the existing statement, then places the closing brace at the matching indent.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        },
+        {
+          "n": 3,
+          "text": "Nested blocks, arm bodies, functions, markers, literals, and code-argument blocks use the same four-space rule.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        },
+        {
+          "n": 4,
+          "text": "Strings, typed text bodies, line comments, block comments, and unmatched braces do not receive a false indentation edit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        },
+        {
+          "n": 5,
+          "text": "The edit changes only the current block lines and preserves text, comments, cursor-relative content, and line endings.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        },
+        {
+          "n": 6,
+          "text": "Protocol tests cover empty blocks, content before and after the cursor, nested blocks, closing braces, malformed source, and Unicode text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        },
+        {
+          "n": 7,
+          "text": "VS Code and another LSP client can consume the same server response without editor-specific indentation code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.304Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "lsp",
+        "editor",
+        "formatting"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:51.615Z",
+      "updated": "2026-08-24T23:10:30.829Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cs2bko2y",
+      "num": 2175,
+      "title": "Give build entries a BuildPlan success and BuildError failure",
+      "body": "Six live build entries spell `fn build(b: BuildContext) BuildPlan!`. Under D-ERRSUFFIX1=B, this declares unit success with `BuildPlan` as the error. Each function instead returns a `BuildPlan` and propagates build-operation failures. This card fixes the contract and chooses how the recognized build entry gets its default error type.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-BUILD-FAIL1 for the build-entry failure contract.\n2. Make sema check a build entry against `BuildPlan` success and the chosen build error rule.\n3. Give every `BuildContext` failure one named `BuildError` path and preserve explicit custom conversion.\n4. Migrate all build entries, tests, generated templates, docs, and diagnostics.\n5. Reject the old `BuildPlan!` spelling with a focused fix.\n6. Prove successful plans and representative build failures through the programmable-build runner.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every recognized `fn build` returns `BuildPlan` as its success value and never treats `BuildPlan` as an error type.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        },
+        {
+          "n": 2,
+          "text": "The default and explicit build error forms match D-BUILD-FAIL1 in declarations, function values, generated templates, and help text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        },
+        {
+          "n": 3,
+          "text": "`BuildContext` operations propagate one structured `BuildError` with operation, target, source, and cause data.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        },
+        {
+          "n": 4,
+          "text": "Custom build errors convert through the ordinary declared error-conversion rail; non-build functions receive no build-entry magic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        },
+        {
+          "n": 5,
+          "text": "The retired `BuildPlan!` form gets a registered diagnostic that shows the exact current build signature.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        },
+        {
+          "n": 6,
+          "text": "All build entry examples and test fixtures migrate in one pass, and a corpus check finds no active old signature.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        },
+        {
+          "n": 7,
+          "text": "Programmable-build tests prove a valid plan, a context failure, a custom converted failure, and the same report in human and JSON output.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:13.844Z"
+        }
+      ],
+      "refs": [
+        "D-ERRSUFFIX1",
+        "D-CALLABLE-ONE1"
+      ],
+      "tags": [
+        "build",
+        "errors",
+        "syntax"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:55:55.606Z",
+      "updated": "2026-08-24T23:10:13.844Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "ctrvtgzf",
+      "num": 2176,
+      "title": "Color warning span arrows yellow",
+      "body": "The diagnostic header uses warning yellow, but `Diagnostic::render_inner` always colors source carets with `theme.error`. A warning therefore looks like an error at its exact source span. The caret color must follow severity while plain output stays byte-identical.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "1. Select the source-span style from the diagnostic severity.\n2. Use the warning theme for lint carets and the error theme for error carets.\n3. Keep source columns, hyperlinks, plain output, `NO_COLOR`, redirects, and JSON unchanged.\n4. Add exact ANSI and plain-output tests for one error and one warning.\n5. Check every shared diagnostic renderer uses the same severity rule.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "No owner choice remains. The card now has a complete plan and observable exit criteria."
+        },
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A lint or warning renders its source carets in the same yellow warning style as its header.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.373Z"
+        },
+        {
+          "n": 2,
+          "text": "An error keeps red source carets and its current error header style.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.373Z"
+        },
+        {
+          "n": 3,
+          "text": "Caret width, padding, Unicode display columns, source text, Why text, and Fix text do not change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.373Z"
+        },
+        {
+          "n": 4,
+          "text": "`NO_COLOR`, redirected output, explicit no-color mode, and JSON output contain no new bytes or ANSI sequences.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.373Z"
+        },
+        {
+          "n": 5,
+          "text": "Exact renderer tests compare colored error, colored warning, plain error, plain warning, and a wide-character span.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.373Z"
+        },
+        {
+          "n": 6,
+          "text": "CLI, LSP-rendered text, Canvas diagnostic text, and snapshots all use the shared severity-based renderer or machine severity field.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.373Z"
+        }
+      ],
+      "refs": [
+        "D-REPORT-SEV1"
+      ],
+      "tags": [
+        "diagnostics",
+        "terminal"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:01.505Z",
+      "updated": "2026-08-24T23:10:31.767Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cup3p8gb",
+      "num": 2177,
+      "title": "Fix the output callable example to a canonical bare binding",
+      "body": "`output_callable.jet` still writes `app: Output :: .Executable{...};`. D-BIND-BARE1 retired typed binding heads, and current constructors carry their type. The owner requires `app :: Output.Executable{...}` with no semicolon. This is syntax drift, not a new design choice.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "1. Replace the stale binding with the exact canonical typed constructor and remove the semicolon.\n2. Search active examples, tests, templates, and docs for the same retired output declaration shape.\n3. Keep ordinary callable resolution for `entry:` and the closed Output kind law.\n4. Reformat and update the expected output and source snapshots.\n5. Run the output through selection, inspection, default execution, and AOT execution.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "No owner choice remains. The card now has a complete plan and observable exit criteria."
+        },
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`examples/features/tooling/output_callable.jet` declares `app :: Output.Executable{...}` and contains no semicolon.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.956Z"
+        },
+        {
+          "n": 2,
+          "text": "No active Output declaration uses a typed binding head or a leading dot constructor that depends on a retired annotation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.956Z"
+        },
+        {
+          "n": 3,
+          "text": "The `entry: launch` field resolves through ordinary callable identity and keeps its exact Executable role contract.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.956Z"
+        },
+        {
+          "n": 4,
+          "text": "`jet fmt --check` accepts the example without changing its declaration shape.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.956Z"
+        },
+        {
+          "n": 5,
+          "text": "`jet inspect output` reports the Executable name, entry, source path, and callable identity from the same Output value.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.956Z"
+        },
+        {
+          "n": 6,
+          "text": "Default `jet run` and AOT print the expected text, and the golden source/output checks pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:14.956Z"
+        }
+      ],
+      "refs": [
+        "D-ECO-OUTPUT1",
+        "D-ECO-OUTPUT-PAYLOAD1",
+        "D-ECO-OUTPUT-KINDS1"
+      ],
+      "tags": [
+        "examples",
+        "outputs",
+        "syntax"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:05.691Z",
+      "updated": "2026-08-24T23:10:32.301Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cv62zydw",
+      "num": 2178,
+      "title": "Read tracked origin through the compiler fact surface",
+      "body": "`#Track` stores compiler metadata, yet `provenance_track.jet` reads it through the runtime-looking `speed.origin()` method. Jet already exposes `value.@track_origin` through the typed fact registry. This card decides whether origin becomes one compiler fact such as `speed.@origin`, and whether any runtime projection remains.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-TRACK-ORIGIN1.\n2. Make the fact registry, flow facts, reflection, completion, hover, and inspect output use the selected name and type.\n3. Remove any duplicate runtime method or hidden metadata path that the ruling retires.\n4. Preserve tracked, untracked, moved, copied, branch-merged, and mutable binding meaning.\n5. Migrate examples, tests, generated Core declarations, and diagnostics.\n6. Prove comptime reads and any ratified runtime projection on every execution tier.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Tracked origin has one canonical public read surface and one typed fact shape, as selected by D-TRACK-ORIGIN1.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:15.785Z"
+        },
+        {
+          "n": 2,
+          "text": "The read distinguishes tracked, untracked, ambiguous after merge, copied, moved, and mutable bindings without inventing provenance.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:15.785Z"
+        },
+        {
+          "n": 3,
+          "text": "Completion, hover, go-to-definition, reflection, and `jet inspect expand --facts` show the same fact name and fields.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:15.785Z"
+        },
+        {
+          "n": 4,
+          "text": "Any retired `.origin()` or `.@track_origin` spelling is removed and gets a focused teaching diagnostic when user-typed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:15.785Z"
+        },
+        {
+          "n": 5,
+          "text": "The example reads origin through the canonical surface and does not imply compiler metadata is an ordinary runtime method.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:15.785Z"
+        },
+        {
+          "n": 6,
+          "text": "AOT, JIT, interpreter, and comptime use the same sema fact; adapters do not rebuild origin policy.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:15.785Z"
+        }
+      ],
+      "refs": [
+        "D-FACT-READ1"
+      ],
+      "tags": [
+        "facts",
+        "provenance",
+        "syntax"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:11.071Z",
+      "updated": "2026-08-24T23:15:26.784Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cwf44fqc",
+      "num": 2179,
+      "title": "Give durable service receipts clear states and errors",
+      "body": "`ServiceReceipt` currently exposes `.Enqueued`, `.Executed`, `.Retained`, `.DeadLettered`, `.Rejected`, and `.Unavailable`. The names mix queue events, durable state, and failures. The implementation also drifted from D-SERVICE-AUTHORITY1, which named accepted and duplicate receipts. This card chooses one honest receipt and error model.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-SERVICE-RECEIPT2.\n2. Define the receipt identity, delivery state, retention fields, idempotency meaning, and error boundary in Core.\n3. Put policy rejection and unavailable authority on the ratified failure route rather than a misleading success variant when required.\n4. Migrate send, retry, receive, inspect, show, persistence, recovery, and examples.\n5. Keep service semantics in the shared Prelude and adapt every execution tier to it.\n6. Prove crash windows, duplicates, retention expiry, dead letters, rejection, partition, and replay.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every receipt variant names a durable fact a caller can act on; no variant name confuses an action with a state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        },
+        {
+          "n": 2,
+          "text": "Accepted, duplicate, retained, delivered, and dead-letter outcomes follow the exact model ratified in D-SERVICE-RECEIPT2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        },
+        {
+          "n": 3,
+          "text": "Policy rejection, unavailable authority, partition, revocation, and stale generation use one typed failure route with structured causes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        },
+        {
+          "n": 4,
+          "text": "A receipt has a stable idempotency identity and enough typed fields to retry, inspect retention, and correlate delivery after restart.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        },
+        {
+          "n": 5,
+          "text": "Human show, JSON, persistence, comptime, AOT, JIT, and interpreter use the same variant names, fields, and transitions.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        },
+        {
+          "n": 6,
+          "text": "The example explains where receipts come from, handles every public state exhaustively, and contains no fallback for impossible hidden variants.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        },
+        {
+          "n": 7,
+          "text": "Tests cover first send, duplicate key, conflicting key, execution, retention, expiry, dead letter, rejection, partition, crash recovery, and retry.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:16.524Z"
+        }
+      ],
+      "refs": [
+        "D-SERVICE-AUTHORITY1",
+        "D-FAIL-MODEL1"
+      ],
+      "tags": [
+        "services",
+        "errors",
+        "stdlib"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:15.971Z",
+      "updated": "2026-08-24T23:15:27.173Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cxf6x7ap",
+      "num": 2180,
+      "title": "Return branch-table values directly and lint redundant tails",
+      "body": "`service_runtime.jet` returns from every branch, then returns a default after the table. A value arm table can express the same choice directly. The owner also wants a sole final expression to become the function result without repeated `return`. This card separates the safe lint from the owner-gated tail-return rule.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-TAIL-RETURN1.\n2. Type a value arm table once and apply the selected function-tail rule in sema and TIR.\n3. Add a lint for an arm table followed by a same-type default return when an `else` value arm is equivalent.\n4. Supply a behavior-preserving fix that inserts `else`, removes redundant returns, and preserves comments.\n5. Migrate the service example to canonical value-table form.\n6. Prove divergence, unit bodies, loops, nested blocks, comments, and all execution tiers.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A function can express the selected branch result as one value arm table with an explicit `else` arm.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        },
+        {
+          "n": 2,
+          "text": "The final-expression return rule matches D-TAIL-RETURN1 for function blocks, lambdas, methods, nested blocks, and unit bodies.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        },
+        {
+          "n": 3,
+          "text": "A registered lint detects an arm table followed by an equivalent default return and stays silent when control flow or effects differ.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        },
+        {
+          "n": 4,
+          "text": "The lint fix preserves evaluation order, payload bindings, comments, source spans, effects, and the exact returned value.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        },
+        {
+          "n": 5,
+          "text": "`status_label` and `outcome_label` become exhaustive value tables with no repeated `return` and no trailing fallback statement.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        },
+        {
+          "n": 6,
+          "text": "Missing `else`, mixed arm types, diverging arms, unreachable tails, and accidental unit results get precise sema diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        },
+        {
+          "n": 7,
+          "text": "Default `jet run`, AOT, JIT, interpreter, and web agree for value tables and final-expression returns.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.081Z"
+        }
+      ],
+      "refs": [
+        "D-BRANCH-LINT1",
+        "D-BRANCH-VALUE1",
+        "D-CALLABLE-ONE1"
+      ],
+      "tags": [
+        "syntax",
+        "lint",
+        "control-flow"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:22.506Z",
+      "updated": "2026-08-24T23:15:27.541Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cyxijw5j",
+      "num": 2181,
+      "title": "Count qualified alias use before warning about imports",
+      "body": "`solve_puzzle.jet` imports `core.compute.solve as solve` and uses `solve.Solver.new(42)`, yet the compiler reports the import as unused. Qualified use through an alias must mark the exact import as live. This is a false warning, not a policy choice.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P3",
+      "plan": "1. Trace import-use accounting from alias resolution through qualified member lookup.\n2. Mark an import live only when name resolution binds a use to that import symbol.\n3. Cover type, value, call, constructor, marker, generic, fact-read, and nested module positions.\n4. Keep truly unused imports, shadowed aliases, and similarly named local modules warning correctly.\n5. Add a UI regression for the reported example and negative controls.\n6. Run the example and focused lint tests.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "No owner choice remains. The card now has a complete plan and observable exit criteria."
+        },
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`use core.compute.solve as solve` receives no unused-import warning when `solve.Solver.new(42)` resolves through that alias.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.602Z"
+        },
+        {
+          "n": 2,
+          "text": "Qualified type, value, constructor, call, generic, marker, fact-read, and nested member uses each mark the bound import live.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.602Z"
+        },
+        {
+          "n": 3,
+          "text": "A similarly named local binding or module does not mark an unrelated import live.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.602Z"
+        },
+        {
+          "n": 4,
+          "text": "A truly unused direct import, alias import, grouped import, and re-export still receives L0103 with the correct source span.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.602Z"
+        },
+        {
+          "n": 5,
+          "text": "The use record follows semantic symbol identity through aliases and does not depend on matching source text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.602Z"
+        },
+        {
+          "n": 6,
+          "text": "The solve-puzzle example runs with its expected output and no L0103, while focused negative UI snapshots remain exact.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:17.602Z"
+        }
+      ],
+      "refs": [
+        "D-LINT-UNUSED1"
+      ],
+      "tags": [
+        "lint",
+        "imports",
+        "sema"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:30.144Z",
+      "updated": "2026-08-24T23:10:32.831Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "cz2ys9cb",
+      "num": 2182,
+      "title": "Decide whether bare ! may hide the error type",
+      "body": "D-ERRSUFFIX1=B kept bare `!` as shorthand for the default `Err` error. The owner now questions that choice because a declaration can erase the visible failure contract. This card asks whether every fallible declaration must name its error type, while preserving ordinary propagation and conversion.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-DEFAULT-ERROR1 as an amendment or confirmation of D-ERRSUFFIX1.\n2. Apply the outcome in declarations, aliases, fields, parameters, function values, lambdas, and generated signatures.\n3. Keep call-site `?`, `??`, and error conversion separate from declaration spelling.\n4. Migrate every active bare declaration if the shorthand retires.\n5. Add a registered diagnostic with the inferred or required error type when possible.\n6. Prove explicit errors, unions, unit failure, optional success, and default conversion on every tier.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every fallible declaration exposes or intentionally defaults its error contract exactly as D-DEFAULT-ERROR1 requires.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        },
+        {
+          "n": 2,
+          "text": "Bare `!` is either rejected everywhere or has one narrow documented meaning; no declaration position behaves differently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        },
+        {
+          "n": 3,
+          "text": "The compiler never type-erases a known error into an uninspectable report solely because the signature used shorthand.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        },
+        {
+          "n": 4,
+          "text": "Call-site propagation, fallback, context notes, and declared error conversion keep their ratified behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        },
+        {
+          "n": 5,
+          "text": "If bare `!` retires, diagnostics name the source error types and show an explicit replacement without guessing an invalid union.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        },
+        {
+          "n": 6,
+          "text": "The active corpus, docs, examples, generated Core signatures, formatter snapshots, and editor grammars use only the ratified form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        },
+        {
+          "n": 7,
+          "text": "AOT, JIT, interpreter, comptime, and web preserve the same typed failure identity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.148Z"
+        }
+      ],
+      "refs": [
+        "D-ERRSUFFIX1",
+        "D-FAIL-UNIT1"
+      ],
+      "tags": [
+        "syntax",
+        "errors",
+        "safety"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:39.181Z",
+      "updated": "2026-08-24T23:10:18.148Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c10086k5d",
+      "num": 2183,
+      "title": "Use one marker declaration shape for legal sites",
+      "body": "User marker declarations currently mix `marker AddGreeting(@sites: [.Type])` with `marker Pattern on [.Text]`. These are two declaration forms for the same legal-site fact. Applied-marker placement already has one law; declarations need one canonical site clause too.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-MARKER-SITES1.\n2. Give marker declarations one grammar for ordinary parameters, legal sites, inheritance, repeatability, and status metadata.\n3. Keep applied-marker placement under D-MARK-FORM1 unchanged.\n4. Migrate the Prelude registry, user markers, tests, examples, docs, grammar files, and generated digest.\n5. Reject every retired declaration shape with one teaching diagnostic and formatter fix when safe.\n6. Prove declarations with no arguments, arguments, one site, many sites, block bodies, and text heads.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every marker declaration uses one canonical legal-site clause; `@sites` is not a second public declaration form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        },
+        {
+          "n": 2,
+          "text": "Ordinary marker arguments stay in the ordinary parameter list and cannot be confused with registry metadata.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        },
+        {
+          "n": 3,
+          "text": "Text, block, type, field, function, method, binding, statement, and package sites use the same declaration grammar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        },
+        {
+          "n": 4,
+          "text": "The Prelude marker registry, user rules, generated digest, hover, completion, and docs show the same canonical shape.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        },
+        {
+          "n": 5,
+          "text": "Retired forms get one registered parse diagnostic with the exact canonical rewrite and no compatibility alias.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        },
+        {
+          "n": 6,
+          "text": "Parser, formatter, editor grammar, snapshots, and marker declaration tests cover zero, one, and many arguments and sites.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        },
+        {
+          "n": 7,
+          "text": "D-MARK-FORM1 still governs only where an applied `#Marker` sits; this change adds no second application rule.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:18.699Z"
+        }
+      ],
+      "refs": [
+        "D-MARK-FORM1",
+        "D-BOUND-SINK1"
+      ],
+      "tags": [
+        "syntax",
+        "markers"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:43.369Z",
+      "updated": "2026-08-24T23:10:18.699Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c11y6itr6",
+      "num": 2184,
+      "title": "Allow terminal typestates without a dead-end warning",
+      "body": "L0151 warns when a declared state has no outgoing transition. A terminal state such as `Confirmed`, `Closed`, `Cancelled`, or `Completed` is often the intended end of a protocol. This card decides whether silence, an explicit terminal mark, or the current warning best describes that state.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-STATE-TERMINAL1.\n2. Apply the terminal-state rule in sema, reflection, diagnostics, and state diagrams.\n3. Keep missing incoming transitions, unreachable states, duplicate transitions, and invalid source states as separate checks.\n4. Remove or narrow L0151 and its registry row and snapshots.\n5. Add terminal, accidental dead-end, cycle, self-loop, branch, and sealed-resource examples.\n6. Prove no runtime representation or execution-tier policy is added.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A state with no outgoing transition follows D-STATE-TERMINAL1 and does not receive the old unconditional dead-end warning.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        },
+        {
+          "n": 2,
+          "text": "Terminal status is available to reflection and generated state diagrams without adding runtime storage.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        },
+        {
+          "n": 3,
+          "text": "A terminal state can still be required by `#State` methods for read-only inspection, cleanup, or audit operations.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        },
+        {
+          "n": 4,
+          "text": "Unreachable states, unknown states, duplicate transitions, invalid transition sources, and impossible cycles keep distinct diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        },
+        {
+          "n": 5,
+          "text": "The old L0151 text is removed or narrowed to the exact remaining mistake; snapshots and the diagnostic registry agree.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        },
+        {
+          "n": 6,
+          "text": "Examples cover intended final success, final failure, reopenable resources, self-loops, and an actually unreachable state.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        },
+        {
+          "n": 7,
+          "text": "AOT, JIT, interpreter, comptime, and web consume the same erased sema state facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.236Z"
+        }
+      ],
+      "refs": [
+        "D-STATE-DECL",
+        "D-STATE-NS1"
+      ],
+      "tags": [
+        "typestate",
+        "lint",
+        "semantics"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:47.598Z",
+      "updated": "2026-08-24T23:10:19.236Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c12uacgqe",
+      "num": 2185,
+      "title": "Decide whether a declared text head is a marker or type",
+      "body": "`marker Pattern on [.Text]` creates a value that functions accept as the type `Pattern`. The applied value has no `#`, so the declaration reads like a rule while the use reads like a nominal type. This card reopens that boundary and chooses one honest model for checked text heads.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-TEXTHEAD-TYPE1 as an amendment or confirmation of D-BOUND-SINK1.\n2. Give declaration, construction, parameter, reflection, hover, completion, and diagnostics one consistent ontology.\n3. Keep body checking and hole encoding on one registered compile-time path.\n4. Preserve `.raw()` as the audited escape and reject plain String at typed sinks.\n5. Migrate the declared-text examples, library tests, snapshots, docs, and generated grammar.\n6. Prove user libraries can declare and consume the selected form without a parallel sink registry.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The declaration reads as the same kind of thing that `Pattern{...}` constructs and `fn accept(pattern: Pattern)` accepts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        },
+        {
+          "n": 2,
+          "text": "A marker is always applied with `#` to a target, while a type is always named and constructed as a type; the chosen model has no exception.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        },
+        {
+          "n": 3,
+          "text": "Checked body validation, interpolation encoding, typed sink rejection, and `.raw()` use one registered implementation path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        },
+        {
+          "n": 4,
+          "text": "Reflection, hover, completion, go-to-definition, rename, and generated docs classify the declaration consistently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        },
+        {
+          "n": 5,
+          "text": "The losing declaration forms are removed in one cutover and receive a focused teaching diagnostic when user-typed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        },
+        {
+          "n": 6,
+          "text": "Library-defined SQL-like, regex-like, and identity text heads prove validation, holes, raw escape, imports, generics, and separate modules.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        },
+        {
+          "n": 7,
+          "text": "Comptime, AOT, JIT, interpreter, and web agree on accepted bodies, rejected bodies, encoded holes, and runtime representation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:19.766Z"
+        }
+      ],
+      "refs": [
+        "D-BOUND-SINK1",
+        "D-FACTMODEL1"
+      ],
+      "tags": [
+        "syntax",
+        "markers",
+        "types"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:51.717Z",
+      "updated": "2026-08-24T23:10:19.766Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c13gfyz5l",
+      "num": 2186,
+      "title": "Put typestate ownership inside its type",
+      "body": "`fact_reads.jet` writes `state Order { Draft, Confirmed }` beside `struct Order { ... }`. The state declaration is meant to attach facts to the struct, not create another runtime type, but the repeated name looks like a namespace collision. This card chooses the canonical ownership and placement form.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-STATE-HOME1 as an amendment to the written form of D-STATE-NS1.\n2. Parse and resolve states as facts owned by exactly one declared type.\n3. Preserve the qualified fact path `Type.State.Name` and bare sugar only where ratified.\n4. Reject duplicate homes, missing owner types, state/member collisions, and repeated state declarations with focused diagnostics.\n5. Migrate structs, enums if allowed, impls, markers, examples, docs, grammars, and snapshots.\n6. Prove reflection, completion, diagrams, transitions, generics, and all execution tiers.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Typestate is declared in or explicitly attached to exactly one existing type; the source cannot look like two unrelated `Order` declarations.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        },
+        {
+          "n": 2,
+          "text": "The canonical path remains `Order.State.Draft`, and bare state names work only in the ratified marker context.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        },
+        {
+          "n": 3,
+          "text": "A missing owner type, duplicate state set, duplicate state name, and real type namespace collision each get a distinct registered diagnostic.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        },
+        {
+          "n": 4,
+          "text": "State declarations work for generic types and across impl blocks without creating a runtime field or second type identity.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        },
+        {
+          "n": 5,
+          "text": "Reflection, completion, go-to-definition, rename, hover, and generated state diagrams all point to the owning type and state declaration.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        },
+        {
+          "n": 6,
+          "text": "`fact_reads.jet` has one visually coherent `Order` declaration and no apparent namespace collision.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        },
+        {
+          "n": 7,
+          "text": "Parser, formatter, grammars, snapshots, sema, TIR facts, AOT, JIT, interpreter, and web use the ratified form only.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.307Z"
+        }
+      ],
+      "refs": [
+        "D-STATE-NS1",
+        "D-FACTMODEL1"
+      ],
+      "tags": [
+        "syntax",
+        "typestate",
+        "types"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:55.233Z",
+      "updated": "2026-08-24T23:10:20.307Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c14vk3sif",
+      "num": 2187,
+      "title": "Choose the final name for abilities and effects",
+      "body": "Jet already retired `Capability` and `#Caps` through D-AUTHORITY-WORD2=E. The current surface is `Ability`, `Abilities`, and `#Abilities`; effect rows still name effects. The owner now asks whether `FX` is a better final replacement. This card compares the current words with a clean `FX` cutover and other coherent names.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": "1. Ratify D-ABILITY-NAME2 as an amendment or confirmation of D-AUTHORITY-WORD2.\n2. Apply one vocabulary to the fact menu, carried value, block marker, diagnostics, CLI, browser reader, manifests, reflection, and docs.\n3. Keep effect rows and granted rights semantically distinct even if the chosen words rhyme.\n4. Remove every retired spelling with no aliases and add exact teaching diagnostics.\n5. Regenerate marker registries, grammars, help, snapshots, examples, and inspect output.\n6. Prove beginner discovery and expert audit queries use the same final terms.",
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-24",
+          "by": "Main",
+          "text": "Prepared full implementation plan and observable exit criteria; owner choices are captured in linked ballots."
+        },
+        {
+          "at": "2026-08-24",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The fact menu, carried value, scope marker, browser reader, CLI flag, manifest fields, diagnostics, and docs use one ratified vocabulary.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        },
+        {
+          "n": 2,
+          "text": "The final names make the difference between an effect a function may perform and authority the caller grants clear.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        },
+        {
+          "n": 3,
+          "text": "No live user surface contains `Capability`, `Capabilities`, `#Caps`, or any losing spelling from D-ABILITY-NAME2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        },
+        {
+          "n": 4,
+          "text": "Retired spellings get registered diagnostics with exact replacements and no parser, library, or CLI aliases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        },
+        {
+          "n": 5,
+          "text": "Completion, hover, reflection, `jet explain`, `jet inspect`, JSON reports, and generated docs use the same terms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        },
+        {
+          "n": 6,
+          "text": "Examples show a beginner default, a narrow lexical grant, a bound handle, a denied effect, and an expert audit receipt.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        },
+        {
+          "n": 7,
+          "text": "Syntax.rs, marker registry, grammars, snapshots, AOT, JIT, interpreter, comptime, and web all use the same selected names.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T23:10:20.858Z"
+        }
+      ],
+      "refs": [
+        "D-AUTHORITY-WORD2",
+        "D-EFFECT-ROW2"
+      ],
+      "tags": [
+        "syntax",
+        "effects",
+        "naming"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-24T22:56:58.324Z",
+      "updated": "2026-08-24T23:10:20.858Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -199805,6 +201889,656 @@
       "created": "2026-08-24T19:33:09.128Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-24"
+    },
+    {
+      "id": "D-CANVAS-CMD1",
+      "cardId": "cldqlgbu",
+      "group": "tooling",
+      "title": "How should a user open Canvas?",
+      "gist": "Choose the one command that opens Canvas.",
+      "lesson": "Canvas is a visual lens on the resident dev session. The command should say that relation clearly. A second watch loop or hidden automatic browser would split one development act into two models.",
+      "explainer": "",
+      "story": "Maya edits a native game. She wants the graph beside the running program without pretending that the game is a web target.",
+      "inWild": "$ jet dev game.jet --canvas\nwatching game.jet\nCanvas: http://127.0.0.1:43127/session/…",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A flag on `jet dev`",
+          "detail": "Use `jet dev <source> --canvas`. Canvas is visibly a lens on the dev session. Plain dev stays terminal-only. The command is longer than a new verb.",
+          "technical": "The existing dev dispatcher starts one resident session. The flag attaches the Canvas control host and browser client to that session.",
+          "code": "$ jet dev game.jet --canvas\nwatching game.jet\nCanvas: http://127.0.0.1:43127/session/…"
+        },
+        {
+          "key": "B",
+          "name": "A `jet canvas` command",
+          "detail": "Use `jet canvas <source>`. The command is short and easy to discover. It must still create or attach to a dev session, so the verb hides that shared lifecycle.",
+          "technical": "`jet canvas` becomes a canonical top-level command. It calls the same dev-session constructor and changes only the initial lens.",
+          "code": "$ jet canvas game.jet\nwatching game.jet\nCanvas: http://127.0.0.1:43127/session/…"
+        },
+        {
+          "key": "C",
+          "name": "Canvas opens for every dev session",
+          "detail": "Plain `jet dev <source>` always opens Canvas. Beginners get the visual tool with no flag. Terminal users pay a browser launch and local server they did not ask for.",
+          "technical": "Canvas becomes an unconditional dev-session client. A new opt-out would be required for headless and terminal use.",
+          "code": "$ jet dev game.jet\nwatching game.jet\nOpening Canvas…\n\n$ jet dev game.jet --no-canvas"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A states the true model: Canvas is one optional lens on `jet dev`. It preserves the quiet terminal default and avoids a second lifecycle verb.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The short verb hides that Canvas owns a dev session and creates two entry stories for one act."
+          },
+          {
+            "key": "C",
+            "reason": "An automatic browser and server burden headless, remote, scripted, and terminal-only work."
+          }
+        ],
+        "tradeoff": "The user types one flag. That cost keeps the command model honest and the plain dev loop quiet."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared a dev flag with a new command and recommended the flag because Canvas shares the dev lifecycle.",
+        "boilOcean": "The breadth pass also tested automatic opening and an editor command. Automatic opening became option C; an editor command duplicated the same hidden session problem as option B.",
+        "hybrid": "The hybrid pass tested keeping both `jet canvas` and `jet dev --canvas`. It was removed because two canonical spellings would split help, scripts, and teaching.",
+        "cooperative": "The cooperative pass strengthened the new verb as the shortest discoverable form. It still hides the session relation that controls reload, tests, and debugging.",
+        "adversarial": "The adversarial pass tested remote terminals, headless runs, browser failure, and repeated invocation. The optional dev flag survives without adding an opt-out or second lifecycle."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:12:49.368Z"
+    },
+    {
+      "id": "D-CANVAS-TARGET1",
+      "cardId": "cmtyww5f",
+      "group": "tooling",
+      "title": "How should Canvas choose its target and local endpoint?",
+      "gist": "Choose how Canvas runs without a web target or required port.",
+      "lesson": "Canvas edits checked source and projects a dev session. The program target decides how the program runs, not whether Canvas exists. The browser client still needs a safe local transport.",
+      "explainer": "",
+      "story": "Noah opens Canvas for a command-line parser, then for a web app. He expects the same graph and no port setup in either project.",
+      "inWild": "$ jet dev parser.jet --canvas\nCanvas: http://127.0.0.1:43127/session/…\n\n$ jet dev site.jet --target=web --canvas\nApp: http://127.0.0.1:8080\nCanvas: http://127.0.0.1:43128/session/…",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Target-neutral loopback host",
+          "detail": "Canvas always uses a Jet-owned loopback control host. The operating system selects a free port. `--canvas-port` is an expert override. The program target stays independent.",
+          "technical": "Bind `127.0.0.1:0` by default and read the assigned port. Use a session secret and strict origin checks. A non-loopback host needs explicit unsafe network exposure policy.",
+          "code": "$ jet dev parser.jet --canvas\nCanvas: http://127.0.0.1:43127/session/…\n\n$ jet dev parser.jet --canvas --canvas-port=9001"
+        },
+        {
+          "key": "B",
+          "name": "Native desktop shell",
+          "detail": "Canvas opens in a first-party desktop window and needs no TCP port. Browser deployment and remote use need another transport or product.",
+          "technical": "Embed the existing HTML and JavaScript in a native webview. The webview protocol replaces HTTP locally but requires a platform shell and packaging path.",
+          "code": "$ jet dev parser.jet --canvas\nCanvas: native window\n# no local URL is available"
+        },
+        {
+          "key": "C",
+          "name": "Keep Canvas inside web dev",
+          "detail": "Canvas remains a route on `jet dev --target=web`. The existing port scan stays. Native, game, service, and library projects still cannot use Canvas directly.",
+          "technical": "No host split. Canvas routes remain owned by `WebHost` and share its target and listener.",
+          "code": "$ jet dev parser.jet --canvas\nError: Canvas needs `--target=web`\n\n$ jet dev parser.jet --target=web --canvas"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the existing browser surface, removes the false target dependency, and makes the port an implementation detail. It also supports remote forwarding without a second product.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A desktop shell removes ports locally but adds a platform product and still needs a transport for remote use."
+          },
+          {
+            "key": "C",
+            "reason": "Canvas source editing has no web-only meaning, so this keeps the exact restriction the card must remove."
+          }
+        ],
+        "tradeoff": "Canvas still starts a local HTTP service. Loopback binding, a session secret, and strict origin checks bound that risk."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft separated the program target from the Canvas transport and recommended an automatic loopback host.",
+        "boilOcean": "The breadth pass tested a native shell, static files, Unix sockets, and the current web route. The shell and current route remain distinct options; static files cannot support live transactions.",
+        "hybrid": "The hybrid pass combined a loopback host with an optional desktop wrapper. The wrapper is only a later client, so it does not change option A.",
+        "cooperative": "The cooperative pass strengthened the desktop shell with zero visible ports and native packaging. It still leaves remote and browser use needing another transport.",
+        "adversarial": "The adversarial pass tested port collisions, hostile origins, remote hosts, and multiple sessions. Port zero, session secrets, and loopback-only defaults repair those risks."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:12:49.749Z"
+    },
+    {
+      "id": "D-CANVAS-SESSION1",
+      "cardId": "cnnczx0n",
+      "group": "web-ui",
+      "title": "How should Canvas share a session with app dev servers?",
+      "gist": "Choose how app preview and Canvas share one dev session.",
+      "lesson": "A web app may own routes, middleware, and a port. Canvas also needs a control transport. They must share source, revisions, debugging, and last-good state without forcing one server to own both jobs.",
+      "explainer": "",
+      "story": "Iris runs a custom web server on port 3000. She opens Canvas, edits a handler, and expects the preview and graph to move to the same accepted revision.",
+      "inWild": "$ jet dev app.jet --server=dev --canvas\nApp:    http://127.0.0.1:3000\nCanvas: http://127.0.0.1:43127/session/…\nSession: 7f2a · revision 19",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One session, separate listeners",
+          "detail": "The app server and Canvas control host use separate listeners but one resident session. App routes stay fully customizable. Canvas never reserves paths in the application.",
+          "technical": "One session broker owns revisions, transactions, last-good artifacts, debugger state, and client leases. Target adapters and listeners subscribe to that broker.",
+          "code": "App:    http://127.0.0.1:3000\nCanvas: http://127.0.0.1:43127/session/…\nSession: 7f2a · revision 19"
+        },
+        {
+          "key": "B",
+          "name": "One listener with reserved tool routes",
+          "detail": "The app and Canvas share one host and port. Jet reserves `/__jet/*` for tools. One URL is simple, but custom routing and middleware must never intercept the reserved namespace.",
+          "technical": "The dev host multiplexes app traffic and tool protocols. Every custom server must implement or delegate the reserved route contract.",
+          "code": "App:    http://127.0.0.1:3000/\nCanvas: http://127.0.0.1:3000/__jet/canvas\n# `/__jet/*` belongs to Jet"
+        },
+        {
+          "key": "C",
+          "name": "Separate Canvas session",
+          "detail": "Canvas starts its own compiler, watcher, and transaction state beside the app dev server. Each product stays isolated. Source revisions, reload, state, and diagnostics can disagree.",
+          "technical": "Two independent session engines watch the same project. Coordination relies on file changes rather than shared semantic state.",
+          "code": "App session:    revision 19\nCanvas session: revision 18\nWarning: Canvas waits for its own rebuild"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A shares every semantic fact that must agree while keeping application networking independent. It works for custom web servers and for targets with no app server.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Reserved routes push Jet policy into every custom server and can collide with middleware, proxies, and user routes."
+          },
+          {
+            "key": "C",
+            "reason": "Two sessions can disagree on revision, last-good code, state, diagnostics, and debugger position."
+          }
+        ],
+        "tradeoff": "Users may see two local URLs for web work. Clear labels and automatic browser opening make that cost small and honest."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared shared and separate server topologies and recommended one session with separate listeners.",
+        "boilOcean": "The breadth pass tested reverse proxies, one process with two ports, embedded panels, and file-only coordination. These reduce to the three session and listener models shown.",
+        "hybrid": "The hybrid pass kept separate listeners but added one session broker and preview bridge. That complete combination became option A.",
+        "cooperative": "The cooperative pass strengthened one-listener mode with a reserved namespace and delegation contract. It still burdens every custom server.",
+        "adversarial": "The adversarial pass tested stale revisions, custom middleware, two browsers, target switches, and compile failure. A shared broker with separate listeners contains each failure."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:12:50.125Z"
+    },
+    {
+      "id": "D-WRAP-SCOPE1",
+      "cardId": "co323ahi",
+      "group": "syntax",
+      "title": "How should fixed-width code opt into wrapping arithmetic?",
+      "gist": "Choose a clear bounded form for intentional wrapping.",
+      "lesson": "Fixed-width Jet arithmetic traps on overflow by default. Hashes and ciphers need modular arithmetic by design. Repeating `wrapping(...)` around every operation is safe but hides the algorithm.",
+      "explainer": "",
+      "story": "Ravi ports Murmur3 from C. He wants reviewers to see one explicit modular-arithmetic boundary and then read the published algorithm without wrapper noise.",
+      "inWild": "fn fmix32(value: U32) U32 -> wrapping {\n    h := value\n    h ~|= h >> 16\n    h *= 0x85ebca6b\n    h ~|= h >> 13\n    h *= 0xc2b2ae35\n    h ~| (h >> 16)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A lexical `wrapping` block",
+          "detail": "`wrapping { ... }` makes fixed-width arithmetic modular inside one visible block. Other code still traps. Reviewers see one bounded policy gate around the whole algorithm.",
+          "technical": "Sema marks fixed-width arithmetic nodes inside the block as wrapping. The mark lowers to the existing shared wrapping Prelude operations on every tier. It does not affect indexing, division, casts, or default `Int`.",
+          "code": "fn fmix32(value: U32) U32 -> wrapping {\n    h := value\n    h *= 0x85ebca6b\n    h ~| (h >> 16)\n}"
+        },
+        {
+          "key": "B",
+          "name": "A `Wrapping<T>` value type",
+          "detail": "Code enters modular arithmetic by wrapping a value. Operators on `Wrapping<U32>` wrap until `.raw()` leaves the type. The policy follows values, but conversions surround function and library boundaries.",
+          "technical": "Add a transparent Core wrapper with same-width operators. The wrapper is a distinct static type and must preserve ABI and layout only through explicit conversion.",
+          "code": "fn fmix32(value: U32) U32 -> {\n    h := Wrapping<U32>{value}\n    h *= 0x85ebca6b\n    return (h ~| (h >> 16)).raw()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep per-operation gates",
+          "detail": "Each operation stays inside `wrapping(...)` or uses a `wrapping_*` method. The policy is exact at each operator. Repetition keeps obscuring arithmetic-heavy algorithms.",
+          "technical": "No change to D-NUMOPS1. Core may add byte-loading helpers, but arithmetic spelling stays per operation.",
+          "code": "h = wrapping(h * U32{0x85ebca6b})\nh = wrapping(h ~| (h >> 16))"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps the safe default and makes the exceptional policy visible once at the smallest useful algorithm boundary. It removes noise without changing value types or APIs.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The wrapper makes modular policy precise but spreads conversions through parameters, returns, constants, and helper calls."
+          },
+          {
+            "key": "C",
+            "reason": "Per-operation gates are safe but make a standard modular algorithm harder to compare with its reference."
+          }
+        ],
+        "tradeoff": "A lexical mode changes the meaning of several operators inside a block. The explicit keyword and tight block boundary make that change reviewable."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared a lexical block, a wrapper type, and current per-operation gates. It recommended the block for algorithm readability.",
+        "boilOcean": "The breadth pass also tested wrapping operators, a function marker, and wrap-by-default unsigned integers. Operators add punctuation, markers hide locality, and wrap-by-default breaks the safe numeric law.",
+        "hybrid": "The hybrid pass kept the lexical block and reused existing type-owned wrapping operations underneath. This avoids a second runtime mechanism.",
+        "cooperative": "The cooperative pass strengthened the wrapper type because policy follows values across helper calls. Its conversion noise remains high in ports.",
+        "adversarial": "The adversarial pass tested accidental scope growth, nested policies, division, casts, and generic code. Limiting the block to fixed-width arithmetic repairs the risk."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:14:20.275Z"
+    },
+    {
+      "id": "D-ERROR-TYPE1",
+      "cardId": "cp3zupnt",
+      "group": "safety",
+      "title": "What types may wear the failure suffix?",
+      "gist": "Choose which values may become declared errors.",
+      "lesson": "The `!` suffix marks an error role. Today even `String!` can fill that role. Plain text is quick, but it gives tools no stable error cases, fields, or recovery contract.",
+      "explainer": "",
+      "story": "Leah calls a parser from an editor. She needs to distinguish bad input from an unsupported feature without parsing a message string.",
+      "inWild": "enum ParseError { Invalid(text: String) Unsupported(feature: String) }\n\nfn parse(text: String) Ast ParseError! -> { … }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named error domains",
+          "detail": "A failure type must be a named enum, struct, distinct type, or the built-in default error. Primitive text, numbers, lists, and anonymous records cannot wear `!` directly.",
+          "technical": "The suffix supplies the error role; no new trait is required. Sema rejects primitive and anonymous failure types. Named domains must support the shared report conversion used by the failure carrier.",
+          "code": "enum ParseError { Invalid(text: String) Unsupported(feature: String) }\nfn parse(text: String) Ast ParseError! -> { … }\n\nfn bad() Int String! -> { … }\n// Error: declare a named error domain"
+        },
+        {
+          "key": "B",
+          "name": "Any type may be an error",
+          "detail": "Keep the current rule. `String!` and `Int!` stay legal for small programs. Libraries can expose unstructured errors that tools and callers must interpret by convention.",
+          "technical": "The failure carrier accepts any Jet type. Rendering uses the existing value-to-report path.",
+          "code": "fn parse(text: String) Ast String! -> {\n    return Err(\"invalid input\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "Only declared error types",
+          "detail": "Add an `error` declaration kind. Only that kind and the built-in default error may wear `!`. The role is explicit, but Jet gains a second nominal type declaration mechanism.",
+          "technical": "Parser and I7 gain `error Name { ... }`. Error declarations lower like enums or structs plus generated report support.",
+          "code": "error ParseError {\n    Invalid(text: String)\n    Unsupported(feature: String)\n}\nfn parse(text: String) Ast ParseError! -> { … }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives callers a stable typed domain without adding a new declaration mechanism. The suffix still states the role, while the named type states the cases and data.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Primitive errors make recovery, documentation, JSON reports, and evolution depend on message text."
+          },
+          {
+            "key": "C",
+            "reason": "A new `error` declaration duplicates enums and structs when the suffix already states the error role."
+          }
+        ],
+        "tradeoff": "Tiny scripts must name an error domain or use the built-in default error instead of returning a raw string."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared unrestricted values, named domains, and a dedicated error declaration. It recommended named domains without a new keyword.",
+        "boilOcean": "The breadth pass also tested an Error trait and automatic string wrapping. A trait adds boilerplate; wrapping preserves an unnamed public contract.",
+        "hybrid": "The hybrid pass combined named domains with generated report conversion. The suffix provides the role, so no new trait or keyword is needed.",
+        "cooperative": "The cooperative pass strengthened raw String errors for short scripts and prototypes. The built-in default error already serves that low-ceremony path.",
+        "adversarial": "The adversarial pass tested private functions, generic errors, distinct strings, and foreign errors. Named types cover each case while keeping public recovery structured."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:14:20.661Z"
+    },
+    {
+      "id": "D-FALLIBLE-VISIBLE1",
+      "cardId": "cp3zupnt",
+      "group": "syntax",
+      "title": "Does a fallible signature need another result mark?",
+      "gist": "Choose whether typed error suffixes are enough to show fallibility.",
+      "lesson": "A signature such as `Int ParseError!` names a success type and an error type. Adding `?` would reuse the mark for absence and failure. Adding `Result` would expose the internal carrier as a second surface.",
+      "explainer": "",
+      "story": "Omar reviews a payment function. He must tell absence from failure before reading the body or generated docs.",
+      "inWild": "fn find(id: Id) Order? StoreError! -> { … }\n// optional Order success; StoreError failure",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The error suffix is the result mark",
+          "detail": "Any `ErrorType!` makes the callable fallible. `?` stays absence only. No `Result` wrapper appears in source. Optional success and failure compose without ambiguity.",
+          "technical": "Keep the suffix zone `[Success?] [ErrorUnion!]`. Tooling renders roles as Success, Absent, and Failure fields.",
+          "code": "fn load(id: Id) Order StoreError! -> { … }\nfn find(id: Id) Order? StoreError! -> { … }"
+        },
+        {
+          "key": "B",
+          "name": "Write an explicit Result type",
+          "detail": "Use `Result<Success, Error>` in signatures. The carrier is obvious and familiar. Jet now has wrapper syntax beside `?`, `!`, propagation, and pattern forms.",
+          "technical": "Expose the failure carrier as a public generic type. Optional success becomes `Result<Order?, StoreError>`.",
+          "code": "fn load(id: Id) Result<Order, StoreError> -> { … }\nfn find(id: Id) Result<Order?, StoreError> -> { … }"
+        },
+        {
+          "key": "C",
+          "name": "Mark the success with `?` too",
+          "detail": "Write `Order? StoreError!` for every fallible result, even when Order cannot be absent. This makes fallibility louder but gives `?` two meanings.",
+          "technical": "The parser treats `?` in a return zone as a carrier mark unless absence is also declared through another form. That requires a new way to express optional success.",
+          "code": "fn load(id: Id) Order? StoreError! -> { … }\n// Here `?` means fallible, not absent"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one mark per role. `?` means absence, `!` means failure, and their presence together shows both facts without a wrapper.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "An explicit carrier adds a second failure surface and makes the common signature longer without adding information."
+          },
+          {
+            "key": "C",
+            "reason": "Reusing `?` for fallibility destroys the distinction the suffix law was designed to make."
+          }
+        ],
+        "tradeoff": "Readers must learn that a suffixed error type creates the result carrier. Hover and docs must label each role clearly."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared suffix-only signatures with Result and a second question mark. It recommended one mark per role.",
+        "boilOcean": "The breadth pass also tested a `throws` word and a trailing bare marker. Both repeat information already carried by the error suffix.",
+        "hybrid": "The hybrid pass added role labels in hover and docs instead of source punctuation. This strengthens suffix-only reading without another grammar.",
+        "cooperative": "The cooperative pass strengthened explicit Result as familiar to Rust and Swift users. It still duplicates Jet propagation and suffix rules.",
+        "adversarial": "The adversarial pass tested unit failure, optional success, error unions, and function values. The suffix zone stays unambiguous in all four cases."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:14:21.047Z"
+    },
+    {
+      "id": "D-RESULT-DECON2",
+      "cardId": "cq5blslq",
+      "group": "syntax",
+      "title": "How should a short Result handler fit on one line?",
+      "gist": "Choose the compact exhaustive Result handler.",
+      "lesson": "A one-sided Result test already fits on one line. Handling both cases uses an arm table. The formatter needs a compact form that keeps ordinary enum patterns and visible exhaustiveness.",
+      "explainer": "",
+      "story": "Asha parses one setting. Success stores the value; failure records the message. Both actions are short, but the current table takes four lines.",
+      "inWild": "if parsed == { .Ok(value) -> save(value), .Err(error) -> warn(error) }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Comma-separated short arm table",
+          "detail": "A fitting arm table may put its arms on one line with commas. Long or commented arms stay vertical. Result uses ordinary `.Ok` and `.Err` patterns, not a special handler.",
+          "technical": "Comma becomes an optional arm separator only inside a one-line arm table. The formatter inserts it when collapsing and removes trailing ambiguity. Sema and TIR stay on ordinary arm-table paths.",
+          "code": "if parsed == { .Ok(value) -> save(value), .Err(error) -> warn(error) }"
+        },
+        {
+          "key": "B",
+          "name": "A two-branch Result operator",
+          "detail": "Add a dedicated success and error form. It is short and names both roles. Result handling gains syntax that ordinary enums do not share.",
+          "technical": "A new expression grammar binds success and error payloads. It lowers to the same carrier split but needs new parsing, formatting, diagnostics, and teaching.",
+          "code": "parsed ? value -> save(value) ! error -> warn(error)"
+        },
+        {
+          "key": "C",
+          "name": "Keep vertical arm tables",
+          "detail": "Keep the current four-line canonical form. It is clear and already exhaustive. Common short handlers remain visually heavy.",
+          "technical": "No grammar or formatter change. One-sided tests stay the only one-line Result form.",
+          "code": "if parsed == {\n    .Ok(value) -> save(value)\n    .Err(error) -> warn(error)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes the existing exhaustive mechanism compact without giving Result a private control-flow language. The same form helps any short enum dispatch.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A dedicated operator duplicates ordinary enum patterns and adds dense punctuation that is harder to scan."
+          },
+          {
+            "key": "C",
+            "reason": "The vertical form is clear but keeps four lines for two tiny exhaustive actions."
+          }
+        ],
+        "tradeoff": "Commas gain one formatting role inside short arm tables. The parser must keep that role local and unambiguous."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared a compact arm table, dedicated punctuation, and the current vertical form. It recommended the compact table.",
+        "boilOcean": "The breadth pass tested fold methods, callbacks, else-pattern syntax, and tuple destructuring. Each either hides control flow or duplicates the arm table.",
+        "hybrid": "The hybrid pass kept vertical layout for long arms and used commas only when the whole table fits. This preserves readability at both sizes.",
+        "cooperative": "The cooperative pass strengthened the dedicated operator as the shortest spelling. Its punctuation still creates a Result-only branch mechanism.",
+        "adversarial": "The adversarial pass tested nested calls, commas in arguments, comments, value arms, and missing cases. Local parsing and formatter width rules repair those risks."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:14:21.459Z"
+    },
+    {
+      "id": "D-TRACK-ORIGIN1",
+      "cardId": "cv62zydw",
+      "group": "syntax",
+      "title": "How should code read tracked origin?",
+      "gist": "Choose the one public surface for tracked origin.",
+      "lesson": "`#Track` stores a compiler fact. Jet now reads compiler facts with `@`, but the old example calls `.origin()` like a runtime method. Keeping both surfaces makes one fact look like two mechanisms.",
+      "explainer": "",
+      "story": "Sofia tracks a calibration value. She wants to print its source note and inspect the same typed fact in tooling.",
+      "inWild": "#Track speed :: Float{3.5}\n@origin :: speed.@origin\nprint(@origin.note)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One `.@origin` compiler fact",
+          "detail": "Read `value.@origin` at comptime. It returns typed origin data that code may embed or print. Remove `.origin()` and the longer `.@track_origin` name.",
+          "technical": "Rename the registered TrackOrigin fact to Origin. The value contains tracked, source, line, column, and ambiguity fields. Sema owns it; runtime output embeds a folded value.",
+          "code": "#Track speed :: Float{3.5}\n@origin :: speed.@origin\nprint(@origin.note)"
+        },
+        {
+          "key": "B",
+          "name": "Keep `.@track_origin` only",
+          "detail": "Remove `.origin()` but keep the precise existing fact name. It distinguishes `#Track` provenance from input-origin and attribution facts. The common read stays longer.",
+          "technical": "The registered fact name and type remain TrackOriginInfo. The runtime method retires.",
+          "code": "#Track speed :: Float{3.5}\n@origin :: speed.@track_origin\nprint(@origin.note)"
+        },
+        {
+          "key": "C",
+          "name": "Keep fact and runtime method",
+          "detail": "Use `.@track_origin` for compiler work and `.origin()` for runtime text. Each phase has a direct surface. Users must learn why two reads of one metadata source differ.",
+          "technical": "Both surfaces share sema data, but codegen keeps a runtime string operation for `.origin()`. Tooling exposes the typed fact separately.",
+          "code": "#Track speed :: Float{3.5}\nprint(speed.origin())\n@tracked :: speed.@track_origin.tracked"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A follows the one fact-read law and uses the short name the owner expected. Typed data can still be folded into runtime output without a runtime-looking method.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The precise name avoids one collision, but it preserves needless wording on the primary origin fact."
+          },
+          {
+            "key": "C",
+            "reason": "Two public reads make one compiler fact look like separate compile-time and runtime mechanisms."
+          }
+        ],
+        "tradeoff": "`origin` must be documented beside input-origin and attribution facts. Its typed fields must make that distinction clear."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared the short fact name, the current long fact name, and the duplicate method. It recommended one short fact.",
+        "boilOcean": "The breadth pass also tested `@provenance`, a free `origin(value)` function, and reflection-only access. Each either broadens the meaning or breaks the fact-read law.",
+        "hybrid": "The hybrid pass kept one typed fact and allowed ordinary comptime folding to print it at runtime. That removes the need for a second method.",
+        "cooperative": "The cooperative pass strengthened the long name because it separates Track from input origin. Typed fields and documentation can make that distinction without a long public name.",
+        "adversarial": "The adversarial pass tested untracked values, copies, moves, branches, mutable bindings, and runtime printing. A typed optional or ambiguous fact handles each case."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:15:26.784Z"
+    },
+    {
+      "id": "D-SERVICE-RECEIPT2",
+      "cardId": "cwf44fqc",
+      "group": "stdlib",
+      "title": "What should a durable service send return?",
+      "gist": "Choose clear receipt states and a separate error boundary.",
+      "lesson": "A durable send can be accepted, recognized as a duplicate, retained, delivered, or moved to a dead letter. Policy refusal and unavailable authority are failures, not successful receipts. The current enum mixes all of these.",
+      "explainer": "",
+      "story": "Priya submits an order with an idempotency key. After a restart, she uses the receipt id to learn whether Jet accepted, delivered, or retained that exact send.",
+      "inWild": "receipt :: orders.send(order, key: order.id)?\nif receipt == {\n    .Accepted(id) -> record(id)\n    .Duplicate(id) -> reuse(id)\n    .Retained(id, until) -> wait_until(until)\n    .Delivered(id) -> finish(id)\n    .DeadLetter(id) -> inspect(id)\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Receipt states, failures on `!`",
+          "detail": "Return a `DeliveryReceipt` with `.Accepted`, `.Duplicate`, `.Retained`, `.Delivered`, and `.DeadLetter`. Rejection and unavailability return `DeliveryError!`.",
+          "technical": "Every receipt carries the stable delivery id. Retained also carries its deadline. DeliveryError has Policy, Unavailable, Partitioned, Revoked, and Stale cases with structured context.",
+          "code": "fn send(...) DeliveryReceipt DeliveryError! -> { … }\n\nif receipt == {\n    .Accepted(id) -> record(id)\n    .Duplicate(id) -> reuse(id)\n    .Retained(id, until) -> wait_until(until)\n    .Delivered(id) -> finish(id)\n    .DeadLetter(id) -> inspect(id)\n}"
+        },
+        {
+          "key": "B",
+          "name": "One enum for states and failures",
+          "detail": "Keep one return enum, but rename the cases to `.Queued`, `.Delivered`, `.Stored`, `.DeadLetter`, `.Denied`, and `.Offline`. Callers handle everything in one table.",
+          "technical": "The function is fallible only for internal faults. Expected policy and availability outcomes stay receipt variants.",
+          "code": "if receipt == {\n    .Queued(id) -> record(id)\n    .Delivered(id) -> finish(id)\n    .Stored(id, until) -> wait_until(until)\n    .DeadLetter(id) -> inspect(id)\n    .Denied(reason) -> reject(reason)\n    .Offline(reason) -> retry(reason)\n}"
+        },
+        {
+          "key": "C",
+          "name": "A receipt struct with status",
+          "detail": "Return one struct with `id`, `status`, `retained_until`, and optional failure detail. The shape is stable for storage, but invalid field combinations become possible.",
+          "technical": "Status is a closed enum. Sema cannot prevent `Delivered` with a retention deadline or `Denied` without failure detail unless constructors stay private.",
+          "code": "struct DeliveryReceipt {\n    id: String\n    status: DeliveryStatus\n    retained_until: Int?\n    failure: DeliveryError?\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A separates durable facts from failures and restores the accepted and duplicate states promised by the authority law. Each successful variant has one actionable meaning.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A success enum that contains denial and offline states forces callers to treat failures as normal receipts."
+          },
+          {
+            "key": "C",
+            "reason": "A wide struct permits meaningless field combinations and weakens exhaustive handling."
+          }
+        ],
+        "tradeoff": "Callers may handle both a typed error rail and receipt states. That split matches the difference between a failed send and an accepted delivery lifecycle."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft separated durable states from policy and availability failures. It recommended a closed receipt enum plus a typed error.",
+        "boilOcean": "The breadth pass tested current names, a status struct, event streams, and opaque receipt handles. The enum and struct remain the only complete immediate-return models.",
+        "hybrid": "The hybrid pass put stable identity on every receipt state and moved only true failures to the error rail. That complete split became option A.",
+        "cooperative": "The cooperative pass strengthened one-enum handling as a single exhaustive table. It still labels failed sends as successful return values.",
+        "adversarial": "The adversarial pass tested crash windows, duplicate keys, conflicting keys, retention expiry, partition, and replay. Stable ids and a separate error domain keep each case honest."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:15:27.173Z"
+    },
+    {
+      "id": "D-TAIL-RETURN1",
+      "cardId": "cxf6x7ap",
+      "group": "syntax",
+      "title": "When does a function block return its final expression?",
+      "gist": "Choose the function tail-value rule.",
+      "lesson": "Jet already has value expressions and value arm tables. A block can either require `return` or yield its last expression. One rule must cover functions, methods, lambdas, and nested value blocks.",
+      "explainer": "",
+      "story": "Eli writes a status label as one exhaustive arm table. He wants the table value to be the function result without repeating `return` in every arm.",
+      "inWild": "fn status_label(status: TaskStatus) String -> {\n    if status == {\n        .Running -> \"running\"\n        .Paused -> \"paused\"\n        else -> \"unknown\"\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Every value block yields its tail expression",
+          "detail": "The last expression of a value-expected block is its value. Functions, methods, lambdas, fallback blocks, and nested blocks share one rule. A semicolon or statement tail yields unit.",
+          "technical": "Sema gives each block an expected type and checks its final expression. Explicit `return` still exits early. TIR receives an ordinary block value; engines add no policy.",
+          "code": "fn label(status: Status) String -> {\n    prepare()\n    if status == {\n        .Ready -> \"ready\"\n        else -> \"waiting\"\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Only a sole expression returns",
+          "detail": "A function block returns its expression only when that expression is the only top-level item. Any setup statement requires explicit `return`. The common branch-table case is short, but blocks gain a special count rule.",
+          "technical": "Parser or sema checks the number of top-level items before allowing an implicit result. Nested blocks keep existing rules.",
+          "code": "fn label(status: Status) String -> {\n    if status == { .Ready -> \"ready\", else -> \"waiting\" }\n}\n\nfn prepared(status: Status) String -> {\n    prepare()\n    return label(status)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep explicit returns in braced functions",
+          "detail": "Every braced function path uses `return`. A short expression body after the arrow remains the only implicit result form. Control flow is explicit but repetitive.",
+          "technical": "No semantic change. The lint may still replace branch returns with `return if ...` and one trailing `else`.",
+          "code": "fn label(status: Status) String -> {\n    return if status == {\n        .Ready -> \"ready\"\n        else -> \"waiting\"\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives blocks one compositional value rule and removes repeated returns from branch tables. It matches the existing bare-value tail in fallback blocks.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Counting top-level items creates a special case that breaks as soon as a setup statement is added."
+          },
+          {
+            "key": "C",
+            "reason": "Explicit returns keep value tables wrapped in control-flow noise and make functions differ from other value blocks."
+          }
+        ],
+        "tradeoff": "A final expression can become observable after an edit. Type checking and explicit unit tails must make that change clear in diagnostics."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The base draft compared general tail values, a sole-expression exception, and explicit returns. It recommended one value rule for all blocks.",
+        "boilOcean": "The breadth pass also tested automatic return of the last statement and a function marker. Statements do not always have values, and a marker would make ordinary block meaning opt-in.",
+        "hybrid": "The hybrid pass kept explicit early `return` while making only the natural tail expression the block value. This is option A, not a separate mechanism.",
+        "cooperative": "The cooperative pass strengthened sole-expression return as the exact owner example with smaller blast radius. Its item-count rule remains brittle and hard to teach.",
+        "adversarial": "The adversarial pass tested unit functions, trailing assignments, comments, unreachable tails, divergence, and added setup code. Expected block types and unit diagnostics contain the risks."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-24T23:15:27.541Z"
     }
   ],
   "questions": [
@@ -201604,24 +204338,6 @@
       "created": "2026-08-20T12:10:24.541Z"
     },
     {
-      "id": "b13ud5r3",
-      "text": "We’re retiring the word capabilities but the Caps marker is probably in tact. Need to find replacement word for that",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-21T07:20:27.009Z"
-    },
-    {
-      "id": "b2kt5b7k",
-      "text": "Consider FX for Caps replacement",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-21T07:20:56.333Z"
-    },
-    {
       "id": "b0d6odpr",
       "text": "Teaching path: rebuild coreutils in Jet (cat, sort, grep) as the official learning series — the Zig 2027 tutorial's entire pedagogy was 'rebuild GNU sort in 20 minutes, docs-first'; Jet's version shows the same program at beginner (one-line print, implicit memory) and expert (arena, budgets, views) facets side by side. Pairs with jetdoc #86.",
       "note": "",
@@ -201636,8 +204352,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T12:10:02.204Z"
+      "status": "tagged",
+      "created": "2026-08-24T12:10:02.204Z",
+      "cardId": "cldqlgbu"
     },
     {
       "id": "b18gzfuo",
@@ -201645,8 +204362,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T12:11:08.025Z"
+      "status": "tagged",
+      "created": "2026-08-24T12:11:08.025Z",
+      "cardId": "cnnczx0n"
     },
     {
       "id": "b2txnmyp",
@@ -201654,8 +204372,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T12:12:29.864Z"
+      "status": "tagged",
+      "created": "2026-08-24T12:12:29.864Z",
+      "cardId": "cmtyww5f"
     },
     {
       "id": "b30mqblk",
@@ -201672,8 +204391,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T13:12:32.699Z"
+      "status": "tagged",
+      "created": "2026-08-24T13:12:32.699Z",
+      "cardId": "co323ahi"
     },
     {
       "id": "b5tahz4k",
@@ -201681,8 +204401,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T13:26:30.461Z"
+      "status": "tagged",
+      "created": "2026-08-24T13:26:30.461Z",
+      "cardId": "cp3zupnt"
     },
     {
       "id": "b6xhdf4x",
@@ -201690,8 +204411,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T13:29:29.211Z"
+      "status": "tagged",
+      "created": "2026-08-24T13:29:29.211Z",
+      "cardId": "cq5blslq"
     },
     {
       "id": "b7fy4k0n",
@@ -201699,8 +204421,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T13:30:48.692Z"
+      "status": "tagged",
+      "created": "2026-08-24T13:30:48.692Z",
+      "cardId": "cr8bdkzb"
     },
     {
       "id": "b8zmcwei",
@@ -201708,8 +204431,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T13:34:07.968Z"
+      "status": "tagged",
+      "created": "2026-08-24T13:34:07.968Z",
+      "cardId": "ctrvtgzf"
     },
     {
       "id": "b9d67wdm",
@@ -201717,8 +204441,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:22:30.439Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:22:30.439Z",
+      "cardId": "cs2bko2y"
     },
     {
       "id": "baka5idp",
@@ -201726,8 +204451,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:26:39.022Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:26:39.022Z",
+      "cardId": "cup3p8gb"
     },
     {
       "id": "bbdi37us",
@@ -201735,8 +204461,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:29:34.931Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:29:34.931Z",
+      "cardId": "cv62zydw"
     },
     {
       "id": "bcqav25a",
@@ -201744,8 +204471,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:31:20.191Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:31:20.191Z",
+      "cardId": "cwf44fqc"
     },
     {
       "id": "bdzg0oj2",
@@ -201753,8 +204481,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:36:40.730Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:36:40.730Z",
+      "cardId": "cxf6x7ap"
     },
     {
       "id": "beq88dw9",
@@ -201762,8 +204491,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:40:39.619Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:40:39.619Z",
+      "cardId": "cyxijw5j"
     },
     {
       "id": "bfrc25nv",
@@ -201771,8 +204501,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:47:37.628Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:47:37.628Z",
+      "cardId": "cz2ys9cb"
     },
     {
       "id": "bgeb2f5o",
@@ -201780,8 +204511,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T14:58:18.991Z"
+      "status": "tagged",
+      "created": "2026-08-24T14:58:18.991Z",
+      "cardId": "c10086k5d"
     },
     {
       "id": "bhb1rlc4",
@@ -201789,8 +204521,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T15:00:16.341Z"
+      "status": "tagged",
+      "created": "2026-08-24T15:00:16.341Z",
+      "cardId": "c12uacgqe"
     },
     {
       "id": "bisro98p",
@@ -201798,8 +204531,9 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T15:03:02.847Z"
+      "status": "tagged",
+      "created": "2026-08-24T15:03:02.847Z",
+      "cardId": "c11y6itr6"
     },
     {
       "id": "bjvvrinb",
@@ -201807,11 +204541,421 @@
       "note": "",
       "level": null,
       "tags": [],
-      "status": "open",
-      "created": "2026-08-24T15:04:38.814Z"
+      "status": "tagged",
+      "created": "2026-08-24T15:04:38.814Z",
+      "cardId": "c13gfyz5l"
+    },
+    {
+      "id": "bkwm57pm",
+      "text": "We’re retiring the word capabilities but the Caps marker is probably in tact.  Consider FX for Caps replacement",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "tagged",
+      "created": "2026-08-24T22:54:54.311Z",
+      "cardId": "c14vk3sif"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-24T23:15:27.541Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-TAIL-RETURN1",
+      "note": "When does a function block return its final expression?"
+    },
+    {
+      "at": "2026-08-24T23:15:27.174Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SERVICE-RECEIPT2",
+      "note": "What should a durable service send return?"
+    },
+    {
+      "at": "2026-08-24T23:15:26.784Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-TRACK-ORIGIN1",
+      "note": "How should code read tracked origin?"
+    },
+    {
+      "at": "2026-08-24T23:14:21.460Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-RESULT-DECON2",
+      "note": "How should a short Result handler fit on one line?"
+    },
+    {
+      "at": "2026-08-24T23:14:21.048Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FALLIBLE-VISIBLE1",
+      "note": "Does a fallible signature need another result mark?"
+    },
+    {
+      "at": "2026-08-24T23:14:20.661Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ERROR-TYPE1",
+      "note": "What types may wear the failure suffix?"
+    },
+    {
+      "at": "2026-08-24T23:14:20.275Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-WRAP-SCOPE1",
+      "note": "How should fixed-width code opt into wrapping arithmetic?"
+    },
+    {
+      "at": "2026-08-24T23:12:50.126Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CANVAS-SESSION1",
+      "note": "How should Canvas share a session with app dev servers?"
+    },
+    {
+      "at": "2026-08-24T23:12:49.749Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CANVAS-TARGET1",
+      "note": "How should Canvas choose its target and local endpoint?"
+    },
+    {
+      "at": "2026-08-24T23:12:49.369Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CANVAS-CMD1",
+      "note": "How should a user open Canvas?"
+    },
+    {
+      "at": "2026-08-24T23:10:32.831Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cyxijw5j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:32.301Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cup3p8gb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:31.767Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "ctrvtgzf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:30.829Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cr8bdkzb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:20.858Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c14vk3sif",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:20.307Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c13gfyz5l",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:19.766Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c12uacgqe",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:19.236Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c11y6itr6",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:18.699Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c10086k5d",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:18.148Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cz2ys9cb",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:17.602Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cyxijw5j",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:17.081Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cxf6x7ap",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:16.524Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cwf44fqc",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:15.785Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cv62zydw",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:14.956Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cup3p8gb",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:14.374Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "ctrvtgzf",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:13.844Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cs2bko2y",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:13.304Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cr8bdkzb",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:12.786Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cq5blslq",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:12.104Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cp3zupnt",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:11.366Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "co323ahi",
+      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:10.551Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cnnczx0n",
+      "note": "title,kind,tags,refs,needsAcceptance,body,plan,criteria,checkSteps,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:10.023Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cmtyww5f",
+      "note": "title,kind,tags,refs,body,plan,criteria,checkSteps,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T23:10:09.054Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cldqlgbu",
+      "note": "title,kind,tags,refs,body,plan,criteria,checkSteps,phase,priority,track,logEntry"
+    },
+    {
+      "at": "2026-08-24T22:56:58.324Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c14vk3sif",
+      "note": "We’re retiring the word capabilities but the Caps marker is probably in tact.  C"
+    },
+    {
+      "at": "2026-08-24T22:56:55.233Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c13gfyz5l",
+      "note": "Should typestate be defined IN a type? there seems like there should be a namesp"
+    },
+    {
+      "at": "2026-08-24T22:56:51.717Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c12uacgqe",
+      "note": "Also for examples/features/tooling/declared_text_head.jet -> this seems like a t"
+    },
+    {
+      "at": "2026-08-24T22:56:47.598Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c11y6itr6",
+      "note": "Should dead end typestates be allowed? I would think so... Why"
+    },
+    {
+      "at": "2026-08-24T22:56:43.369Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "c10086k5d",
+      "note": "examples/features/tooling/declared_text_head.jet -> ```marker Pattern on [.Text]"
+    },
+    {
+      "at": "2026-08-24T22:56:39.181Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cz2ys9cb",
+      "note": "Why would ! be acceptable bare in a function declaration? The point is to allow"
+    },
+    {
+      "at": "2026-08-24T22:56:30.144Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cyxijw5j",
+      "note": "False unused import warning in examples/features/tooling/solve_puzzle.jet"
+    },
+    {
+      "at": "2026-08-24T22:56:22.506Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cxf6x7ap",
+      "note": "examples/features/tooling/service_runtime.jet -> Need to have some kind of lint"
+    },
+    {
+      "at": "2026-08-24T22:56:15.971Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cwf44fqc",
+      "note": "examples/features/tooling/service_authority.jet -> Where do these come from, wha"
+    },
+    {
+      "at": "2026-08-24T22:56:11.071Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cv62zydw",
+      "note": "examples/features/tooling/provenance_track.jet -> Shouldnt compiler/metadata be"
+    },
+    {
+      "at": "2026-08-24T22:56:05.692Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cup3p8gb",
+      "note": "examples/features/tooling/output_callable.jet -> app declaration shape should no"
+    },
+    {
+      "at": "2026-08-24T22:56:01.505Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "ctrvtgzf",
+      "note": "for warnings, consider the \"red arrows\" that show exactly where an error is, mak"
+    },
+    {
+      "at": "2026-08-24T22:55:55.606Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cs2bko2y",
+      "note": "examples/features/tooling/compiler_api.jet -> Why is buildplan an error type? Th"
+    },
+    {
+      "at": "2026-08-24T22:55:51.615Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cr8bdkzb",
+      "note": "Adding newline inside {} should support auto formatting/organizing like with oth"
+    },
+    {
+      "at": "2026-08-24T22:55:47.080Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cq5blslq",
+      "note": "Double check what improved syntax for result deconstruction is -> instead of 4 l"
+    },
+    {
+      "at": "2026-08-24T22:55:42.647Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cp3zupnt",
+      "note": "examples/features/patterns/refutable_test_bind.jet -> confusing name, single spa"
+    },
+    {
+      "at": "2026-08-24T22:55:31.706Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "co323ahi",
+      "note": "Relook examples/features/ports/murmur3_x86_64 -> Jet is uglier than plain c. Nee"
+    },
+    {
+      "at": "2026-08-24T22:55:24.227Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cnnczx0n",
+      "note": "Consider cases where someone wants to use (and customize) dev but to use it as a"
+    },
+    {
+      "at": "2026-08-24T22:55:18.096Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cmtyww5f",
+      "note": "Canvas shouldnt require a web target or port specification -> port should have d"
+    },
+    {
+      "at": "2026-08-24T22:55:04.054Z",
+      "by": "owner",
+      "action": "card.add",
+      "ref": "cldqlgbu",
+      "note": "Canvas -> Consider canvas subcommand or simple --canvas flag on dev."
+    },
+    {
+      "at": "2026-08-24T22:54:58.256Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b13ud5r3",
+      "note": ""
+    },
+    {
+      "at": "2026-08-24T22:54:56.680Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b2kt5b7k",
+      "note": ""
+    },
+    {
+      "at": "2026-08-24T22:54:54.312Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "bkwm57pm",
+      "note": "We’re retiring the word capabilities but the Caps marker is "
+    },
     {
       "at": "2026-08-24T22:24:53.493Z",
       "by": "owner",
@@ -204912,405 +208056,6 @@
       "action": "decision.add",
       "ref": "D-CORENS1",
       "note": "D-CORENS1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:42.482Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CONST-RETIRE1",
-      "note": "D-CONST-RETIRE1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:42.077Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CONFIG-ENV1",
-      "note": "D-CONFIG-ENV1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:41.700Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CONF",
-      "note": "D-CONF (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:41.301Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CONCCOMB1",
-      "note": "D-CONCCOMB1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:40.921Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CONC",
-      "note": "D-CONC (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:40.568Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-COMPILERSEAMS1",
-      "note": "D-COMPILERSEAMS1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:40.161Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-COLLBREADTH1",
-      "note": "D-COLLBREADTH1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:39.787Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CITE-EMPTY1",
-      "note": "D-CITE-EMPTY1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:39.398Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CFFI2",
-      "note": "D-CFFI2 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:39.000Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CBIND3",
-      "note": "D-CBIND3 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:38.619Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CBIND2",
-      "note": "D-CBIND2 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:38.261Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CASING1",
-      "note": "D-CASING1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:37.897Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP9",
-      "note": "D-CAP9 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:37.550Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP8",
-      "note": "D-CAP8 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:37.192Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP7",
-      "note": "D-CAP7 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:36.802Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP4-5-6",
-      "note": "D-CAP4-5-6 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:36.413Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP4",
-      "note": "D-CAP4 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:36.026Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP3",
-      "note": "D-CAP3 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:35.649Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP2",
-      "note": "D-CAP2 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:35.281Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP10",
-      "note": "D-CAP10 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:34.867Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-CAP1",
-      "note": "D-CAP1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:34.498Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BUILDPROFILE1",
-      "note": "D-BUILDPROFILE1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:34.111Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BUILD1",
-      "note": "D-BUILD1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:33.720Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BPE",
-      "note": "D-BPE (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:33.369Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BOUND",
-      "note": "D-BOUND (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:33.021Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BIND4",
-      "note": "D-BIND4 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:32.651Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BIND1",
-      "note": "D-BIND1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:32.263Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BFS1",
-      "note": "D-BFS1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:31.907Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-BENCH1",
-      "note": "D-BENCH1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:31.543Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ATTR2",
-      "note": "D-ATTR2 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:31.192Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ATTR1",
-      "note": "D-ATTR1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:30.832Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ASSIGNCOND1",
-      "note": "D-ASSIGNCOND1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:30.497Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ARGS1",
-      "note": "D-ARGS1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:30.136Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALLOC2",
-      "note": "D-ALLOC2 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:29.796Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALLOC1",
-      "note": "D-ALLOC1 (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:29.457Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALLOC-D",
-      "note": "D-ALLOC-D (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:11:29.094Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ALLOC-C",
-      "note": "D-ALLOC-C (spec-only import) (draft)"
-    },
-    {
-      "at": "2026-08-24T15:10:51.000Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-WORKSPACE2",
-      "note": "Workspace index file (draft)"
-    },
-    {
-      "at": "2026-08-24T15:08:13.966Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xcy6t7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:13.232Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qzu9ne",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:12.482Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bsz89k",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:11.689Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y8co8p",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:10.939Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0plyen8",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:10.176Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fd2x01",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:09.226Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jcz1t1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T15:08:08.244Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xcy6t7",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T15:08:07.857Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xcy6t7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T15:08:07.466Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xcy6t7",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T15:08:07.067Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xcy6t7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T15:08:06.653Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qzu9ne",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T15:08:06.266Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qzu9ne",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T15:08:05.883Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qzu9ne",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T15:08:05.499Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qzu9ne",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T15:08:05.117Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bsz89k",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T15:08:04.708Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bsz89k",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T15:08:04.353Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bsz89k",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T15:08:03.941Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0bsz89k",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

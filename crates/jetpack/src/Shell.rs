@@ -304,7 +304,7 @@ fn nix_projection_command(
     let empty_store = unique_tmp("jetpack-nix-store");
     std::fs::create_dir(&empty_store)?;
     let mut scratch = vec![Scratch::Dir(empty_store.clone())];
-    let mut fstab = String::from("jetpack-nix-store /nix tmpfs mode=0755 0 0\n");
+    let mut fstab = String::from("jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir 0 0\n");
     fstab.push_str(&format!(
         "{} /nix/store none bind,ro,x-mount.mkdir 0 0\n",
         fstab_field(&empty_store.to_string_lossy())
@@ -428,6 +428,11 @@ fn logical_executable_path(
     binary: &Path,
 ) -> Option<PathBuf> {
     projections.iter().find_map(|(logical, source)| {
+        if let Ok(relative) = binary.strip_prefix(logical) {
+            if !relative.as_os_str().is_empty() {
+                return Some(binary.to_path_buf());
+            }
+        }
         let source = std::fs::canonicalize(source).ok()?;
         let relative = binary.strip_prefix(source).ok()?;
         (!relative.as_os_str().is_empty()).then(|| Path::new(logical).join(relative))
@@ -1651,9 +1656,25 @@ mod tests {
     #[test]
     fn nix_projection_uses_an_empty_store_not_the_host_store_as_lower() {
         let source = include_str!("Shell.rs");
-        assert!(source.contains("\"$mount\" -t tmpfs"));
-        assert!(source.contains("\"$mount\" --bind"));
+        assert!(source.contains("jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir"));
+        assert!(source.contains("none bind,ro,x-mount.mkdir"));
+        assert!(source.contains("\"$mount\" --no-canonicalize --no-mtab --all --fstab"));
+        assert!(source.contains("has_mount /nix/store"));
         let host_lower = ["lower", "dir", "=/nix/store"].concat();
         assert!(!source.contains(&host_lower));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nix_projection_keeps_absolute_store_binary_on_logical_path() {
+        let projections = std::collections::BTreeMap::from([(
+            "/nix/store/root".to_string(),
+            PathBuf::from("/missing-hangar-object"),
+        )]);
+        let binary = Path::new("/nix/store/root/bin/true");
+        assert_eq!(
+            logical_executable_path(&projections, binary),
+            Some(binary.into())
+        );
     }
 }

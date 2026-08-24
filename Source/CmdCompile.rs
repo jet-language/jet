@@ -1075,7 +1075,7 @@ pub(crate) fn run_compile_cmd(
             }
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
             // effect summary is build-time tool output, not runtime stderr.
-            if cmd == "build" {
+            if cmd == "build" && !mode.json {
                 eprintln!("{}", jet::EffectBudget::summary_line(&entries));
             }
             if let Some((root, manifest)) = package_manifest.as_ref() {

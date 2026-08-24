@@ -28,15 +28,7 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
     match open(&abs) {
         Ok(idx) => {
             if json {
-                println!(
-                    "{}",
-                    render_status_json(
-                        "ok",
-                        true,
-                        "inspect.semindex",
-                        &format!(",\"semindex\":{}", idx.to_json()),
-                    )
-                );
+                println!("{}", idx.to_json());
             } else {
                 println!("semantic index (schema v{})", SCHEMA_VERSION);
                 println!("  definitions: {}", idx.definitions().len());

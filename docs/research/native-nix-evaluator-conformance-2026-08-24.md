@@ -13,7 +13,8 @@ per-attribute differential ledger, and no evaluated graph or closure result.
 The five card criteria therefore remain open. The existing dogfood index path
 must stay separate from this evaluator program.
 
-Coverage counts below use current `HEAD` (`f9abed095`). The earlier 20-item
+Coverage counts below use current `HEAD`
+(`7831588fff1e68584ce6724dfcc4a79f6448eaf0`). The earlier 20-item
 `env.jet` count is a historical card baseline; `env.jet` gained the full
 runtime/tool projection after that baseline was recorded.
 
@@ -56,13 +57,36 @@ does not replace that producer contract.
 It compares one Nix oracle and one Jet result for one pinned revision and
 system. It requires exact derivation, output, direct-reference, and closure
 identity before it reports a match. Missing graph or closure identity is
-`missing_identity`, not a match. Empty inputs report `not-measured`.
+`missing_identity`, not a match. Revision metadata must be one matching
+40-character lowercase hexadecimal identity. Empty inputs report
+`not-measured` and exit non-zero when used as a CLI gate.
 
 The tool has no Nix, store, network, or process authority. The Nix side remains
 an off-device producer. The existing `tools/jetpack-nix-index/oracle.nix`
 provides the producer pattern; a future Jet runner must emit the same row shape
 after real nixpkgs evaluation. This slice does not create whole-nixpkgs rows,
 so it does not close criteria 2–4.
+
+The closeout check passed the report self-test:
+
+```text
+$ node tools/jet-nix-eval/differential-report.mjs --self-test
+differential report self-test: passed
+```
+
+An empty-corpus CLI check returned `status=1` and
+`"status": "not-measured"`. The gate cannot publish zero-row coverage.
+
+The isolated evaluator seam test also passed:
+
+```text
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+No whole-nixpkgs report was generated in this pass. The committed oracle has
+revision and build metadata but no attribute records, so a zero-row result is
+`not-measured`, not coverage.
 
 ## Snix and Tvix reuse posture
 
@@ -374,5 +398,6 @@ The differential graph prototype must test this before more surface work.
    closure corpus supports removal. Evidence:
    `crates/jet-nix-eval/src/lib.rs:248-254`.
 
-This report changes no evaluator, provider, index, Tower, or user-facing
-product code. It publishes the measured boundary and the closeout contract.
+This pass changes no evaluator, provider, index, Tower, or user-facing product
+code. It hardens the differential gate and publishes the measured boundary and
+the closeout contract.

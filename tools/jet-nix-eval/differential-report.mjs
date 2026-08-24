@@ -42,6 +42,14 @@ function string(value, label) {
   return value;
 }
 
+function revisionString(value, label) {
+  const revision = string(value, label);
+  if (!/^[0-9a-f]{40}$/.test(revision)) {
+    fail(`${label} must be exactly 40 lowercase hexadecimal characters`);
+  }
+  return revision;
+}
+
 function attrpath(value, label) {
   if (!Array.isArray(value) || value.length === 0 || value.some((part) => typeof part !== "string" || part.length === 0)) {
     fail(`${label} must be a non-empty string array`);
@@ -124,8 +132,15 @@ function normalizeInput(value, label) {
   if (input.schema !== undefined && input.schema !== SCHEMA) {
     fail(`${label}.schema must be ${SCHEMA}`);
   }
-  const revision = string(input.revision ?? input.nixpkgs_revision, `${label}.revision`);
+  const revision = revisionString(input.revision ?? input.nixpkgs_revision, `${label}.revision`);
   const system = string(input.system, `${label}.system`);
+  if (input.nixpkgs !== undefined && input.nixpkgs !== null) {
+    const nixpkgs = object(input.nixpkgs, `${label}.nixpkgs`);
+    const pinnedRevision = nixpkgs.revision ?? nixpkgs.rev;
+    if (pinnedRevision !== undefined && revisionString(pinnedRevision, `${label}.nixpkgs.revision`) !== revision) {
+      fail(`${label}.nixpkgs.revision must match ${label}.revision`);
+    }
+  }
   if (!Array.isArray(input.records)) fail(`${label}.records must be an array`);
   const records = input.records.map((record, index) => normalizeRecord(record, `${label}.records[${index}]`));
   const byKey = new Map();
@@ -276,6 +291,15 @@ function runSelfTest() {
   );
   assert.equal(incomplete.counts.missing_identity, 1);
 
+  assert.throws(
+    () => compare({ ...base, revision: "not-a-revision", records: [] }, { ...base, records: [] }),
+    /exactly 40 lowercase hexadecimal characters/,
+  );
+  assert.throws(
+    () => compare({ ...base, nixpkgs: { revision: "b".repeat(40) }, records: [] }, { ...base, records: [] }),
+    /nixpkgs\.revision must match nix\.revision/,
+  );
+
   const empty = compare({ ...base, records: [] }, { ...base, records: [] });
   assert.equal(empty.status, "not-measured");
   console.log("differential report self-test: passed");
@@ -289,7 +313,7 @@ function main() {
   const text = `${JSON.stringify(canonical(report), null, 2)}\n`;
   if (args.output) fs.writeFileSync(args.output, text, { encoding: "utf8", flag: "wx" });
   else process.stdout.write(text);
-  if (report.status === "fail") process.exitCode = 1;
+  if (report.status !== "pass") process.exitCode = 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

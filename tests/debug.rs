@@ -647,6 +647,74 @@ fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String>
     None
 }
 
+fn write_dap_request(input: &mut impl Write, body: &str) {
+    input.write_all(body.as_bytes()).expect("send DAP request");
+    input.flush().expect("flush DAP request");
+}
+
+fn read_dap_until(
+    output_rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+    stdout: &mut String,
+    ready: impl Fn(&str) -> bool,
+    what: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if ready(stdout) {
+            return;
+        }
+        match output_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(chunk) => stdout.push_str(&String::from_utf8_lossy(&chunk)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    panic!("timed out waiting for {what}:\n{stdout}");
+}
+
+fn read_dap_response(
+    output_rx: &std::sync::mpsc::Receiver<Vec<u8>>,
+    stdout: &mut String,
+    request_seq: u32,
+    command: &str,
+) -> String {
+    read_dap_until(
+        output_rx,
+        stdout,
+        |output| dap_response(output, request_seq, command).is_some(),
+        &format!("DAP {command} response {request_seq}"),
+    );
+    dap_response(stdout, request_seq, command).expect("DAP response after wait")
+}
+
+fn dap_u32_after(body: &str, marker: &str) -> u32 {
+    let start = body
+        .find(marker)
+        .unwrap_or_else(|| panic!("missing `{marker}` in DAP body: {body}"));
+    body[start + marker.len()..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or_else(|_| panic!("missing integer after `{marker}` in DAP body: {body}"))
+}
+
+fn dap_u32_before(body: &str, marker: &str) -> u32 {
+    let end = body
+        .find(marker)
+        .unwrap_or_else(|| panic!("missing `{marker}` in DAP body: {body}"));
+    let prefix = &body[..end];
+    let start = prefix
+        .rfind("\"id\":")
+        .unwrap_or_else(|| panic!("missing frame id before `{marker}` in DAP body: {body}"));
+    prefix[start + 5..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or_else(|_| panic!("missing frame id before `{marker}` in DAP body: {body}"))
+}
+
 #[cfg(target_os = "linux")]
 fn linux_process_state(pid: u32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
@@ -1263,19 +1331,6 @@ fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
         )),
         dap_frame(r#"{"seq":3,"type":"request","command":"configurationDone","arguments":{}}"#),
     );
-    let follow_up = format!(
-        "{}{}{}{}",
-        dap_frame(
-            r#"{"seq":4,"type":"request","command":"stackTrace","arguments":{"threadId":1,"showRawFrames":"yes"}}"#
-        ),
-        dap_frame(
-            r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#
-        ),
-        dap_frame(
-            r#"{"seq":6,"type":"request","command":"stackTrace","arguments":{"threadId":1,"showRawFrames":true}}"#
-        ),
-        dap_frame(r#"{"seq":7,"type":"request","command":"disconnect","arguments":{"terminateDebuggee":true}}"#),
-    );
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["debug", "--dap", &file])
         .stdin(Stdio::piped())
@@ -1284,10 +1339,7 @@ fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
         .spawn()
         .expect("start the production Jet DAP command");
     let mut input_pipe = child.stdin.take().expect("DAP stdin");
-    input_pipe
-        .write_all(setup.as_bytes())
-        .expect("send DAP setup requests");
-    input_pipe.flush().expect("flush DAP setup requests");
+    write_dap_request(&mut input_pipe, &setup);
 
     let mut stdout_pipe = child.stdout.take().expect("DAP stdout");
     let (output_tx, output_rx) = std::sync::mpsc::channel::<Vec<u8>>();
@@ -1317,12 +1369,150 @@ fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+    assert!(stopped, "production DAP did not stop at entry:\n{stdout}");
     if stopped {
-        input_pipe
-            .write_all(follow_up.as_bytes())
-            .expect("send DAP stack requests");
-        input_pipe.flush().expect("flush DAP stack requests");
+        write_dap_request(
+            &mut input_pipe,
+            &dap_frame(
+                r#"{"seq":4,"type":"request","command":"stackTrace","arguments":{"threadId":1,"showRawFrames":"yes"}}"#,
+            ),
+        );
     }
+    let rejected = read_dap_response(&output_rx, &mut stdout, 4, "stackTrace");
+    assert!(rejected.contains("\"success\":false"), "{rejected}");
+    assert!(rejected.contains("\"id\":22032"), "{rejected}");
+    assert!(rejected.contains("\"code\":\"E2236\""), "{rejected}");
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(
+            r#"{"seq":5,"type":"request","command":"stackTrace","arguments":{"threadId":1}}"#,
+        ),
+    );
+    let safe = read_dap_response(&output_rx, &mut stdout, 5, "stackTrace");
+    assert!(safe.contains("\"success\":true"), "{safe}");
+    assert!(
+        !safe.contains("__jet_"),
+        "generated Rust leaked into Jet view: {safe}"
+    );
+    assert!(
+        !safe.contains(&rust_file),
+        "generated Rust source leaked into Jet view: {safe}"
+    );
+    let safe_frame = dap_u32_after(&safe, "\"stackFrames\":[{\"id\":");
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(&format!(
+            r#"{{"seq":6,"type":"request","command":"scopes","arguments":{{"frameId":{safe_frame}}}}}"#
+        )),
+    );
+    let safe_scopes = read_dap_response(&output_rx, &mut stdout, 6, "scopes");
+    assert!(safe_scopes.contains("\"success\":true"), "{safe_scopes}");
+    assert!(safe_scopes.contains("\"name\":\"Locals\""), "{safe_scopes}");
+    assert!(
+        !safe_scopes.contains("[raw]"),
+        "raw scope leaked into Jet view: {safe_scopes}"
+    );
+    let safe_scope = dap_u32_after(&safe_scopes, "\"name\":\"Locals\",\"variablesReference\":");
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(&format!(
+            r#"{{"seq":7,"type":"request","command":"variables","arguments":{{"variablesReference":{safe_scope}}}}}"#
+        )),
+    );
+    let safe_variables = read_dap_response(&output_rx, &mut stdout, 7, "variables");
+    assert!(
+        safe_variables.contains("\"success\":true"),
+        "{safe_variables}"
+    );
+    assert!(
+        !safe_variables.contains("__jet_"),
+        "generated Rust leaked into Jet locals: {safe_variables}"
+    );
+    assert!(
+        !safe_variables.contains(&rust_file),
+        "generated Rust source leaked into Jet locals: {safe_variables}"
+    );
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(
+            r#"{"seq":8,"type":"request","command":"stackTrace","arguments":{"threadId":1,"showRawFrames":true}}"#,
+        ),
+    );
+    let raw = read_dap_response(&output_rx, &mut stdout, 8, "stackTrace");
+    assert!(raw.contains("\"success\":true"), "{raw}");
+    assert!(raw.contains("\"name\":\"[raw]"), "{raw}");
+    assert!(
+        raw.contains(&format!("\"path\":\"{}\"", rust_file)),
+        "raw stack must expose the generated frame source only in expert mode: {raw}"
+    );
+    let raw_frame = dap_u32_before(&raw, "\"name\":\"[raw]");
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(&format!(
+            r#"{{"seq":9,"type":"request","command":"scopes","arguments":{{"frameId":{raw_frame}}}}}"#
+        )),
+    );
+    let raw_scopes = read_dap_response(&output_rx, &mut stdout, 9, "scopes");
+    assert!(raw_scopes.contains("\"success\":true"), "{raw_scopes}");
+    assert!(
+        raw_scopes.contains("\"name\":\"[raw] Locals\""),
+        "{raw_scopes}"
+    );
+    let raw_scope = dap_u32_after(
+        &raw_scopes,
+        "\"name\":\"[raw] Locals\",\"variablesReference\":",
+    );
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(&format!(
+            r#"{{"seq":10,"type":"request","command":"variables","arguments":{{"variablesReference":{raw_scope}}}}}"#
+        )),
+    );
+    let raw_variables = read_dap_response(&output_rx, &mut stdout, 10, "variables");
+    assert!(
+        raw_variables.contains("\"success\":true"),
+        "{raw_variables}"
+    );
+
+    let stopped_count = stdout.matches("\"event\":\"stopped\"").count();
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(r#"{"seq":11,"type":"request","command":"next","arguments":{"threadId":1}}"#),
+    );
+    let next = read_dap_response(&output_rx, &mut stdout, 11, "next");
+    assert!(next.contains("\"success\":true"), "{next}");
+    read_dap_until(
+        &output_rx,
+        &mut stdout,
+        |output| output.matches("\"event\":\"stopped\"").count() > stopped_count,
+        "next stopped event",
+    );
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(&format!(
+            r#"{{"seq":12,"type":"request","command":"variables","arguments":{{"variablesReference":{safe_scope}}}}}"#
+        )),
+    );
+    let stale = read_dap_response(&output_rx, &mut stdout, 12, "variables");
+    assert!(stale.contains("\"success\":false"), "{stale}");
+    assert!(stale.contains("\"id\":22036"), "{stale}");
+    assert!(stale.contains("\"code\":\"E2238\""), "{stale}");
+
+    write_dap_request(
+        &mut input_pipe,
+        &dap_frame(
+            r#"{"seq":13,"type":"request","command":"disconnect","arguments":{"terminateDebuggee":true}}"#,
+        ),
+    );
+    let disconnected = read_dap_response(&output_rx, &mut stdout, 13, "disconnect");
+    assert!(disconnected.contains("\"success\":true"), "{disconnected}");
     drop(input_pipe);
     let status = child
         .wait()
@@ -1332,29 +1522,7 @@ fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
         stdout.push_str(&String::from_utf8_lossy(&chunk));
     }
     let _ = std::fs::remove_file(&file);
-    assert!(stopped, "production DAP did not stop at entry:\n{stdout}");
     assert!(status.success(), "DAP command failed:\nstdout:\n{stdout}");
-
-    let rejected = dap_response(&stdout, 4, "stackTrace")
-        .unwrap_or_else(|| panic!("invalid stack response:\n{stdout}"));
-    assert!(rejected.contains("\"success\":false"), "{rejected}");
-    assert!(rejected.contains("\"id\":22032"), "{rejected}");
-    assert!(rejected.contains("\"code\":\"E2236\""), "{rejected}");
-
-    let safe = dap_response(&stdout, 5, "stackTrace").expect("safe stack response");
-    assert!(safe.contains("\"success\":true"), "{safe}");
-    assert!(!safe.contains("__jet_"), "generated Rust leaked into Jet view: {safe}");
-    assert!(!safe.contains(&rust_file), "generated Rust source leaked into Jet view: {safe}");
-
-    let raw = dap_response(&stdout, 6, "stackTrace").expect("raw stack response");
-    assert!(raw.contains("\"success\":true"), "{raw}");
-    assert!(raw.contains("\"name\":\"[raw]"), "{raw}");
-    assert!(
-        raw.contains(&format!("\"path\":\"{}\"", rust_file)),
-        "raw stack must expose the generated frame source only in expert mode: {raw}"
-    );
-    let disconnected = dap_response(&stdout, 7, "disconnect").expect("disconnect response");
-    assert!(disconnected.contains("\"success\":true"), "{disconnected}");
 }
 
 #[test]
@@ -1508,4 +1676,125 @@ fn native_session_steps_and_shows_locals() {
     );
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(&file);
+}
+
+#[test]
+fn dap_cli_keeps_running_state_transitions_on_the_production_wire() {
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let tag = format!(
+        "dap_cli_running_state_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    );
+    let file = native_fixture(
+        &tag,
+        "fn run() {\n    total := 0\n    loop i in 1..1000000000 {\n        total += i\n    }\n}\n",
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    let mut input = child.stdin.take().expect("DAP stdin");
+    let mut stdout_pipe = child.stdout.take().expect("DAP stdout");
+    let (output_tx, output_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let output_reader = std::thread::spawn(move || {
+        let mut chunk = [0u8; 4096];
+        loop {
+            match stdout_pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(size) => {
+                    if output_tx.send(chunk[..size].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+    let mut transcript = String::new();
+    write_dap_request(
+        &mut input,
+        &format!(
+            "{}{}",
+            dap_frame(
+                r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path"}}"#
+            ),
+            dap_frame(&format!(
+                r#"{{"seq":2,"type":"request","command":"launch","arguments":{{"program":"{}","stopOnEntry":false,"args":[],"env":{{}}}}}}"#,
+                file
+            )),
+        ),
+    );
+    let launch = read_dap_response(&output_rx, &mut transcript, 2, "launch");
+    assert!(launch.contains("\"success\":true"), "{launch}");
+
+    // A restart in Configuring must not execute user code before the gate.
+    write_dap_request(
+        &mut input,
+        &dap_frame(r#"{"seq":3,"type":"request","command":"restart","arguments":{}}"#),
+    );
+    let configuring_restart = read_dap_response(&output_rx, &mut transcript, 3, "restart");
+    assert!(
+        configuring_restart.contains("\"success\":true"),
+        "{configuring_restart}"
+    );
+    write_dap_request(
+        &mut input,
+        &dap_frame(r#"{"seq":4,"type":"request","command":"configurationDone","arguments":{}}"#),
+    );
+    let configured = read_dap_response(&output_rx, &mut transcript, 4, "configurationDone");
+    assert!(configured.contains("\"success\":true"), "{configured}");
+
+    // Both restart and breakpoint replacement must preempt an in-flight native
+    // resume, then leave the target in the state the editor requested.
+    write_dap_request(
+        &mut input,
+        &dap_frame(r#"{"seq":5,"type":"request","command":"restart","arguments":{}}"#),
+    );
+    let running_restart = read_dap_response(&output_rx, &mut transcript, 5, "restart");
+    assert!(
+        running_restart.contains("\"success\":true"),
+        "{running_restart}"
+    );
+
+    write_dap_request(
+        &mut input,
+        &dap_frame(&format!(
+            r#"{{"seq":6,"type":"request","command":"setBreakpoints","arguments":{{"source":{{"path":"{}"}},"breakpoints":[{{"line":4}}]}}}}"#,
+            file
+        )),
+    );
+    let breakpoints = read_dap_response(&output_rx, &mut transcript, 6, "setBreakpoints");
+    assert!(breakpoints.contains("\"success\":true"), "{breakpoints}");
+    assert!(breakpoints.contains("\"verified\":true"), "{breakpoints}");
+    read_dap_until(
+        &output_rx,
+        &mut transcript,
+        |output| output.contains("\"hitBreakpointIds\":[1]"),
+        "replacement breakpoint stop",
+    );
+
+    write_dap_request(
+        &mut input,
+        &dap_frame(r#"{"seq":7,"type":"request","command":"disconnect","arguments":{}}"#),
+    );
+    let disconnected = read_dap_response(&output_rx, &mut transcript, 7, "disconnect");
+    assert!(disconnected.contains("\"success\":true"), "{disconnected}");
+    drop(input);
+    let status = child
+        .wait()
+        .expect("wait for the production Jet DAP command");
+    output_reader.join().expect("join DAP output reader");
+    while let Ok(chunk) = output_rx.try_recv() {
+        transcript.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    let _ = std::fs::remove_file(&file);
+    assert!(status.success(), "DAP command failed:\n{transcript}");
 }

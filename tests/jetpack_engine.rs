@@ -4195,7 +4195,7 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
             .args(["enter", "--no-color", "--trust"])
             .current_dir(&project_dir)
             .env("JETPACK_ROOT", &root_dir)
-            .env("PATH", "")
+            .env("PATH", "/usr/bin")
             .env_remove("JETPACK_FIXTURES");
         if offline {
             command.arg("--offline");

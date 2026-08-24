@@ -1,13 +1,25 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
 const source = fs.readFileSync(path.join(root, "env.jet"), "utf8");
+const flake = fs.readFileSync(path.join(root, "flake.nix"));
 const oracle = JSON.parse(
   fs.readFileSync(path.join(root, "tests/fixtures/nix-compat/env-shell-oracle.json"), "utf8"),
 );
+
+if (oracle.schema !== "jet-shell-oracle/v1" || oracle.flake !== "flake.nix") {
+  throw new Error("shell oracle must identify schema jet-shell-oracle/v1 and flake.nix");
+}
+const flakeSha256 = crypto.createHash("sha256").update(flake).digest("hex");
+if (oracle.flake_sha256 !== flakeSha256) {
+  throw new Error(
+    `shell oracle is stale for flake.nix: expected ${flakeSha256}, got ${oracle.flake_sha256 || "missing"}`,
+  );
+}
 
 function declaredPackages(environment) {
   const moduleName = environment === "default" ? "dev" : environment;

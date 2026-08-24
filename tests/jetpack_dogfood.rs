@@ -197,6 +197,8 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
 
     let online = summaries.get("online").expect("online summary");
     let offline = summaries.get("offline").expect("offline summary");
+    assert_ne!(online.pid, offline.pid, "offline run reused online process");
+    assert_ne!(offline.pid, u64::from(std::process::id()));
     assert_eq!(
         probe_identity(&online.probe),
         probe_identity(&offline.probe)
@@ -339,6 +341,8 @@ fn run_phase(
     mode: &str,
 ) {
     let offline = mode == "offline";
+    fs::write(scratch.pid_path(mode), std::process::id().to_string())
+        .expect("save phase process identity");
     let probe = enter_command(repo, jetpack, scratch, offline)
         .arg("--")
         .arg(test_binary)
@@ -673,7 +677,13 @@ fn walk_physical_nodes(
 fn read_phase_summary(scratch: &DogfoodScratch, mode: &str) -> PhaseSummary {
     let probe_text = fs::read_to_string(scratch.probe_path(mode)).expect("read probe evidence");
     let du_text = fs::read_to_string(scratch.du_path(mode)).expect("read du evidence");
+    let pid = fs::read_to_string(scratch.pid_path(mode))
+        .expect("read phase process identity")
+        .trim()
+        .parse()
+        .expect("phase process identity is a pid");
     PhaseSummary {
+        pid,
         probe: jetpack::JSON::parse(probe_text.trim()).expect("parse probe evidence"),
         du: jetpack::JSON::parse(du_text.trim()).expect("parse du evidence"),
     }
@@ -850,6 +860,10 @@ impl DogfoodScratch {
     fn du_path(&self, mode: &str) -> PathBuf {
         self.root.join(format!("dogfood-{mode}.du.json"))
     }
+
+    fn pid_path(&self, mode: &str) -> PathBuf {
+        self.root.join(format!("dogfood-{mode}.pid"))
+    }
 }
 
 impl Drop for DogfoodScratch {
@@ -862,6 +876,7 @@ impl Drop for DogfoodScratch {
 
 #[derive(Debug, PartialEq)]
 struct PhaseSummary {
+    pid: u64,
     probe: JSONValue,
     du: JSONValue,
 }

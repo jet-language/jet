@@ -666,6 +666,32 @@ fn verify_full_default_run_covers_whole_workspace() {
     );
 }
 
+#[test]
+fn ci_runs_repository_no_nix_dogfood_gate() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
+        .expect("read scripts/agent/verify-full.sh");
+    assert!(
+        verify.contains("cargo test --test jetpack_dogfood")
+            && verify
+                .contains("jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures")
+            && verify.contains("-- --exact --nocapture"),
+        "verify-full must run the exact repository no-Nix dogfood test"
+    );
+
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    assert!(workflow.contains("push:"), "CI must run on pushes");
+    assert!(
+        workflow.contains("pull_request:"),
+        "CI must run on pull requests"
+    );
+    assert!(
+        workflow.contains("scripts/agent/verify-full.sh"),
+        "CI must invoke verify-full, which owns the repository no-Nix dogfood gate"
+    );
+}
+
 // ============================================================================
 // Section: #805 read-only Tower hygiene (D-ONCE-LEDGER1=A)
 

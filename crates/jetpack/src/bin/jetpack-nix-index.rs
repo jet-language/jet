@@ -16,9 +16,9 @@ mod Store {
     pub use jetpack::Store::Roots;
 }
 
-// Only the producer half is used here; the client half is card #2158.
-// This producer uses only the producer half of the module; the client half
-// is consumed by card #2158. Remove this allow with that card.
+// The index producer binary uses only the generation half of this module; the
+// resolution half is consumed by the jetpack library. Both halves are live,
+// just not from this one target.
 #[allow(dead_code)]
 #[path = "../NixIndex.rs"]
 mod NixIndex;

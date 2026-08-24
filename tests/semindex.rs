@@ -1256,6 +1256,11 @@ fn jet_semindex_cli_json_smoke() {
         vec![jet_foundation::MachineOutput::MachineRecord::Status]
     );
     assert!(text.starts_with("{\"schema\":\"jet.report/v1\""));
+    assert_eq!(
+        text.matches("\"schema\":\"jet.report/v1\"").count(),
+        1,
+        "semindex must emit one report envelope, not nest a second one: {text}"
+    );
     assert!(text.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
 }
 

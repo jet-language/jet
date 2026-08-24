@@ -24,6 +24,42 @@ use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NativeDevTool {
+    definition: &'static str,
+    command: &'static str,
+    relative_binary: &'static str,
+}
+
+/// The two repo-local dev tools are native projections, not realized Nix
+/// packages. Their definitions preserve the flake names while pointing at
+/// the cargo-built binaries directly; argument forwarding remains the normal
+/// child-process path, with no generated shell wrapper.
+const NATIVE_DEV_TOOLS: [NativeDevTool; 2] = [
+    NativeDevTool {
+        definition: "jetDev",
+        command: "jet",
+        relative_binary: "target/debug/jet",
+    },
+    NativeDevTool {
+        definition: "jetpackDev",
+        command: "jetpack",
+        relative_binary: "target/debug/jetpack",
+    },
+];
+
+fn native_dev_tool_paths(project_root: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    NATIVE_DEV_TOOLS
+        .iter()
+        .map(|tool| {
+            (
+                tool.command.to_string(),
+                project_root.join(tool.relative_binary),
+            )
+        })
+        .collect()
+}
+
 /// Native projection for the repository's dev-shell contract. These values
 /// are derived from the selected project root and realized package outputs;
 /// no shellHook, store-path literal, or external shell is involved.
@@ -32,10 +68,15 @@ fn native_environment_projection(
     realized: &[(String, String)],
     inherited_loader_path: Option<&str>,
 ) -> (Vec<String>, std::collections::BTreeMap<String, String>) {
-    let bin_dirs = vec![project_root
-        .join("target/debug")
-        .to_string_lossy()
-        .into_owned()];
+    let mut bin_dirs = Vec::new();
+    for (_, binary) in native_dev_tool_paths(project_root) {
+        if let Some(parent) = binary.parent() {
+            let directory = parent.to_string_lossy().into_owned();
+            if !bin_dirs.iter().any(|existing| existing == &directory) {
+                bin_dirs.push(directory);
+            }
+        }
+    }
     let mut vars = std::collections::BTreeMap::from([
         (
             "JET_ROOT".to_string(),
@@ -1263,7 +1304,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
         if live_mode {
             live.clear();
         }
-        1
+        2
     }
 }
 
@@ -1367,8 +1408,30 @@ fn enforce_required_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32>
 
 #[cfg(test)]
 mod native_projection_tests {
-    use super::native_environment_projection;
+    use super::{native_dev_tool_paths, native_environment_projection, NATIVE_DEV_TOOLS};
     use std::path::Path;
+
+    #[test]
+    fn native_dev_tools_define_both_repo_binaries_without_shell_wrappers() {
+        assert_eq!(
+            NATIVE_DEV_TOOLS
+                .iter()
+                .map(|tool| tool.definition)
+                .collect::<Vec<_>>(),
+            vec!["jetDev", "jetpackDev"]
+        );
+        let tools = native_dev_tool_paths(Path::new("/workspace/jet"));
+        assert_eq!(
+            tools,
+            vec![
+                ("jet".to_string(), "/workspace/jet/target/debug/jet".into()),
+                (
+                    "jetpack".to_string(),
+                    "/workspace/jet/target/debug/jetpack".into()
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn native_projection_derives_root_timezone_and_loader_paths() {

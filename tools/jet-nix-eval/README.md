@@ -48,6 +48,5 @@ references, and closure digest all match.
 
 The existing `tools/jetpack-nix-index/oracle.nix` is a producer for the Nix
 side. A future Jet runner must emit the same record shape after it evaluates
-the pinned nixpkgs source graph. An empty input reports `not-measured`; it never
-creates a passing zero-coverage claim.
-
+the pinned nixpkgs source graph. An empty input reports `not-measured`, never
+creates a passing zero-coverage claim, and exits non-zero for CI.

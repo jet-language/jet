@@ -46,12 +46,28 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
     )
     .unwrap();
     fs::write(scratch.join("env.jet"), "module env.dev { }\n").unwrap();
+    fs::write(
+        scratch.join("before.jet"),
+        "fn square(n: Int) Int -> n * n\nfn run() { square(2) }\n",
+    )
+    .unwrap();
+    fs::write(
+        scratch.join("after.jet"),
+        "fn square(n: Int) Int -> n * n + 1\nfn run() { square(2) }\n",
+    )
+    .unwrap();
 
     // Keep these as real argv cases. A synthetic render_status_json loop does
     // not catch a command that emits a third envelope at its own door.
     let doors: &[(&str, &[&str])] = &[
         ("check", &["check", "run.jet", "--json"]),
+        ("abilities-json", &["build", "run.jet", "--abilities-json"]),
         ("fmt", &["fmt", "--check", "run.jet", "--json"]),
+        ("budget", &["budget", "check", "--json"]),
+        (
+            "compiler-always-json",
+            &["inspect", "compiler", "lex", "run.jet"],
+        ),
         ("compiler", &["inspect", "compiler", "lex", "run.jet", "--json"]),
         ("compiler-parse", &["inspect", "compiler", "parse", "run.jet", "--json"]),
         ("compiler-check", &["inspect", "compiler", "check", "run.jet", "--json"]),
@@ -73,6 +89,48 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             "expand",
             &["inspect", "expand", "--facts", "inline", "run.jet", "--json"],
         ),
+        (
+            "expand-memory",
+            &["inspect", "expand", "--facts", "memory", "run.jet", "--json"],
+        ),
+        (
+            "expand-web",
+            &["inspect", "expand", "--facts", "web", "run.jet", "--json"],
+        ),
+        (
+            "expand-effects",
+            &["inspect", "expand", "--facts", "effects", "run.jet", "--json"],
+        ),
+        (
+            "expand-layout",
+            &["inspect", "expand", "--facts", "layout", "run.jet", "--json"],
+        ),
+        (
+            "expand-derive",
+            &["inspect", "expand", "--facts", "derive", "run.jet", "--json"],
+        ),
+        (
+            "expand-templates",
+            &[
+                "inspect",
+                "expand",
+                "--facts",
+                "templates",
+                "run.jet",
+                "--json",
+            ],
+        ),
+        (
+            "expand-callable-signature",
+            &[
+                "inspect",
+                "expand",
+                "--facts",
+                "callable-signature",
+                "run.jet",
+                "--json",
+            ],
+        ),
         ("guarantees", &["inspect", "guarantees", "run.jet", "--json"]),
         ("gates", &["inspect", "gates", "run.jet", "--json"]),
         ("authority", &["inspect", "authority", "run.jet", "--json"]),
@@ -88,6 +146,10 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             "query-build",
             &["inspect", "query", "build", "run.jet", "--json"],
         ),
+        (
+            "structural-diff",
+            &["diff", "--structural", "before.jet", "after.jet", "--json"],
+        ),
         ("find", &["find", "square", "run.jet", "--json"]),
         ("fill", &["fill", "run.jet", "--json"]),
         ("eval", &["eval", "1 + 2", "--json"]),
@@ -101,5 +163,18 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
 
     for (label, args) in doors {
         assert_machine_door(&scratch.path, label, args);
+    }
+
+    let trace = scratch.join("fixture.jettrace");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".jet/perf/1787269028-687eeec2.jettrace"),
+        &trace,
+    )
+    .unwrap();
+    let trace = trace.to_string_lossy().into_owned();
+    for (label, action) in [("perf-view", "view"), ("perf-export", "export")] {
+        let args = ["perf", action, trace.as_str(), "--json"];
+        assert_machine_door(&scratch.path, label, &args);
     }
 }
