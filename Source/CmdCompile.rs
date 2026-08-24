@@ -514,8 +514,9 @@ pub(crate) fn run_compile_cmd(
     // sandboxed WASM Component Model guest build instead of a native binary.
     let is_plugin = cross_target == Some(jet::Syntax::TARGET_SANDBOX);
     // D-DEVR-PROD1=A: native `jet run` gives every execution tier one shared,
-    // redacted receipt context. The Prelude writer owns receipt bytes; this
-    // CLI boundary supplies only closure/input digests and a local destination.
+    // redacted receipt context. `jet dev` installs the same context at its
+    // watcher seam. The Prelude writer owns receipt bytes; this CLI boundary
+    // supplies only closure/input digests and a local destination.
     let production_receipt = (cmd == "run" && !is_web && !is_plugin && cross_target.is_none())
         .then(|| crate::ProductionReceipt::prepare(file, &src, program_args));
     if let Some(context) = production_receipt.as_ref() {
@@ -1318,6 +1319,7 @@ pub(crate) fn run_dev_entry(
     profile: BuildProfile,
     mode: OutputMode,
     setting_overrides: &BTreeMap<String, String>,
+    program_args: &[&String],
     record_name: Option<&str>,
 ) {
     let src = match fs::read_to_string(file) {
@@ -1327,6 +1329,9 @@ pub(crate) fn run_dev_entry(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    // D-DEVR-PROD1=A / I9: the native `fn dev()` entry uses the same receipt
+    // context as `jet run`, while the compiled program remains the adapter.
+    crate::ProductionReceipt::prepare(file, &src, program_args).install();
     let record = record_name.map(|name| {
         crate::ProveReplay::begin_named_capture(file, name, mode.json)
             .unwrap_or_else(|status| exit(status))
@@ -1381,6 +1386,7 @@ pub(crate) fn run_dev_entry(
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| jet::Syntax::BINARY_NAME.to_string());
     let status = Command::new(&bin)
+        .args(program_args)
         .env("JET_DEV_FILE", &dev_file)
         .env("JET_BIN", &jet_bin)
         .status()

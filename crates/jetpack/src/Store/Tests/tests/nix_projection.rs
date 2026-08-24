@@ -2,11 +2,92 @@ use super::*;
 
 use crate::RuntimePolicy;
 use ed25519_dalek::{Signer, SigningKey};
+#[cfg(target_os = "linux")]
+use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+#[cfg(target_os = "linux")]
+#[path = "../../../../../../tests/support/no_nix_namespace.rs"]
+mod no_nix_namespace;
+
+#[cfg(target_os = "linux")]
+const ROOTLESS_PROJECTION_ROOT: &str = "JETPACK_ROOTLESS_PROJECTION_ROOT";
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nix_projection_runs_in_rootless_namespace_without_host_store() {
+    let test_name = std::thread::current()
+        .name()
+        .expect("rootless projection test name")
+        .to_string();
+    let is_child = std::env::var_os(no_nix_namespace::CHILD_MARKER).is_some();
+    if is_child {
+        no_nix_namespace::run_in_no_nix_namespace(
+            &test_name,
+            no_nix_namespace::NetworkMode::Enabled,
+            run_rootless_projection_child,
+        );
+        return;
+    }
+
+    let (roots, _guard) = temp_roots();
+    let admitted = admit_signed_closure(&roots);
+    let entries = canonicalize_admitted_records(&roots, &admitted);
+    assert!(entries.iter().any(|entry| {
+        ProducerRecord::decode(&entry.producer_record)
+            .ok()
+            .and_then(|producer| producer.facts.get("nix.store-path").cloned())
+            == Some("/nix/store/00000000000000000000000000000000-root".into())
+    }));
+
+    let previous_root = std::env::var_os(ROOTLESS_PROJECTION_ROOT);
+    std::env::set_var(ROOTLESS_PROJECTION_ROOT, &roots.root);
+    no_nix_namespace::run_in_no_nix_namespace(
+        &test_name,
+        no_nix_namespace::NetworkMode::Enabled,
+        run_rootless_projection_child,
+    );
+    match previous_root {
+        Some(value) => std::env::set_var(ROOTLESS_PROJECTION_ROOT, value),
+        None => std::env::remove_var(ROOTLESS_PROJECTION_ROOT),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn run_rootless_projection_child() {
+    let root = PathBuf::from(
+        std::env::var_os(ROOTLESS_PROJECTION_ROOT)
+            .expect("rootless projection child needs its admitted Hangar root"),
+    );
+    let roots = Roots {
+        root,
+        dev_mode: true,
+    };
+    let entries = list_checked(&roots).unwrap();
+    let entry = find_entry(&entries, "/nix/store/00000000000000000000000000000000-root");
+    let lease = snapshot_lease(&roots, &entry).unwrap();
+    let env = crate::Shell::Env {
+        bin_dirs: Vec::new(),
+        vars: std::collections::BTreeMap::new(),
+        unset_vars: Vec::new(),
+        refs: vec![entry.reference.clone()],
+        label: "nix-projection-test".into(),
+        prompt_path: PromptPathMode::Short,
+        prompt_strip: PromptStripMode::Off,
+        cache_leases: vec![lease],
+    };
+    let code = crate::Shell::run_clean_command(
+        &env,
+        &["/nix/store/00000000000000000000000000000000-root/bin/rg".into()],
+    );
+    assert_eq!(code, 0);
+}
 
 #[test]
 fn nix_store_projection_includes_every_hangar_closure_object() {
@@ -182,7 +263,20 @@ fn admit_signed_closure(roots: &Roots) -> AdmittedNixClosure {
     let source = roots.root.join("nix-projection-source");
     fs::create_dir_all(source.join("root/bin")).unwrap();
     fs::create_dir_all(source.join("leaf")).unwrap();
-    fs::write(source.join("root/bin/rg"), b"root").unwrap();
+    fs::write(
+        source.join("root/bin/rg"),
+        b"#!/bin/sh\ntest -f /nix/store/11111111111111111111111111111111-leaf/leaf/payload\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(
+            source.join("root/bin/rg"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
     fs::write(source.join("leaf/payload"), b"leaf").unwrap();
     let (root_nar, _) = write_nar(&source.join("root")).unwrap();
     let (leaf_nar, _) = write_nar(&source.join("leaf")).unwrap();

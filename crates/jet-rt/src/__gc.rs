@@ -14,7 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, TryLockError, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jet_foundation::JetTrace::TRACE_VERSION;
+// Keep the emitted collector dependency-free. The GC trace has its own
+// versioned schema and must also compile after codegen embeds this module in
+// a user crate that links only the cached Jet runtime.
+const TRACE_VERSION: u32 = 1;
 
 const MAX_OBJECTS: usize = 1_000_000;
 const MAX_EDGES_PER_OBJECT: usize = 65_536;

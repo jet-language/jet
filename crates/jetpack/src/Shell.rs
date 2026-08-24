@@ -172,6 +172,7 @@ pub fn run_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>)
 struct NixProjection {
     command: Command,
     keepers: Vec<std::fs::File>,
+    scratch: Vec<Scratch>,
 }
 
 #[derive(Debug)]
@@ -268,26 +269,13 @@ fn nix_projection_command(
         .ok_or_else(|| {
             NixProjectionError::unsupported("rootless `/nix/store` projection needs `sh`")
         })?;
-    let mkdir = [
-        "/run/current-system/sw/bin/mkdir",
-        "/usr/bin/mkdir",
-        "/bin/mkdir",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .find(|path| path.is_file())
-    .ok_or_else(|| {
-        NixProjectionError::unsupported("rootless `/nix/store` projection needs `mkdir`")
-    })?;
     let (unshare, unshare_file, _) = inherited_tool_path(&unshare, None)
         .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
     let (shell, shell_file, _) = inherited_tool_path(&shell, None)
         .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
     let (mount, mount_file, _) = inherited_tool_path(&mount, None)
         .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
-    let (mkdir, mkdir_file, mkdir_mode) = inherited_tool_path(&mkdir, Some("mkdir"))
-        .map_err(|error| NixProjectionError::unsupported(error.to_string()))?;
-    let mut keepers = vec![unshare_file, shell_file, mount_file, mkdir_file];
+    let mut keepers = vec![unshare_file, shell_file, mount_file];
     let binary = env
         .cache_leases
         .iter()
@@ -308,6 +296,9 @@ fn nix_projection_command(
     } else {
         (binary, None)
     };
+    let empty_store = unique_tmp("jetpack-nix-store");
+    std::fs::create_dir(&empty_store)?;
+    let mut scratch = vec![Scratch::Dir(empty_store.clone())];
     for (logical, source) in &projections {
         validate_projection_path(logical)?;
         if source.starts_with("/nix/store") {
@@ -323,24 +314,44 @@ fn nix_projection_command(
                 source.display()
             )));
         }
+        let name = logical
+            .strip_prefix("/nix/store/")
+            .expect("validated projection path");
+        let mountpoint = empty_store.join(name);
+        if metadata.is_dir() {
+            std::fs::create_dir(mountpoint)?;
+        } else {
+            std::fs::File::create(mountpoint)?;
+        }
     }
-    // Mount an empty store. Every visible Nix path is supplied by the verified
-    // lease closure below; the host store is never a namespace lower layer.
+    let fstab_path = unique_tmp("jetpack-nix-fstab");
+    let mut fstab = String::from("jetpack-nix-store /nix tmpfs mode=0755 0 0\n");
+    fstab.push_str(&format!(
+        "{} /nix/store none bind,ro,x-mount.mkdir 0 0\n",
+        fstab_field(&empty_store.to_string_lossy())
+    ));
+    for (logical, source) in &projections {
+        fstab.push_str(&format!(
+            "{} {} none bind,ro 0 0\n",
+            fstab_field(&source.to_string_lossy()),
+            fstab_field(logical)
+        ));
+    }
+    let mut fstab_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&fstab_path)?;
+    std::io::Write::write_all(&mut fstab_file, fstab.as_bytes())?;
+    scratch.push(Scratch::File(fstab_path.clone()));
+
+    // Start mount once, before it hides the host Nix store. The process then
+    // keeps its loaded interpreter while applying every exact Hangar bind.
     let script = r#"set -eu
 mount="$1"
-mkdir="$2"
-mkdir_mode="$3"
+fstab="$2"
+count="$3"
 shift 3
-make_dir() {
-    if [ -n "$mkdir_mode" ]; then
-        "$mkdir" --coreutils-prog="$mkdir_mode" "$@"
-    else
-        "$mkdir" "$@"
-    fi
-}
-make_dir -p /nix
-"$mount" -t tmpfs -o mode=0755 jetpack-nix-store /nix
-make_dir -p /nix/store
+"$mount" --no-canonicalize --no-mtab --all --fstab "$fstab"
 has_mount() {
     expected="$1"
     while IFS=' ' read -r _ _ _ _ mountpoint rest; do
@@ -359,27 +370,11 @@ while IFS=' ' read -r _ _ _ _ mountpoint rest; do
     fi
 done < /proc/self/mountinfo
 [ "$nix_tmpfs" -eq 1 ]
-count="$1"
-shift
+has_mount /nix/store
 i=0
 while [ "$i" -lt "$count" ]; do
     logical="$1"
-    source="$2"
-    shift 2
-    name="${logical#/nix/store/}"
-    case "$name" in
-        ""|*/*|.|..)
-            exit 125
-            ;;
-    esac
-    target="/nix/store/$name"
-    if [ -d "$source" ]; then
-        make_dir -p "$target"
-    else
-        : > "$target"
-    fi
-    "$mount" --bind "$source" "$target"
-    "$mount" -o remount,bind,ro "$target"
+    shift
     has_mount "$logical"
     i=$((i + 1))
 done
@@ -405,17 +400,20 @@ fi
         .arg(shell)
         .args(["-c", script, "jetpack-nix-run"])
         .arg(mount)
-        .arg(mkdir)
-        .arg(mkdir_mode.as_deref().unwrap_or(""))
+        .arg(&fstab_path)
         .arg(projections.len().to_string());
-    for (logical, source) in projections {
-        command.arg(logical).arg(source);
+    for logical in projections.keys() {
+        command.arg(logical);
     }
     command
         .arg(binary.0)
         .arg(binary.1.as_deref().unwrap_or(""))
         .args(rest);
-    Ok(Some(NixProjection { command, keepers }))
+    Ok(Some(NixProjection {
+        command,
+        keepers,
+        scratch,
+    }))
 }
 
 #[cfg(target_os = "linux")]
@@ -451,12 +449,29 @@ fn validate_projection_path(logical: &str) -> std::io::Result<()> {
     let name = logical.strip_prefix("/nix/store/").ok_or_else(|| {
         std::io::Error::other(format!("invalid canonical Nix output path `{logical}`"))
     })?;
-    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+    if name.is_empty()
+        || name.contains('/')
+        || name == "."
+        || name == ".."
+        || name
+            .bytes()
+            .any(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'\\' | b'#'))
+    {
         return Err(std::io::Error::other(format!(
             "invalid canonical Nix output path `{logical}`"
         )));
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn fstab_field(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace(' ', "\\040")
+        .replace('\t', "\\011")
+        .replace('\n', "\\012")
+        .replace('#', "\\043")
 }
 
 #[cfg(target_os = "linux")]
@@ -555,8 +570,8 @@ fn run_command_in_mode(
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let (mut cmd, _projection_keepers) = match nix_projection_command(env, program, rest) {
-        Ok(Some(projection)) => (projection.command, projection.keepers),
+    let (mut cmd, _projection_keepers, _projection_scratch) = match nix_projection_command(env, program, rest) {
+        Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
         Ok(None) => {
             let stable_program = env
                 .cache_leases
@@ -566,7 +581,7 @@ fn run_command_in_mode(
                 .as_ref()
                 .map_or_else(|| Command::new(program), Command::new);
             command.args(rest);
-            (command, Vec::new())
+            (command, Vec::new(), Vec::new())
         }
         Err(error) => {
             report_nix_projection_error(
@@ -662,9 +677,9 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
         "nothing is installed",
     ]);
 
-    let (mut cmd, _projection_keepers) = match nix_projection_command(env, kind.binary(), &[]) {
-        Ok(Some(projection)) => (projection.command, projection.keepers),
-        Ok(None) => (Command::new(kind.binary()), Vec::new()),
+    let (mut cmd, _projection_keepers, _projection_scratch) = match nix_projection_command(env, kind.binary(), &[]) {
+        Ok(Some(projection)) => (projection.command, projection.keepers, projection.scratch),
+        Ok(None) => (Command::new(kind.binary()), Vec::new(), Vec::new()),
         Err(error) => {
             report_nix_projection_error(theme, kind.binary(), &error);
             return 126;

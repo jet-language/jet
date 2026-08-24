@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use jet::ReceiptStore::{participating_verb, ReceiptStore, PARTICIPATING_VERBS, RECEIPT_KINDS};
+use jet::ReceiptStore::{participating_verb, ReceiptStore, PARTICIPATING_VERBS};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -112,31 +112,32 @@ fn check_reuses_receipt_at_the_cli_boundary() {
 }
 
 #[test]
-fn test_golden_budget_and_api_share_one_current_receipt_store() {
+fn result_payloads_share_one_receipt_codec_and_store() {
     let root = temp_root("kinds");
     let source = root.join("main.jet");
     std::fs::write(&source, "fn run() {}\n").unwrap();
     let store = ReceiptStore::new(root.join("store"));
     let args = vec!["act".into()];
+    let payloads = [
+        ("test", b"test".as_slice()),
+        ("golden", b"golden".as_slice()),
+        ("budget", b"budget".as_slice()),
+        ("api", b"api".as_slice()),
+    ];
 
-    for kind in RECEIPT_KINDS {
-        store
-            .record(
-                kind,
-                &args,
-                std::slice::from_ref(&source),
-                0,
-                kind.as_bytes(),
-                b"",
-            )
+    for (kind, payload) in payloads {
+        let receipt = store
+            .record(kind, &args, std::slice::from_ref(&source), 0, payload, b"")
             .unwrap();
+        let bytes = std::fs::read(store.object_path(&receipt.claim.key)).unwrap();
+        assert!(bytes.starts_with(b"jet-receipt-v1\0"));
     }
 
-    assert_eq!(store.list().unwrap().len(), RECEIPT_KINDS.len());
-    assert_eq!(store.list_current().unwrap().len(), RECEIPT_KINDS.len());
+    assert_eq!(store.list().unwrap().len(), payloads.len());
+    assert_eq!(store.list_current().unwrap().len(), payloads.len());
     std::fs::write(&source, "fn run() { print(1) }\n").unwrap();
     assert!(store.list_current().unwrap().is_empty());
-    assert_eq!(store.list().unwrap().len(), RECEIPT_KINDS.len());
+    assert_eq!(store.list().unwrap().len(), payloads.len());
 
     let _ = std::fs::remove_dir_all(root);
 }

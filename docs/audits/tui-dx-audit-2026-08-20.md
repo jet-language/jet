@@ -350,6 +350,11 @@ The `(jet)` prompt and native/interpreter split are source-confirmed. No debug
 session ran under this card; prompt keys, Ctrl-C/EOF, and narrow output remain U.
 ```
 
+Ship note (2026-08-24): targeted production coverage now exercises native DAP
+launch and same-user attach, with Jet-projected threads, stacks, scopes, nested
+values, and read-only evaluation. `showRawFrames` remains the explicit escape
+hatch for generated-Rust frames; the interactive TUI gaps above remain open.
+
 ### `jet notebook` terminal client
 
 Source signal: `jet notebook` starts an HTTP notebook server and prints its URL

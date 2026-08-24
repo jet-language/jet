@@ -171,6 +171,7 @@ pub(crate) fn run_dev(
     use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    program_args: &[&String],
     record_name: Option<&str>,
 ) {
     let path = Path::new(file);
@@ -178,6 +179,12 @@ pub(crate) fn run_dev(
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
+
+    // D-DEVR-PROD1=A / I9: native `jet dev` and `jet run --watch` use the
+    // same receipt context as one-shot `jet run`; the execution tier only
+    // marshals the shared Prelude writer.
+    let source = fs::read_to_string(file).unwrap_or_default();
+    crate::ProductionReceipt::prepare(file, &source, program_args).install();
 
     // The dev loop re-prints the run's output and nothing else reads it, so the
     // program owns the process's streams. Without this a piped `jet dev` showed

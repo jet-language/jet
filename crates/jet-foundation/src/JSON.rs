@@ -80,7 +80,8 @@ impl JSONValue {
 /// Protocol JSON is bounded so hostile LSP/DAP input cannot exhaust the stack.
 pub const MAX_JSON_DEPTH: usize = 64;
 
-/// Maximum decoded LSP/DAP message body accepted from a `Content-Length` frame.
+/// Default maximum decoded protocol message body accepted by `parse`.
+/// The native DAP adapter supplies its larger 16 MiB limit explicitly.
 pub const MAX_PROTOCOL_MESSAGE_BYTES: usize = 1024 * 1024;
 
 /// Maximum cumulative bytes and field count accepted in an LSP/DAP frame header.

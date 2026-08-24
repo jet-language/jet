@@ -1,10 +1,11 @@
 //! D-DEVR-STATUS1=A: one read-only project truth surface.
 //!
 //! Status consumes authenticated receipts. It never runs a producer command;
-//! missing and stale evidence stay visible as non-proven.
+//! stale stored evidence stays visible, and absent evidence creates no claim.
 
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::Report::render_status_json;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -25,22 +26,12 @@ impl State {
 }
 
 struct ClaimRow {
-    name: &'static str,
+    name: String,
     action: String,
     state: State,
     receipt: Option<String>,
     reason: &'static str,
 }
-
-const CLAIMS: &[(&str, &[&str], &str)] = &[
-    ("check", &["check"], "jet check"),
-    ("build", &["build"], "jet build"),
-    ("tests", &["test"], "jet test"),
-    ("proofs", &["prove"], "jet prove"),
-    ("budgets", &["budget"], "jet budget check"),
-    ("goldens", &["golden"], "jet test"),
-    ("api", &["api"], "jet publish"),
-];
 
 pub(crate) fn run_status(args: &[String], json: bool) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -64,38 +55,41 @@ pub(crate) fn run_status(args: &[String], json: bool) -> i32 {
     let receipts = match store.list() {
         Ok(receipts) => receipts,
         Err(error) => {
-            let rows = CLAIMS
-                .iter()
-                .map(|(name, _verbs, action)| ClaimRow {
-                    name,
-                    action: format!("{action} {target}"),
-                    state: State::Unproven,
-                    receipt: None,
-                    reason: "receipt store is unreadable",
-                })
-                .collect::<Vec<_>>();
             return render(
                 &target,
-                &rows,
+                &[],
                 format!("receipt store is unreadable: {error}"),
                 json,
             );
         }
     };
-    let rows = CLAIMS
-        .iter()
-        .map(|(name, verbs, action)| {
-            summarize(
-                &store,
-                &receipts,
-                &target_path,
-                name,
-                verbs,
-                action,
-            )
-        })
-        .collect::<Vec<_>>();
+    let rows = rows_from_receipts(&store, &receipts, &target_path, &target);
     render(&target, &rows, String::new(), json)
+}
+
+fn rows_from_receipts(
+    store: &jet::ReceiptStore::ReceiptStore,
+    receipts: &[jet::Receipt],
+    target_path: &Path,
+    display_target: &str,
+) -> Vec<ClaimRow> {
+    let target = canonical_or_absolute(target_path);
+    let mut by_verb = BTreeMap::<String, Vec<&jet::Receipt>>::new();
+    for receipt in receipts {
+        if receipt_matches(&receipt.claim.inputs, &target) {
+            by_verb
+                .entry(receipt.claim.verb.clone())
+                .or_default()
+                .push(receipt);
+        }
+    }
+    by_verb
+        .into_iter()
+        .map(|(name, receipts)| {
+            let action = format!("jet {name}");
+            summarize(store, &receipts, name, action, display_target)
+        })
+        .collect()
 }
 
 fn target_arg(args: &[String], cwd: &Path) -> Result<String, String> {
@@ -136,20 +130,15 @@ fn target_arg(args: &[String], cwd: &Path) -> Result<String, String> {
 
 fn summarize(
     store: &jet::ReceiptStore::ReceiptStore,
-    receipts: &[jet::Receipt],
-    target_path: &Path,
-    name: &'static str,
-    verbs: &'static [&'static str],
-    action: &str,
+    receipts: &[&jet::Receipt],
+    name: String,
+    action: String,
+    display_target: &str,
 ) -> ClaimRow {
-    let target = canonical_or_absolute(target_path);
     let mut current_success = None;
     let mut current_failure = None;
     let mut stale = None;
-    for receipt in receipts.iter().filter(|receipt| {
-        verbs.contains(&receipt.claim.verb.as_str())
-            && receipt_matches(&receipt.claim.inputs, &target)
-    }) {
+    for receipt in receipts {
         match store.is_current(receipt) {
             Ok(true) if receipt.status == 0 => current_success = Some(short_id(&receipt.claim.key)),
             Ok(true) => current_failure = Some(short_id(&receipt.claim.key)),
@@ -168,7 +157,7 @@ fn summarize(
     };
     ClaimRow {
         name,
-        action: format!("{action} {}", target.display()),
+        action: format!("{action} {display_target}"),
         state,
         receipt,
         reason,
@@ -198,7 +187,7 @@ fn render(target: &str, rows: &[ClaimRow], error: String, json: bool) -> i32 {
             .map(|row| {
                 CanonicalJson::object([
                     ("action".into(), CanonicalJson::String(row.action.clone())),
-                    ("claim".into(), CanonicalJson::String(row.name.into())),
+                    ("claim".into(), CanonicalJson::String(row.name.clone())),
                     ("reason".into(), CanonicalJson::String(row.reason.into())),
                     (
                         "receipt".into(),
@@ -228,10 +217,18 @@ fn render(target: &str, rows: &[ClaimRow], error: String, json: bool) -> i32 {
             ("target".into(), CanonicalJson::String(target.into())),
         ])
         .expect("status keys are unique");
-        let payload = String::from_utf8(document.bytes()).expect("canonical JSON is UTF-8");
+        let payload = String::from_utf8(document.bytes())
+            .expect("canonical JSON is UTF-8")
+            .trim_end_matches('\n')
+            .to_string();
         println!(
             "{}",
-            render_status_json("ok", true, "status", &format!(",\"status_report\":{payload}"))
+            render_status_json(
+                "ok",
+                true,
+                "status",
+                &format!(",\"status_report\":{payload}")
+            )
         );
     } else {
         println!("target  {target}");

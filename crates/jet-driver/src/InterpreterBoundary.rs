@@ -78,8 +78,8 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
         Diagnostic::error(
             "E2203",
             format!("`jet debug` can't step through this program yet — it uses {}", boundary.feature),
-            "`jet debug` steps your program in the same interpreter `jet dev` uses; this feature touches threads, foreign code, raw memory, or the outside world, which the source-level stepper doesn't cover yet".to_string(),
-            "run `jet build` then the binary, or `jet run <file>` to compile and run it; remove the unsupported feature to step the rest, or wait for the native-debugger milestone".to_string(),
+            "The interpreter debugger cannot model threads, foreign code, raw memory, or host state. The native `jet debug` CLI normally selects the LLDB backend for this program.".to_string(),
+            "Use the native `jet debug <file>` path with LLDB installed, or use `jet run <file>` when native debugging is unavailable.".to_string(),
             boundary.span,
         )
     })

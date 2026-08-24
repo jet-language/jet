@@ -7,9 +7,10 @@
 #![allow(dead_code)] // #2158 wires this seam into the provider dispatch.
 
 use crate::NixEval::NativeDerivationEvaluation;
-use crate::Provider::{self, Realized, SourceState};
+use crate::Provider::{self, ProviderError, Realized, SourceState};
 use crate::Store::{self, CacheIdentity, Roots, StoreEntry};
 use crate::{Envelope, SHA256};
+use jet_foundation::Diagnostics::Diagnostic;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,8 +19,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_SCRATCH: AtomicU64 = AtomicU64::new(0);
 const OUTPUT_ROOT: &str = "/work/output";
 
-/// A failure at the native Nix build boundary. The codes reuse the existing
-/// Jetpack diagnostics: no new user-facing diagnostic is needed for this seam.
+/// A failure at the native Nix build boundary. The native route projects each
+/// failure through the same provider diagnostic contract as substitution; the
+/// route itself remains visible only in the producer provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NativeNixBuildError {
     SandboxUnavailable(String),
@@ -40,42 +42,71 @@ impl NativeNixBuildError {
 
     pub(crate) fn what(&self) -> String {
         match self {
-            Self::SandboxUnavailable(reason) => {
-                format!("Nix derivation build sandboxing is unavailable: {reason}")
-            }
-            Self::Invalid(reason) => format!("Nix derivation build request is invalid: {reason}"),
-            Self::Failed(reason) => format!("Nix derivation builder failed: {reason}"),
-            Self::Store(reason) => format!("Nix derivation could not enter Hangar: {reason}"),
+            Self::SandboxUnavailable(_) => "build sandboxing is required but unavailable".into(),
+            Self::Invalid(_) => "couldn't understand the provider's output".into(),
+            Self::Failed(_) => "package build failed at a logged step".into(),
+            Self::Store(_) => "hangar ingest aborted".into(),
         }
     }
 
-    pub(crate) fn why(&self) -> &'static str {
+    pub(crate) fn why(&self) -> &str {
         match self {
-            Self::SandboxUnavailable(_) => {
-                "Jetpack refuses to launch a local executable without an enforceable native child boundary."
-            }
-            Self::Invalid(_) => {
-                "The bounded evaluator supplies the derivation contract; the builder cannot guess missing paths or input closures."
-            }
-            Self::Failed(_) => {
-                "The evaluated builder ran inside Jet's private output sandbox and did not produce a successful result."
-            }
-            Self::Store(_) => {
-                "Only the existing race-safe Hangar projection may publish native Nix output bytes."
-            }
+            Self::SandboxUnavailable(reason)
+            | Self::Invalid(reason)
+            | Self::Failed(reason)
+            | Self::Store(reason) => reason,
         }
     }
 
     pub(crate) fn fix(&self) -> &'static str {
         match self {
             Self::SandboxUnavailable(_) => {
-                "Enable the native sandbox or provide a trusted substitute, then retry."
+                "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."
             }
-            Self::Invalid(_) => {
-                "Use a supported derivation with an absolute non-Nix builder and materialized inputs."
+            Self::Invalid(_) => "this is likely a Jetpack bug — please report it.",
+            Self::Failed(_) => {
+                "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`."
             }
-            Self::Failed(_) => "Inspect the builder failure and retry the derivation.",
-            Self::Store(_) => "Repair the Hangar path or output, then retry the realization.",
+            Self::Store(_) => {
+                "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source."
+            }
+        }
+    }
+
+    /// Build the same registered diagnostic that the substituted provider
+    /// route exposes to the terminal and machine-facing diagnostic consumers.
+    pub(crate) fn diagnostic(&self) -> Diagnostic {
+        Diagnostic::error(
+            self.code(),
+            self.what(),
+            self.why().to_string(),
+            self.fix().to_string(),
+            None,
+        )
+    }
+
+    /// Render through the shared Jetpack terminal surface. Callers do not
+    /// need a native-only error renderer or route-specific wording.
+    pub(crate) fn report(&self, theme: &crate::Output::Theme) {
+        let diagnostic = self.diagnostic();
+        theme.error_coded(
+            &diagnostic.code,
+            &diagnostic.what,
+            &diagnostic.why,
+            &diagnostic.fix,
+        );
+    }
+}
+
+impl From<NativeNixBuildError> for ProviderError {
+    fn from(error: NativeNixBuildError) -> Self {
+        match error {
+            NativeNixBuildError::SandboxUnavailable(reason) => {
+                ProviderError::SandboxUnavailable(reason)
+            }
+            NativeNixBuildError::Invalid(reason) => ProviderError::BadOutput(reason),
+            NativeNixBuildError::Failed(reason) => ProviderError::BuildDebug(reason),
+            NativeNixBuildError::Store(reason) => ProviderError::Ingest(reason),
         }
     }
 }
@@ -591,6 +622,16 @@ mod Tests {
             .join("receipts")
             .join(&entry.receipt)
             .is_file());
+        let receipt =
+            fs::read_to_string(roots.hangar_dir().join("receipts").join(&entry.receipt)).unwrap();
+        assert!(receipt.starts_with("jet-development-receipt-v1\n"));
+        assert!(receipt.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\n"));
+        assert!(receipt.contains("input\t70726f64756365722d7265636f7264\t"));
+        assert!(receipt.contains("outcome\t\t706173736564\n"));
+        assert_eq!(
+            entry.receipt,
+            format!("sha256-{}", SHA256::sha256_hex(receipt.as_bytes()))
+        );
         let producer = Store::ProducerRecord::decode(&entry.producer_record).unwrap();
         assert_eq!(producer.provider, "nix");
         assert_eq!(
@@ -600,6 +641,49 @@ mod Tests {
         assert_eq!(
             producer.facts.get("nix.drv_path").map(String::as_str),
             Some(evaluation.drv_path())
+        );
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(source);
+    }
+
+    #[test]
+    fn native_receipt_contract_is_independent_of_source_route() {
+        let evaluation = fixed_evaluation();
+        let (roots, root) = test_root("receipt-route");
+        let source = test_source("receipt-route");
+        let native = admit_built_derivation(
+            &roots,
+            build_derivation(&roots, &source, &evaluation).unwrap(),
+            "./flake.nix#native-hello",
+            "",
+        )
+        .unwrap();
+        let mut substituted_envelope = native.envelope.clone();
+        substituted_envelope.provenance = format!("{} via nix", native.reference);
+        let substituted = Realized {
+            name: native.name.clone(),
+            version: native.version.clone(),
+            reference: native.reference.clone(),
+            out: native.out.clone(),
+            bin: native.bin.clone(),
+            rlib: native.rlib.clone(),
+            envelope: substituted_envelope,
+            cache_identity: native.cache_identity.clone(),
+            source_state: SourceState::Substituted,
+            named_outputs: BTreeMap::from([("out".into(), native.out.clone())]),
+            references: native.references.clone(),
+            producer: Store::ProducerRecord::decode(&native.producer_record).unwrap(),
+        };
+        let substituted_entry = Store::record_realized_mode(&roots, &substituted).unwrap();
+
+        assert_eq!(native.receipt, substituted_entry.receipt);
+        assert_eq!(
+            native.envelope.output_hash,
+            substituted_entry.envelope.output_hash
+        );
+        assert_ne!(
+            native.envelope.provenance,
+            substituted_entry.envelope.provenance
         );
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(source);
@@ -677,5 +761,46 @@ mod Tests {
         assert_eq!(error.code(), "E1273");
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(source);
+    }
+
+    #[test]
+    fn native_build_diagnostics_match_substituted_provider_contract() {
+        let cases = [
+            (
+                NativeNixBuildError::SandboxUnavailable("sandbox detail".into()),
+                "E1275",
+                "build sandboxing is required but unavailable",
+                "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry.",
+            ),
+            (
+                NativeNixBuildError::Invalid("invalid derivation".into()),
+                "E1340",
+                "couldn't understand the provider's output",
+                "this is likely a Jetpack bug — please report it.",
+            ),
+            (
+                NativeNixBuildError::Failed("builder detail".into()),
+                "E1273",
+                "package build failed at a logged step",
+                "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`.",
+            ),
+            (
+                NativeNixBuildError::Store("store detail".into()),
+                "E1315",
+                "hangar ingest aborted",
+                "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source.",
+            ),
+        ];
+
+        for (error, code, what, fix) in cases {
+            let diagnostic = error.diagnostic();
+            assert_eq!(diagnostic.code, code);
+            assert_eq!(diagnostic.what, what);
+            assert_eq!(diagnostic.fix, fix);
+            assert!(diagnostic.why.ends_with("detail") || diagnostic.why == "invalid derivation");
+
+            let provider_error: ProviderError = error.into();
+            assert_eq!(provider_error.code().unwrap_or("E1340"), code);
+        }
     }
 }

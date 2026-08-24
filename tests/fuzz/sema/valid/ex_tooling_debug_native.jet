@@ -18,11 +18,11 @@ fn word_count(text: String) Int -> {
     return total
 }
 
-fn run() {
-    path := "/tmp/jet_189_debug_native_notes.txt"
-    fs.write(path, "jet debug steps the full feature set") ?? return
-    text := fs.read(path) ?? ""
-    n := word_count(text)
+fn run() ! {
+    path :: "/tmp/jet_189_debug_native_notes.txt"
+    fs.write(path, "jet debug steps the full feature set") ?? return Err("write failed")
+    text :: fs.read(path) ?? ""
+    n :: word_count(text)
     print("that note has {n} words")
-    fs.remove(path) ?? return
+    fs.remove(path) ?? return Err("remove failed")
 }

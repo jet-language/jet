@@ -800,7 +800,7 @@ fn run_with_io(
     let src = bundle.modules[bundle.entry].source.clone();
     // The debugger steps the dev interpreter, so it declines the same features
     // `jet dev` does — but with E2203 (debug-specific): names `jet debug` and
-    // points at the real build (D-DBG3 step 2, the native backend follow-on).
+    // points at the real build (D-DBG3 step 2, the shipped native backend).
     if let Some(b) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
         emit_diags(&mut io, file, &src, &[b]);
         return (ExitCodes::USER_ERROR, io.into_output(), false, None);

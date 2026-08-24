@@ -22,6 +22,7 @@ mod common;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Write `src` to a temp `.jet` file and return its path.
 fn fixture(tag: &str, src: &str) -> String {
@@ -624,7 +625,8 @@ fn dap_frame(body: &str) -> String {
 
 #[test]
 fn dap_cli_exercises_the_production_wire_and_attach_failure() {
-    let file = native_fixture("dap_cli_failure", "fn run() {\n    print(\"dap\")\n}\n");
+    let tag = format!("dap_cli_failure_{}", std::process::id());
+    let file = native_fixture(&tag, LOOPS);
     let input = format!(
         "{}{}",
         dap_frame(
@@ -659,7 +661,116 @@ fn dap_cli_exercises_the_production_wire_and_attach_failure() {
     assert!(stdout.contains("\"command\":\"attach\""), "{stdout}");
     assert!(stdout.contains("\"success\":false"), "{stdout}");
     assert!(stdout.contains("\"id\":22032"), "{stdout}");
+    assert!(
+        !stdout.contains("\"event\":\"stopped\""),
+        "invalid attach must not start a target: {stdout}"
+    );
     let _ = std::fs::remove_file(&file);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let tag = format!(
+        "dap_cli_attach_success_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    );
+    let file = native_fixture(&tag, "fn run() {\n    loop {}\n}\n");
+    let stem = Path::new(&file)
+        .file_stem()
+        .expect("attach fixture has a file stem")
+        .to_string_lossy();
+    let binary = Path::new("build").join(format!("{stem}_dbg"));
+    let map = binary.with_extension("jetmap");
+    let mut adapter = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    let mut input = adapter.stdin.take().expect("DAP stdin");
+    input
+        .write_all(
+            dap_frame(
+                r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet","pathFormat":"path"}}"#,
+            )
+            .as_bytes(),
+        )
+        .expect("send initialize request");
+    input.flush().expect("flush initialize request");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !(binary.is_file() && map.is_file()) {
+        if adapter
+            .try_wait()
+            .expect("check production DAP process")
+            .is_some()
+        {
+            panic!("production DAP process exited before writing its debug map");
+        }
+        assert!(
+            Instant::now() < deadline,
+            "production DAP process did not publish its debug map"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let mut target = Command::new(&binary)
+        .spawn()
+        .expect("start the matching native debug target");
+    let attach = format!(
+        "{}{}",
+        dap_frame(&format!(
+            r#"{{"seq":2,"type":"request","command":"attach","arguments":{{"processId":{},"program":"{}","map":"{}"}}}}"#,
+            target.id(),
+            binary.display(),
+            map.display()
+        )),
+        dap_frame(r#"{"seq":3,"type":"request","command":"disconnect","arguments":{}}"#),
+    );
+    input
+        .write_all(attach.as_bytes())
+        .expect("send attach and disconnect requests");
+    drop(input);
+    let output = adapter
+        .wait_with_output()
+        .expect("wait for the production Jet DAP command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let target_alive = target.try_wait().expect("check detached target").is_none();
+    if target_alive {
+        let _ = target.kill();
+    }
+    let _ = target.wait();
+    let _ = std::fs::remove_file(&map);
+    let _ = std::fs::remove_file(&binary);
+    let _ = std::fs::remove_file(Path::new("build").join(format!("{stem}.rs")));
+    let _ = std::fs::remove_file(&file);
+
+    assert!(output.status.success(), "DAP command failed:\n{stderr}");
+    assert!(stdout.contains("\"command\":\"attach\""), "{stdout}");
+    assert!(
+        stdout.contains("\"request_seq\":2,\"success\":true,\"command\":\"attach\""),
+        "{stdout}"
+    );
+    assert!(stdout.contains("\"command\":\"disconnect\""), "{stdout}");
+    assert!(
+        stdout.contains("\"request_seq\":3,\"success\":true,\"command\":\"disconnect\""),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("\"success\":false"), "{stdout}");
+    assert!(
+        target_alive,
+        "production disconnect must leave an attached target alive"
+    );
 }
 
 #[test]
@@ -667,7 +778,8 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
     if !have("rustc") || !have("lldb") {
         return;
     }
-    let file = native_fixture("dap_cli_success", LOOPS);
+    let tag = format!("dap_cli_success_{}", std::process::id());
+    let file = native_fixture(&tag, LOOPS);
     let input = format!(
         "{}{}{}{}{}{}{}{}{}",
         dap_frame(
@@ -688,7 +800,8 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
         ),
         dap_frame(r#"{"seq":7,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
         dap_frame(r#"{"seq":8,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
-        dap_frame(r#"{"seq":9,"type":"request","command":"disconnect","arguments":{}}"#),
+        dap_frame(r#"{"seq":9,"type":"request","command":"continue","arguments":{"threadId":1}}"#),
+        dap_frame(r#"{"seq":10,"type":"request","command":"disconnect","arguments":{}}"#),
     );
     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["debug", "--dap", &file])
@@ -714,10 +827,14 @@ fn dap_cli_launches_and_projects_a_live_target_in_jet_terms() {
     assert!(stdout.contains("\"event\":\"stopped\""), "{stdout}");
     assert!(stdout.contains("\"command\":\"threads\""), "{stdout}");
     assert!(stdout.contains("\"command\":\"stackTrace\""), "{stdout}");
+    assert!(stdout.contains("\"name\":\"run\""), "{stdout}");
+    assert!(stdout.contains("\"line\":2"), "{stdout}");
     assert!(
         stdout.contains(&format!("\"path\":\"{}\"", file)),
         "{stdout}"
     );
+    assert!(stdout.contains("\"event\":\"output\""), "{stdout}");
+    assert!(stdout.contains("total is "), "{stdout}");
     assert!(
         !stdout.contains("__jet_"),
         "generated Rust leaked into Jet view: {stdout}"

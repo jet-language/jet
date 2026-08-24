@@ -18,13 +18,11 @@
 //!    sentinel command (its rejection is deterministic and unique); reads run
 //!    until the sentinel's own echo appears.
 //! 2. A resuming command's (`run`/`continue`/step) own stop banner is printed
-//!    by an asynchronous event listener that can race with — and lose to — the
-//!    NEXT command's synchronous reply, so parsing the resume command's own
-//!    returned text for frame info is unreliable. [`Self::resume_and_locate`]
-//!    instead sends the resume command immediately followed by `bt` in the
-//!    SAME write; `bt` is synchronous and lldb's command queue guarantees it
-//!    runs only once the resume has fully settled (stopped or exited), so its
-//!    reply is always accurate.
+//!    by an asynchronous event listener. While the target is running, bytes
+//!    written after the resume command go to the target's stdin, not LLDB's
+//!    command parser. [`Self::resume_and_locate`] therefore writes only the
+//!    resume command, waits for the stopped/exited event, then asks for `bt`
+//!    through the normal sentinel-framed command path.
 //! 3. By default the debuggee INHERITS lldb's own stdout/stderr, so a Jet
 //!    `print()` can land byte-interleaved into the middle of lldb's own
 //!    sentinel echo (confirmed live: a `total is 6` program print tore the
@@ -60,12 +58,6 @@ const SENTINEL: &str = "__jet_dbg_sentinel_9f3c__";
 /// lldb, or a resume command that never stops) — generous, since a debuggee
 /// can legitimately run for a while before hitting a breakpoint or exiting.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// After the sentinel for a resuming command, how long to wait for the
-/// asynchronous exit notification that can lag behind it (see
-/// `resume_and_locate`'s doc) — short, since it's confirmed to arrive within
-/// milliseconds live; this is not a "maybe it'll show up eventually" timeout.
-const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(300);
 
 /// One resolved stop location: the function lldb reports plus its raw Rust
 /// file:line. Callers translate `rust_line` through [`super::LineMap::LineMap`]
@@ -460,33 +452,58 @@ impl Inferior {
         self.write_lines(&[line])
     }
 
-    /// Drain whatever arrives within [`EXIT_GRACE_WINDOW`] with no new input
-    /// sent — used ONLY by `resume_and_locate` to catch a delayed exit
-    /// notification (see its doc). Nothing is lost if the window is too
-    /// short: this just widens the window `resume_and_locate` checks
-    /// `full.contains("exited with status")` over.
-    fn drain_grace_window(&mut self) -> String {
-        let mut extra: Vec<u8> = Vec::new();
-        while let Ok(b) = self.rx.recv_timeout(EXIT_GRACE_WINDOW) {
-            extra.push(b);
-        }
-        String::from_utf8_lossy(&extra).into_owned()
+    /// Resume commands must be written without the sentinel. While the target
+    /// is running, LLDB forwards following input to the target instead of
+    /// parsing it as debugger commands; `read_until_resume_settled` owns the
+    /// bounded wait until LLDB is ready for the next sentinel-framed command.
+    fn write_resume(&mut self, command: &str) -> std::io::Result<()> {
+        writeln!(self.stdin, "{command}")?;
+        self.stdin.flush()
     }
 
-    /// Send a resuming command (`run`, `continue`, a step) immediately
-    /// followed by `bt`, in the SAME write, and derive the outcome from `bt`'s
-    /// reply — never from the resume command's own text (module doc point 2).
-    ///
-    /// A THIRD race, distinct from point 2: when the debuggee EXITS (rather
-    /// than stopping), `bt` doesn't need to wait for anything — it fails fast
-    /// ("no running process") — so it can print (and the sentinel can be seen)
-    /// BEFORE lldb's separate async event listener gets around to printing
-    /// `Process N exited with status = …`. Confirmed live: that line can
-    /// arrive AFTER the sentinel's own echo. So after the sentinel, this waits
-    /// one short grace window for anything still queued before deciding.
+    fn read_until_resume_settled(&mut self, mut text: String) -> std::io::Result<String> {
+        if resume_settled(&text) {
+            return Ok(text);
+        }
+        let deadline = Instant::now() + READ_TIMEOUT;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "lldb did not report a stopped or exited target before timeout",
+                ));
+            }
+            let byte = match self.rx.recv_timeout(remaining) {
+                Ok(byte) => byte,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "lldb did not report a stopped or exited target before timeout",
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "lldb closed the debugger control channel before the target settled",
+                    ));
+                }
+            };
+            text.push(byte as char);
+            if resume_settled(&text) {
+                return Ok(text);
+            }
+        }
+    }
+
+    /// Send a resuming command (`run`, `continue`, a step), wait for lldb's
+    /// asynchronous stopped/exited event, then ask for `bt` in a separate
+    /// command. Sending `bt` in the same batch races the event listener: lldb
+    /// can echo the sentinel while the target is still running, leaving `bt`
+    /// without a stopped process and losing the actual Jet stop.
     pub(crate) fn resume_and_locate(&mut self, resume_cmd: &str) -> std::io::Result<ResumeResult> {
-        let mut full = self.write_lines(&[resume_cmd, "bt"])?;
-        full.push_str(&self.drain_grace_window());
+        self.write_resume(resume_cmd)?;
+        let full = self.read_until_resume_settled(String::new())?;
         if full.contains("exited with") {
             self.debuggee_exited = true;
             return Ok(ResumeResult::Exited {
@@ -494,15 +511,7 @@ impl Inferior {
                 signal: parse_exit_signal(&full),
             });
         }
-        // Everything after the LAST `(lldb) bt` echo is `bt`'s own reply —
-        // guaranteed to run (and thus print) only once the resume has fully
-        // settled, since lldb's command queue is strictly in-order.
-        let bt_reply = full
-            .rsplit("(lldb) bt\n")
-            .next()
-            .unwrap_or(full.as_str())
-            .to_string();
-        Ok(ResumeResult::Stopped(bt_reply))
+        Ok(ResumeResult::Stopped(self.backtrace()?))
     }
 
     /// `breakpoint set -f <file> -l <line>` — set on the RUST file/line (already
@@ -598,8 +607,22 @@ impl Inferior {
         self.cmd("bt")
     }
 
-    pub(crate) fn threads(&mut self) -> std::io::Result<Vec<ThreadInfo>> {
-        Ok(parse_threads(&self.cmd("thread list")?))
+    /// Read every stopped native thread with its stack. Scheduler workers and
+    /// runtime helpers are intentionally left for the caller to filter by the
+    /// verified Jet source map; a native thread id is not itself a Jet task.
+    pub(crate) fn thread_backtraces(&mut self) -> std::io::Result<Vec<(ThreadInfo, String)>> {
+        let listing = self.cmd("thread list")?;
+        let threads = parse_threads(&listing);
+        let selected = parse_current_thread_id(&listing);
+        let mut result = Vec::with_capacity(threads.len());
+        for thread in threads {
+            self.select_thread(thread.id)?;
+            result.push((thread, self.backtrace()?));
+        }
+        if let Some(selected) = selected {
+            self.select_thread(selected)?;
+        }
+        Ok(result)
     }
 
     pub(crate) fn select_thread(&mut self, id: u32) -> std::io::Result<()> {
@@ -853,21 +876,26 @@ impl Inferior {
     /// value` rows. The DAP adapter issues another bounded query when a child
     /// is expanded, so deeper rows stay behind that reference.
     pub(crate) fn parse_variable_children(lldb_output: &str) -> Vec<(String, String, String)> {
-        let mut lines = lldb_output.lines();
-        let Some(root) = lines.next() else {
+        let lines: Vec<&str> = lldb_output.lines().collect();
+        let Some(root_index) = lines.iter().position(|line| {
+            parse_typed_line(line)
+                .map(|(_, _, value)| Self::has_nested_value(value))
+                .unwrap_or(false)
+        }) else {
             return Vec::new();
         };
+        let root = lines[root_index];
         let root_indent = root.len() - root.trim_start().len();
         let Some(root_value) = root.split_once(" = ").map(|(_, value)| value.trim()) else {
             return Vec::new();
         };
-        if !root_value.starts_with('{') {
+        let Some(open_brace) = root_value.find('{') else {
             return Vec::new();
-        }
-        let mut depth =
-            root_value.matches('{').count() as i32 - root_value.matches('}').count() as i32;
+        };
+        let mut depth = root_value[open_brace..].matches('{').count() as i32
+            - root_value[open_brace..].matches('}').count() as i32;
         let mut children = Vec::new();
-        for line in lines {
+        for line in &lines[root_index + 1..] {
             let trimmed = line.trim();
             if depth <= 0 {
                 break;
@@ -885,7 +913,7 @@ impl Inferior {
 
     pub(crate) fn has_nested_value(raw: &str) -> bool {
         let raw = raw.trim();
-        raw.starts_with('{') || raw.starts_with('[')
+        raw.starts_with('{') || raw.starts_with('[') || (!raw.starts_with('"') && raw.contains('{'))
     }
 
     /// D-DBG3 step 2 (I2): translate a raw Rust local/param name back to its
@@ -935,8 +963,10 @@ impl Inferior {
         let safe = match type_name.trim() {
             "bool" | "Bool" => matches!(raw, "true" | "false"),
             "f32" | "f64" | "Float" => raw.parse::<f64>().is_ok(),
-            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
-            | "usize" | "Int" => raw.parse::<i128>().is_ok(),
+            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "Int" => {
+                raw.parse::<i128>().is_ok()
+            }
+            "u8" | "u16" | "u32" | "u64" | "usize" | "u128" => raw.parse::<u128>().is_ok(),
             "alloc::string::String" | "std::string::String" | "String" | "&str" => {
                 complete_quoted_literal(raw).is_some_and(|value| value.len() == raw.len())
             }
@@ -954,8 +984,8 @@ impl Inferior {
         match raw.trim() {
             "bool" => Some("Bool"),
             "f32" | "f64" => Some("Float"),
-            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
-            | "usize" => Some("Int"),
+            "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "u8" | "u16" | "u32"
+            | "u64" | "usize" | "u128" => Some("Int"),
             "alloc::string::String" | "std::string::String" | "String" | "&str" => Some("String"),
             "()" => Some("Unit"),
             _ => None,
@@ -1017,7 +1047,12 @@ impl Inferior {
         if looks_like_hash {
             segs.pop();
         }
-        let name = segs.last().copied().unwrap_or(func);
+        let name = segs
+            .iter()
+            .rev()
+            .find(|segment| !is_rust_closure(segment))
+            .copied()
+            .unwrap_or(func);
         name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
             .unwrap_or(name)
             .to_string()
@@ -1040,6 +1075,10 @@ impl Inferior {
     }
 }
 
+fn is_rust_closure(name: &str) -> bool {
+    name.starts_with("{{") || name.starts_with("{closure")
+}
+
 /// LLDB echoes commands as a prompt-prefixed line. Match that complete echo,
 /// rather than a bare token: a user value or backend diagnostic can contain
 /// the unique token without completing the command reply.
@@ -1051,6 +1090,12 @@ fn sentinel_echo_at_end(buf: &[u8]) -> bool {
     }
     let start = buf.len() - marker.len();
     start == 0 || buf[start - 1] == b'\n'
+}
+
+fn resume_settled(text: &str) -> bool {
+    text.contains("stop reason =")
+        || text.contains("exited with")
+        || text.contains("exited due to")
 }
 
 impl Drop for Inferior {
@@ -1201,6 +1246,9 @@ fn parse_threads(output: &str) -> Vec<ThreadInfo> {
 
 pub(crate) fn parse_current_thread_id(output: &str) -> Option<u32> {
     output.lines().find_map(|line| {
+        if !line.trim_start().starts_with('*') {
+            return None;
+        }
         let start = line.find("thread #")? + "thread #".len();
         let digits = line[start..]
             .chars()
@@ -1638,6 +1686,15 @@ mod tests {
     }
 
     #[test]
+    fn resume_wait_requires_a_real_process_event() {
+        assert!(!resume_settled("(lldb) run\nProcess 1 launched\n"));
+        assert!(resume_settled(
+            "Process 1 stopped\n* thread #1, stop reason = breakpoint 1.1\n"
+        ));
+        assert!(resume_settled("Process 1 exited with status = 0\n"));
+    }
+
+    #[test]
     fn parses_multiple_frames_for_backtrace() {
         let out = "  * frame #0: 0x1 bin`__jet_helper at a.rs:3:1\n    frame #1: 0x2 bin`__jet_main + 10 at a.rs:9:1\n";
         let frames = Inferior::parse_frames(out);
@@ -1706,6 +1763,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_immediate_children_after_lldb_command_echo() {
+        let out = "(lldb) frame variable __jet_point\n(__jet_Point) __jet_point = {\n  (__int) __jet_x = 1\n}\n";
+        assert_eq!(
+            Inferior::parse_variable_children(out),
+            vec![("__int".to_string(), "__jet_x".to_string(), "1".to_string())]
+        );
+    }
+
+    #[test]
+    fn parses_immediate_children_of_a_sized_composite() {
+        let out =
+            "(__jet_Array) __jet_values = size=2 {\n  (__int) [0] = 7\n  (__int) [1] = 8\n}\n";
+        assert_eq!(
+            Inferior::parse_variable_children(out),
+            vec![
+                ("__int".to_string(), "[0]".to_string(), "7".to_string()),
+                ("__int".to_string(), "[1]".to_string(), "8".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn recognizes_lldb_sized_composites_as_expandable_values() {
+        assert!(Inferior::has_nested_value("size=2 { [0] = 1 [1] = 2 }"));
+        assert!(!Inferior::has_nested_value("\"literal { text\""));
+    }
+
+    #[test]
     fn no_frame_line_is_none() {
         assert!(Inferior::parse_top_frame("Process 1 exited with status = 0\n").is_none());
     }
@@ -1750,6 +1835,14 @@ mod tests {
     }
 
     #[test]
+    fn optimized_unsigned_values_keep_jet_integer_meaning() {
+        let max = "340282366920938463463374607431768211455";
+        assert_eq!(Inferior::safe_value("u128", max), max);
+        assert_eq!(Inferior::safe_value("u128", "-1"), "<unavailable>");
+        assert_eq!(Inferior::jet_type_name("u128"), Some("Int"));
+    }
+
+    #[test]
     fn lldb_paths_reject_control_characters() {
         assert!(checked_lldb_quote("safe/name.rs").is_ok());
         assert!(checked_lldb_quote("bad\nname.rs").is_err());
@@ -1777,6 +1870,12 @@ mod tests {
     fn parses_the_selected_thread_id_from_a_stop_banner() {
         assert_eq!(
             parse_current_thread_id("* thread #7, stop reason = breakpoint 1.1\n"),
+            Some(7)
+        );
+        assert_eq!(
+            parse_current_thread_id(
+                "  thread #1, stop reason = none\n* thread #7, stop reason = breakpoint 1.1\n"
+            ),
             Some(7)
         );
         assert_eq!(
@@ -1810,5 +1909,9 @@ mod tests {
             "<native frame>"
         );
         assert_eq!(Inferior::safe_jet_func("prog::__jet_run::h4002"), "run");
+        assert_eq!(
+            Inferior::safe_jet_func("prog::__jet_run::{{closure}}::h4002"),
+            "run"
+        );
     }
 }

@@ -2498,6 +2498,7 @@ fn main() {
                     dev_profile,
                     mode,
                     &setting_overrides,
+                    &passthrough,
                     record_name.as_deref(),
                 );
                 return;
@@ -2521,6 +2522,7 @@ fn main() {
                         true,
                         named_profile.as_deref().unwrap_or("dev"),
                         &setting_overrides,
+                        &passthrough,
                         record_name.as_deref(),
                     );
                 }
@@ -2555,6 +2557,7 @@ fn main() {
                 use_interpreter,
                 named_profile.as_deref().unwrap_or("dev"),
                 &setting_overrides,
+                &passthrough,
                 record_name.as_deref(),
             );
             return;
@@ -2782,6 +2785,7 @@ fn main() {
                                     use_interpreter,
                                     named_profile.as_deref().unwrap_or("dev"),
                                     &setting_overrides,
+                                    &passthrough,
                                     record_name.as_deref(),
                                 );
                                 return;
@@ -2809,6 +2813,7 @@ fn main() {
                                         use_interpreter,
                                         named_profile.as_deref().unwrap_or("dev"),
                                         &setting_overrides,
+                                        &program_args,
                                         record_name.as_deref(),
                                     );
                                     return;
@@ -3089,6 +3094,7 @@ fn main() {
                         use_interpreter,
                         named_profile.as_deref().unwrap_or("dev"),
                         &setting_overrides,
+                        &program_args,
                         record_name.as_deref(),
                     );
                     return;

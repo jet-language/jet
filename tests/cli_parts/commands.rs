@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn status_renders_missing_receipts_as_unproven_with_a_proving_act() {
+fn status_renders_no_claim_without_a_receipt() {
     let dir = isolated_cwd("status_missing_receipts");
     fs::write(dir.join("run.jet"), "fn run() { print(\"status\") }\n").unwrap();
     let output = Command::new(jet())
@@ -10,7 +10,12 @@ fn status_renders_missing_receipts_as_unproven_with_a_proving_act() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let json = String::from_utf8(output.stdout).unwrap();
     assert_eq!(
         jet_foundation::MachineOutput::read_machine_output(&json).unwrap(),
@@ -18,9 +23,39 @@ fn status_renders_missing_receipts_as_unproven_with_a_proving_act() {
     );
     assert!(json.starts_with("{\"schema\":\"jet.report/v1\""), "{json}");
     assert!(json.contains("\"status_report\""), "{json}");
-    assert!(json.contains("\"state\":\"unproven\""), "{json}");
-    assert!(json.contains("\"action\":\"jet prove run.jet\""), "{json}");
-    assert!(!json.contains("\"state\":\"proven\""), "{json}");
+    assert!(json.contains("\"claims\":[]"), "{json}");
+}
+
+#[test]
+fn status_renders_each_receipt_verb_without_a_claim_inventory() {
+    let dir = isolated_cwd("status_receipt_verbs");
+    let source = dir.join("run.jet");
+    fs::write(&source, "fn run() { print(\"status\") }\n").unwrap();
+    let store = jet::ReceiptStore::ReceiptStore::new(dir.join(".jet/receipts"));
+    for verb in ["custom-api", "custom-test"] {
+        let argv = vec![verb.to_string(), "run.jet".to_string()];
+        store
+            .record(verb, &argv, std::slice::from_ref(&source), 0, b"ok", b"")
+            .unwrap();
+    }
+
+    let output = Command::new(jet())
+        .args(["status", "run.jet", "--json"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = String::from_utf8(output.stdout).unwrap();
+    assert!(json.contains("\"claim\":\"custom-api\""), "{json}");
+    assert!(json.contains("\"claim\":\"custom-test\""), "{json}");
+    assert!(json.contains("\"action\":\"jet custom-api run.jet\""), "{json}");
+    assert!(json.contains("\"action\":\"jet custom-test run.jet\""), "{json}");
 }
 
 #[test]

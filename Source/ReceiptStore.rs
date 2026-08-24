@@ -3,6 +3,8 @@
 //! D-DEVR-TWICE1=A: `check`, `build`, `test`, `prove`, and `budget check`
 //! consult one local receipt store before doing work. Receipt identity uses
 //! input bytes and invocation context; filesystem timestamps never participate.
+//! Result payloads are opaque bytes in this one codec; a claim never selects a
+//! legacy result format.
 
 use crate::SHA256::sha256_hex;
 use jet_devserver::WatchService::WatchGraph;
@@ -21,10 +23,6 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 /// `run`/`dev` already reuse their compile actions through the tier caches;
 /// mutation and interactive verbs do not claim a whole-invocation receipt.
 pub const PARTICIPATING_VERBS: &[&str] = &["check", "build", "test", "prove", "budget check"];
-
-/// Claim kinds that used to grow separate result formats. Their payloads now
-/// live in the same immutable receipt object as ordinary command output.
-pub const RECEIPT_KINDS: &[&str] = &["test", "golden", "budget", "api"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptInput {

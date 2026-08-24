@@ -100,9 +100,10 @@ engine as `jet dev`/`jet repl`) — `(jet)` prompt, lldb-familiar
 `step`/`next`/`continue`/`finish`, `break`/`print`/`locals`/`backtrace`, `<- here`
 caret, all in Jet terms (I2). It declines unsteppable native features at the
 interpreter API boundary with E2203. Step 2's native DAP/lldb backend now
-launches those programs through the same Jet source mapping; remaining
-editor/platform conformance is tracked by Tower #12, which the owner moved to
-Epoch 8 on 2026-07-12.
+launches those programs through the same Jet source mapping, with source
+breakpoints and run control available through the terminal and editor adapters;
+remaining platform conformance is tracked by Tower #12, which the owner moved
+to Epoch 8 on 2026-07-12.
 
 **E2-M18 — REPL** verified 2026-06-17. `jet repl` interactive
 session; 16 transcript tests green.

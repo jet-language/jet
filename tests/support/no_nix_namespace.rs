@@ -9,7 +9,7 @@ pub enum NetworkMode {
     Disabled,
 }
 
-const CHILD_MARKER: &str = "JET_NO_NIX_NAMESPACE_CHILD";
+pub const CHILD_MARKER: &str = "JET_NO_NIX_NAMESPACE_CHILD";
 
 pub fn run_in_no_nix_namespace<F>(exact_test_name: &str, network_mode: NetworkMode, child_body: F)
 where

@@ -21,7 +21,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use super::Inferior::{parse_current_thread_id, parse_exit_signal, Inferior, ResumeResult};
+use super::Inferior::{
+    parse_current_thread_id, parse_exit_signal, Inferior, RawFrame, ResumeResult,
+};
 use super::LineMap::LineMap;
 #[cfg(test)]
 use jet_foundation::JSON::parse_json;
@@ -89,6 +91,7 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
         launch_env: Vec::new(),
         current_thread: 1,
         last_signal: None,
+        last_exception: None,
         exception_filters: default_exception_filters(),
         show_raw_frames: false,
         lines_start_at_1: true,
@@ -157,6 +160,9 @@ struct DapServer {
     launch_env: Vec<(String, String)>,
     current_thread: u32,
     last_signal: Option<String>,
+    /// Jet-level exception kind for the current stopped snapshot. Backend
+    /// panic/error text never crosses the adapter boundary.
+    last_exception: Option<String>,
     exception_filters: HashSet<String>,
     show_raw_frames: bool,
     lines_start_at_1: bool,
@@ -237,6 +243,42 @@ enum ReferenceKind {
 struct FrameLocation {
     thread_id: u32,
     position: usize,
+}
+
+struct ProjectedFrame<'a> {
+    position: usize,
+    frame: &'a RawFrame,
+    jet_line: Option<usize>,
+    raw: bool,
+}
+
+fn project_frames<'a>(
+    frames: &'a [RawFrame],
+    map: &LineMap,
+    rust_file: &str,
+    show_raw_frames: bool,
+) -> Vec<ProjectedFrame<'a>> {
+    let mut projected = Vec::new();
+    for (position, frame) in frames.iter().enumerate() {
+        let jet_line = map.jet_line_for_file(&frame.rust_file, rust_file, frame.rust_line);
+        if jet_line.is_some() {
+            projected.push(ProjectedFrame {
+                position,
+                frame,
+                jet_line,
+                raw: false,
+            });
+        }
+        if show_raw_frames {
+            projected.push(ProjectedFrame {
+                position,
+                frame,
+                jet_line,
+                raw: true,
+            });
+        }
+    }
+    projected
 }
 
 struct ValueReference {
@@ -410,7 +452,10 @@ impl DapServer {
         action
     }
 
-    fn cleanup_after_terminal_state(&mut self, out: &mut impl Write) {
+    /// Close the native target and report whether the close was proven. A
+    /// terminated adapter is not proof that LLDB detached or killed its
+    /// debuggee; callers must keep that distinction in the DAP event stream.
+    fn cleanup_after_terminal_state(&mut self, out: &mut impl Write) -> bool {
         let terminate = self.target == Some(TargetKind::Launched);
         if let Err(error) = self.close_target(terminate) {
             let (id, message) = cleanup_error_details(&error);
@@ -424,7 +469,9 @@ impl DapServer {
                 diagnostic, message
             );
             self.event(out, "output", &body);
+            return false;
         }
+        true
     }
 
     fn source_line(&self, line: usize) -> &str {
@@ -620,8 +667,82 @@ impl DapServer {
         Ok(verified)
     }
 
+    /// Report the backend's resolved state after a target becomes available.
+    /// A source-map hit is not enough: optimized code can leave LLDB with a
+    /// pending breakpoint, and the editor must receive that truth as a DAP
+    /// breakpoint event rather than retain a stale pre-launch `verified` bit.
+    fn emit_breakpoint_statuses(&mut self, out: &mut impl Write, statuses: &[bool]) {
+        let specs = self.pending_specs.clone();
+        let client_ids = self.client_breakpoint_ids.clone();
+        let source_path = self.source_path();
+        for (index, spec) in specs.iter().enumerate() {
+            let id = client_ids.get(index).copied().unwrap_or(0);
+            let verified = statuses.get(index).copied().unwrap_or(false)
+                && spec.condition.as_deref().is_none_or(valid_condition)
+                && spec
+                    .hit_condition
+                    .as_deref()
+                    .is_none_or(valid_hit_condition);
+            let breakpoint = if verified {
+                format!(
+                    "{{\"id\":{id},\"verified\":true,\"line\":{},\"source\":{{\"path\":\"{}\"}}}}",
+                    self.dap_line(spec.line),
+                    json_escape(&source_path)
+                )
+            } else {
+                format!(
+                    "{{\"id\":{id},\"verified\":false,\"line\":{},\"source\":{{\"path\":\"{}\"}},\"message\":\"E2235: no stoppable Jet statement at {}:{}\"}}",
+                    self.dap_line(spec.line),
+                    json_escape(&source_path),
+                    json_escape(&source_path),
+                    self.dap_line(spec.line)
+                )
+            };
+            self.event(
+                out,
+                "breakpoint",
+                &format!("{{\"reason\":\"changed\",\"breakpoint\":{breakpoint}}}"),
+            );
+        }
+    }
+
     fn invalidate_references(&mut self) {
         self.references.invalidate();
+    }
+
+    fn select_resume_thread(
+        &mut self,
+        args: Option<&JSONValue>,
+    ) -> Result<(), (i64, &'static str)> {
+        let thread_id = args
+            .and_then(|args| json_get(args, "threadId"))
+            .and_then(json_u32)
+            .filter(|thread_id| *thread_id > 0)
+            .ok_or((22032, "run control requires a positive threadId"))?;
+        let raw_frames = self.show_raw_frames;
+        let map = &self.map;
+        let rust_file = self.rust_file.as_str();
+        let Some(inf) = self.inf.as_mut() else {
+            return Err((22034, "Jet debugger has no target"));
+        };
+        inf.select_thread(thread_id)
+            .map_err(|_| (22034, "the requested Jet task is no longer stopped"))?;
+        if !raw_frames {
+            let backtrace = inf
+                .backtrace()
+                .map_err(|_| (22034, "the requested Jet task is no longer stopped"))?;
+            if !Inferior::parse_frames(&backtrace).iter().any(|frame| {
+                map.jet_line_for_file(&frame.rust_file, rust_file, frame.rust_line)
+                    .is_some()
+            }) {
+                return Err((
+                    22039,
+                    "the requested thread has no verified Jet source location",
+                ));
+            }
+        }
+        self.current_thread = thread_id;
+        Ok(())
     }
 
     fn restart_target(&mut self, out: &mut impl Write, request_seq: i64) {
@@ -631,6 +752,7 @@ impl DapServer {
         }
         self.current_thread = 1;
         self.last_signal = None;
+        self.last_exception = None;
         self.unmapped_steps = 0;
 
         let map_path = self.binary.with_extension("jetmap");
@@ -695,7 +817,7 @@ impl DapServer {
             );
             return;
         }
-        let (source_ids, _) = match Self::install_breakpoints(
+        let (source_ids, statuses) = match Self::install_breakpoints(
             &self.map,
             &self.rust_file,
             &self.pending_breakpoints,
@@ -725,6 +847,7 @@ impl DapServer {
         self.target = Some(TargetKind::Launched);
         self.respond(out, request_seq, "restart", true, "{}");
         self.emit_target_started_events(out);
+        self.emit_breakpoint_statuses(out, &statuses);
         self.start_target(out);
     }
 
@@ -951,7 +1074,10 @@ impl DapServer {
                 self.pending_specs = specs;
                 self.client_breakpoint_ids = client_ids.clone();
                 self.hit_counts = vec![0; lines.len()];
-                let statuses = if matches!(self.state, State::Running | State::Stopped) {
+                let statuses = if matches!(
+                    self.state,
+                    State::Configuring | State::Running | State::Stopped
+                ) {
                     match self.replace_source_breakpoints() {
                         Ok(statuses) => statuses,
                         Err(_error) => {
@@ -1031,12 +1157,23 @@ impl DapServer {
                     );
                     return Some(());
                 }
-                let threads = match self.inf.as_mut().map(Inferior::threads) {
-                    Some(Ok(threads)) if !threads.is_empty() => threads,
-                    Some(Ok(_)) => vec![super::Inferior::ThreadInfo {
-                        id: 1,
-                        name: "main".to_string(),
-                    }],
+                let threads = match self.inf.as_mut().map(Inferior::thread_backtraces) {
+                    Some(Ok(threads)) => threads
+                        .into_iter()
+                        .filter(|(_, backtrace)| {
+                            self.show_raw_frames
+                                || Inferior::parse_frames(backtrace).iter().any(|frame| {
+                                    self.map
+                                        .jet_line_for_file(
+                                            &frame.rust_file,
+                                            &self.rust_file,
+                                            frame.rust_line,
+                                        )
+                                        .is_some()
+                                })
+                        })
+                        .map(|(thread, _)| thread)
+                        .collect::<Vec<_>>(),
                     Some(Err(error)) => {
                         self.respond_backend_error(
                             out,
@@ -1058,6 +1195,16 @@ impl DapServer {
                         return Some(());
                     }
                 };
+                if threads.is_empty() && !self.show_raw_frames {
+                    self.respond_jet_error(
+                        out,
+                        request_seq,
+                        command,
+                        22039,
+                        "the stopped target has no verified Jet task",
+                    );
+                    return Some(());
+                }
                 let thread_json = threads
                     .iter()
                     .map(|thread| {
@@ -1151,6 +1298,22 @@ impl DapServer {
                         return Some(());
                     }
                 };
+                if !show_raw_frames
+                    && !frames.iter().any(|frame| {
+                        self.map
+                            .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
+                            .is_some()
+                    })
+                {
+                    self.respond_jet_error(
+                        out,
+                        request_seq,
+                        command,
+                        22039,
+                        "the stopped target has no verified Jet frame",
+                    );
+                    return Some(());
+                }
                 let start_frame = args
                     .and_then(|args| json_get(args, "startFrame"))
                     .and_then(json_u32)
@@ -1159,36 +1322,35 @@ impl DapServer {
                     .and_then(|args| json_get(args, "levels"))
                     .and_then(json_u32)
                     .map(|levels| levels as usize);
+                let projected =
+                    project_frames(&frames, &self.map, &self.rust_file, show_raw_frames);
+                let total_frames = projected.len();
                 let mut entries = Vec::new();
-                for (position, frame) in frames
-                    .iter()
-                    .enumerate()
+                for projected in projected
+                    .into_iter()
                     .skip(start_frame)
                     .take(levels.unwrap_or(usize::MAX))
                 {
-                    if let Some(jline) = self.map.jet_line_for_file(
-                        &frame.rust_file,
-                        &self.rust_file,
-                        frame.rust_line,
-                    ) {
-                        let id = self.references.issue_frame(thread_id, position);
-                        entries.push(format!(
-                            "{{\"id\":{},\"name\":\"{}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
-                            id,
-                            json_escape(&Inferior::safe_jet_func(&frame.func)),
-                            json_escape(&self.source_path()),
-                            self.dap_line(jline),
-                            self.dap_column(1)
-                        ));
-                    }
-                    if show_raw_frames {
-                        let id = self.references.issue_raw_frame(thread_id, position);
+                    if projected.raw {
+                        let id = self
+                            .references
+                            .issue_raw_frame(thread_id, projected.position);
                         entries.push(format!(
                             "{{\"id\":{},\"name\":\"[raw] {}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
                             id,
-                            json_escape(&frame.func),
+                            json_escape(&projected.frame.func),
                             json_escape(&self.rust_file),
-                            self.dap_line(frame.rust_line),
+                            self.dap_line(projected.frame.rust_line),
+                            self.dap_column(1)
+                        ));
+                    } else if let Some(jline) = projected.jet_line {
+                        let id = self.references.issue_frame(thread_id, projected.position);
+                        entries.push(format!(
+                            "{{\"id\":{},\"name\":\"{}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
+                            id,
+                            json_escape(&Inferior::safe_jet_func(&projected.frame.func)),
+                            json_escape(&self.source_path()),
+                            self.dap_line(jline),
                             self.dap_column(1)
                         ));
                     }
@@ -1196,38 +1358,7 @@ impl DapServer {
                 let body = format!(
                     "{{\"stackFrames\":[{}],\"totalFrames\":{}}}",
                     entries.join(","),
-                    frames
-                        .iter()
-                        .map(|frame| {
-                            if show_raw_frames {
-                                if self
-                                    .map
-                                    .jet_line_for_file(
-                                        &frame.rust_file,
-                                        &self.rust_file,
-                                        frame.rust_line,
-                                    )
-                                    .is_some()
-                                {
-                                    2
-                                } else {
-                                    1
-                                }
-                            } else if self
-                                .map
-                                .jet_line_for_file(
-                                    &frame.rust_file,
-                                    &self.rust_file,
-                                    frame.rust_line,
-                                )
-                                .is_some()
-                            {
-                                1
-                            } else {
-                                0
-                            }
-                        })
-                        .sum::<usize>()
+                    total_frames
                 );
                 self.respond(out, request_seq, command, true, &body);
                 Some(())
@@ -1298,13 +1429,6 @@ impl DapServer {
                         scopes.push(format!(
                             "{{\"name\":\"[raw] Locals\",\"variablesReference\":{},\"expensive\":false}}",
                             raw_scope_id
-                        ));
-                    }
-                    for scope_name in ["Arguments", "Captures"] {
-                        let scope_id = self.references.issue_scope(frame_id, ReferenceKind::Scope);
-                        scopes.push(format!(
-                            "{{\"name\":\"{}\",\"variablesReference\":{},\"expensive\":false}}",
-                            scope_name, scope_id
                         ));
                     }
                 }
@@ -1670,6 +1794,10 @@ impl DapServer {
                     );
                     return Some(());
                 }
+                if let Err((id, message)) = self.select_resume_thread(args) {
+                    self.respond_jet_error(out, request_seq, command, id, message);
+                    return Some(());
+                }
                 self.invalidate_references();
                 let resume_cmd = match command {
                     "continue" => "continue",
@@ -1820,16 +1948,23 @@ impl DapServer {
                     );
                     return Some(());
                 }
-                if let Some(signal) = self.last_signal.as_deref() {
+                if let Some(kind) = self.last_exception.as_deref() {
+                    let (exception_id, description) = if kind == "panic" {
+                        ("JetPanic", "Jet panic".to_string())
+                    } else if kind == "error" {
+                        ("JetError", "Jet error".to_string())
+                    } else {
+                        (kind, format!("Jet target stopped on {kind}"))
+                    };
                     self.respond(
                         out,
                         request_seq,
                         command,
                         true,
                         &format!(
-                            "{{\"exceptionId\":\"{}\",\"description\":\"Jet target stopped on {}\"}}",
-                            json_escape(signal),
-                            json_escape(signal)
+                            "{{\"exceptionId\":\"{}\",\"description\":\"{}\"}}",
+                            json_escape(exception_id),
+                            json_escape(&description)
                         ),
                     );
                 } else {
@@ -1961,7 +2096,7 @@ impl DapServer {
                 return;
             }
         }
-        let (ids, _) = match Self::install_breakpoints(map, &rust_file, &lines, inf) {
+        let (ids, statuses) = match Self::install_breakpoints(map, &rust_file, &lines, inf) {
             Ok(result) => result,
             Err(_error) => {
                 self.terminate_with_diagnostic(
@@ -1973,6 +2108,7 @@ impl DapServer {
             }
         };
         self.source_breakpoint_ids = ids;
+        self.emit_breakpoint_statuses(out, &statuses);
         self.state = State::Running;
         let resume = if self.target == Some(TargetKind::Attached) {
             "continue"
@@ -2066,15 +2202,26 @@ impl DapServer {
                         (None, None) => "{}".to_string(),
                     };
                     self.event(out, "exited", &body);
-                    self.cleanup_after_terminal_state(out);
-                    self.event(out, "terminated", "{}");
+                    if self.cleanup_after_terminal_state(out) {
+                        self.event(out, "terminated", "{}");
+                    }
                     return;
                 }
                 ResumeResult::Stopped(text) => text,
             };
             self.last_signal = parse_exit_signal(&bt_text);
+            let exception_kind = self.exception_kind(&bt_text).map(str::to_string);
+            self.last_exception = exception_kind.clone().map(|kind| {
+                if kind == "signal" {
+                    self.last_signal
+                        .clone()
+                        .unwrap_or_else(|| "unknown signal".to_string())
+                } else {
+                    kind
+                }
+            });
             if mode != ResumeMode::Pause {
-                if let Some(kind) = self.exception_kind(&bt_text) {
+                if let Some(kind) = exception_kind.as_deref() {
                     if !self.exception_filter_enabled(kind) {
                         match self.resume_hidden_stop("continue") {
                             Ok(next) => {
@@ -2137,7 +2284,7 @@ impl DapServer {
                     .map
                     .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
                 {
-                    None if !self.show_raw_frames && mode != ResumeMode::Pause => {
+                    None if !self.show_raw_frames => {
                         if self.unmapped_steps >= 200 {
                             self.terminate_with_diagnostic(
                             out,
@@ -2280,14 +2427,13 @@ impl DapServer {
     }
 
     fn exception_kind(&self, backtrace: &str) -> Option<&'static str> {
-        if self.last_signal.is_some() {
-            return Some("signal");
-        }
         let text = backtrace.to_ascii_lowercase();
         if text.contains("panic") || text.contains("unwind") {
             Some("panic")
         } else if text.contains("exception") || text.contains("fatal error") {
             Some("error")
+        } else if self.last_signal.is_some() {
+            Some("signal")
         } else {
             None
         }
@@ -2306,14 +2452,16 @@ impl DapServer {
     fn terminate_with_diagnostic(&mut self, out: &mut impl Write, diagnostic: &str, message: &str) {
         self.state = State::Terminated;
         self.invalidate_references();
-        self.cleanup_after_terminal_state(out);
+        let cleanup_proven = self.cleanup_after_terminal_state(out);
         let body = format!(
             "{{\"category\":\"stderr\",\"output\":\"[{}] {}\\n\"}}",
             json_escape(diagnostic),
             json_escape(message)
         );
         self.event(out, "output", &body);
-        self.event(out, "terminated", "{}");
+        if cleanup_proven {
+            self.event(out, "terminated", "{}");
+        }
     }
 
     fn breakpoint_action(&mut self, line: usize) -> BreakpointAction {
@@ -2517,6 +2665,7 @@ impl DapServer {
             22036 => "jet.staleReference",
             22037 => "jet.mapMismatch",
             22038 => "jet.cancelled",
+            22039 => "jet.noSourceLocation",
             _ => "jet.unavailable",
         };
         let (diagnostic, why, fix) = diagnostic_details(id, format);
@@ -2658,6 +2807,11 @@ fn diagnostic_details(id: i64, format: &str) -> (&'static str, &'static str, &'s
             "E2237",
             "the editor, adapter, or debugger control channel closed before cleanup was proven",
             "check the target process, then start a new debug session",
+        ),
+        22039 => (
+            "E2235",
+            "the requested thread has no verified Jet source location",
+            "select a stopped Jet task or move the breakpoint to a mapped Jet statement",
         ),
         _ => (
             "E2239",
@@ -3182,6 +3336,7 @@ mod tests {
             launch_env: Vec::new(),
             current_thread: 1,
             last_signal: None,
+            last_exception: None,
             exception_filters: default_exception_filters(),
             show_raw_frames: false,
             lines_start_at_1: true,
@@ -3197,6 +3352,45 @@ mod tests {
 
     fn frame(body: &str) -> String {
         format!("Content-Length: {}\r\n\r\n{body}", body.len())
+    }
+
+    #[test]
+    fn stack_projection_pages_over_unmapped_native_frames() {
+        let map = LineMap::build("// jet:line 2\nlet x = 1;\n// jet:line 3\nlet y = 2;\n");
+        let frames = vec![
+            RawFrame {
+                func: "runtime_helper".to_string(),
+                rust_file: "main.rs".to_string(),
+                rust_line: 1,
+            },
+            RawFrame {
+                func: "__jet_run".to_string(),
+                rust_file: "main.rs".to_string(),
+                rust_line: 2,
+            },
+            RawFrame {
+                func: "__jet_run".to_string(),
+                rust_file: "main.rs".to_string(),
+                rust_line: 4,
+            },
+        ];
+
+        let jet_frames = project_frames(&frames, &map, "main.rs", false);
+        assert_eq!(jet_frames.len(), 2);
+        assert_eq!(jet_frames[0].position, 1);
+        assert_eq!(jet_frames[0].jet_line, Some(2));
+        assert_eq!(jet_frames[1].position, 2);
+        assert_eq!(jet_frames[1].jet_line, Some(3));
+
+        let second_page = jet_frames.iter().skip(1).take(1).collect::<Vec<_>>();
+        assert_eq!(second_page[0].frame.rust_line, 4);
+        assert_eq!(second_page[0].jet_line, Some(3));
+
+        let raw_frames = project_frames(&frames, &map, "main.rs", true);
+        assert_eq!(raw_frames.len(), 5);
+        assert!(raw_frames[0].raw);
+        assert!(!raw_frames[1].raw);
+        assert!(raw_frames[2].raw);
     }
 
     #[test]
@@ -3295,6 +3489,37 @@ mod tests {
         );
         assert!(response.contains("\"line\":0"), "{response}");
         assert_eq!(zero_based.pending_breakpoints, vec![1]);
+    }
+
+    #[test]
+    fn breakpoint_status_events_publish_backend_resolution() {
+        let mut server = test_server(State::Configuring);
+        server.pending_specs = vec![
+            BreakpointSpec {
+                line: 2,
+                ..BreakpointSpec::default()
+            },
+            BreakpointSpec {
+                line: 3,
+                ..BreakpointSpec::default()
+            },
+        ];
+        server.client_breakpoint_ids = vec![7, 8];
+        let mut output = Vec::new();
+        server.emit_breakpoint_statuses(&mut output, &[false, true]);
+        let text = String::from_utf8(output).unwrap();
+        assert!(
+            text.contains("\"event\":\"breakpoint\""),
+            "missing DAP breakpoint change events: {text}"
+        );
+        assert!(
+            text.contains("\"id\":7,\"verified\":false"),
+            "unresolved native breakpoint must be reported as pending: {text}"
+        );
+        assert!(
+            text.contains("\"id\":8,\"verified\":true"),
+            "resolved native breakpoint must be reported as verified: {text}"
+        );
     }
 
     #[test]
@@ -3865,6 +4090,35 @@ mod tests {
     }
 
     #[test]
+    fn dap_exception_info_keeps_jet_panic_error_and_signal_meaning() {
+        let mut server = test_server(State::Stopped);
+        server.last_exception = Some("panic".to_string());
+        let panic = dap_call(
+            &mut server,
+            r#"{"seq":1,"type":"request","command":"exceptionInfo","arguments":{}}"#,
+        );
+        assert!(panic.contains("\"exceptionId\":\"JetPanic\""), "{panic}");
+        assert!(panic.contains("\"description\":\"Jet panic\""), "{panic}");
+
+        server.last_exception = Some("error".to_string());
+        let error = dap_call(
+            &mut server,
+            r#"{"seq":2,"type":"request","command":"exceptionInfo","arguments":{}}"#,
+        );
+        assert!(error.contains("\"exceptionId\":\"JetError\""), "{error}");
+        assert!(error.contains("\"description\":\"Jet error\""), "{error}");
+
+        server.last_signal = Some("SIGABRT".to_string());
+        server.last_exception = Some("SIGABRT".to_string());
+        let signal = dap_call(
+            &mut server,
+            r#"{"seq":3,"type":"request","command":"exceptionInfo","arguments":{}}"#,
+        );
+        assert!(signal.contains("\"exceptionId\":\"SIGABRT\""), "{signal}");
+        assert!(signal.contains("Jet target stopped on SIGABRT"), "{signal}");
+    }
+
+    #[test]
     fn dap_unmapped_stop_terminates_with_a_jet_diagnostic() {
         let mut server = test_server(State::Running);
         let mut output = Vec::new();
@@ -3878,6 +4132,23 @@ mod tests {
         assert!(text.contains("E2235"));
         assert!(text.contains("\"event\":\"terminated\""));
         assert!(!text.contains("\"event\":\"stopped\""));
+    }
+
+    #[test]
+    fn dap_pause_does_not_expose_an_unmapped_native_frame() {
+        let mut server = test_server(State::Running);
+        let mut output = Vec::new();
+        server.emit_resume(
+            &mut output,
+            ResumeResult::Stopped(
+                "frame #0: 0x0000 `runtime_helper at generated.rs:99:1\n".to_string(),
+            ),
+            ResumeMode::Pause,
+        );
+        let text = String::from_utf8(output).expect("DAP output is UTF-8");
+        assert_eq!(server.state, State::Terminated);
+        assert!(!text.contains("\"event\":\"stopped\""));
+        assert!(text.contains("E2235") || text.contains("E2234"), "{text}");
     }
 
     #[test]

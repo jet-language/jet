@@ -1666,6 +1666,14 @@ fn jet_jit_rich_panic(
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let locals = rt.heap.clone_string(locals).unwrap_or_default();
         Concurrency::set_rich_panic_reason(msg.clone());
+        // I9: Cranelift marshals the same failure facts into the canonical
+        // Prelude receipt writer; it does not own a second receipt path.
+        let _ = jet_codegen::development_receipt::jet_production_failure_receipt_write(
+            "E3001",
+            &file,
+            line.max(0) as u32,
+            &fn_name,
+        );
         let report = contract_kernel::jet_runtime_stop_report(
             "E3001",
             &file,
