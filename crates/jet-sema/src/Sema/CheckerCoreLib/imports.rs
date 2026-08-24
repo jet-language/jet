@@ -4,8 +4,17 @@ use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::is_polymorphic_core_special;
 use crate::Sema::Diagnostics::{private_item, soft_public_use, type_fix_hint};
 use crate::Sema::FFI::e3211;
+use crate::Sema::ModuleState;
 use crate::Syntax;
 use std::collections::HashMap;
+
+fn imported_inline_member_name(target: &ModuleState, name: &str) -> Option<String> {
+    let (inline_module, item) = name.split_once('.')?;
+    let canonical = target.code_modules.get(inline_module)?;
+    let mangled = jet_foundation::Names::member_name(canonical, item);
+    target.funcs.contains_key(&mangled).then_some(mangled)
+}
+
 impl<'a> Checker<'a> {
         /// D-MOD2: check a call `alias.method(args)` where `alias` is an inline code module.
         /// The function was registered as `__jet_{alias}__{method}` in `self.funcs`.
@@ -352,6 +361,8 @@ impl<'a> Checker<'a> {
                 return None;
             };
             let target = &mods[mod_idx];
+            let semantic_name = imported_inline_member_name(target, name)
+                .unwrap_or_else(|| name.to_string());
             // D-MOD4: `pub use` re-export — `thismod.Item` where Item is defined in a
             // submodule and re-exported. Redirect to the real definition.
             if let Some((real_name, real_idx)) = target.reexports.get(name) {
@@ -372,8 +383,10 @@ impl<'a> Checker<'a> {
                     false,
                 );
             }
-            if target.funcs.contains_key(name) {
-                let is_pub = self.name_ledger.visible(self.module_idx, mod_idx, name);
+            if target.funcs.contains_key(&semantic_name) {
+                let is_pub = self
+                    .name_ledger
+                    .visible(self.module_idx, mod_idx, &semantic_name);
                 if !is_pub && mod_idx != self.module_idx {
                     self.diags.push(private_item(name, span));
                     for a in args.iter_mut() {
@@ -388,7 +401,7 @@ impl<'a> Checker<'a> {
                 {
                     self.diags.push(soft_public_use(name, span));
                 }
-                let sig = target.funcs.get(name).unwrap().clone();
+                let sig = target.funcs.get(&semantic_name).unwrap().clone();
                 if let Some(dep) = sig.deprecation.as_ref() {
                     self.check_deprecation(name, dep, span);
                 }
@@ -444,7 +457,12 @@ impl<'a> Checker<'a> {
                     *args = normalized.args;
                 }
                 let mut call_access = self.call_access_frame();
-                let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();
+                let type_params = target
+                    .trait_reg
+                    .fn_params
+                    .get(&semantic_name)
+                    .cloned()
+                    .unwrap_or_default();
                 let mut subst = HashMap::new();
                 let mut pre_inferred = Vec::new();
                 if !type_args.is_empty() {
@@ -544,7 +562,7 @@ impl<'a> Checker<'a> {
                 }).collect();
                 let target_alias = target.module_alias.clone();
                 self.record_edge(format!("{target_alias}.{name}"), span);
-                self.record_function_reference(mod_idx, name, span);
+                self.record_function_reference(mod_idx, &semantic_name, span);
                 if args.len() != sig.params.len() {
                     self.diags.push(Diagnostic::error(
                         "E0104",
@@ -724,8 +742,8 @@ impl<'a> Checker<'a> {
                     self.trait_reg.instantiate_type(ty, &subst)
                 )));
             }
-            if target.registry.contains(name) {
-                let is_pub = self.type_is_pub_in(mod_idx, name);
+            if target.registry.contains(&semantic_name) {
+                let is_pub = self.type_is_pub_in(mod_idx, &semantic_name);
                 if !is_pub && mod_idx != self.module_idx {
                     self.diags.push(private_item(name, span));
                 } else {

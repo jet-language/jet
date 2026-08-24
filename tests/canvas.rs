@@ -3027,7 +3027,7 @@ fn canvas_actions_preserve_nested_imported_module_callee() {
     )
     .unwrap();
     let path = dir.join("main.jet");
-    let src = "use \"./helper\" as h\n\nfn run() {\n    limit :: 4\n    print(limit)\n}\n";
+    let src = "use \"./helper\" as h\n\nfn run(limit: Int) {\n    print(limit)\n}\n";
     fs::write(&path, src).unwrap();
 
     let request = format!(

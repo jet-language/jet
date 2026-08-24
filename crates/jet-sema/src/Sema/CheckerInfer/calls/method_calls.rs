@@ -556,6 +556,29 @@ impl<'a> Checker<'a> {
             && matches!(receiver.as_ref(), Expr::Ident(name, _) if self
                 .lookup(name)
                 .is_some_and(|info| is_allocator_type(&info.ty)));
+        // D-MOD2: an imported file can expose an inline module, so
+        // `alias.module.item(...)` must resolve the module member before the
+        // ordinary receiver walk tries to treat `alias.module` as a value.
+        if let Expr::Field(base, inline_module, _) = receiver.as_ref() {
+            if let Expr::Ident(alias, alias_span) = base.as_ref() {
+                if let Some(&module_idx) = self.imports.get(alias) {
+                    let is_inline_module = self
+                        .modules
+                        .is_some_and(|modules| modules[module_idx].code_modules.contains_key(inline_module));
+                    if is_inline_module {
+                        self.record_import_alias_reference(alias, *alias_span);
+                        return self.infer_import_call(
+                            module_idx,
+                            &format!("{inline_module}.{method}"),
+                            *alias_span,
+                            span,
+                            type_args,
+                            args,
+                        );
+                    }
+                }
+            }
+        }
         self.check_call_receiver_evaluation(receiver, span);
         // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
         // range-shaped recovery long enough to point at the old spelling,

@@ -1033,7 +1033,8 @@ async function dragExecEndpoint(ctx, graphTitle, oldTargetTitle, newTargetTitle)
 }
 
 async function dragExecPin(ctx, graphTitle, fromTitle, fromPinName, toTitle) {
-  await ctx.switchGraph(graphTitle);
+  const current = await ctx.state();
+  if (!current || current.graphTitle !== graphTitle) await ctx.switchGraph(graphTitle);
   await ctx.waitForCanvas();
   const doc = await ctx.graph();
   const graph = graphByTitle(doc, graphTitle);

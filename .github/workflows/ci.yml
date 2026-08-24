@@ -178,6 +178,20 @@ jobs:
         if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
         run: nix develop .#full -c cargo test --test build_sandbox -- --nocapture
 
+      # Card #1415 criterion 5: the script-to-system journey records its own
+      # receipt per host. It is already its own registered suite
+      # (tests/suites.txt), so the native rows run it here rather than
+      # re-hosting its #[test] inside another test binary -- doing that
+      # double-included tests/common/mod.rs and broke the build with
+      # "cannot define multiple global allocators".
+      - name: Script-to-system journey (Unix)
+        if: ${{ !cancelled() && matrix.os != 'windows-latest' }}
+        run: nix develop .#full -c cargo test --test script_to_system -- --nocapture
+
+      - name: Script-to-system journey (Windows)
+        if: ${{ !cancelled() && matrix.os == 'windows-latest' }}
+        run: cargo test --test script_to_system -- --nocapture
+
       # Card #1173 rows: the agent corpus on its frozen OS matrix. The corpus
       # doc excludes Windows at docs/audits/agent-workload-corpus.md:61 and
       # the exclusion is recorded with an expiry in native_os_matrix.tsv, so

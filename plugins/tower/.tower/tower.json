@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2165,
-    "rev": 43543,
+    "rev": 43624,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18,20 +18,21 @@
         "radar-cards",
         "radar-remaining",
         "radar-frozen",
-        "radar:e9",
-        "radar:e12",
-        "radar:e3",
         "radar-sq",
-        "radar:e6",
         "radar:e4",
-        "radar:e10",
-        "radar:e11",
-        "radar:e7",
+        "board-ideas",
+        "radar:e9",
         "radar:e5",
-        "radar:e8"
+        "radar:e3",
+        "radar:e6",
+        "radar:e10",
+        "radar:e8",
+        "radar:e7",
+        "radar:e11",
+        "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-24T13:12:41.132Z"
+    "completionCursor": "2026-08-24T13:53:12.597Z"
   },
   "epochs": [
     {
@@ -2479,7 +2480,7 @@
       "title": "M08 · Source-backed visual app building",
       "goal": "The RAD slice has one documented UI architecture and a source-backed round trip: shared source model and protocol, component palette and tree, property inspector, layout editing, callback creation and navigation, and two-way text, design, and graph proof; the UI-tree spelling is explicitly marked unbuilt until that architecture decision. Someone can build a small UI visually, inspect the exact Jet source, jump to a handler, and reopen it with design and graph views agreeing.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:03:02.937Z"
     },
     {
@@ -2619,7 +2620,7 @@
       "title": "M02 · Source-backed graph editing",
       "goal": "Canvas supports safe graph manipulation over canonical Jet source: select and move, drag typed data pins, converge and label execution pins, insert at branch and pattern targets, copy, paste, and duplicate, rename across a project, and apply checked cross-file edits. Someone can perform each gesture, see formatted source, and undo it, while stale, ambiguous, incompatible, or invalid edits reject atomically and preserve source.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:04:51.905Z"
     },
     {
@@ -2660,7 +2661,7 @@
       "title": "M03 · First run to daily workflow",
       "goal": "A beginner can install Jet, create or open a project, run a bare project or single-file shebang program, understand the first diagnostic, recover with check and test, and continue into a daily command workflow with migration and command-function overrides. The capability is proven by the supported-host terminal and editor matrix, executable examples and help, AOT/dev proof, recovery exercises, and measured first-success evidence.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:06:01.558Z"
     },
     {
@@ -20074,8 +20075,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "evidence: Source/BudgetProviders.rs:649-711, crates/jet-foundation/src/PerformanceBudget.rs:1787-1826, and tests/cli_parts/budget.rs:4-30 pin inputs, cache states, samples, variance, and failure rails.",
-          "at": "2026-08-24T10:52:50.402Z"
+          "evidence": "unchanged; failure rails remain in tests/dev_parts/corpus_gate.rs:205-295 and tools/perf/dashboard.sh:491-535.",
+          "at": "2026-08-24T13:50:03.464Z"
         },
         {
           "n": 4,
@@ -20083,8 +20084,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "evidence: tests/dev_parts/corpus_gate.rs:105-124,272-295; production outputs matched across JIT, interpreter, and release AOT, and missing-source failure returned Error [E2105] with exit_status=1.",
-          "at": "2026-08-24T10:52:50.748Z"
+          "evidence": "unchanged; cli_compiler_speed production success/failure tests pass.",
+          "at": "2026-08-24T13:50:03.818Z"
         },
         {
           "n": 5,
@@ -20103,7 +20104,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T01:38:26.355Z",
-      "updated": "2026-08-24T10:52:50.749Z",
+      "updated": "2026-08-24T13:50:03.819Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -20787,8 +20788,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "evidence: prior source ledger unchanged; [crosswalk:32](/home/nate/Projects/Github/jet/docs/research/compiler-latency-video-crosswalk-2026-08-24.md:32)",
-          "at": "2026-08-24T13:00:37.743Z"
+          "evidence": "unchanged; existing source-ledger evidence retained.",
+          "at": "2026-08-24T13:50:04.170Z"
         },
         {
           "n": 2,
@@ -20863,7 +20864,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T18:00:25.417Z",
-      "updated": "2026-08-24T13:00:37.743Z",
+      "updated": "2026-08-24T13:50:04.171Z",
       "tags": [],
       "parentId": null,
       "updatedBy": "Main"
@@ -21037,7 +21038,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m03-first-run-path",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Goal\nScaffold and template emit `run.jet` as the canonical default program entry (D-VERDICT-678-1), matching `jet run` and `fn run`.\n\n## Law\n- Default entry file is `run.jet`.\n- Explicit file targets remain available.\n- Sibling cards own resolver (#1031), migration (#1032), and specs/help/examples/AOT proof (#1033) — do not absorb them.\n\n## Scope\nIn: `jet new` / scaffold templates; default bare-project file creation; template contents with `fn run`.\nOut: bare-project resolution algorithm; migrating existing `main.jet` trees; full onboarding curriculum (#679+).\n\n## Owned paths\n- `Source/CmdCompile.rs` / scaffold command paths\n- template files used by `jet new`\n- `tests/jet_test.rs` (and related CLI tests)\n- short docs pointers (philosophy / getting started) only as needed for scaffold behavior\n\n## Steps\n1. Audit current scaffold output; replace default entry with `run.jet` + `fn run`.\n2. Keep explicit `--file` / path targets working unchanged.\n3. Focused tests: new project runs with `jet run`; template compiles; no `main.jet` default.\n4. Do not fight #1031–#1033 ownership; coordinate names only.\n5. Independent review.\n\n## Acceptance / proof\nCriteria 1–3. Proof: CLI/scaffold tests + manual `jet new` smoke.\n\n## Blockers\nblockedBy: none. Verdict ratified. Cleared stale #217 freeze link — scaffold is not gated on the bootstrap dogfood campaign (siblings already proceeded).\n",
       "blockedBy": [
@@ -21089,35 +21090,35 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "already met; unchanged.",
-          "at": "2026-08-24T13:00:38.120Z"
+          "evidence": "unchanged.",
+          "at": "2026-08-24T13:50:04.550Z"
         },
         {
           "n": 2,
           "text": "Install, scaffold, resolve, run, diagnose, test, edit, and learn use consistent commands and source on every supported beginner host.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:54.343Z"
+          "evidence": "evidence: tests/onboarding_matrix.rs:100-190; terminal_editor_state_matrix passed.",
+          "at": "2026-08-24T13:50:04.905Z"
         },
         {
           "n": 3,
           "text": "Missing entry, ambiguous project, unsupported host, install failure, invalid code, offline state, and migration from old layouts offer a tested recovery path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:54.343Z"
+          "evidence": "evidence: tests/onboarding_recovery.rs:132-330; recovery suite passed.",
+          "at": "2026-08-24T13:50:05.252Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:54.343Z"
+          "evidence": "evidence: tests/jet_test.rs:1056-1065; tests/pkg.rs:3583-3647; production scaffold tests passed.",
+          "at": "2026-08-24T13:50:05.597Z"
         },
         {
           "n": 5,
@@ -21125,8 +21126,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "already met; unchanged.",
-          "at": "2026-08-24T13:00:38.527Z"
+          "evidence": "unchanged.",
+          "at": "2026-08-24T13:50:05.954Z"
         }
       ],
       "refs": [
@@ -21141,10 +21142,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-17T14:49:29.497Z",
-      "updated": "2026-08-24T13:00:38.527Z",
+      "updated": "2026-08-24T13:50:17.807Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T13:50:17.807Z"
     },
     {
       "id": "c0q08oaj",
@@ -33880,7 +33882,7 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": "e8-m02-graph-editing",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Outcome\n\nShip **Canvas execution pins: source-backed incoming convergence** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/spec/syntax-decisions.md, crates/jet-devserver/src/Canvas/graph_projection.rs, crates/jet-devserver/src/Canvas/edit_actions.rs, crates/jet-canvas/src/js/graph-rendering.js, crates/jet-canvas/src/js/input-events.js, scripts/canvas-test/scenario.mjs, tests/canvas.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Author the named Jet construct structurally while preserving its exact source meaning, safe beginner defaults, and explicit expert controls.\n6. Incomplete, ill-typed, ambiguous, or stale edits remain recoverable and never emit plausible but semantically different source.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 8 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -33909,47 +33911,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:14.688Z"
+          "evidence": "evidence: graph_json.rs:246-297, schema_api.rs:1140-1168, Chromium PASS for apply, structured-join, and explicit-strategies.",
+          "at": "2026-08-24T13:49:59.872Z"
         },
         {
           "n": 2,
           "text": "Create, inspect, edit, format, undo, and reload preserve the construct's types, scopes, provenance, and canonical Jet spelling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:14.688Z"
+          "evidence": "evidence: graph_json.rs:140-155, edit_actions.rs:1519-1604, selected-span/apply PASS with reload and undo.",
+          "at": "2026-08-24T13:50:00.242Z"
         },
         {
           "n": 3,
           "text": "Incomplete, ill-typed, ambiguous, or stale edits remain recoverable and never emit plausible but semantically different source.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:14.688Z"
+          "evidence": "evidence: edit_actions.rs:2183-2218, input-events.js:452-473, preview/refusal/escape/stale Chromium scenarios PASS.",
+          "at": "2026-08-24T13:50:00.601Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:14.688Z"
+          "evidence": "evidence: real Chromium 151 scenarios PASS; targeted Canvas tests pass.",
+          "at": "2026-08-24T13:50:00.961Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:14.688Z"
+          "evidence": "evidence: syntax-decisions.md:5327-5336, canvas-parity.md:68-69, editor and JavaScript asset tests pass.",
+          "at": "2026-08-24T13:50:01.314Z"
         }
       ],
       "refs": [
@@ -33963,10 +33965,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:04:33.208Z",
-      "updated": "2026-08-23T01:05:37.795Z",
-      "updatedBy": "mse8",
+      "updated": "2026-08-24T13:50:15.861Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T13:50:15.860Z"
     },
     {
       "id": "c02atgwz",
@@ -47160,20 +47163,20 @@
         {
           "n": 3,
           "text": "Cold-cache regressions, invalidation errors, nondeterminism, pathological inputs, and benchmark instability remain visible and cannot be hidden by changed workloads or warmups.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:00.786Z"
+          "evidence": "evidence: tools/perf/dashboard.sh:32, :392, :505, :525, :535; Source/BudgetProviders.rs:899, :1382; passing targeted cache and pathological-input tests. Sibling replay compile error was not owned.",
+          "at": "2026-08-24T13:49:56.997Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:00.786Z"
+          "evidence": "evidence: crates/jet-driver/src/QueryService.rs:478, :485, :493; crates/jet-driver/src/Loader.rs:3082, :3098; targeted production success/failure checks pass.",
+          "at": "2026-08-24T13:49:57.380Z"
         },
         {
           "n": 5,
@@ -47201,7 +47204,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:40.145Z",
-      "updated": "2026-08-24T13:00:27.280Z",
+      "updated": "2026-08-24T13:49:57.380Z",
       "updatedBy": "Main",
       "tags": [],
       "parentId": null
@@ -47998,7 +48001,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m03-first-run-path",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Beginner onboarding: diagnostic-led recovery exercises** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with README.md, docs/spec/philosophy.md, docs/spec/diagnostics.md, docs/spec/syntax-decisions.md, examples/features, tests/golden.rs, tests/diagnostic_snapshots.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Make run.jet and the named newcomer workflow the real scaffold, resolver, documentation, diagnostic, and example path while preserving explicit targets.\n6. Missing entry, ambiguous project, unsupported host, install failure, invalid code, offline state, and migration from old layouts offer a tested recovery path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 11 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -48035,20 +48038,20 @@
         {
           "n": 3,
           "text": "Missing entry, ambiguous project, unsupported host, install failure, invalid code, offline state, and migration from old layouts offer a tested recovery path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:02.624Z"
+          "evidence": "evidence: passing onboarding_recovery tests at tests/onboarding_recovery.rs:40, :132, and :272; suite registered at tests/suites.txt:326.",
+          "at": "2026-08-24T13:49:57.751Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:02.624Z"
+          "evidence": "evidence: tests/onboarding_recovery.rs real CLI success/failure/recovery tests; tests/onboarding_matrix.rs::terminal_editor_state_matrix; production resolver crates/jet-pkg-model/src/Package/mod.rs:847-886,1402-1505",
+          "at": "2026-08-24T13:49:58.104Z"
         },
         {
           "n": 5,
@@ -48071,10 +48074,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:44.127Z",
-      "updated": "2026-08-24T13:00:32.119Z",
+      "updated": "2026-08-24T13:50:14.105Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T13:50:14.105Z"
     },
     {
       "id": "c0iho8mx",
@@ -48085,7 +48089,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m03-first-run-path",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Beginner onboarding: terminal and editor state matrix** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with README.md, docs/spec/philosophy.md, docs/spec/diagnostics.md, docs/spec/syntax-decisions.md, examples/features, tests/golden.rs, tests/diagnostic_snapshots.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Make run.jet and the named newcomer workflow the real scaffold, resolver, documentation, diagnostic, and example path while preserving explicit targets.\n6. Missing entry, ambiguous project, unsupported host, install failure, invalid code, offline state, and migration from old layouts offer a tested recovery path.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 11 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -48104,11 +48108,11 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:02.890Z"
+          "evidence": "evidence: tests/onboarding_matrix.rs:118-130; production CLI, PTY, LSP, and recovery smokes passed; sibling compile error isolated to crates/jet-codegen/src/Codegen/mod.rs:1096.",
+          "at": "2026-08-24T13:49:58.462Z"
         },
         {
           "n": 2,
@@ -48122,20 +48126,20 @@
         {
           "n": 3,
           "text": "Missing entry, ambiguous project, unsupported host, install failure, invalid code, offline state, and migration from old layouts offer a tested recovery path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:02.890Z"
+          "evidence": "evidence: tests/onboarding_recovery.rs:272, docs/audits/beginner-onboarding-2026-08-24.md:69",
+          "at": "2026-08-24T13:49:58.812Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:02.890Z"
+          "evidence": "evidence: tests/onboarding_matrix.rs:38,118; real-binary matrix and recovery tests pass.",
+          "at": "2026-08-24T13:49:59.155Z"
         },
         {
           "n": 5,
@@ -48158,10 +48162,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:44.457Z",
-      "updated": "2026-08-24T13:00:32.858Z",
+      "updated": "2026-08-24T13:50:14.853Z",
       "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T13:50:14.852Z"
     },
     {
       "id": "c0o7y0dj",
@@ -50082,7 +50087,7 @@
       "track": "epoch",
       "epoch": "e8",
       "milestoneId": "e8-m08-rad-app-builder",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **Canvas RAD: two-way text, design, and graph round-trip proof** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply the card body and referenced ratified law. Stop for a ballot before new syntax, public names, dependencies, or invariant exceptions.\n2. Start with docs/plans/epoch-6/canvas-design-spec.md, docs/plans/epoch-6/canvas-workspace-architecture.md, crates/jet-canvas, tests/canvas_scenarios.rs. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Keep Jet source canonical. Canvas reads and writes the same semantic graph through one transactional architecture with explicit provenance.\n6. Parse errors, stale revisions, conflicting edits, invalid graph operations, and failed saves preserve source and undo history without a hidden shadow model.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 8 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [
@@ -50106,47 +50111,47 @@
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:16.970Z"
+          "evidence": "evidence: tests/canvas_scenarios.rs:897, real Chromium RAD round-trip passed.",
+          "at": "2026-08-24T13:50:01.668Z"
         },
         {
           "n": 2,
           "text": "Source, semantic graph, visual projection, edits, undo, diagnostics, and saved text remain lossless and mutually consistent.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:16.970Z"
+          "evidence": "evidence: input-events.js:695, editing-history.js:856, transactions-catalog.js:327; source/graph/view state stays synchronized.",
+          "at": "2026-08-24T13:50:02.034Z"
         },
         {
           "n": 3,
           "text": "Parse errors, stale revisions, conflicting edits, invalid graph operations, and failed saves preserve source and undo history without a hidden shadow model.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:16.970Z"
+          "evidence": "evidence: schema_api.rs:980, source_model.rs:35, transactions-catalog.js:368, diagnostics-query.js:131; failure and stale tests passed.",
+          "at": "2026-08-24T13:50:02.392Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:16.970Z"
+          "evidence": "evidence: PASS chromium@Chrome/151.0.7922.137 canvas-rad-two-way-round-trip; targeted Canvas unit tests passed.",
+          "at": "2026-08-24T13:50:02.752Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:16.970Z"
+          "evidence": "evidence: architecture :234, parity matrix :97, protocol :420, example check/run passed, JS syntax passed.",
+          "at": "2026-08-24T13:50:03.126Z"
         }
       ],
       "refs": [
@@ -50157,10 +50162,11 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:54.841Z",
-      "updated": "2026-08-23T01:06:35.011Z",
-      "updatedBy": "mse8",
+      "updated": "2026-08-24T13:50:16.597Z",
+      "updatedBy": "Main",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "completedAt": "2026-08-24T13:50:16.597Z"
     },
     {
       "id": "c0kne6oz",
@@ -82383,7 +82389,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m03-first-run-path",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Grounded plan (D-SCRIPT-ENTRY1=A: first-line shebang)\n\nCanonical: `#!/usr/bin/env jet` as byte 0 of the file. Lexer skips it. No new\nCLI flag, no new resolver, no project file. Owner ruling: this is OS syntax,\nnot Jet syntax (see card question qknub48i answer) — do not invent a marker.\n\nParser/lexer:\n1. Entry point is `pub fn lex(src: &str)` in crates/jet-lexer/src/Lexer/Terminators.rs:15\n   (also crates/jet-lexer/src/Lexer/Scan.rs::lex_raw). Before scanning, if\n   `src.as_bytes()` starts with `#!`, skip bytes through the first `\\n`\n   (or EOF) and do not emit a token for that line.\n2. Line/col spans for every later token must still report the real source\n   line (line 2 onward), not shift left. Check how the lexer currently\n   advances its line counter per newline and confirm the skipped line counts\n   as line 1 exactly like a comment line would.\n3. `#!` appearing anywhere except byte offset 0 (e.g. after leading\n   whitespace, or on a later line) is rejected with a new diagnostic —\n   reserve the next free E-code per docs/spec/diagnostics.md \"Adding a\n   diagnostic\"; what: \"a shebang line is only recognized at the very start\n   of the file\"; fix: \"move `#!...` to line 1, or delete it\".\n4. Direct-file resolution already exists (Source/main.rs ~line 1761, \"a\n   `.jet` file can define...\"); confirm a shebang-prefixed file still\n   resolves through the exact same path as `jet <file>.jet` with zero branch\n   added there — the shebang is invisible below the lexer.\n5. No dependency header, no option grammar, no interpretation of anything\n   after `#!` — the whole rest of the line is opaque OS text Jet never reads.\n\nDocs/registry (I7):\n6. crates/jet-foundation/src/Syntax.rs: add a comment-only line citing\n   D-SCRIPT-ENTRY1=A next to the other \"adds no token\" comments (see\n   D-SHAPE3a, D-ARROW-CONTROL1 block ~lines 56-110) — the shebang mints no\n   Jet constant, so there is nothing to add beyond the decision-ID note.\n7. docs/spec/syntax-decisions.md: one log entry for D-SCRIPT-ENTRY1=A next to\n   the other 2026-08-04 entries.\n8. Run `jet devtools grammars` (Source/CmdDevTools.rs \"grammars\" subcommand)\n   and confirm the diff is empty (no new token was added).\n\nExamples/tests (I5, I9 — this is lexer-only, no runtime semantics change, so\nAOT/jet run/interpreter parity is automatic once the same token stream feeds\nevery tier):\n9. Add examples/features/cli/direct_launch.jet starting with\n   `#!/usr/bin/env jet`, printing one line. Golden at\n   examples/features/expected/cli/direct_launch.out.\n10. New test in tests/cli.rs, next to the existing `#!/bin/sh` executable\n    fixtures (e.g. ~line 3940): chmod +x the example file, exec it directly\n    on the current Unix host, assert stdout/exit code are byte-identical to\n    running the same file via `jet <path>`. Name it e.g.\n    `direct_launch_shebang_runs_executable_file`.\n11. New tests/ui/*.jet + .stderr pair for a `#!` NOT at byte 0 (model on\n    tests/ui/loop_header_semicolon_retired.jet/.stderr) — auto-discovered by\n    tests/diagnostic_snapshots.rs::ui_snapshots via fs::read_dir, no manual\n    registration needed.\n\nExact test commands:\n- `scripts/agent/jet-env cargo test --test cli direct_launch_shebang_runs_executable_file`\n- `scripts/agent/jet-env cargo test --test diagnostic_snapshots`\n- `scripts/agent/jet-env cargo test --test golden` (example compiles/runs, AOT tier)",
       "blockedBy": [],
@@ -82399,101 +82405,101 @@
         {
           "n": 1,
           "text": "The implementation matches the ratified D-SCRIPT-ENTRY1 launch contract and adds no second script semantics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T16:52:44.742Z"
+          "evidence": "evidence: crates/jet-lexer/src/Lexer/Scan.rs:51-61,240-251",
+          "at": "2026-08-24T13:50:06.305Z"
         },
         {
           "n": 2,
           "text": "A marked Jet file runs directly on supported Unix hosts. Every supported host also runs the same file through the direct Jet file command.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T16:52:44.972Z"
+          "evidence": "evidence: direct_launch_shebang_runs_executable_file",
+          "at": "2026-08-24T13:50:06.677Z"
         },
         {
           "n": 3,
           "text": "Arguments, working directory, environment, standard streams, signals, panic, and exit status match jet run exactly.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T16:52:45.210Z"
+          "evidence": "evidence: tests/cli.rs:27-56 compares cwd, environment, streams, output, and exit status",
+          "at": "2026-08-24T13:50:07.039Z"
         },
         {
           "n": 4,
           "text": "The lexer preserves source locations and rejects launch metadata outside its one allowed position with a registered teaching diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T16:52:45.432Z"
+          "evidence": "evidence: tests/ui/shebang_not_at_file_start.stderr:1-7; filtered UI snapshot passed",
+          "at": "2026-08-24T13:50:07.375Z"
         },
         {
           "n": 5,
           "text": "Help, installer behavior, editors, examples, snapshots, and clean-host tests teach one portable workflow. A fresh reviewer verifies the result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T16:52:45.653Z"
+          "evidence": "evidence: grammar regeneration produced no diff; filtered golden passed",
+          "at": "2026-08-24T13:50:07.715Z"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:22:59.386Z"
+          "evidence": "evidence: crates/jet-foundation/src/Syntax.rs:130-131",
+          "at": "2026-08-24T13:50:08.054Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:22:59.386Z"
+          "evidence": "evidence: docs/spec/syntax-decisions.md:6475-6480",
+          "at": "2026-08-24T13:50:08.397Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:22:59.386Z"
+          "evidence": "evidence: jet self devtools grammars; editor diff empty",
+          "at": "2026-08-24T13:50:08.758Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T17:22:59.386Z"
+          "evidence": "evidence: tests/ui/shebang_not_at_file_start.stderr:1-7; UI snapshot passed",
+          "at": "2026-08-24T13:50:09.128Z"
         },
         {
           "n": 10,
           "text": "examples/features/cli/direct_launch.jet (golden at examples/features/expected/cli/direct_launch.out) runs identically via chmod+x direct exec and via 'jet <path>'; proved by a new tests/cli.rs test (scripts/agent/jet-env cargo test --test cli direct_launch_shebang_runs_executable_file).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:56:30.448Z"
+          "evidence": "evidence: examples/features/cli/direct_launch.jet, golden, and direct_launch_shebang_runs_executable_file",
+          "at": "2026-08-24T13:50:09.569Z"
         },
         {
           "n": 11,
           "text": "A file with '#!' on any line other than byte offset 0 produces the new registered E-code with a blessed tests/ui/*.stderr snapshot, verified by scripts/agent/jet-env cargo test --test diagnostic_snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:56:30.795Z"
+          "evidence": "evidence: filtered ui_snapshots passed with E0042 snapshot",
+          "at": "2026-08-24T13:50:09.936Z"
         }
       ],
       "refs": [
@@ -82511,8 +82517,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T16:50:22.441Z",
-      "updated": "2026-08-23T01:06:37.207Z",
-      "updatedBy": "mse11"
+      "updated": "2026-08-24T13:50:18.556Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-08-24T13:50:18.556Z"
     },
     {
       "id": "c0pkjxs2",
@@ -82708,8 +82715,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "evidence: tests/compiled_workloads/manifest.tsv:1, docs/audits/compiled-workload-gate.md:17; contract pass: 7 tasks, 6 peer classes.",
-          "at": "2026-08-24T09:45:07.696Z"
+          "evidence": "evidence: tests/compiled_workloads/manifest.tsv:2-8 (unchanged)",
+          "at": "2026-08-24T13:50:10.280Z"
         },
         {
           "n": 2,
@@ -82773,7 +82780,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T16:50:55.353Z",
-      "updated": "2026-08-24T09:45:07.696Z",
+      "updated": "2026-08-24T13:50:10.281Z",
       "updatedBy": "Main"
     },
     {
@@ -82835,11 +82842,11 @@
         {
           "n": 5,
           "text": "Clean-host Linux, macOS, and Windows journeys record user actions, edit latency, build latency, failures, recovery, and final artifacts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-04T16:53:05.272Z"
+          "evidence": "Per-host journey receipts run as their own CI rows in the native-session-matrix job: Script-to-system journey (Unix) at .github/workflows/ci.yml:188 and (Windows) at ci.yml:192, so Linux, macOS and Windows each execute tests/script_to_system.rs and record their own receipt. The suite is registered at tests/suites.txt:334 and records user actions, edit and build latency, failures, recovery and final artifacts (tests/script_to_system.rs:25,37,59,73,100). Corrected mechanism: an earlier attempt re-hosted this suite inside tests/jetpack_platform.rs via a path mod, which double-included tests/common/mod.rs and broke the workspace build with cannot define multiple global allocators at tests/common/mod.rs:285. The include is removed and the workspace checks clean at 0 errors 0 warnings.",
+          "at": "2026-08-24T13:55:05.738Z"
         },
         {
           "n": 6,
@@ -82868,7 +82875,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T16:51:15.701Z",
-      "updated": "2026-08-24T13:00:35.848Z",
+      "updated": "2026-08-24T13:55:05.738Z",
       "updatedBy": "Main"
     },
     {
@@ -124144,7 +124151,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m03-first-run-path",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
@@ -124160,74 +124167,74 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:19:27.433Z"
+          "evidence": "evidence: crates/jet-foundation/src/Syntax.rs:176-179",
+          "at": "2026-08-24T13:50:10.642Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:19:27.433Z"
+          "evidence": "evidence: docs/spec/syntax-decisions.md:5963-5985",
+          "at": "2026-08-24T13:50:10.984Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:19:27.433Z"
+          "evidence": "evidence: jet self devtools grammars --quiet exited 0; editor diff was empty",
+          "at": "2026-08-24T13:50:11.335Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-10T16:19:27.433Z"
+          "evidence": "evidence: tests/ui/command_override_conflict/stderr:1-7",
+          "at": "2026-08-24T13:50:11.707Z"
         },
         {
           "n": 5,
           "text": "D-ROLEFILE1 and D-CMDOVERRIDE1 are ratified and logged in syntax-decisions.md; the D-VERDICT-678-1 amendment (run.jet loses reserved status) is recorded.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:25.667Z"
+          "evidence": "evidence: docs/spec/syntax-decisions.md:5963-5985",
+          "at": "2026-08-24T13:50:12.086Z"
         },
         {
           "n": 6,
           "text": "Each of run/build/dev/test resolves its package-root command file or the ratified default; CLI tests cover both paths.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:26.102Z"
+          "evidence": "evidence: resolver/build scope in Source/main.rs:2310-2334, Source/CmdCompile.rs:688-814; passing CLI test command_role_home_overrides_stock_and_show_default_reports_stock",
+          "at": "2026-08-24T13:50:12.446Z"
         },
         {
           "n": 7,
           "text": "A duplicate command file is a registered error with what/why/fix and a UI snapshot (I4).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:26.535Z"
+          "evidence": "evidence: docs/spec/diagnostic-rows.md:465, UI snapshot, and passing E3540 CLI assertion",
+          "at": "2026-08-24T13:50:12.775Z"
         },
         {
           "n": 8,
           "text": "Scaffold emits command files with a commented override, and jet <cmd> --show-default prints the effective default.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-19T13:38:26.953Z"
+          "evidence": "evidence: scaffold generation Source/CmdCompile.rs:1904-1940; passing scaffold assertions in tests/cli_parts/runtime.rs:528-537",
+          "at": "2026-08-24T13:50:13.121Z"
         }
       ],
       "refs": [],
@@ -124235,9 +124242,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-10T14:36:56.210Z",
-      "updated": "2026-08-23T01:06:38.723Z",
-      "updatedBy": "mse11",
-      "workOrder": 300
+      "updated": "2026-08-24T13:50:19.530Z",
+      "updatedBy": "Main",
+      "workOrder": 300,
+      "completedAt": "2026-08-24T13:50:19.530Z"
     },
     {
       "id": "c003lpmk",
@@ -144230,6 +144238,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-24T12:56:27.276Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T13:36:37.335Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T13:36:37.336Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T13:36:37.336Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-24T13:36:37.336Z"
         }
       ],
       "refs": [],
@@ -144237,8 +144281,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:56:25.841Z",
-      "updated": "2026-08-24T13:24:07.867Z",
-      "updatedBy": "Main"
+      "updated": "2026-08-24T13:36:37.336Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -190812,8 +190856,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-24T12:58:57.463Z"
+      "status": "ratified",
+      "created": "2026-08-24T12:58:57.463Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-08-24"
     }
   ],
   "questions": [
@@ -192683,9 +192729,493 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-24T13:12:32.699Z"
+    },
+    {
+      "id": "b5tahz4k",
+      "text": "examples/features/patterns/refutable_test_bind.jet -> confusing name, single space separator is weird for `Int String!`. Not clear that string is/should be an error type, that seems regressive. Also, a touch odd that no result type is indicated anywhere, though I guess that's part of core jet to have result with context riding? should result type require ?",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T13:26:30.461Z"
+    },
+    {
+      "id": "b6xhdf4x",
+      "text": "Double check what improved syntax for result deconstruction is -> instead of 4 lines for if guarded val == .ok or .err, single or just two lines -> how? Need this to be readable and clear but still shorter than 4 lines for something so common",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T13:29:29.211Z"
+    },
+    {
+      "id": "b7fy4k0n",
+      "text": "Adding newline inside {} should support auto formatting/organizing like with other languages so if you expand a single line block to multiline, it will auto indent the existing line",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T13:30:48.692Z"
+    },
+    {
+      "id": "b8zmcwei",
+      "text": "for warnings, consider the \"red arrows\" that show exactly where an error is, making it yellow to match the warning text color. Otherwise it looks like an error even though it is just a warning",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-24T13:34:07.968Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-24T13:55:05.738Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ufv5m3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:53:12.597Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-24T13:53:12.597Z"
+    },
+    {
+      "at": "2026-08-24T13:50:19.530Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01edx3m",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:18.556Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dmreif",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:17.807Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05e21g2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:16.597Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a8hfb2",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:15.861Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s5vucj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:14.853Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iho8mx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:14.105Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0d1h35k",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-24T13:50:13.121Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-24T13:50:12.776Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-24T13:50:12.446Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-24T13:50:12.086Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:50:11.708Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:50:11.335Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:50:10.984Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-24T13:50:10.642Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01edx3m",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:50:10.281Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hx9cco",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:50:09.937Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#11"
+    },
+    {
+      "at": "2026-08-24T13:50:09.569Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-24T13:50:09.129Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-24T13:50:08.759Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-24T13:50:08.398Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-24T13:50:08.055Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-24T13:50:07.715Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:50:07.376Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:50:07.040Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:50:06.677Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-24T13:50:06.305Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dmreif",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:50:05.955Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05e21g2",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:50:05.597Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05e21g2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:50:05.253Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05e21g2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:50:04.906Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05e21g2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-24T13:50:04.551Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05e21g2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:50:04.171Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0171611",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:50:03.819Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zmoznd",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:50:03.464Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zmoznd",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:50:03.126Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8hfb2",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:50:02.753Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8hfb2",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:50:02.393Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8hfb2",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:50:02.035Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8hfb2",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-24T13:50:01.668Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8hfb2",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:50:01.315Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0s5vucj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:50:00.961Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0s5vucj",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:50:00.601Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0s5vucj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:50:00.242Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0s5vucj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-24T13:49:59.873Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0s5vucj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:49:59.508Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ufv5m3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-24T13:49:59.155Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iho8mx",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:49:58.813Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iho8mx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:49:58.462Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0iho8mx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-24T13:49:58.105Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d1h35k",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:49:57.751Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0d1h35k",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:49:57.380Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j6jiv0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-24T13:49:56.998Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j6jiv0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-24T13:36:37.336Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LITCARRIER1",
+      "note": "D"
+    },
+    {
+      "at": "2026-08-24T13:36:37.336Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s69hxm",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-24T13:36:37.336Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s69hxm",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-24T13:36:37.336Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s69hxm",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-24T13:36:37.335Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0s69hxm",
+      "note": "#5 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-24T13:34:07.968Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b8zmcwei",
+      "note": "for warnings, consider the \"red arrows\" that show exactly wh"
+    },
+    {
+      "at": "2026-08-24T13:30:48.692Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b7fy4k0n",
+      "note": "Adding newline inside {} should support auto formatting/orga"
+    },
+    {
+      "at": "2026-08-24T13:29:29.211Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b6xhdf4x",
+      "note": "Double check what improved syntax for result deconstruction "
+    },
+    {
+      "at": "2026-08-24T13:26:30.461Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b5tahz4k",
+      "note": "examples/features/patterns/refutable_test_bind.jet -> confus"
+    },
     {
       "at": "2026-08-24T13:24:07.867Z",
       "by": "Main",
@@ -195737,454 +196267,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ewd6kd",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-23T20:39:09.962Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ewd6kd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T20:39:09.104Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ewd6kd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T20:39:06.847Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zpnwk9",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T20:39:06.069Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zpnwk9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T20:39:05.415Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zti5r8",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T20:39:04.689Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zti5r8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T20:39:04.341Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zti5r8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T20:39:03.980Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zti5r8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T20:39:03.308Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zti5r8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T20:34:51.584Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-1912-NAME1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-23T20:33:06.605Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-1913-LIVENESS1",
-      "note": "C"
-    },
-    {
-      "at": "2026-08-23T20:30:30.636Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PLATFORM-EVIDENCE1",
-      "note": "D"
-    },
-    {
-      "at": "2026-08-23T20:29:37.166Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-23T20:29:37.166Z"
-    },
-    {
-      "at": "2026-08-23T19:56:54.709Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00307he",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:56:53.955Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00307he",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T19:56:52.887Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00307he",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T19:56:51.621Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00307he",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T19:56:51.282Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00307he",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T19:56:49.981Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06eyg3s",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:56:48.105Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06eyg3s",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T19:56:46.231Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yl88cz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:56:44.743Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yl88cz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T19:56:43.704Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yl88cz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T19:56:43.197Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yl88cz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T19:56:41.071Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f07u66",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:56:40.312Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0f07u66",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-23T19:56:39.946Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0f07u66",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T19:56:39.585Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0f07u66",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T19:14:08.297Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06eyg3s",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:14:06.576Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06eyg3s",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T19:14:05.325Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06eyg3s",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T19:14:04.900Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06eyg3s",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T19:14:03.191Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ocarv7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:14:01.506Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ocarv7",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T19:14:00.181Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ocarv7",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T19:13:58.387Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tfsrts",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:13:57.045Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y9w2ur",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:13:55.535Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y9w2ur",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T19:13:53.558Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zti5r8",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:13:51.909Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zti5r8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T19:13:50.196Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wbf3js",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T19:13:48.677Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wbf3js",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T19:13:47.129Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wbf3js",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T19:13:45.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wbf3js",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T19:13:43.888Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wbf3js",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T18:31:09.967Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sad0nq",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T18:31:09.227Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sad0nq",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T18:31:08.855Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sad0nq",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T18:31:08.496Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sad0nq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T18:31:08.133Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sad0nq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T18:31:07.792Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0sad0nq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T18:31:06.821Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zpnwk9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-23T18:31:05.976Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y9w2ur",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T18:31:05.615Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y9w2ur",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-23T18:31:05.279Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y9w2ur",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T18:31:04.929Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0y9w2ur",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T18:31:04.335Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yl88cz",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T18:31:03.512Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yl88cz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T17:48:51.138Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zpnwk9",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-23T17:48:50.259Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zpnwk9",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-23T17:48:49.706Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zpnwk9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-23T17:48:48.984Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zpnwk9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-23T17:48:47.660Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0zpnwk9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-23T17:48:45.792Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lc8k7l",
-      "note": "phase"
     }
   ],
   "nextNum": 368,

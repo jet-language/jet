@@ -1454,8 +1454,10 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
-    out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
-    out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+    if needs_math {
+        out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
+    }
     out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 
     if needs_email {

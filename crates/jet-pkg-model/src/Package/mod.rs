@@ -931,8 +931,24 @@ impl PackageFacts {
     ) -> Result<Option<CheckedFile>, String> {
         self.validate_defaults()
             .map_err(|error| format!("{}: {error}", self.origin))?;
+        let mut files = self
+            .source_files_checked(resolver)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        files.retain(|file| {
+            let is_role_file = file
+                .relative
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| crate::Syntax::COMMAND_ROLE_FILES.contains(&name));
+            !is_role_file
+                || file
+                    .relative
+                    .parent()
+                    .map(|parent| parent.as_os_str().is_empty() || parent == Path::new("."))
+                    .unwrap_or(true)
+        });
         let entries = self
-            .discover_function_entries_checked(resolver, "build", true, true)
+            .discover_function_entries_from_files(resolver, &files, "build", true, true)
             .map_err(|error| format!("{}: {error}", self.origin))?;
         if entries.len() > 1 {
             let locations = entries

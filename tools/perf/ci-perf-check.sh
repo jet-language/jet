@@ -49,10 +49,11 @@ memory_budget=$(json_number memory_regression_pct)
 variance_budget=$(json_number variance_pct)
 baseline_samples=$(json_number samples)
 baseline_warmups=$(json_number warmups)
-for value in "$baseline_version" "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
+[ -n "$baseline_version" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
+[ "$baseline_version" -eq 3 ] || { echo "unsupported compiler-speed baseline version: $baseline_version" >&2; exit 1; }
+for value in "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
     [ -n "$value" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
 done
-[ "$baseline_version" -eq 3 ] || { echo "unsupported compiler-speed baseline version: $baseline_version" >&2; exit 1; }
 
 case "$THRESH" in
     "") latency_threshold=$latency_budget; memory_threshold=$memory_budget ;;

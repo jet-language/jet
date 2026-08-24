@@ -196,15 +196,34 @@
     const hasExecInput = (node) => (graph.pins || []).some((pin) => {
       return pin.node_id === node.node_id && pin.direction === "input" && pin.type === "exec";
     });
-    const selected = [...(selectedNodeIds || [])]
+    const explicitlySelected = [...(selectedNodeIds || [])]
       .map((nodeId) => (graph.nodes || []).find((node) => node.node_id === nodeId))
       .filter((node) => node && hasExecInput(node))
       .map((node) => ({ node, span: sourceBackedExecSpan(latestDoc.source_text, node) }))
       .filter((entry) => entry.span)
-      .filter((entry) => entry.span.start <= targetSpan.start && entry.span.end >= targetSpan.end
-        || entry.span.start >= targetSpan.start && entry.span.end <= targetSpan.end
-        || (entry.span.start < targetSpan.end && targetSpan.start < entry.span.end))
       .sort((a, b) => a.span.start - b.span.start);
+    const targetSelected = explicitlySelected.some((entry) => entry.node.node_id === targetNode.node_id);
+    const pinNodeId = (pinId) => (graph.pins || []).find((pin) => pin.pin_id === pinId)?.node_id;
+    const directControlStep = (from, to) => (graph.wires || []).some((wire) => {
+      return wire.wire_kind === "control"
+        && pinNodeId(wire.from_pin) === from.node.node_id
+        && pinNodeId(wire.to_pin) === to.node.node_id;
+    });
+    if (targetSelected && explicitlySelected.length > 1
+      && explicitlySelected.slice(1).every((entry, index) => {
+        return directControlStep(explicitlySelected[index], entry);
+      })) {
+      return {
+        span: {
+          start: explicitlySelected[0].span.start,
+          end: explicitlySelected[explicitlySelected.length - 1].span.end
+        },
+        nodes: explicitlySelected.map((entry) => entry.node)
+      };
+    }
+    const selected = explicitlySelected.filter((entry) => entry.span.start <= targetSpan.start && entry.span.end >= targetSpan.end
+      || entry.span.start >= targetSpan.start && entry.span.end <= targetSpan.end
+      || (entry.span.start < targetSpan.end && targetSpan.start < entry.span.end));
     if (!selected.some((entry) => entry.node.node_id === targetNode.node_id)) {
       selected.push({ node: targetNode, span: targetSpan });
       selected.sort((a, b) => a.span.start - b.span.start);

@@ -428,6 +428,7 @@ mod tests {
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
         let unrelated = root.join("c.jet");
+        let lock_dir = root.join(".jet");
         let main_source =
             "module b;\nmodule c;\nfn run() Int -> { return b.value() + c.other() }\n";
         let dependency_source = "pub fn value() Int -> { return 1 }\n";
@@ -436,6 +437,12 @@ mod tests {
         std::fs::write(&main, main_source).unwrap();
         std::fs::write(&dependency, dependency_source).unwrap();
         std::fs::write(&unrelated, unrelated_source).unwrap();
+        std::fs::create_dir_all(&lock_dir).unwrap();
+        std::fs::write(
+            lock_dir.join("lock"),
+            "version = 1\n\n[build.stamp]\ndirty = false\ntoolchain = \"test\"\nat = \"test\"\n",
+        )
+        .unwrap();
 
         let mut service = CompilerQueries::new();
         let first = service.check_disk(&main.to_string_lossy(), false);

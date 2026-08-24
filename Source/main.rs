@@ -2314,12 +2314,24 @@ fn main() {
                     mode,
                     !jet_argv.iter().any(|arg| arg == "--show-default"),
                 ),
-                None => match resolve_bare_entry("dev", &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")), bare_member) {
-                    Some(entry) => entry.to_string_lossy().into_owned(),
-                    None => {
-                        crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
-                        exit(ExitCodes::USAGE);
-                    }
+                None => {
+                    let entry = match resolve_bare_entry(
+                        "dev",
+                        &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                        bare_member,
+                    ) {
+                        Some(entry) => entry,
+                        None => {
+                            crate::cli_error!("E2104", "`jet dev` needs a file to watch: {} dev <file.{}>", jet::Syntax::BINARY_NAME, jet::Syntax::FILE_EXT);
+                            exit(ExitCodes::USAGE);
+                        }
+                    };
+                    let entry = if !jet_argv.iter().any(|arg| arg == "--show-default") {
+                        package_command_override_for_entry("dev", &entry, mode).unwrap_or(entry)
+                    } else {
+                        entry
+                    };
+                    entry.to_string_lossy().into_owned()
                 },
             };
             // E2-M15: `jet dev` has the same target validation contract as

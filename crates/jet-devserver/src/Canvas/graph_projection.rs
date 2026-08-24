@@ -2302,6 +2302,20 @@ fn getter_key(index: &SemIndex, name: &str, span: SourceSpan) -> String {
     )
 }
 
+fn method_is_pure(index: &SemIndex, span: SourceSpan) -> Option<bool> {
+    let reference = index.references().iter().find(|reference| reference.span == span)?;
+    let target = reference.target.as_ref()?;
+    let definition = index.definitions().iter().find(|definition| {
+        definition.module_path == target.module_path && definition.def_span == target.def_span
+    })?;
+    Some(
+        definition
+            .callable_signature
+            .as_ref()
+            .map_or(true, |signature| signature.effects.is_empty()),
+    )
+}
+
 fn canvas_ident_fragment(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
@@ -2458,12 +2472,13 @@ fn project_expr_node(
         } => {
             let node_id = format!("{}:expr:{ordinal}:method:{method}", g.graph_id);
             let variant_like = starts_uppercase(method);
-            let archetype = if variant_like {
+            let pure = method_is_pure(index, (*method_span).into()).unwrap_or_else(|| {
+                !exec_context && !call_has_effects(index, method)
+            });
+            let archetype = if variant_like || pure {
                 "function_pure"
-            } else if exec_context || call_has_effects(index, method) {
-                "function_exec"
             } else {
-                "function_pure"
+                "function_exec"
             };
             // D-CONC-SPAWN1=D: `task …`/`task.all { … }`/etc. desugar onto the
             // compiler-private `INTERNAL_TASK_RECEIVER` (parser-only, never a

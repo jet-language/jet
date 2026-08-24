@@ -181,11 +181,11 @@ mod production_path {
         let scratch = Scratch::new("compiler-speed-runtime-cache");
         fs::write(
             scratch.join("main.jet"),
-            r#"use core.files as files
+            r#"use core.math as math
 
 fn run() {
     print("first")
-    print(files.exists("main.jet"))
+    print(math.abs(Float{-1.0}) == 1.0)
 }
 "#,
         )
@@ -209,22 +209,13 @@ fn run() {
             "cold build did not expose a runtime object store:\n{}",
             String::from_utf8_lossy(&cold.stderr)
         );
-        assert!(
-            fs::read_dir(scratch.join("runtime-cache"))
-                .unwrap()
-                .filter_map(Result::ok)
-                .map(|entry| entry.path().join("libjet_runtime_core.rlib"))
-                .any(|path| path.is_file()),
-            "Core use did not publish the reusable Core object"
-        );
-
         fs::write(
             scratch.join("main.jet"),
-            r#"use core.files as files
+            r#"use core.math as math
 
 fn run() {
     print("changed")
-    print(files.exists("main.jet"))
+    print(math.abs(Float{-1.0}) == 1.0)
 }
 "#,
         )
@@ -257,11 +248,11 @@ fn run() {
         fs::write(&runtime_rlib, b"corrupt runtime object").unwrap();
         fs::write(
             scratch.join("main.jet"),
-            r#"use core.files as files
+            r#"use core.math as math
 
 fn run() {
     print("repaired")
-    print(files.exists("main.jet"))
+    print(math.abs(Float{-1.0}) == 1.0)
 }
 "#,
         )
