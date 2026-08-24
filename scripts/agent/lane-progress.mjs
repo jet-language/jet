@@ -12,18 +12,21 @@
 //   node scripts/agent/lane-progress.mjs --lane X   # full narration for one lane
 import fs from "node:fs";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
 
 const DIR = `${os.homedir()}/.cache/jet-luna`;
 const args = process.argv.slice(2);
 const watch = args.includes("--watch");
 const only = args.includes("--lane") ? args[args.indexOf("--lane") + 1] : null;
 
-const live = () => {
-  try {
-    return execFileSync("pgrep", ["-af", "codex exec"], { encoding: "utf8" })
-      .split("\n").filter(Boolean);
-  } catch { return []; }
+// lane-dispatch writes <lane>.pid and clears it on exit, so a live pidfile
+// whose process still exists is the only trustworthy liveness signal. The
+// codex command line does not carry the lane name (the brief arrives on
+// stdin), so matching pgrep output against a lane never works.
+const alivePid = (lane) => {
+  let pid;
+  try { pid = Number(fs.readFileSync(`${DIR}/${lane}.pid`, "utf8").trim()); } catch { return false; }
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
 function laneState(lane) {
@@ -59,14 +62,13 @@ function laneState(lane) {
 }
 
 function render() {
-  const running = live();
-  const lanes = fs.readdirSync(DIR).filter((f) => f.endsWith(".out")).map((f) => f.slice(0, -4));
+    const lanes = fs.readdirSync(DIR).filter((f) => f.endsWith(".out")).map((f) => f.slice(0, -4));
   const rows = [];
   for (const lane of lanes) {
     if (only && lane !== only) continue;
     const s = laneState(lane);
     if (!s) continue;
-    s.alive = running.some((p) => p.includes(`/${lane}.md`) || p.includes(`${lane}.out`));
+    s.alive = alivePid(lane);
     // Only surface lanes that are alive or finished very recently.
     if (!s.alive && s.ageMin > 90) continue;
     rows.push(s);
