@@ -3,6 +3,7 @@
 use crate::OutputMode;
 use jet::Comptime::Build::RemoteBuildBinding;
 use jet::ExitCodes;
+use jet_foundation::Report::render_status_json;
 
 pub(crate) fn run_remote(args: &[String], mode: OutputMode) -> ! {
     match args.get(1).map(String::as_str) {
@@ -85,13 +86,21 @@ fn bind(args: &[String], mode: OutputMode) -> ! {
     .unwrap_or_else(|error| fail(&error));
     if mode.json {
         println!(
-            "{{\"schema_version\":1,\"builder\":\"{}\",\"root\":\"{}\",\"trust_domain\":\"{}\",\"worker_id\":\"{}\",\"platform\":\"{}\",\"abi\":\"{}\"}}",
-            escape(&binding.builder),
-            escape(&binding.root.to_string_lossy()),
-            escape(&binding.trust_domain),
-            escape(&binding.worker_id),
-            escape(&binding.platform),
-            escape(&binding.abi),
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "remote.bind",
+                &format!(
+                    ",\"builder\":\"{}\",\"root\":\"{}\",\"trust_domain\":\"{}\",\"worker_id\":\"{}\",\"platform\":\"{}\",\"abi\":\"{}\"",
+                    escape(&binding.builder),
+                    escape(&binding.root.to_string_lossy()),
+                    escape(&binding.trust_domain),
+                    escape(&binding.worker_id),
+                    escape(&binding.platform),
+                    escape(&binding.abi),
+                ),
+            )
         );
     } else {
         println!("bound remote builder `{}`", binding.builder);
@@ -122,7 +131,15 @@ fn list(mode: OutputMode) -> ! {
             })
             .collect::<Vec<_>>()
             .join(",");
-        println!("{{\"schema_version\":1,\"builders\":[{builders}]}}");
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "remote.list",
+                &format!(",\"builders\":[{builders}]"),
+            )
+        );
     } else if names.is_empty() {
         println!("no remote builders are bound");
     } else {

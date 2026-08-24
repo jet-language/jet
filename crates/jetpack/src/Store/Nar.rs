@@ -8,6 +8,7 @@
 
 use crate::TrustRoot::{Signature as TrustSignature, TrustKey};
 use crate::SHA256;
+use ed25519_dalek::{Signature as Ed25519Signature, Verifier, VerifyingKey};
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -51,6 +52,242 @@ pub struct NarInfo {
     /// remaining narinfo fields and retained across endpoint round-trips.
     pub ca: Option<String>,
     pub signatures: Vec<NarSignature>,
+}
+
+/// Standard Nix binary-cache compression names. This protocol is separate
+/// from Jet's local HMAC narinfo format above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NixCompression {
+    None,
+    Zstd,
+    Xz,
+    Bzip2,
+}
+
+impl NixCompression {
+    pub fn parse(value: &str) -> io::Result<Self> {
+        match value {
+            "" | "bzip2" => Ok(Self::Bzip2),
+            "none" => Ok(Self::None),
+            "zstd" => Ok(Self::Zstd),
+            "xz" => Ok(Self::Xz),
+            _ => Err(invalid("narinfo has an unsupported compression")),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Zstd => "zstd",
+            Self::Xz => "xz",
+            Self::Bzip2 => "bzip2",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NixNarInfoSignature {
+    pub key_id: String,
+    pub signature: [u8; 64],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NixPublicKey {
+    pub key_id: String,
+    pub public_key: [u8; 32],
+}
+
+impl NixPublicKey {
+    pub fn parse(value: &str) -> io::Result<Self> {
+        let (key_id, encoded) = value
+            .split_once(':')
+            .ok_or_else(|| invalid("Nix public key is missing its key name"))?;
+        validate_nix_key_id(key_id)?;
+        let bytes = jet_foundation::base_encoding_strict::decode_base64(encoded, false, false)
+            .map_err(|_| invalid("Nix public key is not padded base64"))?;
+        let public_key = bytes
+            .try_into()
+            .map_err(|_| invalid("Nix public key is not 32 bytes"))?;
+        Ok(Self {
+            key_id: key_id.to_string(),
+            public_key,
+        })
+    }
+}
+
+/// Standard Nix `.narinfo` metadata. Its signature covers only Nix's
+/// canonical fingerprint, not the text serialization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NixNarInfo {
+    pub store_path: String,
+    pub url: String,
+    pub compression: NixCompression,
+    pub file_hash: Option<String>,
+    pub file_size: Option<u64>,
+    pub nar_hash: String,
+    pub nar_size: u64,
+    pub references: Vec<String>,
+    pub deriver: Option<String>,
+    pub ca: Option<String>,
+    pub signatures: Vec<NixNarInfoSignature>,
+}
+
+impl NixNarInfo {
+    pub fn parse(text: &str) -> io::Result<Self> {
+        if text.len() > MAX_INFO_BYTES {
+            return Err(invalid("narinfo is too large"));
+        }
+        if !text.ends_with('\n') {
+            return Err(invalid("narinfo is missing its final newline"));
+        }
+        let mut store_path = None;
+        let mut url = None;
+        let mut compression = None;
+        let mut file_hash = None;
+        let mut file_size = None;
+        let mut nar_hash = None;
+        let mut nar_size = None;
+        let mut references = None;
+        let mut deriver = None;
+        let mut ca = None;
+        let mut signatures = Vec::new();
+        let mut seen = BTreeSet::new();
+
+        for line in text[..text.len() - 1].split('\n') {
+            if line.is_empty() {
+                return Err(invalid("narinfo contains an empty line"));
+            }
+            let (key, value) = line
+                .split_once(':')
+                .ok_or_else(|| invalid("narinfo contains a malformed line"))?;
+            if !value.starts_with(' ') || value.as_bytes().get(1) == Some(&b' ') {
+                return Err(invalid("narinfo field does not use one separator space"));
+            }
+            validate_nix_field_name(key)?;
+            let value = &value[1..];
+            if key == "Sig" {
+                signatures.push(parse_nix_signature(value)?);
+                continue;
+            }
+            if !seen.insert(key.to_string()) {
+                return Err(invalid("narinfo contains duplicate fields"));
+            }
+            match key {
+                "StorePath" => store_path = Some(value.to_string()),
+                "URL" => url = Some(value.to_string()),
+                "Compression" => compression = Some(value.to_string()),
+                "FileHash" => file_hash = Some(parse_nix_hash(value, "FileHash")?),
+                "FileSize" => file_size = Some(parse_nix_size(value, "FileSize")?),
+                "NarHash" => nar_hash = Some(parse_nix_hash(value, "NarHash")?),
+                "NarSize" => nar_size = Some(parse_nix_size(value, "NarSize")?),
+                "References" => {
+                    references = Some(parse_nix_references(value)?);
+                }
+                "Deriver" => deriver = Some(value.to_string()),
+                "CA" => ca = Some(value.to_string()),
+                _ => validate_nix_unknown_field(value)?,
+            }
+        }
+
+        let store_path = store_path.ok_or_else(|| invalid("narinfo has no StorePath field"))?;
+        let url = url.ok_or_else(|| invalid("narinfo has no URL field"))?;
+        let nar_hash = nar_hash.ok_or_else(|| invalid("narinfo has no NarHash field"))?;
+        let nar_size = nar_size.ok_or_else(|| invalid("narinfo has no NarSize field"))?;
+        validate_nix_store_path(&store_path)?;
+        validate_nix_url(&url)?;
+        if nar_size == 0 {
+            return Err(invalid("narinfo NarSize must be nonzero"));
+        }
+        if let Some(size) = file_size {
+            if size > MAX_NAR_BYTES as u64 {
+                return Err(invalid("narinfo FileSize exceeds the NAR limit"));
+            }
+        }
+        if nar_size > MAX_NAR_BYTES as u64 {
+            return Err(invalid("narinfo NarSize exceeds the NAR limit"));
+        }
+        if let Some(deriver) = &deriver {
+            if deriver != "unknown-deriver" {
+                validate_nix_store_basename(deriver)?;
+            }
+        }
+        if let Some(ca) = &ca {
+            if ca.is_empty()
+                || ca.len() > MAX_NAME_BYTES * 4
+                || ca.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+            {
+                return Err(invalid("narinfo CA field is invalid"));
+            }
+        }
+
+        Ok(Self {
+            store_path,
+            url,
+            compression: NixCompression::parse(compression.as_deref().unwrap_or(""))?,
+            file_hash,
+            file_size,
+            nar_hash,
+            nar_size,
+            references: references.unwrap_or_default(),
+            deriver,
+            ca,
+            signatures,
+        })
+    }
+
+    pub fn fingerprint(&self, store_dir: &str) -> io::Result<Vec<u8>> {
+        validate_nix_store_dir(store_dir)?;
+        validate_nix_store_path(&self.store_path)?;
+        let nar_hash = decode_sha256(&self.nar_hash)
+            .ok_or_else(|| invalid("Nix NarHash is not a SHA-256 digest"))?;
+        let mut references = BTreeSet::new();
+        for reference in &self.references {
+            validate_nix_store_basename(reference)?;
+            let full = format!("{store_dir}/{reference}");
+            if !references.insert(full) {
+                return Err(invalid("narinfo contains duplicate references"));
+            }
+        }
+        Ok(format!(
+            "1;{};sha256:{};{};{}",
+            self.store_path,
+            encode_nix_base32(&nar_hash),
+            self.nar_size,
+            references.into_iter().collect::<Vec<_>>().join(",")
+        )
+        .into_bytes())
+    }
+
+    pub fn verify_signature(
+        &self,
+        store_dir: &str,
+        trusted_keys: &[NixPublicKey],
+    ) -> io::Result<()> {
+        self.verified_signature(store_dir, trusted_keys).map(|_| ())
+    }
+
+    pub(crate) fn verified_signature(
+        &self,
+        store_dir: &str,
+        trusted_keys: &[NixPublicKey],
+    ) -> io::Result<(String, [u8; 64])> {
+        let fingerprint = self.fingerprint(store_dir)?;
+        for signature in &self.signatures {
+            let Some(key) = trusted_keys
+                .iter()
+                .find(|key| key.key_id == signature.key_id)
+            else {
+                continue;
+            };
+            let verifying_key = VerifyingKey::from_bytes(&key.public_key)
+                .map_err(|_| invalid("Nix trusted public key is invalid"))?;
+            let signature = Ed25519Signature::from_bytes(&signature.signature);
+            if verifying_key.verify(&fingerprint, &signature).is_ok() {
+                return Ok((key.key_id.clone(), signature.to_bytes()));
+            }
+        }
+        Err(invalid("Nix narinfo has no valid trusted signature"))
+    }
 }
 
 /// Serialize a store tree into canonical NAR bytes.
@@ -126,6 +363,269 @@ fn decode_nar(bytes: &[u8]) -> io::Result<(NarNode, NarStats)> {
 pub fn read_nar_file(source: &Path, destination: &Path) -> io::Result<NarStats> {
     let bytes = read_bounded(source, MAX_NAR_BYTES)?;
     read_nar(&bytes, destination)
+}
+
+/// Decode a NAR directly from a bounded reader into a fresh destination.
+/// Metadata is bounded separately and regular-file contents are copied in
+/// fixed-size chunks; the whole archive is never retained in memory.
+pub fn read_nar_stream<R: Read>(
+    reader: R,
+    destination: &Path,
+    expected_nar_size: u64,
+) -> io::Result<NarStats> {
+    if expected_nar_size == 0 || expected_nar_size > MAX_NAR_BYTES as u64 {
+        return Err(invalid("NAR stream size is outside its bound"));
+    }
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err(invalid("NAR stream destination already exists"));
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| invalid("NAR stream destination has no parent"))?;
+    validate_destination_parent(parent)?;
+    fs::create_dir_all(parent)?;
+
+    let result = (|| {
+        let mut reader = StreamNarReader::new(reader, expected_nar_size)?;
+        if reader.string()? != NAR_MAGIC || reader.string()? != "(" {
+            return Err(invalid("NAR stream has an invalid header"));
+        }
+        let mut state = StreamDecodeState::default();
+        reader.node(destination, destination, &mut state, 0, 0)?;
+        if reader.string()? != ")" {
+            return Err(invalid("NAR stream has an invalid root terminator"));
+        }
+        let mut trailing = [0u8; 1];
+        if reader.read(&mut trailing)? != 0 || reader.bytes != expected_nar_size {
+            return Err(invalid("NAR stream has trailing or truncated data"));
+        }
+        Ok(NarStats {
+            digest: format!("sha256:{}", bytes_to_hex(&reader.hasher.finalize())),
+            bytes: reader.bytes,
+            nodes: state.nodes,
+        })
+    })();
+    if result.is_err() {
+        let _ = remove_tree(destination);
+    }
+    result
+}
+
+struct StreamNarReader<R> {
+    reader: io::Take<R>,
+    bytes: u64,
+    metadata_bytes: u64,
+    hasher: SHA256::StreamingSha256,
+}
+
+impl<R: Read> StreamNarReader<R> {
+    fn new(reader: R, expected: u64) -> io::Result<Self> {
+        let limit = expected
+            .checked_add(1)
+            .ok_or_else(|| invalid("NAR stream size overflows"))?;
+        Ok(Self {
+            reader: reader.take(limit),
+            bytes: 0,
+            metadata_bytes: 0,
+            hasher: SHA256::StreamingSha256::new(),
+        })
+    }
+
+    fn raw_bytes(&mut self, metadata: bool) -> io::Result<Vec<u8>> {
+        let length = self.u64()?;
+        if length > MAX_NODE_BYTES {
+            return Err(invalid("NAR stream field exceeds the 512 MiB limit"));
+        }
+        if metadata && length > MAX_INFO_BYTES as u64 {
+            return Err(invalid("NAR stream metadata exceeds its 1 MiB limit"));
+        }
+        if metadata {
+            self.metadata_bytes = self
+                .metadata_bytes
+                .checked_add(length)
+                .ok_or_else(|| invalid("NAR stream metadata size overflows"))?;
+            if self.metadata_bytes > MAX_INFO_BYTES as u64 {
+                return Err(invalid("NAR stream metadata exceeds its 1 MiB limit"));
+            }
+        }
+        let length =
+            usize::try_from(length).map_err(|_| invalid("NAR stream field is too large"))?;
+        let mut value = vec![0u8; length];
+        self.read_exact(&mut value)?;
+        let padding = (8 - (length % 8)) % 8;
+        let mut padding_bytes = [0u8; 7];
+        self.read_exact(&mut padding_bytes[..padding])?;
+        if padding_bytes[..padding].iter().any(|byte| *byte != 0) {
+            return Err(invalid("NAR stream padding is not canonical"));
+        }
+        Ok(value)
+    }
+
+    fn u64(&mut self) -> io::Result<u64> {
+        let mut bytes = [0u8; 8];
+        self.read_exact(&mut bytes)?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn string(&mut self) -> io::Result<String> {
+        String::from_utf8(self.raw_bytes(true)?)
+            .map_err(|_| invalid("NAR stream string is not UTF-8"))
+    }
+
+    fn file(&mut self, path: &Path, length: u64) -> io::Result<()> {
+        if length > MAX_NODE_BYTES {
+            return Err(invalid("NAR stream file exceeds the 512 MiB limit"));
+        }
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        let mut remaining = length;
+        let mut buffer = [0u8; 64 * 1024];
+        while remaining != 0 {
+            let take = remaining.min(buffer.len() as u64) as usize;
+            self.read_exact(&mut buffer[..take])?;
+            file.write_all(&buffer[..take])?;
+            remaining -= take as u64;
+        }
+        file.sync_all()
+    }
+
+    fn node(
+        &mut self,
+        path: &Path,
+        root: &Path,
+        state: &mut StreamDecodeState,
+        depth: usize,
+        relative_depth: usize,
+    ) -> io::Result<()> {
+        if depth > MAX_DEPTH {
+            return Err(invalid("NAR stream tree is too deep"));
+        }
+        if self.string()? != "(" || self.string()? != "type" {
+            return Err(invalid("NAR stream node has an invalid header"));
+        }
+        state.nodes = state
+            .nodes
+            .checked_add(1)
+            .ok_or_else(|| invalid("NAR stream node count overflows"))?;
+        if state.nodes > MAX_NODES {
+            return Err(invalid("NAR stream contains too many nodes"));
+        }
+        match self.string()?.as_str() {
+            "directory" => {
+                fs::create_dir(path)?;
+                let mut previous = None;
+                let mut folded = BTreeSet::new();
+                loop {
+                    match self.string()?.as_str() {
+                        ")" => break,
+                        "entry" => {
+                            if self.string()? != "(" || self.string()? != "name" {
+                                return Err(invalid("NAR stream directory entry is malformed"));
+                            }
+                            let name = self.raw_bytes(true)?;
+                            validate_name(&name)?;
+                            if previous
+                                .as_deref()
+                                .is_some_and(|previous| previous >= name.as_slice())
+                            {
+                                return Err(invalid(
+                                    "NAR stream directory entries are not in canonical name order",
+                                ));
+                            }
+                            let folded_name: Vec<u8> =
+                                name.iter().map(u8::to_ascii_lowercase).collect();
+                            if !folded.insert(folded_name) {
+                                return Err(invalid(
+                                    "NAR stream directory contains duplicate names",
+                                ));
+                            }
+                            previous = Some(name.clone());
+                            if self.string()? != "node" {
+                                return Err(invalid("NAR stream directory entry has no node"));
+                            }
+                            let child = path.join(os_string(&name)?);
+                            self.node(&child, root, state, depth + 1, relative_depth + 1)?;
+                            if self.string()? != ")" {
+                                return Err(invalid("NAR stream directory entry is unbalanced"));
+                            }
+                        }
+                        _ => return Err(invalid("NAR stream directory has an unknown field")),
+                    }
+                }
+            }
+            "regular" => {
+                let mut field = self.string()?;
+                let executable = if field == "executable" {
+                    if !self.string()?.is_empty() {
+                        return Err(invalid("NAR stream executable marker is malformed"));
+                    }
+                    field = self.string()?;
+                    true
+                } else {
+                    false
+                };
+                if field != "contents" {
+                    return Err(invalid("NAR stream regular file has no contents"));
+                }
+                let length = self.u64()?;
+                self.file(path, length)?;
+                let padding = (8 - (length as usize % 8)) % 8;
+                let mut padding_bytes = [0u8; 7];
+                self.read_exact(&mut padding_bytes[..padding])?;
+                if padding_bytes[..padding].iter().any(|byte| *byte != 0) {
+                    return Err(invalid("NAR stream padding is not canonical"));
+                }
+                set_mode(path, if executable { 0o755 } else { 0o644 })?;
+                if self.string()? != ")" {
+                    return Err(invalid("NAR stream regular file is unbalanced"));
+                }
+            }
+            "symlink" => {
+                if self.string()? != "target" {
+                    return Err(invalid("NAR stream symlink has no target"));
+                }
+                let target = self.raw_bytes(true)?;
+                validate_symlink_target(&target)?;
+                if target.starts_with(b"/") {
+                    validate_absolute_symlink_target(&target)?;
+                } else {
+                    if relative_depth == 0 {
+                        return Err(invalid(
+                            "NAR stream root relative symlink has no safe parent",
+                        ));
+                    }
+                    validate_relative_symlink_depth(&target, relative_depth - 1)?;
+                }
+                create_symlink(&target, path, root)?;
+                if self.string()? != ")" {
+                    return Err(invalid("NAR stream symlink is unbalanced"));
+                }
+            }
+            _ => return Err(invalid("NAR stream contains an unknown node type")),
+        }
+        Ok(())
+    }
+}
+
+impl<R: Read> Read for StreamNarReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let read = self.reader.read(buffer)?;
+        if read != 0 {
+            self.bytes = self
+                .bytes
+                .checked_add(read as u64)
+                .ok_or_else(|| invalid("NAR stream byte count overflows"))?;
+            self.hasher.update(&buffer[..read]);
+        }
+        Ok(read)
+    }
+}
+
+#[derive(Default)]
+struct StreamDecodeState {
+    nodes: usize,
 }
 
 /// Compute the canonical digest of a NAR byte stream.
@@ -931,6 +1431,180 @@ fn validate_store_reference(value: &str) -> io::Result<()> {
     }
 }
 
+fn validate_nix_field_name(value: &str) -> io::Result<()> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(invalid("narinfo field name is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_nix_unknown_field(value: &str) -> io::Result<()> {
+    if value.len() > MAX_NAME_BYTES * 4
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
+    {
+        return Err(invalid("narinfo unknown field is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_nix_key_id(value: &str) -> io::Result<()> {
+    if value.is_empty()
+        || value.len() > MAX_NAME_BYTES
+        || value
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || byte == b':')
+    {
+        return Err(invalid("Nix key name is invalid"));
+    }
+    Ok(())
+}
+
+fn parse_nix_signature(value: &str) -> io::Result<NixNarInfoSignature> {
+    let (key_id, encoded) = value
+        .split_once(':')
+        .ok_or_else(|| invalid("Nix narinfo signature is malformed"))?;
+    validate_nix_key_id(key_id)?;
+    let bytes = jet_foundation::base_encoding_strict::decode_base64(encoded, false, false)
+        .map_err(|_| invalid("Nix narinfo signature is not padded base64"))?;
+    let signature = bytes
+        .try_into()
+        .map_err(|_| invalid("Nix narinfo signature is not 64 bytes"))?;
+    Ok(NixNarInfoSignature {
+        key_id: key_id.to_string(),
+        signature,
+    })
+}
+
+fn parse_nix_hash(value: &str, field: &str) -> io::Result<String> {
+    if decode_sha256(value).is_none() {
+        return Err(invalid(&format!(
+            "Nix narinfo {field} is not a SHA-256 digest"
+        )));
+    }
+    Ok(value.to_string())
+}
+
+fn parse_nix_size(value: &str, field: &str) -> io::Result<u64> {
+    if value.is_empty()
+        || (value.len() > 1 && value.starts_with('0'))
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(invalid(&format!(
+            "Nix narinfo {field} is not canonical base-10"
+        )));
+    }
+    value
+        .parse()
+        .map_err(|_| invalid(&format!("Nix narinfo {field} is out of range")))
+}
+
+fn parse_nix_references(value: &str) -> io::Result<Vec<String>> {
+    let mut references = Vec::new();
+    let mut seen = BTreeSet::new();
+    for reference in value.split_whitespace() {
+        validate_nix_store_basename(reference)?;
+        if !seen.insert(reference.to_string()) {
+            return Err(invalid("narinfo contains duplicate references"));
+        }
+        references.push(reference.to_string());
+    }
+    Ok(references)
+}
+
+fn validate_nix_store_dir(value: &str) -> io::Result<()> {
+    let path = Path::new(value);
+    if value.is_empty()
+        || !path.is_absolute()
+        || value.ends_with('/')
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir | Component::ParentDir | Component::Prefix(_)
+            )
+        })
+        || value.contains('\\')
+    {
+        return Err(invalid("Nix StoreDir is not a safe absolute path"));
+    }
+    for component in path.components() {
+        if let Component::Normal(component) = component {
+            validate_name(component.to_string_lossy().as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_nix_store_basename(value: &str) -> io::Result<()> {
+    let (hash, name) = value
+        .split_once('-')
+        .ok_or_else(|| invalid("Nix store reference has no name separator"))?;
+    const NIX_BASE32: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    if hash.len() != 32
+        || name.is_empty()
+        || !hash.bytes().all(|byte| NIX_BASE32.contains(&byte))
+        || name
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || matches!(byte, b'/' | b'\\'))
+    {
+        return Err(invalid(
+            "Nix store reference is not one safe store basename",
+        ));
+    }
+    validate_name(value.as_bytes())
+}
+
+fn validate_nix_store_path(value: &str) -> io::Result<()> {
+    let basename = value
+        .strip_prefix("/nix/store/")
+        .ok_or_else(|| invalid("Nix StorePath is not under /nix/store"))?;
+    if basename.contains('/') {
+        return Err(invalid("Nix StorePath is not one direct store child"));
+    }
+    validate_nix_store_basename(basename)
+}
+
+fn validate_nix_url(value: &str) -> io::Result<()> {
+    let (path, query) = value.split_once('?').unwrap_or((value, ""));
+    if value.contains('#')
+        || path.is_empty()
+        || path.ends_with('/')
+        || path.contains('\\')
+        || path.contains("//")
+        || path
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control() || byte == b'%')
+        || Path::new(path).is_absolute()
+        || Path::new(path).components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        })
+        || query.len() > MAX_NAME_BYTES * 4
+        || query
+            .bytes()
+            .any(|byte| byte == 0 || byte.is_ascii_control())
+    {
+        return Err(invalid("Nix narinfo URL is not a safe relative URL"));
+    }
+    for component in Path::new(path).components() {
+        if let Component::Normal(component) = component {
+            validate_name(component.to_string_lossy().as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
 fn validate_relative_url(value: &str) -> io::Result<()> {
     let path = Path::new(value);
     if value.is_empty()
@@ -1038,6 +1712,23 @@ fn decode_nix_base32(value: &str) -> Option<[u8; 32]> {
         }
     }
     Some(output)
+}
+
+fn encode_nix_base32(value: &[u8; 32]) -> String {
+    const ALPHABET: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let mut out = String::with_capacity(52);
+    for index in 0..52 {
+        let bit = (51 - index) * 5;
+        let mut digit = 0u8;
+        for offset in 0..5 {
+            let target = bit + offset;
+            if target < 256 && value[target / 8] & (1 << (target % 8)) != 0 {
+                digit |= 1 << offset;
+            }
+        }
+        out.push(ALPHABET[usize::from(digit)] as char);
+    }
+    out
 }
 
 fn line(output: &mut String, key: &str, value: &str) -> io::Result<()> {
@@ -1330,6 +2021,58 @@ mod tests {
         signed.verify(&key).unwrap();
         let text = signed.to_text().unwrap();
         NarInfo::parse(&text).unwrap().verify(&key).unwrap();
+    }
+
+    #[test]
+    fn standard_narinfo_parses_real_zstd_and_distinct_hashes() {
+        let text = concat!(
+            "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\n",
+            "URL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\n",
+            "Compression: zstd\n",
+            "FileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\n",
+            "FileSize: 2133450\n",
+            "NarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\n",
+            "NarSize: 7088584\n",
+            "References: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\n",
+            "Deriver: iv6j10qg3d5j5m2nija24gzvph451r7a-ripgrep-15.2.0.drv\n",
+            "Sig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n",
+        );
+        let info = NixNarInfo::parse(text).unwrap();
+        assert_eq!(info.compression, NixCompression::Zstd);
+        assert_ne!(info.file_hash.as_deref(), Some(info.nar_hash.as_str()));
+        assert_eq!(info.file_size, Some(2_133_450));
+        assert_eq!(info.nar_size, 7_088_584);
+        assert_eq!(info.references.len(), 3);
+    }
+
+    #[test]
+    fn nix_narinfo_signature_matches_upstream_fingerprint() {
+        let text = concat!(
+            "StorePath: /nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0\n",
+            "URL: nar/19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh.nar.zst\n",
+            "Compression: zstd\n",
+            "FileHash: sha256:1lhgjf25d2ca7sx1ka4g5lsskicr484vqi7cbndzhz598hbr18zy\n",
+            "FileSize: 2133450\n",
+            "NarHash: sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh\n",
+            "NarSize: 7088584\n",
+            "References: 0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67 dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47 r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib\n",
+            "Sig: cache.nixos.org-1:u47N81GjFd/qpAQ8bRz3Ve584pYwp/gWswtHa6PwWSzhfYvw7oTBW0DThOzapKGuxqqnvw9HfKRnggOniyPBDw==\n",
+        );
+        let info = NixNarInfo::parse(text).unwrap();
+        let fingerprint = String::from_utf8(info.fingerprint("/nix/store").unwrap()).unwrap();
+        assert_eq!(
+            fingerprint,
+            "1;/nix/store/axp6zlky4x2v3jwcbq24a2cz25hzlw9b-ripgrep-15.2.0;sha256:19yag7za8bz38dzxd7g20p8738bmb80n4ci9y3hfaxhy15rxxxyh;7088584;/nix/store/0d8g8n0a11v6f5m2h416ajyxmnkwc3md-glibc-2.42-67,/nix/store/dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47,/nix/store/r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib"
+        );
+        let key =
+            NixPublicKey::parse("cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=")
+                .unwrap();
+        info.verify_signature("/nix/store", &[key]).unwrap();
+
+        let wrong_key =
+            NixPublicKey::parse("cache.nixos.org-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                .unwrap();
+        assert!(info.verify_signature("/nix/store", &[wrong_key]).is_err());
     }
 
     #[cfg(unix)]

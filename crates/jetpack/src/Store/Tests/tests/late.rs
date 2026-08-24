@@ -111,7 +111,10 @@ fn optimizer_rejects_symlinked_object_pool_without_touching_outside_data() {
 
     let error = optimize_cas_pool(&roots).unwrap_err();
     assert!(error.to_string().contains("object pool"), "{error}");
-    assert_eq!(fs::read_to_string(outside.join("live")).unwrap(), "must survive");
+    assert_eq!(
+        fs::read_to_string(outside.join("live")).unwrap(),
+        "must survive"
+    );
     assert!(!hangar.join("cas").exists());
 }
 
@@ -128,7 +131,10 @@ fn clean_plan_rejects_symlinked_build_scratch_without_following_it() {
 
     let error = clean_plan(&roots).unwrap_err();
     assert!(error.to_string().contains("build scratch"), "{error}");
-    assert_eq!(fs::read_to_string(outside.join("live")).unwrap(), "must survive");
+    assert_eq!(
+        fs::read_to_string(outside.join("live")).unwrap(),
+        "must survive"
+    );
 }
 #[cfg(target_os = "linux")]
 #[test]

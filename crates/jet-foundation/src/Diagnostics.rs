@@ -83,8 +83,8 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub use crate::Report::{
-    FixApplicability, FixSafety, ReportEdit, ReportEnvelope, ReportExtension, ReportPath,
-    ReportSpan, REPORT_SCHEMA, render_status_json,
+    FixApplicability, FixSafety, ReportEdit, ReportEnvelope, ReportExtension,
+    ReportPath, ReportSpan, REPORT_SCHEMA, render_status_json,
 };
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
@@ -819,15 +819,16 @@ pub fn render_all_json(file: &ReportPath, src: &str, diags: &[Diagnostic]) -> St
 
 /// Render the explicit success result for a clean --json check.
 pub fn render_success_json(file: &ReportPath) -> String {
-    format!(
-        "{{\"schema\":{},\"moment\":\"compile\",\"status\":\"ok\",\"ok\":true,\"diagnostics\":[],\"file\":{}}}\n",
-        json_str(REPORT_SCHEMA),
-        if file.is_empty() {
-            "null".to_string()
-        } else {
-            json_str(file.as_str())
-        },
-    )
+    ReportEnvelope::status_record("compile", "ok", true, "check")
+        .with_fields(&format!(
+            ",\"diagnostics\":[],\"file\":{}",
+            if file.is_empty() {
+                "null".to_string()
+            } else {
+                json_str(file.as_str())
+            },
+        ))
+        .json_line()
 }
 
 /// Count reports whose explicit cause chain names each report. A transitive

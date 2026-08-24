@@ -736,7 +736,7 @@ fn run() { print(make()) }
         String::from_utf8_lossy(&audit.stderr)
     );
     let audit_json = String::from_utf8_lossy(&audit.stdout);
-    assert!(audit_json.contains("\"command\":\"audit copies\""));
+    assert!(audit_json.contains("\"action\":\"audit.copies\""));
     assert!(audit_json.contains("\"kind\":\"implicit\""), "{audit_json}");
 
     let formatted = Command::new(jet())

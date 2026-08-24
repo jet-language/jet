@@ -400,7 +400,12 @@ fn render_text(
     } else {
         println!("meaning    {} semantic change(s)", meaning.len());
         for operation in meaning {
-            println!("  {}: {}", operation.kind.name(), operation.identity);
+            println!(
+                "  {}: {} [{}]",
+                operation.kind.name(),
+                operation.identity,
+                operation.stable_id
+            );
         }
     }
     if authority.is_empty() {
@@ -444,8 +449,9 @@ fn render_json(
         .iter()
         .map(|operation| {
             format!(
-                "{{\"kind\":{},\"identity\":{},\"before\":{},\"after\":{}}}",
+                "{{\"kind\":{},\"stable_id\":{},\"identity\":{},\"before\":{},\"after\":{}}}",
                 json_string(operation.kind.name()),
+                json_string(&operation.stable_id),
                 json_string(&operation.identity),
                 optional_json(operation.before.as_ref()),
                 optional_json(operation.after.as_ref()),

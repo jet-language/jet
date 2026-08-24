@@ -405,7 +405,10 @@ fn receipt_projection(
             }
             Err(error) => reports.push(ExplainReport {
                 kind: "loss".to_string(),
-                message: format!("Hangar receipt `{}` could not be read: {error}", entry.receipt),
+                message: format!(
+                    "Hangar receipt `{}` could not be read: {error}",
+                    entry.receipt
+                ),
             }),
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => reports.push(ExplainReport {
@@ -414,7 +417,10 @@ fn receipt_projection(
         }),
         Err(error) => reports.push(ExplainReport {
             kind: "loss".to_string(),
-            message: format!("Hangar receipt `{}` could not be inspected: {error}", entry.receipt),
+            message: format!(
+                "Hangar receipt `{}` could not be inspected: {error}",
+                entry.receipt
+            ),
         }),
     }
     if let Some(graph) = graph {
@@ -1492,7 +1498,12 @@ fn rebuild_projection(
     );
     checks.insert(
         "receipt".to_string(),
-        if receipt_ok { "verified" } else { "unavailable" }.to_string(),
+        if receipt_ok {
+            "verified"
+        } else {
+            "unavailable"
+        }
+        .to_string(),
     );
     if !output_exists {
         reports.push(ExplainReport {

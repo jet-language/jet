@@ -6,6 +6,7 @@ use jet::AST::ProgramBundle;
 use jet::Diagnostics::Span;
 use jet::Sema::GateLedger::{GateEntry, GateKind, GateLedger};
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::render_status_json;
 
 pub(crate) fn run(
     args: &[String],
@@ -146,17 +147,17 @@ fn render_human(entries: &[&GateEntry], bundle: &ProgramBundle) {
 }
 
 fn render_json(entries: &[&GateEntry], bundle: &ProgramBundle) {
-    print!("{{\"schema_version\":1,\"gates\":[");
+    let mut gates = String::from("[");
     for (gate_index, entry) in entries.iter().enumerate() {
         if gate_index > 0 {
-            print!(",");
+            gates.push(',');
         }
         let source = module_source(bundle, &entry.source);
         let mode = entry
             .detail
             .strip_prefix("mode=")
             .unwrap_or(entry.detail.as_str());
-        print!(
+        gates.push_str(&format!(
             "{{\"source\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"mode\":\"{}\",\"reason\":{},\"provenance\":[",
             json_escape(&entry.source),
             entry.span.map(|span| span.start).unwrap_or(0),
@@ -168,36 +169,40 @@ fn render_json(entries: &[&GateEntry], bundle: &ProgramBundle) {
                 .as_ref()
                 .map(|reason| format!("\"{}\"", json_escape(reason)))
                 .unwrap_or_else(|| "null".to_string()),
-        );
-        strings(&entry.provenance);
-        print!("],\"operations\":[");
+        ));
+        strings(&mut gates, &entry.provenance);
+        gates.push_str("],\"operations\":[");
         for (operation_index, operation) in entry.operations.iter().enumerate() {
             if operation_index > 0 {
-                print!(",");
+                gates.push(',');
             }
-            print!(
+            gates.push_str(&format!(
                 "{{\"kind\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"required\":[",
                 json_escape(&operation.kind),
                 operation.span.start,
                 operation.span.end,
                 json_location(&source, operation.span),
-            );
-            strings(&operation.required);
-            print!("],\"asserted\":[");
-            strings(&operation.asserted);
-            print!("],\"discharged\":{}}}", operation.discharged);
+            ));
+            strings(&mut gates, &operation.required);
+            gates.push_str("],\"asserted\":[");
+            strings(&mut gates, &operation.asserted);
+            gates.push_str(&format!("],\"discharged\":{}}}", operation.discharged));
         }
-        print!("]}}");
+        gates.push_str("]}");
     }
-    println!("]}}");
+    gates.push(']');
+    println!(
+        "{}",
+        render_status_json("ok", true, "inspect.unsafe", &format!(",\"gates\":{gates}"))
+    );
 }
 
-fn strings(values: &[String]) {
+fn strings(out: &mut String, values: &[String]) {
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            out.push(',');
         }
-        print!("\"{}\"", json_escape(value));
+        out.push_str(&format!("\"{}\"", json_escape(value)));
     }
 }
 

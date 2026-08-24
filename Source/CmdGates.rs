@@ -7,6 +7,7 @@ use std::process::exit;
 use jet::Diagnostics::Span;
 use jet::Sema::GateLedger::{GateEntry, GateKind, GateLedger};
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::render_status_json;
 
 const LARGE_KIND_THRESHOLD: usize = 16;
 
@@ -571,26 +572,30 @@ fn render_json(entries: &[&GateEntry], bundle: &jet::AST::ProgramBundle) {
     for entry in entries {
         *counts.entry(entry.kind.name()).or_default() += 1;
     }
-    print!("{{\"schema_version\":1,\"entries\":[");
+    let mut gates = String::from("{\"entries\":[");
     for (index, entry) in entries.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            gates.push(',');
         }
-        render_json_entry(entry, bundle);
+        render_json_entry(&mut gates, entry, bundle);
     }
-    print!("],\"counts\":{{");
+    gates.push_str("],\"counts\":{");
     for (index, (kind, count)) in counts.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            gates.push(',');
         }
-        print!("\"{}\":{}", json_escape(kind), count);
+        gates.push_str(&format!("\"{}\":{}", json_escape(kind), count));
     }
-    println!("}}}}");
+    gates.push_str("}}");
+    println!(
+        "{}",
+        render_status_json("ok", true, "inspect.gates", &format!(",\"gates\":{gates}"))
+    );
 }
 
-fn render_json_entry(entry: &GateEntry, bundle: &jet::AST::ProgramBundle) {
+fn render_json_entry(out: &mut String, entry: &GateEntry, bundle: &jet::AST::ProgramBundle) {
     let source = module_source(bundle, &entry.source);
-    print!(
+    out.push_str(&format!(
         "{{\"kind\":\"{}\",\"domain\":\"{}\",\"scope\":\"{}\",\"source\":\"{}\",\"span\":{},\"location\":{},\"subject\":\"{}\",\"reason\":{},\"status\":{},\"detail\":\"{}\",\"provenance\":[",
         json_escape(entry.kind.name()),
         json_escape(&entry.domain),
@@ -602,34 +607,34 @@ fn render_json_entry(entry: &GateEntry, bundle: &jet::AST::ProgramBundle) {
         json_option(entry.reason.as_deref()),
         json_option(entry.status.as_deref()),
         json_escape(&entry.detail),
-    );
-    strings(&entry.provenance);
-    print!("],\"operations\":[");
+    ));
+    strings(out, &entry.provenance);
+    out.push_str("],\"operations\":[");
     for (index, operation) in entry.operations.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            out.push(',');
         }
-        print!(
+        out.push_str(&format!(
             "{{\"kind\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"required\":[",
             json_escape(&operation.kind),
             operation.span.start,
             operation.span.end,
             json_location(&source, operation.span),
-        );
-        strings(&operation.required);
-        print!("],\"asserted\":[");
-        strings(&operation.asserted);
-        print!("],\"discharged\":{}}}", operation.discharged);
+        ));
+        strings(out, &operation.required);
+        out.push_str("],\"asserted\":[");
+        strings(out, &operation.asserted);
+        out.push_str(&format!("],\"discharged\":{}}}", operation.discharged));
     }
-    print!("]}}");
+    out.push_str("]}");
 }
 
-fn strings(values: &[String]) {
+fn strings(out: &mut String, values: &[String]) {
     for (index, value) in values.iter().enumerate() {
         if index > 0 {
-            print!(",");
+            out.push(',');
         }
-        print!("\"{}\"", json_escape(value));
+        out.push_str(&format!("\"{}\"", json_escape(value)));
     }
 }
 

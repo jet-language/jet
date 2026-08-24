@@ -225,6 +225,7 @@ impl ReviewOpKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewSemanticOp {
     pub kind: ReviewOpKind,
+    pub stable_id: String,
     pub identity: String,
     pub before: Option<String>,
     pub after: Option<String>,
@@ -281,17 +282,10 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         let old = &before_defs[before_index];
         let new = &after_defs[after_index];
         let identity = new.human_identity.clone();
-        if old.name != new.name {
-            operations.push(ReviewSemanticOp {
-                kind: ReviewOpKind::Renamed,
-                identity: identity.clone(),
-                before: Some(old.human_identity.clone()),
-                after: Some(new.human_identity.clone()),
-            });
-        }
         if old.module_path != new.module_path {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::Moved,
+                stable_id: new.stable_id.clone(),
                 identity: identity.clone(),
                 before: Some(old.module_path.clone()),
                 after: Some(new.module_path.clone()),
@@ -300,6 +294,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         if old.signature_id != new.signature_id {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::SignatureChanged,
+                stable_id: new.stable_id.clone(),
                 identity: identity.clone(),
                 before: Some(old.signature_id.clone()),
                 after: Some(new.signature_id.clone()),
@@ -307,6 +302,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         } else if old.content_id != new.content_id {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::BodyChanged,
+                stable_id: new.stable_id.clone(),
                 identity,
                 before: Some(old.content_id.clone()),
                 after: Some(new.content_id.clone()),
@@ -318,6 +314,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         if !matched_before.contains(&index) {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::Removed,
+                stable_id: fact.stable_id.clone(),
                 identity: fact.human_identity.clone(),
                 before: Some(fact.human_identity.clone()),
                 after: None,
@@ -328,6 +325,7 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         if !matched_after.contains(&index) {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::Added,
+                stable_id: fact.stable_id.clone(),
                 identity: fact.human_identity.clone(),
                 before: None,
                 after: Some(fact.human_identity.clone()),
@@ -338,12 +336,14 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
     append_effect_operations(&mut operations, before.effects(), after.effects());
     operations.sort_by(|left, right| {
         (
+            left.stable_id.as_str(),
             left.identity.as_str(),
             &left.kind,
             left.before.as_deref(),
             left.after.as_deref(),
         )
             .cmp(&(
+                right.stable_id.as_str(),
                 right.identity.as_str(),
                 &right.kind,
                 right.before.as_deref(),
@@ -379,8 +379,27 @@ pub fn review_semantic_ops_with_receipts(
         let Some(identity) = after_name.clone() else {
             continue;
         };
+        let stable_id = receipt
+            .targets
+            .first()
+            .map(|target| target.stable_id.clone())
+            .or_else(|| {
+                after
+                    .definition_facts()
+                    .iter()
+                    .find(|fact| {
+                        fact.human_identity == identity
+                            || fact.name == identity
+                            || fact.human_identity.ends_with(&format!("::{identity}"))
+                    })
+                    .map(|fact| fact.stable_id.clone())
+            });
+        let Some(stable_id) = stable_id else {
+            continue;
+        };
         let operation = ReviewSemanticOp {
             kind: ReviewOpKind::Renamed,
+            stable_id,
             identity,
             before: before_name,
             after: after_name,
@@ -391,12 +410,14 @@ pub fn review_semantic_ops_with_receipts(
     }
     operations.sort_by(|left, right| {
         (
+            left.stable_id.as_str(),
             left.identity.as_str(),
             &left.kind,
             left.before.as_deref(),
             left.after.as_deref(),
         )
             .cmp(&(
+                right.stable_id.as_str(),
                 right.identity.as_str(),
                 &right.kind,
                 right.before.as_deref(),
@@ -464,6 +485,7 @@ fn append_effect_operations(
         if old_shape != new_shape {
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::EffectChanged,
+                stable_id: format!("effect:{function}"),
                 identity: function.to_string(),
                 before: Some(old_shape),
                 after: Some(new_shape),

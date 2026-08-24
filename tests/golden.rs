@@ -636,6 +636,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 );
             }
         }
+        record_golden_receipt(entry, env, &run, &run.stdout);
     } else {
         assert!(
             run.status.success(),
@@ -717,7 +718,117 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 }
             }
         }
+        record_golden_receipt(entry, env, &run, actual.as_bytes());
     }
+}
+
+/// Keep the expected channel as the executable-spec input, but record the
+/// observed result in the same content-addressed store as CLI test results.
+/// A missing expected channel produces no claim; an absent input cannot make a
+/// status projection look current.
+fn record_golden_receipt(
+    entry: &GoldenEntry,
+    env: &GoldenEnv,
+    output: &std::process::Output,
+    stdout: &[u8],
+) {
+    let err_path = env
+        .ex_dir
+        .join("expected")
+        .join(format!("{}.err.out", entry.stem));
+    let stdout_path = env
+        .ex_dir
+        .join("expected")
+        .join(format!("{}.out", entry.stem));
+    let stderr_path = env
+        .ex_dir
+        .join("expected")
+        .join(format!("{}.stderr.out", entry.stem));
+    let expected = if err_path.is_file() {
+        err_path
+    } else if stdout_path.is_file() {
+        stdout_path
+    } else {
+        return;
+    };
+    let mut expected_paths = vec![expected];
+    if stderr_path.is_file() {
+        expected_paths.push(stderr_path);
+    }
+    record_golden_receipt_at_output(
+        entry,
+        env,
+        output,
+        stdout,
+        &output.stderr,
+        "aot",
+        None,
+        &expected_paths,
+        &[],
+    );
+}
+
+fn record_golden_receipt_at(
+    entry: &GoldenEntry,
+    env: &GoldenEnv,
+    output: &std::process::Output,
+    tier: &str,
+    variant: Option<&str>,
+    expected_paths: &[PathBuf],
+    extra_inputs: &[PathBuf],
+) {
+    record_golden_receipt_at_output(
+        entry,
+        env,
+        output,
+        &output.stdout,
+        &output.stderr,
+        tier,
+        variant,
+        expected_paths,
+        extra_inputs,
+    );
+}
+
+fn record_golden_receipt_at_output(
+    entry: &GoldenEntry,
+    env: &GoldenEnv,
+    output: &std::process::Output,
+    stdout: &[u8],
+    stderr: &[u8],
+    tier: &str,
+    variant: Option<&str>,
+    expected_paths: &[PathBuf],
+    extra_inputs: &[PathBuf],
+) {
+    if expected_paths.iter().any(|path| !path.is_file()) {
+        return;
+    }
+    let mut inputs = vec![entry.path.clone()];
+    inputs.extend(extra_inputs.iter().cloned().filter(|path| path.is_file()));
+    inputs.extend(expected_paths.iter().cloned());
+    let root = env
+        .ex_dir
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or_else(|| Path::new("."));
+    let store_root = std::env::var_os("JET_RECEIPT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.join(".jet").join("receipts"));
+    let store = jet::ReceiptStore::ReceiptStore::new(store_root);
+    let mut argv = vec!["golden".into(), entry.stem.clone(), tier.to_string()];
+    if let Some(variant) = variant {
+        argv.push(variant.to_string());
+    }
+    let status = output.status.code().unwrap_or(1);
+    store
+        .record("golden", &argv, &inputs, status, stdout, stderr)
+        .unwrap_or_else(|error| {
+            panic!(
+                "could not record golden receipt for {}: {error}",
+                entry.stem
+            )
+        });
 }
 
 /// Use the production package resolver to decide whether an example needs the
@@ -861,7 +972,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
             .current_dir(&dir)
             .env("NO_COLOR", "1")
             .output()
-            .unwrap()
+        .unwrap()
     };
     assert!(
         run.status.success(),
@@ -879,6 +990,22 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         out_path.is_file(),
         "missing examples/features/expected/{}.out",
         entry.stem
+    );
+    let mut foreign_inputs = vec![source_dir.join(foreign_source)];
+    if language == "ada" {
+        foreign_inputs.push(source_dir.join("geodesy.adb"));
+    }
+    if language == "dart" {
+        foreign_inputs.push(source_dir.join("host.dart"));
+    }
+    record_golden_receipt_at(
+        entry,
+        env,
+        &run,
+        "dev",
+        None,
+        std::slice::from_ref(&out_path),
+        &foreign_inputs,
     );
     let actual = String::from_utf8_lossy(&run.stdout);
     if env.update_expected {
@@ -953,6 +1080,15 @@ fn check_job_runner_jobs(entry: &GoldenEntry, env: &GoldenEnv) {
         );
         let out_path = env.ex_dir.join("expected").join(format!("devloop/{expected_name}.out"));
         assert!(out_path.is_file(), "missing expected output for `{job}`");
+        record_golden_receipt_at(
+            entry,
+            env,
+            &run,
+            "aot",
+            Some(job),
+            std::slice::from_ref(&out_path),
+            &[],
+        );
         let actual = String::from_utf8_lossy(&run.stdout);
         if env.update_expected {
             fs::write(&out_path, actual.as_bytes()).unwrap();
@@ -1007,6 +1143,15 @@ fn check_golden_entry_release_run(entry: &GoldenEntry, env: &GoldenEnv) {
     assert!(
         out_path.is_file(),
         "missing examples/features/expected/{stem}.out; update mode never creates a new channel"
+    );
+    record_golden_receipt_at(
+        entry,
+        env,
+        &run,
+        "aot-release",
+        None,
+        std::slice::from_ref(&out_path),
+        &[],
     );
     let actual = String::from_utf8_lossy(&run.stdout);
     if env.update_expected {

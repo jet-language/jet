@@ -105,7 +105,12 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
         }
     };
     let Some(plan) = plan else {
-        if mode.json { println!("{{\"schema_version\":1,\"build\":null}}"); }
+        if mode.json {
+            println!(
+                "{}",
+                render_status_json("ok", true, "inspect.build", ",\"build\":null")
+            );
+        }
         else { println!("default pipeline: no root fn build"); }
         return;
     };
@@ -131,7 +136,11 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
     }
     let graph = plan.graph();
     if mode.json {
-        println!("{}", jet::Driver::build_plan_json(&plan));
+        let payload = jet::Driver::build_plan_json(&plan);
+        println!(
+            "{}",
+            render_status_json("ok", true, "inspect.build", &format!(",\"build\":{payload}"))
+        );
     } else {
         for target in graph.targets { println!("target\t{}\t{:?}", target.name, target.kind); }
         for action in graph.actions { println!("action\t{}\t{}", action.name, action.outputs.join(",")); }
@@ -185,7 +194,19 @@ pub(crate) fn run_compiler_api(operation: &str, file: &str, _mode: OutputMode) {
 
 fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation, json: bool) {
     if json {
-        println!("{{\"schema_version\":1,\"label\":\"{}\",\"provenance\":{}}}", json_escape(&explanation.label), json_strings(&explanation.provenance));
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.build",
+                &format!(
+                    ",\"label\":\"{}\",\"provenance\":{}",
+                    json_escape(&explanation.label),
+                    json_strings(&explanation.provenance),
+                ),
+            )
+        );
     } else {
         println!("{}", explanation.label);
         for fact in &explanation.provenance { println!("  {fact}"); }

@@ -55,6 +55,25 @@ function canonicalProgram(program) {
   return fs.existsSync(absolute) ? fs.realpathSync(absolute) : absolute;
 }
 
+function debugSourceForConfiguration(configuration) {
+  if (configuration.request !== "attach") {
+    return canonicalProgram(configuration.program);
+  }
+  if (!configuration.map) {
+    throw new Error("Jet attach needs the existing `map` sidecar to identify its .jet source.");
+  }
+  let map;
+  try {
+    map = JSON.parse(fs.readFileSync(canonicalProgram(configuration.map), "utf8"));
+  } catch (error) {
+    throw new Error(`Jet attach cannot read its verified map sidecar: ${error.message}`);
+  }
+  if (typeof map.jet_file !== "string" || !map.jet_file) {
+    throw new Error("Jet attach map sidecar does not identify a Jet source file.");
+  }
+  return canonicalProgram(map.jet_file);
+}
+
 function shellQuote(value) {
   return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
 }
@@ -104,7 +123,7 @@ function activate(context) {
   };
   const debugFactory = {
     createDebugAdapterDescriptor(session) {
-      const program = canonicalProgram(session.configuration.program);
+      const program = debugSourceForConfiguration(session.configuration);
       const cwd = session.workspaceFolder?.uri.fsPath || workspaceFolder;
       return new vscode.DebugAdapterExecutable(
         serverPath,

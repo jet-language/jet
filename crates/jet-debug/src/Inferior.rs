@@ -653,9 +653,26 @@ impl Inferior {
 
     pub(crate) fn detach(&mut self) -> std::io::Result<()> {
         if self.child.try_wait()?.is_some() {
-            self.attached = None;
-            self.detached = true;
-            return Ok(());
+            if let Some(identity) = &self.attached {
+                match identity.verify() {
+                    // The target may have exited just before disconnect.  In
+                    // that case there is no running process left to detach.
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        self.attached = None;
+                        self.detached = true;
+                        return Ok(());
+                    }
+                    Err(error) => return Err(error),
+                    Ok(()) => {}
+                }
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "lldb closed before detach was proven",
+            ));
+        }
+        if let Some(identity) = &self.attached {
+            identity.verify()?;
         }
         let output = self.cmd("process detach")?;
         if lldb_reported_error(&output) && !output.contains("no process") {
@@ -682,7 +699,24 @@ impl Inferior {
     /// process by default, so this path must kill the debuggee first.
     pub(crate) fn terminate_debuggee(&mut self) -> std::io::Result<()> {
         if self.child.try_wait()?.is_some() {
-            return Ok(());
+            if let Some(identity) = &self.attached {
+                match identity.verify() {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        self.attached = None;
+                        self.detached = true;
+                        return Ok(());
+                    }
+                    Err(error) => return Err(error),
+                    Ok(()) => {}
+                }
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "lldb closed before termination was proven",
+            ));
+        }
+        if let Some(identity) = &self.attached {
+            identity.verify()?;
         }
         let output = self.cmd("process kill")?;
         if lldb_reported_error(&output) && !output.contains("no process") {
@@ -690,6 +724,18 @@ impl Inferior {
                 io::ErrorKind::Other,
                 "lldb could not terminate the debuggee",
             ));
+        }
+        if let Some(identity) = &self.attached {
+            match identity.verify() {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+                Ok(()) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "lldb did not prove that the debuggee terminated",
+                    ))
+                }
+            }
         }
         self.attached = None;
         self.detached = true;
@@ -804,6 +850,46 @@ impl Inferior {
         pairs
     }
 
+    /// Parse the immediate children of one stopped value. LLDB prints a
+    /// composite as the root assignment followed by indented `(type) name =
+    /// value` rows. The DAP adapter issues another bounded query when a child
+    /// is expanded, so deeper rows stay behind that reference.
+    pub(crate) fn parse_variable_children(lldb_output: &str) -> Vec<(String, String, String)> {
+        let mut lines = lldb_output.lines();
+        let Some(root) = lines.next() else {
+            return Vec::new();
+        };
+        let root_indent = root.len() - root.trim_start().len();
+        let Some(root_value) = root.split_once(" = ").map(|(_, value)| value.trim()) else {
+            return Vec::new();
+        };
+        if !root_value.starts_with('{') {
+            return Vec::new();
+        }
+        let mut depth =
+            root_value.matches('{').count() as i32 - root_value.matches('}').count() as i32;
+        let mut children = Vec::new();
+        for line in lines {
+            let trimmed = line.trim();
+            if depth <= 0 {
+                break;
+            }
+            let indent = line.len() - line.trim_start().len();
+            if depth == 1 && indent > root_indent {
+                if let Some((type_name, name, value)) = parse_typed_line(line) {
+                    children.push((type_name.to_string(), name.to_string(), value.to_string()));
+                }
+            }
+            depth += trimmed.matches('{').count() as i32 - trimmed.matches('}').count() as i32;
+        }
+        children
+    }
+
+    pub(crate) fn has_nested_value(raw: &str) -> bool {
+        let raw = raw.trim();
+        raw.starts_with('{') || raw.starts_with('[')
+    }
+
     /// D-DBG3 step 2 (I2): translate a raw Rust local/param name back to its
     /// Jet spelling. Codegen's `mangle()` (`crates/jet-codegen/src/Codegen/mod.rs`)
     /// prefixes every non-`main` binding with `__jet_`; strip it. Names without
@@ -818,6 +904,18 @@ impl Inferior {
                     None => rest.to_string(),
                 }
             })
+    }
+
+    /// Translate a generated field or array child into Jet display syntax.
+    pub(crate) fn rust_member_to_jet(name: &str) -> Option<String> {
+        let name = name.trim();
+        if name.starts_with('[')
+            && name.ends_with(']')
+            && name[1..name.len() - 1].chars().all(|c| c.is_ascii_digit())
+        {
+            return Some(name.to_string());
+        }
+        Self::rust_local_to_jet(name)
     }
 
     /// Generated locals use the reserved dunder suffix. They remain available
@@ -868,6 +966,42 @@ impl Inferior {
     /// lldb needs for `frame variable <name>`.
     pub(crate) fn jet_local_to_rust(name: &str) -> String {
         mangle(name)
+    }
+
+    /// Translate a validated Jet local path to the generated Rust path LLDB
+    /// needs. Field names use the canonical codegen mangle; indices stay
+    /// literal. This never asks LLDB to evaluate a Rust expression.
+    pub(crate) fn jet_path_to_rust(root: &str, suffix: &str) -> Option<String> {
+        let mut rust = mangle(root);
+        let mut rest = suffix;
+        while !rest.is_empty() {
+            if let Some(field) = rest.strip_prefix('.') {
+                let end = field
+                    .char_indices()
+                    .find(|(_, c)| !c.is_ascii_alphanumeric() && *c != '_')
+                    .map(|(index, _)| index)
+                    .unwrap_or(field.len());
+                if end == 0 {
+                    return None;
+                }
+                rust.push('.');
+                rust.push_str(&mangle(&field[..end]));
+                rest = &field[end..];
+            } else if let Some(index) = rest.strip_prefix('[') {
+                let end = index.find(']')?;
+                let digits = &index[..end];
+                if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                    return None;
+                }
+                rust.push('[');
+                rust.push_str(digits);
+                rust.push(']');
+                rest = &index[end + 1..];
+            } else {
+                return None;
+            }
+        }
+        Some(rust)
     }
 
     /// Clean a raw Rust function symbol (`prog::main::h4002…` or
@@ -952,6 +1086,19 @@ fn complete_quoted_literal(s: &str) -> Option<&str> {
     None
 }
 
+fn parse_typed_line(line: &str) -> Option<(&str, &str, &str)> {
+    let line = line.trim_start();
+    let (type_name, after_type) = if let Some(rest) = line.strip_prefix('(') {
+        let close = rest.find(')')?;
+        (&rest[..close], rest[close + 1..].trim_start())
+    } else {
+        ("", line)
+    };
+    let (name, value) = after_type.split_once(" = ")?;
+    let name = name.trim();
+    (!name.is_empty()).then_some((type_name, name, value.trim()))
+}
+
 fn parse_breakpoint(output: &str) -> Option<Breakpoint> {
     output.lines().find_map(|line| {
         let rest = line.trim().strip_prefix("Breakpoint ")?;
@@ -970,7 +1117,7 @@ fn parse_exit_status(output: &str) -> Option<i32> {
     })
 }
 
-fn parse_exit_signal(output: &str) -> Option<String> {
+pub(crate) fn parse_exit_signal(output: &str) -> Option<String> {
     output.lines().find_map(|line| {
         let marker = if line.contains("stop reason = signal ") {
             "stop reason = signal "
@@ -1030,6 +1177,17 @@ fn parse_threads(output: &str) -> Vec<ThreadInfo> {
             Some(ThreadInfo { id, name })
         })
         .collect()
+}
+
+pub(crate) fn parse_current_thread_id(output: &str) -> Option<u32> {
+    output.lines().find_map(|line| {
+        let start = line.find("thread #")? + "thread #".len();
+        let digits = line[start..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>();
+        (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
+    })
 }
 
 fn clean_lldb_error(output: &str, fallback: &str) -> String {
@@ -1114,24 +1272,8 @@ impl TargetIdentity {
         let proc_dir = std::fs::File::open(format!("/proc/{pid}"))?;
         let target = ProcSnapshot::read(&proc_base(&proc_dir))?;
         let current_status = std::fs::read_to_string("/proc/self/status")?;
-        let current_stat = std::fs::read_to_string("/proc/self/stat")?;
         let current_uid = proc_status_number(&current_status, "Uid:", 1)?;
-        let current_session = proc_stat_fields(&current_stat)?
-            .get(3)
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "current session is invalid")
-            })?
-            .parse()
-            .map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "current session is invalid")
-            })?;
-        validate_target(
-            &target,
-            &executable,
-            &executable_hash,
-            current_uid,
-            current_session,
-        )?;
+        validate_target(&target, &executable, &executable_hash, current_uid)?;
         Ok(Self {
             pid,
             proc_dir,
@@ -1176,10 +1318,7 @@ impl TargetIdentity {
         }
         Err(io::Error::new(
             io::ErrorKind::WouldBlock,
-            format!(
-                "attach target {} did not resume after detach",
-                self.pid
-            ),
+            format!("attach target {} did not resume after detach", self.pid),
         ))
     }
 }
@@ -1239,18 +1378,11 @@ fn validate_target(
     executable: &Path,
     executable_hash: &str,
     current_uid: u32,
-    current_session: u64,
 ) -> io::Result<()> {
     if target.uid != current_uid {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "attach target belongs to another user",
-        ));
-    }
-    if target.session != current_session {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "attach target is outside the current session",
         ));
     }
     if target.tracer_pid != 0 {
@@ -1330,6 +1462,99 @@ fn parse_frame_line(line: &str) -> Option<RawFrame> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exited_lldb_is_not_reported_as_a_proven_disconnect() {
+        let mut child = Command::new("true")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("spawn exited debugger stand-in");
+        let stdin = child.stdin.take().expect("piped stdin");
+        child.wait().expect("reap exited debugger stand-in");
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let mut inferior = Inferior {
+            child,
+            stdin,
+            rx,
+            _reader: None,
+            stdout_path: PathBuf::new(),
+            stderr_path: PathBuf::new(),
+            stdout_pos: 0,
+            stderr_pos: 0,
+            attached: None,
+            detached: false,
+            closed: false,
+        };
+        let error = inferior
+            .detach()
+            .expect_err("dead lldb cannot prove detach");
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn attach_identity_verifies_a_real_process_and_rejects_another_binary() {
+        let mut target = Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn real attach target");
+        let pid = target.id();
+        let result = (|| -> io::Result<()> {
+            let target_binary = std::fs::canonicalize(format!("/proc/{pid}/exe"))?;
+            let identity = TargetIdentity::capture(&target_binary, pid)?;
+            identity.verify()?;
+
+            let other_binary = std::env::current_exe()?;
+            match TargetIdentity::capture(&other_binary, pid) {
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
+                Err(error) => {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        "wrong-binary attach failed for the wrong reason",
+                    ))
+                }
+                Ok(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "wrong-binary attach was accepted",
+                    ))
+                }
+            }
+            Ok(())
+        })();
+        let _ = target.kill();
+        let _ = target.wait();
+        result.expect("real-process attach identity verification");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn attaches_to_and_detaches_from_a_real_local_process() {
+        if !Inferior::available() {
+            eprintln!("skipping live native attach test: lldb is unavailable");
+            return;
+        }
+        let mut target = Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn real attach target");
+        let pid = target.id();
+        let target_binary = std::fs::canonicalize(format!("/proc/{pid}/exe"))
+            .expect("resolve real attach target binary");
+        let mut inferior = match Inferior::attach(&target_binary, pid) {
+            Ok(inferior) => inferior,
+            Err(error) => {
+                let _ = target.kill();
+                let _ = target.wait();
+                panic!("real local attach failed: {error}");
+            }
+        };
+        let detach = inferior.detach();
+        inferior.quit();
+        let _ = target.kill();
+        let _ = target.wait();
+        detach.expect("real local detach was not proven");
+    }
 
     #[test]
     fn parses_a_frame_line() {
@@ -1414,6 +1639,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_immediate_children_without_exposing_deeper_rows() {
+        let out = "(__jet_Point) __jet_point = {\n  (__int) __jet_x = 1\n  (__jet_Point) __jet_nested = {\n    (__int) __jet_y = 2\n  }\n}\n";
+        assert_eq!(
+            Inferior::parse_variable_children(out),
+            vec![
+                ("__int".to_string(), "__jet_x".to_string(), "1".to_string()),
+                (
+                    "__jet_Point".to_string(),
+                    "__jet_nested".to_string(),
+                    "{".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn no_frame_line_is_none() {
         assert!(Inferior::parse_top_frame("Process 1 exited with status = 0\n").is_none());
     }
@@ -1462,6 +1703,32 @@ mod tests {
         assert!(checked_lldb_quote("bad\nname.rs").is_err());
         assert!(valid_frame_expression("__jet_value.items[0]"));
         assert!(!valid_frame_expression("__jet_value; process kill"));
+    }
+
+    #[test]
+    fn translates_jet_paths_and_keeps_array_indices_literal() {
+        assert_eq!(
+            Inferior::jet_path_to_rust("point", ".x[2].label"),
+            Some("__jet_point.__jet_x[2].__jet_label".to_string())
+        );
+        assert_eq!(Inferior::jet_path_to_rust("point", "."), None);
+        assert_eq!(
+            Inferior::rust_member_to_jet("__jet_x"),
+            Some("x".to_string())
+        );
+        assert_eq!(Inferior::rust_member_to_jet("[2]"), Some("[2]".to_string()));
+    }
+
+    #[test]
+    fn parses_the_selected_thread_id_from_a_stop_banner() {
+        assert_eq!(
+            parse_current_thread_id("* thread #7, stop reason = breakpoint 1.1\n"),
+            Some(7)
+        );
+        assert_eq!(
+            parse_current_thread_id("Process 1 exited with status = 0"),
+            None
+        );
     }
 
     #[test]

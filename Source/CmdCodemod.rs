@@ -1581,9 +1581,71 @@ pub(crate) fn commit_fix_with_semantic_ops(
         before,
         after,
     }];
-    let log = render_fix_log(&project, &name, &changes, semantic_ops);
+    let recorded_ops = if semantic_ops.is_empty() {
+        fix_rewrite_op(&changes[0].before, &changes[0].after)
+            .into_iter()
+            .collect::<Vec<_>>()
+    } else {
+        semantic_ops.to_vec()
+    };
+    let log = render_fix_log(&project, &name, &changes, &recorded_ops);
     Transaction::commit_fix(&lock, &changes, &log_path, log.as_bytes());
     log_path
+}
+
+/// A fix transaction without a domain-specific operation still needs to say
+/// what bytes it changed. The exact changed span is sufficient provenance and
+/// keeps hand edits distinguishable from tool-produced rewrite receipts.
+fn fix_rewrite_op(before: &[u8], after: &[u8]) -> Option<SemanticOp> {
+    let before = std::str::from_utf8(before).ok()?;
+    let after = std::str::from_utf8(after).ok()?;
+    if before == after {
+        return None;
+    }
+    let (from, to) = changed_region(before, after);
+    Some(SemanticOp {
+        kind: "rewrite".to_string(),
+        rule_id: Some("jet-fix".to_string()),
+        from: Some(from.to_string()),
+        to: Some(to.to_string()),
+        node: None,
+        match_template: None,
+        replace_template: None,
+        targets: Vec::new(),
+        files: Vec::new(),
+    })
+}
+
+fn changed_region<'a>(before: &'a str, after: &'a str) -> (&'a str, &'a str) {
+    let mut prefix = 0;
+    while prefix < before.len()
+        && prefix < after.len()
+        && before.as_bytes()[prefix] == after.as_bytes()[prefix]
+    {
+        prefix += 1;
+    }
+    while prefix > 0
+        && (!before.is_char_boundary(prefix) || !after.is_char_boundary(prefix))
+    {
+        prefix -= 1;
+    }
+
+    let mut before_end = before.len();
+    let mut after_end = after.len();
+    while before_end > prefix
+        && after_end > prefix
+        && before.as_bytes()[before_end - 1] == after.as_bytes()[after_end - 1]
+    {
+        before_end -= 1;
+        after_end -= 1;
+    }
+    while before_end > prefix && !before.is_char_boundary(before_end) {
+        before_end -= 1;
+    }
+    while after_end > prefix && !after.is_char_boundary(after_end) {
+        after_end -= 1;
+    }
+    (&before[prefix..before_end], &after[prefix..after_end])
 }
 
 fn fix_project_for(path: &Path) -> PathBuf {

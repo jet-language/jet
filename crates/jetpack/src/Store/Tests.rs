@@ -430,7 +430,9 @@ mod tests {
         .unwrap();
 
         let error = live_roots_from(&roots, &project).unwrap_err();
-        assert!(error.to_string().contains("disagrees with Hangar closure record"));
+        assert!(error
+            .to_string()
+            .contains("disagrees with Hangar closure record"));
         assert!(roots.hangar_dir().join(&entry.entry.id).exists());
         assert!(roots
             .hangar_dir()
@@ -1033,14 +1035,13 @@ mod tests {
 
         let projected = project_external_output_unlocked(&roots, &source, &digest).unwrap();
         assert!(Path::new(&projected).starts_with(roots.hangar_dir().join("objects")));
-        assert!(source.is_dir(), "projection must not mutate the source output");
+        assert!(
+            source.is_dir(),
+            "projection must not mutate the source output"
+        );
         assert_eq!(
-            crate::Envelope::try_output_hash_of_in_hangar(
-                &projected,
-                &roots.hangar_dir(),
-                false,
-            )
-            .unwrap(),
+            crate::Envelope::try_output_hash_of_in_hangar(&projected, &roots.hangar_dir(), false,)
+                .unwrap(),
             digest
         );
     }
@@ -1097,10 +1098,7 @@ mod tests {
             ),
             cache_identity: CacheIdentity::default(),
             references: Vec::new(),
-            named_outputs: BTreeMap::from([
-                ("out".into(), out_digest),
-                ("dev".into(), dev_digest),
-            ]),
+            named_outputs: BTreeMap::from([("out".into(), out_digest), ("dev".into(), dev_digest)]),
             platform_artifact_kind: String::new(),
             producer_record: producer.encode(),
             receipt: String::new(),
@@ -1109,13 +1107,16 @@ mod tests {
         };
         let projection = nix_store_projection_for_entry(&roots, &entry, &snapshot).unwrap();
         let projection = projection.into_iter().collect::<BTreeMap<_, _>>();
-        assert_eq!(
-            projection.get("/nix/store/projection-out"),
-            Some(&snapshot)
-        );
+        assert_eq!(projection.get("/nix/store/projection-out"), Some(&snapshot));
         assert_eq!(
             projection.get("/nix/store/projection-dev"),
             Some(&PathBuf::from(dev_object))
+        );
+        assert!(
+            projection
+                .values()
+                .all(|source| !source.starts_with("/nix/store")),
+            "Nix runtime projection must never source bytes from the host store"
         );
 
         #[cfg(target_os = "linux")]
@@ -1140,8 +1141,7 @@ mod tests {
                 ],
             );
             assert_eq!(
-                code,
-                0,
+                code, 0,
                 "rootless canonical store projection must be consumable"
             );
         }

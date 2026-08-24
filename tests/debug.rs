@@ -13,15 +13,15 @@
 //!
 //! Also covers D-DBG3 step 2 (dap-debugger) — the native lldb-backed `jet
 //! debug` backend (see the section below): codegen-only line-marker checks
-//! (no rustc/lldb needed) plus a full native session, gated on BOTH `rustc`
-//! and usable `lldb` presence — a hard skip (not a failure) when either tool is
-//! absent or the host sandbox cannot stop a debuggee, so CI without functional
-//! lldb still passes.
+//! (no rustc/lldb needed), a production DAP wire failure check, and a full
+//! native session. The live session gates only on `rustc`/`lldb` being absent;
+//! once both tools exist, a stop or cleanup failure is a test failure.
 
 mod common;
 
 use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 /// Write `src` to a temp `.jet` file and return its path.
 fn fixture(tag: &str, src: &str) -> String {
@@ -80,7 +80,11 @@ fn paused_session_stops_at_a_live_command_boundary() {
     let result = jet::Debug::run_session_result_paused(&file, &["s"]);
 
     assert_eq!(result.status, jet::Debug::SessionStatus::Running);
-    assert!(result.transcript.contains("<- here"), "missing live stop: {}", result.transcript);
+    assert!(
+        result.transcript.contains("<- here"),
+        "missing live stop: {}",
+        result.transcript
+    );
     assert!(
         !result.transcript.contains("program finished"),
         "a paused session must not fabricate completion: {}",
@@ -103,16 +107,22 @@ fn canvas_debug_session_replays_one_source_bound_session() {
         "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"s\"]}}",
         revision
     );
-    let first = jet::Canvas::debug_session_json_for_file_with_sessions(
-        path,
-        &first_request,
-        &sessions,
-    )
-    .expect("Canvas should expose the first live stop");
+    let first =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &first_request, &sessions)
+            .expect("Canvas should expose the first live stop");
     assert!(first.contains("\"state\":\"running\""), "{first}");
-    assert!(first.contains("\"tier\":\"jet-dev-interpreter\""), "{first}");
-    assert!(first.contains(&format!("\"revision\":\"{}\"", revision)), "{first}");
-    assert!(first.contains("run()"), "Canvas must expose the Jet entry function, not its host wrapper: {first}");
+    assert!(
+        first.contains("\"tier\":\"jet-dev-interpreter\""),
+        "{first}"
+    );
+    assert!(
+        first.contains(&format!("\"revision\":\"{}\"", revision)),
+        "{first}"
+    );
+    assert!(
+        first.contains("run()"),
+        "Canvas must expose the Jet entry function, not its host wrapper: {first}"
+    );
 
     let marker = "\"id\":\"canvas-debug-";
     let start = first.find(marker).expect("live response session id") + 6;
@@ -125,14 +135,14 @@ fn canvas_debug_session_replays_one_source_bound_session() {
         "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
         revision, session_id
     );
-    let next = jet::Canvas::debug_session_json_for_file_with_sessions(
-        path,
-        &next_request,
-        &sessions,
-    )
-    .expect("Canvas should replay the same live session");
+    let next =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
+            .expect("Canvas should replay the same live session");
     assert!(next.contains("\"state\":\"running\""), "{next}");
-    assert!(next.contains(&format!("\"id\":\"{}\"", session_id)), "{next}");
+    assert!(
+        next.contains(&format!("\"id\":\"{}\"", session_id)),
+        "{next}"
+    );
     assert!(next.contains("\"debug_overlay\":\"running\""), "{next}");
 
     let invalid_continuation = format!(
@@ -146,25 +156,25 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     )
     .expect_err("Canvas must reject an unsupported continuation command");
     assert!(invalid.contains("\"kind\":\"unsupported\""), "{invalid}");
-    let after_invalid = jet::Canvas::debug_session_json_for_file_with_sessions(
-        path,
-        &next_request,
-        &sessions,
-    )
-    .expect("a rejected command must leave the live session usable");
-    assert!(after_invalid.contains(&format!("\"id\":\"{}\"", session_id)), "{after_invalid}");
-    assert!(after_invalid.contains("\"state\":\"running\""), "{after_invalid}");
+    let after_invalid =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
+            .expect("a rejected command must leave the live session usable");
+    assert!(
+        after_invalid.contains(&format!("\"id\":\"{}\"", session_id)),
+        "{after_invalid}"
+    );
+    assert!(
+        after_invalid.contains("\"state\":\"running\""),
+        "{after_invalid}"
+    );
 
     let stop_request = format!(
         "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"stop\":true}}",
         revision, session_id
     );
-    let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(
-        path,
-        &stop_request,
-        &sessions,
-    )
-    .expect("Canvas should stop the live session without editing source");
+    let stopped =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &stop_request, &sessions)
+            .expect("Canvas should stop the live session without editing source");
     assert!(stopped.contains("\"state\":\"stopped\""), "{stopped}");
     assert!(stopped.contains("\"overlay\":null"), "{stopped}");
     assert_eq!(std::fs::read_to_string(path).unwrap(), source);
@@ -173,12 +183,9 @@ fn canvas_debug_session_replays_one_source_bound_session() {
         "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"teleport\"]}}",
         revision
     );
-    let invalid = jet::Canvas::debug_session_json_for_file_with_sessions(
-        path,
-        &invalid_request,
-        &sessions,
-    )
-    .expect_err("Canvas must reject commands outside the debugger vocabulary");
+    let invalid =
+        jet::Canvas::debug_session_json_for_file_with_sessions(path, &invalid_request, &sessions)
+            .expect_err("Canvas must reject commands outside the debugger vocabulary");
     assert!(invalid.contains("\"kind\":\"unsupported\""), "{invalid}");
     assert_eq!(std::fs::read_to_string(path).unwrap(), source);
 }
@@ -299,10 +306,9 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
                 "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
                 revision, session_id
             );
-            let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(
-                path, &stop, &sessions,
-            )
-            .expect("native session stop");
+            let stopped =
+                jet::Canvas::debug_session_json_for_file_with_sessions(path, &stop, &sessions)
+                    .expect("native session stop");
             assert!(stopped.contains("\"state\":\"stopped\""), "{stopped}");
         }
         Err(error) => {
@@ -503,7 +509,6 @@ fn missing_run_is_registered_e0101() {
     );
 }
 
-
 /// `next`/`n` steps over the loop body without descending statement-by-statement
 /// at a deeper position — the line advances within `main`, not into a callee.
 #[test]
@@ -546,11 +551,10 @@ fn run() {
 ";
     let file = fixture("loop_next_edges", src);
 
-    let plain = jet::Debug::run_session(
-        &file,
-        &["break 5", "c", "n", "p i", "n", "p i", "c"],
-    );
-    let next_stop = plain.find("5 |             next        <- here").expect("plain next stop");
+    let plain = jet::Debug::run_session(&file, &["break 5", "c", "n", "p i", "n", "p i", "c"]);
+    let next_stop = plain
+        .find("5 |             next        <- here")
+        .expect("plain next stop");
     let step_stop = plain[next_stop..]
         .find("3 |     loop i in 0..<3 {        <- here")
         .map(|offset| next_stop + offset)
@@ -559,13 +563,13 @@ fn run() {
         !plain[next_stop..step_stop].contains("7 |         hits += i        <- here"),
         "plain next leaked into the skipped body before its afterthought:\n{plain}"
     );
-    assert!(plain.contains("i = 2"), "afterthought did not advance i:\n{plain}");
+    assert!(
+        plain.contains("i = 2"),
+        "afterthought did not advance i:\n{plain}"
+    );
     assert!(plain.contains("2,3,0"), "wrong loop result:\n{plain}");
 
-    let labeled = jet::Debug::run_session(
-        &file,
-        &["break 14", "c", "n", "p i", "n", "p i", "c"],
-    );
+    let labeled = jet::Debug::run_session(&file, &["break 14", "c", "n", "p i", "n", "p i", "c"]);
     let next_stop = labeled
         .find("14 |                 next(outer)        <- here")
         .expect("labeled next stop");
@@ -577,8 +581,14 @@ fn run() {
         !labeled[next_stop..outer_step].contains("12 |         loop j in 0..<3 {        <- here"),
         "labeled next stepped through the inner loop edge first:\n{labeled}"
     );
-    assert!(labeled.contains("i = 1"), "outer afterthought did not advance i:\n{labeled}");
-    assert!(labeled.contains("2,3,0"), "wrong labeled loop result:\n{labeled}");
+    assert!(
+        labeled.contains("i = 1"),
+        "outer afterthought did not advance i:\n{labeled}"
+    );
+    assert!(
+        labeled.contains("2,3,0"),
+        "wrong labeled loop result:\n{labeled}"
+    );
 
     let generated = jet::compile_for_debug(&file).expect("loop next fixture compiles for debug");
     for line in [5, 14] {
@@ -605,6 +615,48 @@ fn native_fixture(tag: &str, src: &str) -> String {
     let p = std::env::temp_dir().join(format!("jet_debug_native_{tag}.jet"));
     std::fs::write(&p, src).unwrap();
     p.to_string_lossy().into_owned()
+}
+
+fn dap_frame(body: &str) -> String {
+    format!("Content-Length: {}\r\n\r\n{}", body.as_bytes().len(), body)
+}
+
+#[test]
+fn dap_cli_exercises_the_production_wire_and_attach_failure() {
+    let file = native_fixture("dap_cli_failure", "fn run() {\n    print(\"dap\")\n}\n");
+    let input = format!(
+        "{}{}",
+        dap_frame(r#"{"seq":1,"type":"request","command":"initialize","arguments":{}}"#),
+        dap_frame(r#"{"seq":2,"type":"request","command":"attach","arguments":{"processId":0}}"#),
+    );
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["debug", "--dap", &file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start the production Jet DAP command");
+    child
+        .stdin
+        .take()
+        .expect("DAP stdin")
+        .write_all(input.as_bytes())
+        .expect("send framed DAP requests");
+    let output = child
+        .wait_with_output()
+        .expect("wait for the production Jet DAP command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "DAP command failed:\n{stderr}");
+    assert!(
+        stdout.contains("Content-Length:"),
+        "missing DAP framing:\n{stdout}"
+    );
+    assert!(stdout.contains("\"command\":\"initialize\""), "{stdout}");
+    assert!(stdout.contains("\"command\":\"attach\""), "{stdout}");
+    assert!(stdout.contains("\"success\":false"), "{stdout}");
+    assert!(stdout.contains("\"id\":22032"), "{stdout}");
+    let _ = std::fs::remove_file(&file);
 }
 
 #[test]
@@ -710,15 +762,6 @@ fn native_session_steps_and_shows_locals() {
             "continue",
         ],
     );
-    if !transcript.contains("breakpoint hit") {
-        eprintln!(
-            "skipping native lldb session: lldb launched but did not stop at a Jet line\n{}",
-            transcript
-        );
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_file(&file);
-        return;
-    }
     assert!(
         transcript.contains("breakpoint hit"),
         "expected an initial stop banner:\n{}",
@@ -755,13 +798,16 @@ fn native_session_steps_and_shows_locals() {
         true,
         &["locals", "backtrace", "continue"],
     );
-    if raw.contains("breakpoint hit") {
-        assert!(
-            raw.contains("[raw]"),
-            "raw expert mode must mark generated frames and scopes:\n{}",
-            raw
-        );
-    }
+    assert!(
+        raw.contains("breakpoint hit"),
+        "raw native session did not stop at a Jet line:\n{}",
+        raw
+    );
+    assert!(
+        raw.contains("[raw]"),
+        "raw expert mode must mark generated frames and scopes:\n{}",
+        raw
+    );
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(&file);
 }

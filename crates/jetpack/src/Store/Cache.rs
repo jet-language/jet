@@ -9,9 +9,9 @@
 
 use super::{entry_action_key, NarInfo, ProducerRecord, Roots, StoreEntry};
 use crate::TrustRoot::{
-    allow_cache_builder, allow_cache_witness, cache_builder_identity, is_cache_builder_allowed,
-    is_cache_builder_revoked, is_cache_witness_allowed, os_random_bytes, pin_cache_key,
-    current_receipt_witness, verify_pinned_cache_key, CacheProvenance, CacheReceipt, Signature,
+    allow_cache_builder, allow_cache_witness, cache_builder_identity, current_receipt_witness,
+    is_cache_builder_allowed, is_cache_builder_revoked, is_cache_witness_allowed, os_random_bytes,
+    pin_cache_key, verify_pinned_cache_key, CacheProvenance, CacheReceipt, Signature,
     SystemTrustedClock, TrustKey,
 };
 use crate::SHA256;
@@ -2531,45 +2531,26 @@ fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
 }
 
 fn http_get(url: String, limit: u64) -> io::Result<Option<Vec<u8>>> {
-    let child = Command::new("curl")
-        .args([
-            "--silent",
-            "--show-error",
-            "--netrc-optional",
-            "--compressed",
-            "--max-time",
-            "120",
-            "--write-out",
-            "\n%{http_code}",
-            &url,
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| invalid(&format!("HTTP cache adapter could not start: {error}")))?;
-    let (status_result, stdout, stderr) =
-        run_bounded_output(child, limit.saturating_add(64), "HTTP cache response")?;
-    let Some(separator) = stdout.iter().rposition(|byte| *byte == b'\n') else {
-        return Err(invalid("HTTP cache adapter returned no status"));
-    };
-    let status = std::str::from_utf8(&stdout[separator + 1..])
-        .ok()
-        .and_then(|value| value.trim().parse::<u16>().ok())
-        .ok_or_else(|| invalid("HTTP cache adapter returned an invalid status"))?;
+    let response = jet_net::get_stream(&url, std::time::Duration::from_secs(120))
+        .map_err(|error| invalid(&format!("HTTP cache GET failed: {error}")))?;
+    let status = response.status();
     if status == 404 || status == 410 {
         return Ok(None);
     }
-    if !status_result.success() || !(200..300).contains(&status) {
+    if !(200..300).contains(&status) {
         return Err(invalid(&format!(
-            "HTTP cache GET failed with status {status}: {}",
-            bounded_stderr(&stderr)
+            "HTTP cache GET failed with status {status}"
         )));
     }
-    let body = &stdout[..separator];
+    let mut body = Vec::new();
+    response
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut body)
+        .map_err(|error| invalid(&format!("HTTP cache response could not be read: {error}")))?;
     if body.len() as u64 > limit {
         return Err(invalid("HTTP cache response exceeded its bound"));
     }
-    Ok(Some(body.to_vec()))
+    Ok(Some(body))
 }
 
 fn http_put(url: String, bytes: &[u8]) -> io::Result<()> {

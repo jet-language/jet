@@ -24,6 +24,10 @@ fn check_reports_goal_and_fill_only_offers_checked_candidates() {
         check_text.contains("required effects: none"),
         "{check_text}"
     );
+    assert!(
+        check_text.contains("required effects: [IO]"),
+        "{check_text}"
+    );
 
     let fill = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["fill", file.to_str().unwrap()])

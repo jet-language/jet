@@ -12,11 +12,9 @@
 //!
 //! Caveat (honest, not a stub): this module's lldb-output parsing
 //! (`Inferior::parse_top_frame`/`parse_typed_locals`) is written against lldb's
-//! documented, stable batch-mode text shapes, but this sandbox has no `lldb`
-//! binary to verify against live — `Inferior::available()` gates every entry
-//! point and `tests/debug_native.rs` skips (not fails) when it's absent, the
-//! same posture `tests/observe.rs` takes for `rustc`. Verify on a machine with
-//! lldb before calling this airtight.
+//! documented, stable batch-mode text shapes. The live conformance test gates
+//! only on the required external tools being absent; once lldb is available,
+//! a failure is a test failure rather than a skipped claim.
 
 use std::path::Path;
 
@@ -213,12 +211,22 @@ fn run_with_io(
         );
         return (ExitCodes::ICE, io_into_output(io), false);
     };
-    if let Err(_e) = inf.set_breakpoint(rust_file, entry_line) {
-        report_error(
-            &mut io,
-            "error: native debugger could not set the source breakpoint",
-        );
-        return (ExitCodes::ICE, io_into_output(io), false);
+    match inf.set_breakpoint(rust_file, entry_line) {
+        Ok(breakpoint) if breakpoint.resolved => {}
+        Ok(_) => {
+            report_error(
+                &mut io,
+                "error: native debugger could not set the source breakpoint",
+            );
+            return (ExitCodes::ICE, io_into_output(io), false);
+        }
+        Err(_) => {
+            report_error(
+                &mut io,
+                "error: native debugger could not set the source breakpoint",
+            );
+            return (ExitCodes::ICE, io_into_output(io), false);
+        }
     }
     let result = match inf.resume_and_locate("run") {
         Ok(r) => r,
@@ -399,7 +407,9 @@ impl Session {
                     // default projection reports an honest, Jet-level state.
                     let trimmed = bt_text.trim_end();
                     if self.raw_frames && !trimmed.is_empty() {
-                        self.emit(&format!("[raw] {}", trimmed));
+                        for line in trimmed.lines() {
+                            self.emit(&format!("[raw] {}", line));
+                        }
                     } else {
                         self.no_jet_frame();
                     }
@@ -416,7 +426,10 @@ impl Session {
             self.print_stop_banner(func, rust_file, rust_line);
             return;
         }
-        match self.map.jet_line_for(rust_line) {
+        match self
+            .map
+            .jet_line_for_file(rust_file, &self.rust_file, rust_line)
+        {
             Some(jline) => {
                 let file = self.jet_file.clone();
                 self.print_stop_banner(func, &file, jline)
@@ -442,7 +455,7 @@ impl Session {
             let result = match self.inf.resume_and_locate("thread step-over") {
                 Ok(r) => r,
                 Err(_) => {
-                    self.no_jet_frame();
+                    self.backend_lost("step failed; debugger session is unavailable");
                     return;
                 }
             };
@@ -462,7 +475,11 @@ impl Session {
                 }
                 ResumeResult::Stopped(bt_text) => match Inferior::parse_top_frame(&bt_text) {
                     Some(frame) => {
-                        if let Some(jline) = self.map.jet_line_for(frame.rust_line) {
+                        if let Some(jline) = self.map.jet_line_for_file(
+                            &frame.rust_file,
+                            &self.rust_file,
+                            frame.rust_line,
+                        ) {
                             let file = self.jet_file.clone();
                             let func = Inferior::safe_jet_func(&frame.func);
                             self.print_stop_banner(&func, &file, jline);
@@ -513,7 +530,13 @@ impl Session {
                 };
                 format!("{}{}", prefix, body.join("   "))
             }
-            Err(_) => "locals:  (none)".to_string(),
+            Err(_) => {
+                if self.raw_frames {
+                    "[raw] locals:  (none)".to_string()
+                } else {
+                    "locals:  (none)".to_string()
+                }
+            }
         }
     }
 
@@ -528,9 +551,16 @@ impl Session {
         match self.map.rust_line_for(n) {
             Some(rust_line) => {
                 let rust_file = self.rust_file.clone();
-                if self.inf.set_breakpoint(&rust_file, rust_line).is_err() {
-                    self.emit("couldn't set the breakpoint");
-                    return;
+                match self.inf.set_breakpoint(&rust_file, rust_line) {
+                    Ok(breakpoint) if breakpoint.resolved => {}
+                    Ok(_) => {
+                        self.emit("couldn't set the breakpoint");
+                        return;
+                    }
+                    Err(_) => {
+                        self.emit("couldn't set the breakpoint");
+                        return;
+                    }
                 }
                 let file = self.jet_file.clone();
                 self.emit(&format!("breakpoint set  {}:{}", file, n));
@@ -566,13 +596,26 @@ impl Session {
         };
         let frames = Inferior::parse_frames(&out);
         let jet_file = self.jet_file.clone();
+        if frames.is_empty() {
+            if self.raw_frames {
+                for line in out.trim_end().lines() {
+                    self.emit(&format!("[raw] {}", line));
+                }
+            } else {
+                self.no_jet_frame();
+            }
+            return;
+        }
         for (i, f) in frames.iter().enumerate() {
             if self.raw_frames {
                 self.emit(&format!(
                     "[raw] #{}  {}()  at {}:{}",
                     i, f.func, f.rust_file, f.rust_line
                 ));
-            } else if let Some(jline) = self.map.jet_line_for(f.rust_line) {
+            } else if let Some(jline) =
+                self.map
+                    .jet_line_for_file(&f.rust_file, &self.rust_file, f.rust_line)
+            {
                 let func = Inferior::safe_jet_func(&f.func);
                 self.emit(&format!("#{}  {}()  at {}:{}", i, func, jet_file, jline));
             }
@@ -688,7 +731,8 @@ commands:
     fn current_jet_line(&mut self) -> Option<usize> {
         let out = self.inf.backtrace().ok()?;
         let top = Inferior::parse_frames(&out).into_iter().next()?;
-        self.map.jet_line_for(top.rust_line)
+        self.map
+            .jet_line_for_file(&top.rust_file, &self.rust_file, top.rust_line)
     }
 
     fn step(&mut self, into: bool) {
@@ -699,22 +743,28 @@ commands:
         };
         match self.inf.resume_and_locate(cmd) {
             Ok(r) => self.handle_resume(r),
-            Err(_) => self.emit("step failed; debugger session is unavailable"),
+            Err(_) => self.backend_lost("step failed; debugger session is unavailable"),
         }
     }
 
     fn finish(&mut self) {
         match self.inf.resume_and_locate("thread step-out") {
             Ok(r) => self.handle_resume(r),
-            Err(_) => self.emit("finish failed; debugger session is unavailable"),
+            Err(_) => self.backend_lost("finish failed; debugger session is unavailable"),
         }
     }
 
     fn cont(&mut self) {
         match self.inf.resume_and_locate("continue") {
             Ok(r) => self.handle_resume(r),
-            Err(_) => self.emit("continue failed; debugger session is unavailable"),
+            Err(_) => self.backend_lost("continue failed; debugger session is unavailable"),
         }
+    }
+
+    fn backend_lost(&mut self, message: &str) {
+        self.exit_code = ExitCodes::ICE;
+        self.exited = true;
+        self.emit(message);
     }
 
     fn run_to_completion(&mut self) {
@@ -722,9 +772,7 @@ commands:
             match self.inf.resume_and_locate("continue") {
                 Ok(result) => self.handle_resume(result),
                 Err(_) => {
-                    self.exit_code = ExitCodes::ICE;
-                    self.exited = true;
-                    self.emit("error: native debugger lost the running session");
+                    self.backend_lost("error: native debugger lost the running session");
                 }
             }
         }

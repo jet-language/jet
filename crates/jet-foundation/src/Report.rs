@@ -14,22 +14,29 @@ pub const REPORT_SCHEMA: &str = "jet.report/v1";
 /// status prefix here prevents each tool from inventing its own schema or
 /// escaping rules while preserving command-specific facts for consumers.
 pub fn render_status_json(status: &str, ok: bool, action: &str, fields: &str) -> String {
-    let mut out = String::from("{\"schema\":");
-    out.push_str(&report_json_string(REPORT_SCHEMA));
-    out.push_str(",\"moment\":\"tool\",\"status\":");
-    out.push_str(&report_json_string(status));
-    out.push_str(",\"ok\":");
-    out.push_str(if ok { "true" } else { "false" });
-    out.push_str(",\"action\":");
-    out.push_str(&report_json_string(action));
-    out.push_str(fields);
-    out.push('}');
-    out
+    ReportEnvelope::status_record("tool", status, ok, action)
+        .with_fields(fields)
+        .json()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::render_status_json;
+    use super::{render_status_json, ReportEnvelope, REPORT_NAME, REPORT_SCHEMA, REPORT_VERSION};
+
+    #[test]
+    fn report_envelope_owns_the_versioned_schema_identity() {
+        let envelope = ReportEnvelope::status_record("tool", "ok", true, "facts")
+            .with_fields(",\"facts\":[]");
+        assert_eq!(envelope.schema_name, REPORT_NAME);
+        assert_eq!(envelope.schema_version, REPORT_VERSION);
+        assert_eq!(REPORT_NAME, "jet.report");
+        assert_eq!(REPORT_VERSION, 1);
+        assert_eq!(REPORT_SCHEMA, "jet.report/v1");
+        assert_eq!(
+            envelope.json_line(),
+            "{\"schema\":\"jet.report/v1\",\"moment\":\"tool\",\"status\":\"ok\",\"ok\":true,\"action\":\"facts\",\"facts\":[]}\n"
+        );
+    }
 
     #[test]
     fn status_renderer_emits_one_escaped_machine_report() {
@@ -210,9 +217,11 @@ pub enum ReportExtension {
     },
 }
 
-/// The one `jet.report/v1` envelope.
+/// The one `jet.report/v1` envelope for diagnostics and command fact streams.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportEnvelope {
+    pub schema_name: &'static str,
+    pub schema_version: u32,
     pub moment: String,
     pub severity: String,
     pub code: String,
@@ -229,6 +238,10 @@ pub struct ReportEnvelope {
     pub cause: Vec<String>,
     pub clears: usize,
     pub extension: Option<ReportExtension>,
+    status: Option<String>,
+    ok: Option<bool>,
+    action: Option<String>,
+    fields: String,
 }
 
 impl ReportEnvelope {
@@ -241,6 +254,8 @@ impl ReportEnvelope {
         fix: impl Into<String>,
     ) -> Self {
         Self {
+            schema_name: REPORT_NAME,
+            schema_version: REPORT_VERSION,
             moment: moment.into(),
             severity: severity.into(),
             code: code.into(),
@@ -257,15 +272,52 @@ impl ReportEnvelope {
             cause: Vec::new(),
             clears: 0,
             extension: None,
+            status: None,
+            ok: None,
+            action: None,
+            fields: String::new(),
         }
+    }
+
+    pub fn status_record(
+        moment: impl Into<String>,
+        status: impl Into<String>,
+        ok: bool,
+        action: impl Into<String>,
+    ) -> Self {
+        let mut report = Self::new(moment, "", "", "", "", "");
+        report.status = Some(status.into());
+        report.ok = Some(ok);
+        report.action = Some(action.into());
+        report
+    }
+
+    /// Add already-encoded, comma-prefixed command data to a status record.
+    pub fn with_fields(mut self, fields: &str) -> Self {
+        self.fields.push_str(fields);
+        self
     }
 
     pub fn json(&self) -> String {
         let mut out = String::from("{");
         out.push_str("\"schema\":");
-        out.push_str(&report_json_string(REPORT_SCHEMA));
+        let schema = format!("{}/v{}", self.schema_name, self.schema_version);
+        out.push_str(&report_json_string(&schema));
         out.push_str(",\"moment\":");
         out.push_str(&report_json_string(&self.moment));
+        if let (Some(status), Some(ok), Some(action)) =
+            (&self.status, self.ok, &self.action)
+        {
+            out.push_str(",\"status\":");
+            out.push_str(&report_json_string(status));
+            out.push_str(",\"ok\":");
+            out.push_str(if ok { "true" } else { "false" });
+            out.push_str(",\"action\":");
+            out.push_str(&report_json_string(action));
+            out.push_str(&self.fields);
+            out.push('}');
+            return out;
+        }
         out.push_str(",\"severity\":");
         out.push_str(&report_json_string(&self.severity));
         out.push_str(",\"code\":");
@@ -345,6 +397,12 @@ impl ReportEnvelope {
             }
         }
         out.push('}');
+        out
+    }
+
+    pub fn json_line(&self) -> String {
+        let mut out = self.json();
+        out.push('\n');
         out
     }
 }

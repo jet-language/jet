@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
 use jet::ExitCodes;
+use jet_foundation::Report::render_status_json;
 
 use crate::{find_project_entry, report_problems, OutputMode};
 
@@ -1153,8 +1154,13 @@ pub(crate) fn run_copy_audit(args: &[String], json: bool) {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"schema_version\":1,\"command\":\"audit copies\",\"copies\":[{}]}}",
-            entries
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "audit.copies",
+                &format!(",\"copies\":[{}]", entries),
+            )
         );
         return;
     }

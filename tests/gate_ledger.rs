@@ -162,7 +162,7 @@ fn assert_tier_text(text: &str) {
 }
 
 fn assert_knowledge_ledger(json: &str) {
-    assert!(json.starts_with("{\"schema_version\":1,\"entries\":["), "{json}");
+    assert!(json.starts_with("{\"schema\":\"jet.report/v1\"") && json.contains("\"gates\":{\"entries\":["), "{json}");
     for subject in [
         "approx",
         "wrapping",

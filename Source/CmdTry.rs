@@ -8,6 +8,7 @@ use std::process::exit;
 use jet::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use jet::ExitCodes;
 use jet_foundation::JSON::{json_escape, JSONValue};
+use jet_foundation::Report::ReportEnvelope;
 use jet_semindex::{SemanticOp, SemanticOpTarget, SourceSpan};
 
 #[derive(Clone)]
@@ -347,14 +348,19 @@ fn verify_current_bytes(changes: &[Change]) {
 
 fn emit_success(plan: &TryPlan, verdict: &Verdict, receipt: &str, keep: bool, json: bool) {
     if json {
+        let status = if keep { "kept" } else { "rolled_back" };
         println!(
-            "{{\"schema_version\":1,\"command\":\"try\",\"name\":\"{}\",\"status\":\"{}\",\"kept\":{},\"claims_rechecked\":{},\"claims_reused\":{},\"receipt_id\":\"{}\"}}",
-            json_escape(&plan.name),
-            if keep { "kept" } else { "rolled_back" },
-            keep,
-            verdict.claims_rechecked,
-            verdict.claims_reused,
-            receipt
+            "{}",
+            ReportEnvelope::status_record("tool", status, true, "try")
+                .with_fields(&format!(
+                    ",\"name\":\"{}\",\"kept\":{},\"claims_rechecked\":{},\"claims_reused\":{},\"receipt_id\":\"{}\"",
+                    json_escape(&plan.name),
+                    keep,
+                    verdict.claims_rechecked,
+                    verdict.claims_reused,
+                    json_escape(receipt),
+                ))
+                .json()
         );
         return;
     }
@@ -380,9 +386,14 @@ fn emit_failure(
 ) {
     if json {
         println!(
-            "{{\"schema_version\":1,\"command\":\"try\",\"name\":\"{}\",\"status\":\"rolled_back\",\"kept\":false,\"verdict\":\"failed\",\"receipt_id\":\"{}\"}}",
-            json_escape(&plan.name),
-            receipt
+            "{}",
+            ReportEnvelope::status_record("tool", "rolled_back", false, "try")
+                .with_fields(&format!(
+                    ",\"name\":\"{}\",\"kept\":false,\"verdict\":\"failed\",\"receipt_id\":\"{}\"",
+                    json_escape(&plan.name),
+                    json_escape(receipt),
+                ))
+                .json()
         );
     } else {
         eprintln!("try `{}`: verdict failed; rolled back", plan.name);

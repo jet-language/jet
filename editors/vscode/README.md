@@ -55,6 +55,8 @@ same native debugger path as the terminal command. LLDB must be on `PATH`.
 The adapter starts the selected Jet executable with direct argv. It does not
 run a shell. Set `jet.executablePath` when the editor must use a specific
 build.
+Restart keeps launch arguments and source breakpoints. It expires stack,
+scope, and variable references, so the editor must refresh them after the stop.
 
 Optional `.vscode/launch.json` configuration:
 
@@ -70,6 +72,22 @@ Optional `.vscode/launch.json` configuration:
       "showRawFrames": false
     }
   ]
+}
+```
+
+For a local attach, use the native debug binary and the matching `.jetmap`
+sidecar. The extension reads the Jet source identity from that sidecar before
+starting the adapter; the adapter then verifies the same-user process and
+build identity.
+
+```json
+{
+  "type": "jet",
+  "request": "attach",
+  "name": "Jet: Attach",
+  "program": "${workspaceFolder}/target/debug/jet-program",
+  "map": "${workspaceFolder}/target/debug/jet-program.jetmap",
+  "processId": 12345
 }
 ```
 

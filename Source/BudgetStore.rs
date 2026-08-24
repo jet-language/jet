@@ -12,6 +12,8 @@ use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::ReceiptStore::{input_paths_for, ReceiptStore};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UpdateKind {
     Pass,
@@ -97,6 +99,7 @@ impl BudgetStore {
             }
             Ok(())
         })?;
+        self.record_receipt(&id, bytes)?;
         Ok((id, created))
     }
 
@@ -119,7 +122,53 @@ impl BudgetStore {
         if report_id(&value)? != id || existing != bytes {
             return Err("existing report filename/id/bytes mismatch".into());
         }
+        if self.lookup_receipt(&id, bytes)?.is_none() {
+            return Ok((id, false));
+        }
         Ok((id, true))
+    }
+
+    fn receipt_store(&self) -> ReceiptStore {
+        let root = std::env::var_os("JET_RECEIPT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.workspace.join(".jet").join("receipts"));
+        ReceiptStore::new(root)
+    }
+
+    fn receipt_claim(&self, id: &str) -> Result<crate::ReceiptClaim, String> {
+        let argv = vec!["budget".into(), "check".into(), id.into()];
+        let inputs = self.receipt_inputs(id, &argv);
+        self.receipt_store().claim("budget", &argv, &inputs)
+    }
+
+    fn receipt_inputs(&self, id: &str, argv: &[String]) -> Vec<PathBuf> {
+        let mut inputs = input_paths_for("budget check", argv, &self.workspace);
+        let report = self
+            .workspace
+            .join(".jet")
+            .join("perf")
+            .join("reports")
+            .join(format!("{id}.json"));
+        if report.is_file() {
+            inputs.push(report);
+        }
+        inputs
+    }
+
+    fn record_receipt(&self, id: &str, bytes: &[u8]) -> Result<(), String> {
+        let argv = vec!["budget".into(), "check".into(), id.into()];
+        let inputs = self.receipt_inputs(id, &argv);
+        self.receipt_store()
+            .record("budget", &argv, &inputs, 0, bytes, b"")
+            .map(|_| ())
+    }
+
+    fn lookup_receipt(&self, id: &str, bytes: &[u8]) -> Result<Option<crate::Receipt>, String> {
+        let claim = self.receipt_claim(id)?;
+        let Some(receipt) = self.receipt_store().lookup(&claim)? else {
+            return Ok(None);
+        };
+        Ok((receipt.stdout == bytes).then_some(receipt))
     }
 
     pub fn plan_update(

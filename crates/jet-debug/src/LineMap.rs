@@ -61,6 +61,21 @@ impl LineMap {
             .map(|(_, v)| *v)
     }
 
+    /// Translate a frame only when LLDB's file identity agrees with the
+    /// generated source recorded in the sidecar.  A line number without its
+    /// file is not a safe source location: unrelated Rust/library frames can
+    /// reuse the same line number.
+    pub(crate) fn jet_line_for_file(
+        &self,
+        rust_file: &str,
+        expected_rust_file: &str,
+        rust_line: usize,
+    ) -> Option<usize> {
+        source_file_matches(rust_file, expected_rust_file)
+            .then(|| self.jet_line_for(rust_line))
+            .flatten()
+    }
+
     /// The rust line to set a native breakpoint on for `break <jet_line>`.
     pub(crate) fn rust_line_for(&self, jet_line: usize) -> Option<usize> {
         self.jet_to_rust.get(&jet_line).copied()
@@ -126,7 +141,10 @@ impl LineMap {
         static MAP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let counter = MAP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temporary = path.with_extension(format!("jetmap.tmp-{}-{counter}", std::process::id()));
-        std::fs::write(&temporary, json.as_bytes())?;
+        if let Err(error) = std::fs::write(&temporary, json.as_bytes()) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
         if let Err(error) = std::fs::rename(&temporary, path) {
             let _ = std::fs::remove_file(&temporary);
             return Err(error);
@@ -222,6 +240,24 @@ impl LineMap {
     }
 }
 
+fn source_file_matches(actual: &str, expected: &str) -> bool {
+    if actual == expected {
+        return true;
+    }
+    let actual_path = Path::new(actual);
+    let expected_path = Path::new(expected);
+    if std::fs::canonicalize(actual_path).ok() == std::fs::canonicalize(expected_path).ok()
+        && actual_path.exists()
+        && expected_path.exists()
+    {
+        return true;
+    }
+    matches!(
+        (actual_path.file_name(), expected_path.file_name()),
+        (Some(actual), Some(expected)) if actual == expected
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +285,16 @@ mod tests {
         let rust = "fn main() {\n    let x = 1;\n}\n";
         let map = LineMap::build(rust);
         assert_eq!(map.jet_line_for(2), None);
+    }
+
+    #[test]
+    fn file_aware_mapping_rejects_an_unrelated_frame() {
+        let map = LineMap::build("fn main() {\n// jet:line 7\nlet x = 1;\n}\n");
+        assert_eq!(
+            map.jet_line_for_file("generated.rs", "generated.rs", 3),
+            Some(7)
+        );
+        assert_eq!(map.jet_line_for_file("library.rs", "generated.rs", 3), None);
     }
 
     #[test]

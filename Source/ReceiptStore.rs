@@ -22,6 +22,10 @@ static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 /// mutation and interactive verbs do not claim a whole-invocation receipt.
 pub const PARTICIPATING_VERBS: &[&str] = &["check", "build", "test", "prove", "budget check"];
 
+/// Claim kinds that used to grow separate result formats. Their payloads now
+/// live in the same immutable receipt object as ordinary command output.
+pub const RECEIPT_KINDS: &[&str] = &["test", "golden", "budget", "api"];
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceiptInput {
     pub path: PathBuf,
@@ -53,6 +57,14 @@ impl ReceiptStore {
         Self { root: root.into() }
     }
 
+    fn context_key(&self, verb: &str, argv: &[String]) -> Result<String, String> {
+        Ok(sha256_hex(&context_identity(verb, argv)?))
+    }
+
+    fn context_path(&self, context_key: &str) -> PathBuf {
+        self.root.join("contexts").join(context_key)
+    }
+
     /// Build an action identity from argv, current tool/environment context,
     /// and the exact input files supplied by the caller.
     pub fn claim(
@@ -61,9 +73,15 @@ impl ReceiptStore {
         argv: &[String],
         input_paths: &[PathBuf],
     ) -> Result<ReceiptClaim, String> {
-        if verb.is_empty() {
-            return Err("receipt verb is empty".into());
-        }
+        self.claim_with_identity(verb, context_identity(verb, argv)?, input_paths)
+    }
+
+    fn claim_with_identity(
+        &self,
+        verb: &str,
+        mut identity: Vec<u8>,
+        input_paths: &[PathBuf],
+    ) -> Result<ReceiptClaim, String> {
         let mut inputs = Vec::new();
         let mut seen = BTreeSet::new();
         for path in input_paths {
@@ -77,14 +95,6 @@ impl ReceiptStore {
         }
         inputs.sort_by(|a, b| a.path.cmp(&b.path));
 
-        let mut identity = Vec::new();
-        identity.extend_from_slice(MAGIC);
-        frame(&mut identity, verb.as_bytes());
-        frame(&mut identity, &current_dir_bytes());
-        frame(&mut identity, &argv_identity(argv));
-        frame(&mut identity, &environment_identity());
-        frame(&mut identity, &tool_identity());
-        frame(&mut identity, &terminal_identity());
         for input in &inputs {
             frame(&mut identity, input.path.to_string_lossy().as_bytes());
             frame(&mut identity, input.digest.as_bytes());
@@ -95,6 +105,123 @@ impl ReceiptStore {
             key: sha256_hex(&identity),
             inputs,
         })
+    }
+
+    /// Find a receipt through the cheap invocation index. The receipt carries
+    /// its prior input closure, so current bytes are checked without loading
+    /// the compiler dependency graph. Any mismatch falls back to discovery.
+    fn lookup_context(
+        &self,
+        verb: &str,
+        argv: &[String],
+        cwd: &Path,
+    ) -> Result<Option<Receipt>, String> {
+        let identity = context_identity(verb, argv)?;
+        let context_key = sha256_hex(&identity);
+        let pointer = self.context_path(&context_key);
+        let pointer_bytes = match read_regular(&pointer) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "could not read receipt context {}: {error}",
+                    pointer.display()
+                ))
+            }
+        };
+        let key = String::from_utf8(pointer_bytes)
+            .map_err(|_| "receipt context is not UTF-8".to_string())?;
+        if !is_digest(&key) {
+            return Ok(None);
+        }
+        let object = self.object_path(&key);
+        let bytes = match read_regular(&object) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "could not read receipt {}: {error}",
+                    object.display()
+                ))
+            }
+        };
+        let receipt = match decode_receipt(&bytes) {
+            Ok(receipt) => receipt,
+            Err(_) => return Ok(None),
+        };
+        if receipt.claim.key != key || receipt.claim.verb != verb {
+            return Ok(None);
+        }
+        let input_paths = match target_path(verb, argv, cwd) {
+            Some(target) if target.is_dir() || verb == "budget check" => {
+                input_paths_for(verb, argv, cwd)
+            }
+            _ => receipt
+                .claim
+                .inputs
+                .iter()
+                .map(|input| input.path.clone())
+                .collect(),
+        };
+        let claim = match self.claim_with_identity(verb, identity, &input_paths) {
+            Ok(claim) => claim,
+            Err(_) => return Ok(None),
+        };
+        if claim != receipt.claim
+            || !inputs_current(&claim.inputs)
+            || receipt.digest != receipt_digest(&receipt)
+        {
+            return Ok(None);
+        }
+        Ok(Some(receipt))
+    }
+
+    /// Publish the latest claim for one invocation. This index is advisory:
+    /// a torn, stale, or forged pointer can only cause a cache miss.
+    fn remember_context(
+        &self,
+        verb: &str,
+        argv: &[String],
+        claim: &ReceiptClaim,
+    ) -> Result<(), String> {
+        if claim.verb != verb || !is_digest(&claim.key) {
+            return Err("receipt context claim is malformed".into());
+        }
+        let context_key = self.context_key(verb, argv)?;
+        let path = self.context_path(&context_key);
+        let parent = path
+            .parent()
+            .ok_or_else(|| "receipt context path has no parent".to_string())?;
+        secure_create_dir(parent)?;
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(format!("receipt context is unsafe: {}", path.display()));
+            }
+        }
+        let temp = parent.join(format!(
+            ".{}.{}.{}",
+            context_key,
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+                .map_err(|error| format!("could not stage receipt context: {error}"))?;
+            file.write_all(claim.key.as_bytes())
+                .map_err(|error| format!("could not write receipt context: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("could not flush receipt context: {error}"))?;
+            fs::rename(&temp, &path)
+                .map_err(|error| format!("could not publish receipt context: {error}"))?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        result
     }
 
     /// Return a receipt only when the stored bytes and every current input
@@ -196,6 +323,93 @@ impl ReceiptStore {
         result
     }
 
+    /// Record one command result through the canonical claim/write path and
+    /// return the published receipt. Output is opaque to the store; its input
+    /// closure is not.
+    pub fn record(
+        &self,
+        verb: &str,
+        argv: &[String],
+        input_paths: &[PathBuf],
+        status: i32,
+        stdout: &[u8],
+        stderr: &[u8],
+    ) -> Result<Receipt, String> {
+        let claim = self.claim(verb, argv, input_paths)?;
+        self.write(&claim, status, stdout, stderr)?;
+        self.lookup(&claim)?
+            .ok_or_else(|| "receipt was not current after publication".into())
+    }
+
+    /// List valid immutable receipt objects in stable claim-key order.
+    /// Temporary files and malformed objects are ignored; a ledger can only
+    /// consume a fully decoded, self-authenticated receipt.
+    pub fn list(&self) -> Result<Vec<Receipt>, String> {
+        let objects = self.root.join("objects");
+        let metadata = match fs::symlink_metadata(&objects) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(format!("could not inspect receipt store: {error}")),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(format!(
+                "receipt object store is not a regular directory: {}",
+                objects.display()
+            ));
+        }
+
+        let mut receipts = Vec::new();
+        let entries =
+            fs::read_dir(&objects).map_err(|error| format!("could not list receipts: {error}"))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("could not inspect receipt: {error}"))?;
+            let path = entry.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if name.is_empty() || name.starts_with('.') {
+                continue;
+            }
+            if !is_digest(name) {
+                continue;
+            }
+            let bytes = match read_regular(&path) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            let Ok(receipt) = decode_receipt(&bytes) else {
+                continue;
+            };
+            if receipt.claim.key != name || receipt.digest != receipt_digest(&receipt) {
+                continue;
+            }
+            receipts.push(receipt);
+        }
+        receipts.sort_by(|left, right| left.claim.key.cmp(&right.claim.key));
+        Ok(receipts)
+    }
+
+    /// A receipt is current only when its input closure still hashes to the
+    /// claim and its immutable object still authenticates.
+    pub fn is_current(&self, receipt: &Receipt) -> Result<bool, String> {
+        let current = self.lookup(&receipt.claim)?;
+        Ok(current.as_ref().is_some_and(|current| current == receipt))
+    }
+
+    /// Return only receipts safe for a status projection. Stale and malformed
+    /// objects never become ledger claims.
+    pub fn list_current(&self) -> Result<Vec<Receipt>, String> {
+        self.list()?
+            .into_iter()
+            .filter_map(|receipt| match self.is_current(&receipt) {
+                Ok(true) => Some(Ok(receipt)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
+    }
+
     pub fn object_path(&self, key: &str) -> PathBuf {
         self.root.join("objects").join(key)
     }
@@ -240,17 +454,18 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
         return None;
     }
     let cwd = std::env::current_dir().ok()?;
+    let root = receipt_root(verb, argv, &cwd);
+    let store = ReceiptStore::new(root);
+    if let Ok(Some(receipt)) = store.lookup_context(verb, argv, &cwd) {
+        replay_receipt(verb, &receipt);
+        return Some(receipt.status);
+    }
+
     let input_paths = input_paths_for(verb, argv, &cwd);
     if input_paths.is_empty() && verb != "budget check" {
         return None;
     }
-    let root = receipt_root(verb, argv, &cwd);
-    let store = ReceiptStore::new(root);
     let claim = store.claim(verb, argv, &input_paths).ok()?;
-    if let Ok(Some(receipt)) = store.lookup(&claim) {
-        replay_receipt(verb, &receipt);
-        return Some(receipt.status);
-    }
 
     let executable = std::env::current_exe().ok()?;
     let output = std::process::Command::new(executable)
@@ -262,7 +477,12 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let status = output.status.code().unwrap_or(1);
     write_bytes(std::io::stdout(), &output.stdout);
     write_bytes(std::io::stderr(), &output.stderr);
-    let _ = store.write(&claim, status, &output.stdout, &output.stderr);
+    if store
+        .write(&claim, status, &output.stdout, &output.stderr)
+        .is_ok()
+    {
+        let _ = store.remember_context(verb, argv, &claim);
+    }
     Some(status)
 }
 
@@ -612,6 +832,21 @@ fn decode_receipt(bytes: &[u8]) -> Result<Receipt, String> {
 
 fn receipt_digest(receipt: &Receipt) -> String {
     sha256_hex(&encode_receipt_body(receipt))
+}
+
+fn context_identity(verb: &str, argv: &[String]) -> Result<Vec<u8>, String> {
+    if verb.is_empty() {
+        return Err("receipt verb is empty".into());
+    }
+    let mut identity = Vec::new();
+    identity.extend_from_slice(MAGIC);
+    frame(&mut identity, verb.as_bytes());
+    frame(&mut identity, &current_dir_bytes());
+    frame(&mut identity, &argv_identity(argv));
+    frame(&mut identity, &environment_identity());
+    frame(&mut identity, &tool_identity());
+    frame(&mut identity, &terminal_identity());
+    Ok(identity)
 }
 
 fn is_digest(value: &str) -> bool {

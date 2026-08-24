@@ -70,15 +70,31 @@ Rebuild with `cargo build` and reload Zed to pick up server changes.
 
 ## Native debugging
 
-The extension does not register a Jet DAP adapter yet. Zed extension API
-0.7.0 cannot express the trust and authorization checks required by the
-native debugger. This keeps the Zed debug panel from starting a session that
-cannot report an honest authority state.
+The extension registers the `jet` DAP adapter through Zed extension API 0.7.0.
+It launches `jet debug --dap <file.jet>` over stdio and passes launch or local
+attach configuration, arguments, working directory, environment overrides,
+and stop-on-entry through the same bounded Jet DAP profile as VS Code.
+Restart keeps launch arguments and source breakpoints, but expires stack,
+scope, and variable references; refresh the view after the resulting stop.
 
-Use the terminal command `jet debug <file.jet>` for the native debugger. Add
-`--raw-frames` only for the clearly marked generated-Rust expert view. The
-VS Code extension has the current DAP integration. Zed adapter registration
-will start after the required trust and authorization API is ratified.
+The default view shows Jet threads, stacks, scopes, nested values, and
+read-only evaluation. Use `showRawFrames` only for the clearly marked
+generated-Rust expert view. LLDB must be available to the selected Jet
+executable.
+
+Launch configuration uses the open `.jet` source as `program`. Local attach
+uses the matching native `program`, its `.jetmap` `map`, and a positive
+same-user `processId`; the adapter reads the source identity from that verified
+map before it starts.
+
+```json
+{
+  "request": "launch",
+  "program": "${file}",
+  "stopOnEntry": true,
+  "showRawFrames": false
+}
+```
 
 ## Verify
 

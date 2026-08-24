@@ -14,7 +14,7 @@ fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"kind\":\"dereference\"") && stdout.contains("\"discharged\":true"), "{stdout}");
+    assert!(stdout.contains("\"schema\":\"jet.report/v1\"") && stdout.contains("\"gates\":[") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"kind\":\"dereference\"") && stdout.contains("\"discharged\":true"), "{stdout}");
     assert!(parse_json(&stdout).is_ok(), "inspect unsafe JSON must parse: {stdout}");
     assert!(stdout.contains("\"location\":{\"start\":{\"line\":4,\"column\":2}"), "{stdout}");
     let repeat = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();

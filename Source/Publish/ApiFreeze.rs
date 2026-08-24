@@ -65,9 +65,14 @@ fn record_api_receipt(
         project_root.join(entry)
     };
     let args = vec![package.to_string(), version.to_string()];
+    let input_argv = vec!["api".to_string(), entry.display().to_string()];
+    let mut inputs = crate::ReceiptStore::input_paths_for("api", &input_argv, project_root);
+    let snapshot_path = api_cache_dir(project_root).join(format!("{package}.api"));
+    if snapshot_path.is_file() {
+        inputs.push(snapshot_path);
+    }
     let store = crate::ReceiptStore::ReceiptStore::new(root);
-    let claim = store.claim("api snapshot", &args, &[entry])?;
     store
-        .write(&claim, 0, snapshot.write().as_bytes(), b"")
+        .record("api", &args, &inputs, 0, snapshot.write().as_bytes(), b"")
         .map(|_| ())
 }

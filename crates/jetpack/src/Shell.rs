@@ -11,8 +11,6 @@ use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use jet_foundation::Terminal::Theme as SharedTheme;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-#[cfg(target_os = "linux")]
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The shells Jetpack can decorate. Anything else falls back to `bash`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,17 +172,6 @@ pub fn run_command_in_silent(env: &Env, cmd_args: &[String], cwd: Option<&Path>)
 struct NixProjection {
     command: Command,
     keepers: Vec<std::fs::File>,
-    cleanup: ProjectionCleanup,
-}
-
-struct ProjectionCleanup(Option<PathBuf>);
-
-impl Drop for ProjectionCleanup {
-    fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            let _ = std::fs::remove_dir_all(path);
-        }
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -236,8 +223,18 @@ fn nix_projection_command(
         .map(PathBuf::from)
         .find(|path| path.is_file())
         .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `sh`"))?;
+    let mkdir = [
+        "/run/current-system/sw/bin/mkdir",
+        "/usr/bin/mkdir",
+        "/bin/mkdir",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|path| path.is_file())
+    .ok_or_else(|| std::io::Error::other("rootless `/nix/store` projection needs `mkdir`"))?;
     let (mount, mount_file, _) = inherited_tool_path(&mount, None)?;
-    let mut keepers = vec![mount_file];
+    let (mkdir, mkdir_file, mkdir_mode) = inherited_tool_path(&mkdir, Some("mkdir"))?;
+    let mut keepers = vec![mount_file, mkdir_file];
     let binary = env
         .cache_leases
         .iter()
@@ -258,48 +255,62 @@ fn nix_projection_command(
     } else {
         (binary, None)
     };
-    let staging = projection_staging(&projections)?;
-    let cleanup = ProjectionCleanup(Some(staging.clone()));
-    let fstab = staging.join("fstab");
-    let mut fstab_text = format!(
-        "overlay /nix/store overlay lowerdir=/nix/store,upperdir={},workdir={} 0 0\n",
-        fstab_escape(&staging.join("upper")),
-        fstab_escape(&staging.join("work")),
-    );
     for (logical, source) in &projections {
-        let name = logical.strip_prefix("/nix/store/").ok_or_else(|| {
-            std::io::Error::other(format!("invalid canonical Nix output path `{logical}`"))
-        })?;
-        let target = staging.join("upper").join(name);
+        validate_projection_path(logical)?;
+        if source.starts_with("/nix/store") {
+            return Err(std::io::Error::other(format!(
+                "Nix projection source `{}` is the host store",
+                source.display()
+            )));
+        }
         let metadata = std::fs::symlink_metadata(source)?;
-        if metadata.is_dir() {
-            std::fs::create_dir_all(&target)?;
-        } else if metadata.is_file() {
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let _ = std::fs::File::create(&target)?;
-        } else {
+        if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
             return Err(std::io::Error::other(format!(
                 "canonical Nix projection source `{}` is not a regular node",
                 source.display()
             )));
         }
-        fstab_text.push_str(&format!(
-            "{} {} none bind,ro 0 0\n",
-            fstab_escape(source),
-            fstab_escape(Path::new(logical)),
-        ));
     }
-    std::fs::write(&fstab, fstab_text)?;
-    // ponytail: retain the host store as a read-only lower layer so already-loaded
-    // host tools and their dynamic loaders survive projection; an exact runtime
-    // closure lower layer belongs with the future hostile sandbox boundary.
+    // Mount an empty store. Every visible Nix path is supplied by the verified
+    // lease closure below; the host store is never a namespace lower layer.
     let script = r#"set -eu
 mount="$1"
-fstab="$2"
-shift 2
-"$mount" --all --no-canonicalize --no-mtab --fstab "$fstab"
+mkdir="$2"
+mkdir_mode="$3"
+shift 3
+make_dir() {
+    if [ -n "$mkdir_mode" ]; then
+        "$mkdir" --coreutils-prog="$mkdir_mode" "$@"
+    else
+        "$mkdir" "$@"
+    fi
+}
+make_dir -p /nix
+"$mount" -t tmpfs -o mode=0755 jetpack-nix-store /nix
+make_dir -p /nix/store
+count="$1"
+shift
+i=0
+while [ "$i" -lt "$count" ]; do
+    logical="$1"
+    source="$2"
+    shift 2
+    name="${logical#/nix/store/}"
+    case "$name" in
+        ""|*/*|.|..)
+            exit 125
+            ;;
+    esac
+    target="/nix/store/$name"
+    if [ -d "$source" ]; then
+        make_dir -p "$target"
+    else
+        : > "$target"
+    fi
+    "$mount" --bind "$source" "$target"
+    "$mount" -o remount,bind,ro "$target"
+    i=$((i + 1))
+done
 binary="$1"
 shift
 binary_mode="$1"
@@ -322,52 +333,30 @@ fi
         .arg(shell)
         .args(["-c", script, "jetpack-nix-run"])
         .arg(mount)
-        .arg(&fstab);
+        .arg(mkdir)
+        .arg(mkdir_mode.as_deref().unwrap_or(""))
+        .arg(projections.len().to_string());
+    for (logical, source) in projections {
+        command.arg(logical).arg(source);
+    }
     command
         .arg(binary.0)
         .arg(binary.1.as_deref().unwrap_or(""))
         .args(rest);
-    Ok(Some(NixProjection {
-        command,
-        keepers,
-        cleanup,
-    }))
+    Ok(Some(NixProjection { command, keepers }))
 }
 
 #[cfg(target_os = "linux")]
-static PROJECTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-#[cfg(target_os = "linux")]
-fn projection_staging(projections: &[(String, PathBuf)]) -> std::io::Result<PathBuf> {
-    for (logical, _) in projections {
-        let name = logical.strip_prefix("/nix/store/").ok_or_else(|| {
-            std::io::Error::other(format!("invalid canonical Nix output path `{logical}`"))
-        })?;
-        if name.is_empty() || name.contains('/') || name == "." || name == ".." {
-            return Err(std::io::Error::other(format!(
-                "invalid canonical Nix output path `{logical}`"
-            )));
-        }
+fn validate_projection_path(logical: &str) -> std::io::Result<()> {
+    let name = logical.strip_prefix("/nix/store/").ok_or_else(|| {
+        std::io::Error::other(format!("invalid canonical Nix output path `{logical}`"))
+    })?;
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(std::io::Error::other(format!(
+            "invalid canonical Nix output path `{logical}`"
+        )));
     }
-    let root = std::env::temp_dir().join(format!(
-        "jetpack-nix-projection-{}-{}",
-        std::process::id(),
-        PROJECTION_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(root.join("upper"))?;
-    std::fs::create_dir_all(root.join("work"))?;
-    Ok(root)
-}
-
-#[cfg(target_os = "linux")]
-fn fstab_escape(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "\\134")
-        .replace(' ', "\\040")
-        .replace('\t', "\\011")
-        .replace('\n', "\\012")
-        .replace(',', "\\054")
-        .replace('#', "\\043")
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -430,8 +419,11 @@ fn nix_projection_command(
         .iter()
         .any(|lease| !lease.nix_store_projection().is_empty())
     {
-        return Err(std::io::Error::other(
-            "canonical `/nix/store` projection needs the approved host helper on this platform",
+        // The callers render this error through the registered E1340
+        // diagnostic; never fall back to a host `/nix/store` here.
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "host-store-independent `/nix/store` projection is supported only on Linux with rootless mount helpers",
         ));
     }
     Ok(None)
@@ -450,10 +442,8 @@ fn run_command_in_mode(
     let Some((program, rest)) = cmd_args.split_first() else {
         return 0;
     };
-    let (mut cmd, _projection_keepers, _projection_cleanup) = match nix_projection_command(
-        env, program, rest,
-    ) {
-        Ok(Some(projection)) => (projection.command, projection.keepers, projection.cleanup),
+    let (mut cmd, _projection_keepers) = match nix_projection_command(env, program, rest) {
+        Ok(Some(projection)) => (projection.command, projection.keepers),
         Ok(None) => {
             let stable_program = env
                 .cache_leases
@@ -463,13 +453,13 @@ fn run_command_in_mode(
                 .as_ref()
                 .map_or_else(|| Command::new(program), Command::new);
             command.args(rest);
-            (command, Vec::new(), ProjectionCleanup(None))
+            (command, Vec::new())
         }
         Err(error) => {
             Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
                 &format!("could not project `{program}` through `/nix/store`"),
                 &error.to_string(),
-                "use a supported rootless host projection or provide a verified compatible output",
+                "run on Linux with rootless mount helpers or provide a verified compatible output",
             );
             return 126;
         }
@@ -559,22 +549,14 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
         "nothing is installed",
     ]);
 
-    let (mut cmd, _projection_keepers, _projection_cleanup) = match nix_projection_command(
-        env,
-        kind.binary(),
-        &[],
-    ) {
-        Ok(Some(projection)) => (projection.command, projection.keepers, projection.cleanup),
-        Ok(None) => (
-            Command::new(kind.binary()),
-            Vec::new(),
-            ProjectionCleanup(None),
-        ),
+    let (mut cmd, _projection_keepers) = match nix_projection_command(env, kind.binary(), &[]) {
+        Ok(Some(projection)) => (projection.command, projection.keepers),
+        Ok(None) => (Command::new(kind.binary()), Vec::new()),
         Err(error) => {
             theme.error(
                 "could not project the temporary shell through `/nix/store`",
                 &error.to_string(),
-                "use a supported rootless host projection or provide a verified compatible output",
+                "run on Linux with rootless mount helpers or provide a verified compatible output",
             );
             return 126;
         }
@@ -1401,5 +1383,15 @@ mod tests {
             ],
         );
         assert_eq!(code, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nix_projection_uses_an_empty_store_not_the_host_store_as_lower() {
+        let source = include_str!("Shell.rs");
+        assert!(source.contains("\"$mount\" -t tmpfs"));
+        assert!(source.contains("\"$mount\" --bind"));
+        let host_lower = ["lower", "dir", "=/nix/store"].concat();
+        assert!(!source.contains(&host_lower));
     }
 }

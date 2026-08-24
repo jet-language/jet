@@ -53,6 +53,13 @@ mod Archive;
 pub use Archive::*;
 mod Nar;
 pub use Nar::*;
+#[allow(dead_code)]
+mod NixCache;
+#[allow(unused_imports)]
+pub(crate) use NixCache::{
+    admit_nix_closure, AdmittedNixClosure, AdmittedNixObject, NixCacheError, NixCacheErrorKind,
+    NixOutputRequest, StoreError,
+};
 mod Broker;
 pub use Broker::*;
 mod Reproducibility;
@@ -187,7 +194,14 @@ pub fn recover_hangar(roots: &Roots) -> std::io::Result<usize> {
         let leases = recover_stale_leases_unlocked(roots)?;
         let closure = Closure::recover_closure_journal_unlocked(roots)?;
         let migrated = Closure::migrate_closure_graph_unlocked(roots)?.0;
-        Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
+        Ok(staging
+            + reproducibility
+            + archive
+            + repairs
+            + build_debug
+            + leases
+            + closure
+            + migrated)
     })
 }
 
@@ -687,7 +701,10 @@ fn project_nix_outputs_unlocked(
         for (name, source) in &realized.named_outputs {
             if let Ok(relative) = Path::new(member).strip_prefix(source) {
                 if let Some(destination) = projected.get(name) {
-                    return Path::new(destination).join(relative).to_string_lossy().into_owned();
+                    return Path::new(destination)
+                        .join(relative)
+                        .to_string_lossy()
+                        .into_owned();
                 }
             }
         }
@@ -1330,11 +1347,14 @@ impl CacheLease {
         if name.contains(std::path::MAIN_SEPARATOR) {
             return None;
         }
-        self.executables.iter().any(|(member, _)| member == name).then(|| {
-            self.bin_relative
-                .as_ref()
-                .map(|bin| self.snapshot_root.join(bin).join(name))
-        })?
+        self.executables
+            .iter()
+            .any(|(member, _)| member == name)
+            .then(|| {
+                self.bin_relative
+                    .as_ref()
+                    .map(|bin| self.snapshot_root.join(bin).join(name))
+            })?
     }
 
     pub fn stable_path(&self, path: &str) -> std::io::Result<PathBuf> {
@@ -1706,61 +1726,169 @@ fn nix_store_projection_for_entry(
     entry: &StoreEntry,
     snapshot_root: &Path,
 ) -> std::io::Result<Vec<(String, PathBuf)>> {
-    let Ok(producer) = ProducerRecord::decode(&entry.producer_record) else {
+    if entry.producer_record.is_empty() {
         return Ok(Vec::new());
-    };
+    }
+    let producer = ProducerRecord::decode(&entry.producer_record).map_err(|error| {
+        std::io::Error::other(format!(
+            "cache entry `{}` has an invalid producer record: {error}",
+            entry.id
+        ))
+    })?;
     if producer.provider != "nix" {
         return Ok(Vec::new());
     }
-    let mut projection = Vec::new();
+
+    // The logical store names remain producer facts, but every runtime source
+    // below is either the verified lease snapshot or a Hangar CAS object. A
+    // Nix closure record is the authority for transitive runtime objects.
+    let mut logical_digests = BTreeMap::new();
     for (key, path) in &producer.facts {
         let Some(name) = key.strip_prefix("nix.output.") else {
             continue;
         };
-        let Some(store_name) = path.strip_prefix("/nix/store/") else {
-            continue;
-        };
-        if store_name.is_empty()
-            || store_name.contains('/')
-            || store_name == "."
-            || store_name == ".."
-        {
-            return Err(std::io::Error::other(format!(
-                "invalid canonical Nix output path `{path}`"
-            )));
-        }
-        let source = if name == "out" {
-            snapshot_root.to_path_buf()
+        let digest = if name == "out" {
+            entry.envelope.output_hash.clone()
         } else {
-            let digest = entry.named_outputs.get(name).ok_or_else(|| {
+            entry.named_outputs.get(name).cloned().ok_or_else(|| {
                 std::io::Error::other(format!(
                     "Nix output `{name}` has no verified named-output digest"
                 ))
-            })?;
-            let object = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
-            let metadata = fs::symlink_metadata(&object).map_err(|error| {
-                std::io::Error::other(format!(
-                    "Nix output `{name}` projected object is unavailable: {error}"
-                ))
-            })?;
-            if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
-                return Err(std::io::Error::other(format!(
-                    "Nix output `{name}` projected object is not a regular node"
-                )));
-            }
-            object
+            })?
         };
-        if let Some((_, existing)) = projection.iter().find(|(logical, _)| logical == path) {
-            if existing != &source {
+        add_nix_projection_path(&mut logical_digests, path, &digest)?;
+    }
+    if logical_digests.is_empty() {
+        return Err(std::io::Error::other(format!(
+            "Nix cache entry `{}` has no canonical output path for projection",
+            entry.id
+        )));
+    }
+
+    let graph = Closure::closure_graph_structure_unlocked(roots)?;
+    let mut closure_digests = BTreeSet::new();
+    if let Some(record) = graph.records.get(&entry.id) {
+        if record.primary != entry.envelope.output_hash {
+            return Err(std::io::Error::other(format!(
+                "Nix closure record `{}` has a different primary object",
+                entry.id
+            )));
+        }
+        // Project every transitive object. Selected outputs alone are not a
+        // runtime closure: the loader and shared libraries are references too.
+        closure_digests.extend(graph.closure(&entry.envelope.output_hash));
+        for record in graph.records.values() {
+            for (name, digest) in &record.outputs {
+                if !closure_digests.contains(digest) {
+                    continue;
+                }
+                let producer =
+                    ProducerRecord::decode(&record.producer_record).map_err(|error| {
+                        std::io::Error::other(format!(
+                            "Nix closure record `{}` has invalid producer facts: {error}",
+                            record.id
+                        ))
+                    })?;
+                let Some(path) = producer.facts.get(&format!("nix.output.{name}")) else {
+                    continue;
+                };
+                add_nix_projection_path(&mut logical_digests, path, digest)?;
+            }
+        }
+        if !closure_digests.contains(&entry.envelope.output_hash) {
+            return Err(std::io::Error::other(format!(
+                "Nix closure graph does not contain primary object `{}`",
+                entry.envelope.output_hash
+            )));
+        }
+        for digest in &closure_digests {
+            if !graph.objects.contains_key(digest) {
                 return Err(std::io::Error::other(format!(
-                    "conflicting canonical Nix output path `{path}`"
+                    "Nix closure object `{digest}` is missing from the Hangar graph"
                 )));
             }
-            continue;
+            if !logical_digests.values().any(|known| known == digest) {
+                return Err(std::io::Error::other(format!(
+                    "Nix closure object `{digest}` has no canonical store path"
+                )));
+            }
         }
-        projection.push((path.clone(), source));
+    } else if !entry.references.is_empty()
+        || producer.facts.contains_key("nix.closure.receipt")
+        || producer
+            .facts
+            .contains_key("nix.cache.closure.receipt.sha256")
+    {
+        return Err(std::io::Error::other(format!(
+            "Nix closure record `{}` is missing from the Hangar graph",
+            entry.id
+        )));
+    }
+
+    let mut projection = Vec::new();
+    for (logical, digest) in logical_digests {
+        let source = if digest == entry.envelope.output_hash {
+            snapshot_root.to_path_buf()
+        } else {
+            hangar_projection_object(roots, &digest, logical.as_str())?
+        };
+        projection.push((logical, source));
     }
     Ok(projection)
+}
+
+fn add_nix_projection_path(
+    logical_digests: &mut BTreeMap<String, String>,
+    logical: &str,
+    digest: &str,
+) -> std::io::Result<()> {
+    let name = logical.strip_prefix("/nix/store/").ok_or_else(|| {
+        std::io::Error::other(format!("invalid canonical Nix output path `{logical}`"))
+    })?;
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(std::io::Error::other(format!(
+            "invalid canonical Nix output path `{logical}`"
+        )));
+    }
+    let mut digest_components = Path::new(digest).components();
+    if digest.is_empty()
+        || !matches!(
+            digest_components.next(),
+            Some(std::path::Component::Normal(_))
+        )
+        || digest_components.next().is_some()
+    {
+        return Err(std::io::Error::other(format!(
+            "invalid Hangar digest `{digest}` for `{logical}`"
+        )));
+    }
+    if let Some(existing) = logical_digests.insert(logical.to_string(), digest.to_string()) {
+        if existing != digest {
+            return Err(std::io::Error::other(format!(
+                "conflicting canonical Nix output path `{logical}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn hangar_projection_object(
+    roots: &Roots,
+    digest: &str,
+    logical: &str,
+) -> std::io::Result<PathBuf> {
+    let object = roots.hangar_dir().join(OBJECTS_DIR).join(digest);
+    let metadata = fs::symlink_metadata(&object).map_err(|error| {
+        std::io::Error::other(format!(
+            "Nix output `{logical}` Hangar object `{digest}` is unavailable: {error}"
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+        return Err(std::io::Error::other(format!(
+            "Nix output `{logical}` Hangar object `{digest}` is not a regular node"
+        )));
+    }
+    Ok(object)
 }
 
 struct ExecWrappers {
@@ -2447,9 +2575,7 @@ fn receipt_envelope_matches(package: &super::Lock::LockedPackage, output_hash: &
     package
         .envelope
         .as_ref()
-        .is_none_or(|envelope| {
-            output_hash.is_empty() || envelope.output_hash == output_hash
-        })
+        .is_none_or(|envelope| output_hash.is_empty() || envelope.output_hash == output_hash)
 }
 
 fn receipt_projection_envelope_matches(
@@ -2987,9 +3113,7 @@ pub(crate) fn validate_profile_generation_root(
     if targets.is_empty() {
         return Ok(());
     }
-    let id = Lifecycle::RootId::new(format!(
-        "profile-generation:{owner}:{profile}:{generation}"
-    ))?;
+    let id = Lifecycle::RootId::new(format!("profile-generation:{owner}:{profile}:{generation}"))?;
     let snapshot = Lifecycle::snapshot(roots)?;
     let root = snapshot.roots.get(&id).ok_or_else(|| {
         std::io::Error::new(
@@ -3217,13 +3341,16 @@ fn current_project_root() -> std::io::Result<Option<PathBuf>> {
 /// the same order when it updates a project projection and then refreshes the
 /// Hangar record; keeping one order prevents a concurrent lock update from
 /// being published after cleanup has taken its reachability snapshot.
-fn with_clean_locks<T>(roots: &Roots, action: impl FnOnce() -> std::io::Result<T>) -> std::io::Result<T> {
+fn with_clean_locks<T>(
+    roots: &Roots,
+    action: impl FnOnce() -> std::io::Result<T>,
+) -> std::io::Result<T> {
     match current_project_root()? {
-        Some(project) => super::RuntimePolicy::with_project_lock(
-            &project,
-            "hangar-clean-project",
-            || super::RuntimePolicy::with_lock(&roots.root, "hangar", action),
-        ),
+        Some(project) => {
+            super::RuntimePolicy::with_project_lock(&project, "hangar-clean-project", || {
+                super::RuntimePolicy::with_lock(&roots.root, "hangar", action)
+            })
+        }
         None => super::RuntimePolicy::with_lock(&roots.root, "hangar", action),
     }
 }
@@ -3273,7 +3400,9 @@ fn retained_receipts(
         let meta = read_meta(&path).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar object `{id}` has invalid metadata; repair it before receipt cleanup"),
+                format!(
+                    "Hangar object `{id}` has invalid metadata; repair it before receipt cleanup"
+                ),
             )
         })?;
         let keep = is_live(&id, &meta, live)
@@ -3316,7 +3445,10 @@ fn collect_orphaned_canonical_objects(
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar object pool is not a real directory: {}", objects.display()),
+                format!(
+                    "Hangar object pool is not a real directory: {}",
+                    objects.display()
+                ),
             ));
         }
         Ok(metadata) => metadata,
@@ -3366,7 +3498,10 @@ fn remove_hangar_node(path: &Path) -> std::io::Result<()> {
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("refusing to remove unsupported Hangar node `{}`", path.display()),
+            format!(
+                "refusing to remove unsupported Hangar node `{}`",
+                path.display()
+            ),
         ))
     }
 }
@@ -3381,7 +3516,10 @@ fn sweep_receipts(
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Hangar receipt directory is not a real directory: {}", receipts.display()),
+                format!(
+                    "Hangar receipt directory is not a real directory: {}",
+                    receipts.display()
+                ),
             ));
         }
         Ok(_) => {}
@@ -3680,7 +3818,10 @@ fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport>
     if objects_metadata.file_type().is_symlink() || !objects_metadata.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("Hangar object pool is not a real directory: {}", objects.display()),
+            format!(
+                "Hangar object pool is not a real directory: {}",
+                objects.display()
+            ),
         ));
     }
 
@@ -3732,7 +3873,10 @@ fn optimize_objects_cas_pool_plan(hangar: &Path) -> std::io::Result<CleanReport>
                 Ok(existing) if existing.file_type().is_symlink() || !existing.is_file() => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("Hangar CAS entry is not a regular file: {}", cas_file.display()),
+                        format!(
+                            "Hangar CAS entry is not a regular file: {}",
+                            cas_file.display()
+                        ),
                     ));
                 }
                 Ok(existing) => {
@@ -3849,7 +3993,10 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
                 Ok(existing) if existing.file_type().is_symlink() || !existing.is_file() => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("Hangar CAS entry is not a regular file: {}", cas_file.display()),
+                        format!(
+                            "Hangar CAS entry is not a regular file: {}",
+                            cas_file.display()
+                        ),
                     ));
                 }
                 Ok(existing) => {
@@ -3864,12 +4011,15 @@ fn optimize_objects_cas_pool(hangar: &Path) -> std::io::Result<CleanReport> {
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let tmp = cas.join(format!("{digest}.partial"));
+                    let tmp = cas.join(format!("{digest}.partial"));
                     if let Ok(partial) = fs::symlink_metadata(&tmp) {
                         if partial.file_type().is_symlink() || !partial.is_file() {
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::InvalidData,
-                                format!("Hangar CAS partial is not a regular file: {}", tmp.display()),
+                                format!(
+                                    "Hangar CAS partial is not a regular file: {}",
+                                    tmp.display()
+                                ),
                             ));
                         }
                         fs::remove_file(&tmp)?;
@@ -4111,13 +4261,19 @@ fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
     let raw = fs::read_to_string(&lock_path).map_err(|error| {
         std::io::Error::new(
             error.kind(),
-            format!("could not read project lock `{}`: {error}", lock_path.display()),
+            format!(
+                "could not read project lock `{}`: {error}",
+                lock_path.display()
+            ),
         )
     })?;
     let lock = crate::Lock::parse(&raw).map_err(|error| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("could not parse project lock `{}`: {error}", lock_path.display()),
+            format!(
+                "could not parse project lock `{}`: {error}",
+                lock_path.display()
+            ),
         )
     })?;
     let mut roots = LiveRoots::default();
@@ -4129,7 +4285,10 @@ fn lock_roots_from(start: &Path) -> std::io::Result<LiveRoots> {
             if !valid_receipt_digest(&receipt) {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("project lock `{}` contains an invalid Hangar receipt", lock_path.display()),
+                    format!(
+                        "project lock `{}` contains an invalid Hangar receipt",
+                        lock_path.display()
+                    ),
                 ));
             }
             roots.receipts.insert(receipt.clone());

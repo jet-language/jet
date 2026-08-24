@@ -140,7 +140,11 @@ fn jet_fix_apply_writes_replay_log_and_undo_restores_source() {
         .map(PathBuf::from)
         .expect("jet fix must print replay log path");
     assert!(log.is_file(), "replay log missing: {}", log.display());
-    assert!(String::from_utf8_lossy(&fs::read(&log).unwrap()).contains("\"operation\": \"fix\""));
+    let log_bytes = fs::read(&log).unwrap();
+    let log_text = String::from_utf8_lossy(&log_bytes);
+    assert!(log_text.contains("\"operation\": \"fix\""));
+    assert!(log_text.contains("\"kind\":\"rewrite\""), "{log_text}");
+    assert!(log_text.contains("\"rule_id\":\"jet-fix\""), "{log_text}");
     assert!(fs::read_to_string(&file).unwrap().contains("io.print(\"line\")"));
 
     let undone = Command::new(jet())

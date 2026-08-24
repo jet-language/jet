@@ -56,15 +56,18 @@ pub fn du(roots: &Roots) -> std::io::Result<Vec<DuEntry>> {
         entries
             .into_iter()
             .map(|entry| {
-                let object = graph.objects.get(&entry.envelope.output_hash).ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!(
-                            "closure graph has no output object `{}` for `{}`",
-                            entry.envelope.output_hash, entry.id
-                        ),
-                    )
-                })?;
+                let object = graph
+                    .objects
+                    .get(&entry.envelope.output_hash)
+                    .ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "closure graph has no output object `{}` for `{}`",
+                                entry.envelope.output_hash, entry.id
+                            ),
+                        )
+                    })?;
                 let metadata_path = std::path::Path::new(&entry.out);
                 if metadata_path != std::path::Path::new(&object.path) {
                     return Err(std::io::Error::new(
@@ -1627,9 +1630,7 @@ pub(crate) fn closure_graph_read_only(roots: &Roots) -> std::io::Result<ClosureG
 /// Read the closure structure without taking a lock or replaying a journal.
 /// Store proofs may be unavailable, but an explanation must never repair the
 /// projection merely to describe that loss.
-pub(crate) fn closure_graph_structure_read_only(
-    roots: &Roots,
-) -> std::io::Result<ClosureGraph> {
+pub(crate) fn closure_graph_structure_read_only(roots: &Roots) -> std::io::Result<ClosureGraph> {
     let journal = journal_dir(roots);
     match fs::read_dir(&journal) {
         Ok(entries) => {

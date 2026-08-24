@@ -146,6 +146,7 @@ fn review_uses_a_recorded_rename_and_ignores_hand_spelling() {
     assert!(output.status.success(), "review failed: {:?}", output);
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"kind\":\"renamed\""), "{stdout}");
+    assert!(stdout.contains("\"stable_id\":\"def:"), "{stdout}");
 
     let hand = root.join("hand");
     write(&hand.join("package.jet"), package);

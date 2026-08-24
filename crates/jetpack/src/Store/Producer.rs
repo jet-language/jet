@@ -374,8 +374,16 @@ fn validate_adapter_hook_producer(
             ));
         }
         for (name, expected, actual) in [
-            ("build.sandbox", sandbox.mechanism.as_str(), recorded_sandbox),
-            ("adapter.build.sandbox", sandbox.mechanism.as_str(), planned_sandbox),
+            (
+                "build.sandbox",
+                sandbox.mechanism.as_str(),
+                recorded_sandbox,
+            ),
+            (
+                "adapter.build.sandbox",
+                sandbox.mechanism.as_str(),
+                planned_sandbox,
+            ),
         ] {
             if actual != Some(expected) {
                 return Err(hook_fact_mismatch(name, expected, actual));
@@ -383,7 +391,11 @@ fn validate_adapter_hook_producer(
         }
     } else {
         let Some(recorded_sandbox) = recorded_sandbox else {
-            return Err(hook_fact_mismatch("build.sandbox", "recorded native backend", None));
+            return Err(hook_fact_mismatch(
+                "build.sandbox",
+                "recorded native backend",
+                None,
+            ));
         };
         if !matches!(
             recorded_sandbox,

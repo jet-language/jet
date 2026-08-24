@@ -6,6 +6,7 @@ use std::process::exit;
 
 use jet::ExitCodes;
 use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::render_status_json;
 use jet_semindex::{
     open, EffectFact, SemIndexError, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SCHEMA_VERSION,
@@ -619,9 +620,13 @@ fn render_find(mode: &FindMode, query: &str, matches: &[FindMatch], json: bool) 
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"schema_version\":1,\"query\":\"{}\",\"matches\":[{}]}}",
-            json_escape(query),
-            rows,
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "find",
+                &format!(",\"query\":\"{}\",\"matches\":[{}]", json_escape(query), rows),
+            )
         );
         return;
     }

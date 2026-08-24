@@ -1678,6 +1678,19 @@ pub fn artifact_extension() -> &'static str {
 mod tests {
     use super::*;
 
+    #[test]
+    fn trace_version_has_one_typed_home() {
+        let source = include_str!("JetTrace.rs");
+        assert_eq!(
+            source
+                .lines()
+                .filter(|line| line.trim_start().starts_with("pub const TRACE_VERSION:"))
+                .count(),
+            1
+        );
+        assert!(source.contains("pub const TRACE_VERSION: u32 = 1;"));
+    }
+
     fn sample_skeleton() -> TraceSkeleton {
         TraceSkeleton {
             command: "run".into(),

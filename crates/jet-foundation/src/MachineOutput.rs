@@ -7,6 +7,7 @@ use crate::Report::REPORT_SCHEMA;
 pub enum MachineRecord {
     Report,
     Status,
+    BrowserRelay,
 }
 
 pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
@@ -38,6 +39,10 @@ pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
             .get("status")
             .ok_or_else(|| "status record is missing `status`".to_owned())?
             .as_str()?;
+        object
+            .get("action")
+            .ok_or_else(|| "status record is missing `action`".to_owned())?
+            .as_str()?;
         match object.get("ok") {
             Some(JSONValue::Bool(_)) => Ok(MachineRecord::Status),
             Some(_) => Err("status record field `ok` is not boolean".to_owned()),
@@ -47,6 +52,15 @@ pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
 }
 
 pub fn read_machine_output(text: &str) -> Result<Vec<MachineRecord>, String> {
+    if let Some(header) = text.lines().find(|line| !line.trim().is_empty()) {
+        if header.starts_with(&format!("{REPORT_SCHEMA}\t")) {
+            let fields = header.split('\t').collect::<Vec<_>>();
+            if fields.len() < 5 {
+                return Err("browser relay envelope is incomplete".to_owned());
+            }
+            return Ok(vec![MachineRecord::BrowserRelay]);
+        }
+    }
     let mut records = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
@@ -65,11 +79,13 @@ pub fn read_machine_output(text: &str) -> Result<Vec<MachineRecord>, String> {
 #[cfg(test)]
 mod tests {
     use super::{read_machine_line, read_machine_output, MachineRecord};
-    use crate::Report::{render_status_json, ReportEnvelope};
+    use crate::Report::{ReportEnvelope, render_status_json};
 
     #[test]
     fn reader_accepts_status_and_report_json_lines() {
-        let status = render_status_json("ok", true, "facts", ",\"facts\":[]");
+        let status = ReportEnvelope::status_record("tool", "ok", true, "facts")
+            .with_fields(",\"facts\":[]")
+            .json();
         let report = ReportEnvelope::new("compile", "error", "E0001", "what", "why", "fix")
             .json();
         assert_eq!(read_machine_line(&status), Ok(MachineRecord::Status));
@@ -84,6 +100,23 @@ mod tests {
     }
 
     #[test]
+    fn reader_rejects_status_records_without_the_shared_envelope_fields() {
+        let error = read_machine_line(
+            r#"{"schema":"jet.report/v1","moment":"tool","status":"ok","ok":true}"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("missing `action`"), "{error}");
+    }
+
+    #[test]
+    fn reader_accepts_the_shared_browser_relay_envelope() {
+        assert_eq!(
+            read_machine_output("jet.report/v1\tnonce\t42\tstarted\tsources\n"),
+            Ok(vec![MachineRecord::BrowserRelay])
+        );
+    }
+
+    #[test]
     fn every_registered_machine_surface_uses_one_reader() {
         let surfaces = [
             ("diagnostics", ",\"diagnostics\":[]"),
@@ -95,6 +128,15 @@ mod tests {
             ("perf", ",\"perf\":{}"),
             ("gc", ",\"gc\":{}"),
             ("browser.relay", ",\"browser\":{\"relay\":{}}"),
+            ("inspect.build", ",\"build\":{}"),
+            ("inspect.parts", ",\"parts\":[]"),
+            ("inspect.gates", ",\"gates\":{}"),
+            ("inspect.unsafe", ",\"gates\":[]"),
+            ("find", ",\"matches\":[]"),
+            ("audit.copies", ",\"copies\":[]"),
+            ("try", ",\"name\":\"example\""),
+            ("remote.bind", ",\"builder\":\"local\""),
+            ("remote.list", ",\"builders\":[]"),
         ];
         let output = surfaces
             .iter()

@@ -8,6 +8,28 @@
 use std::io::Read;
 use std::time::Duration;
 
+pub struct StreamResponse {
+    status: u16,
+    content_length: Option<u64>,
+    reader: Box<dyn Read + Send>,
+}
+
+impl StreamResponse {
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+
+    pub fn content_length(&self) -> Option<u64> {
+        self.content_length
+    }
+}
+
+impl Read for StreamResponse {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(buffer)
+    }
+}
+
 #[derive(Debug)]
 pub enum FetchError {
     IO(String),
@@ -150,14 +172,7 @@ fn fetch_with_timeout(url: &str, timeout: Duration) -> Result<Vec<u8>, FetchErro
         std::fs::read(path).map_err(|e| FetchError::IO(e.to_string()))
     } else if url.starts_with("http://") || url.starts_with("https://") {
         let mut bytes = Vec::new();
-        ureq::AgentBuilder::new()
-            .timeout_connect(timeout)
-            .timeout_read(timeout)
-            .build()
-            .get(url)
-            .call()
-            .map_err(|e| FetchError::http(url, e.to_string()))?
-            .into_reader()
+        get_stream_with_timeout(url, timeout)?
             .read_to_end(&mut bytes)
             .map_err(|e| FetchError::http(url, e.to_string()))?;
         Ok(bytes)
@@ -167,6 +182,43 @@ fn fetch_with_timeout(url: &str, timeout: Duration) -> Result<Vec<u8>, FetchErro
             "unsupported URL scheme `{scheme}`; expected `file://`, `http://`, or `https://`"
         )))
     }
+}
+
+pub fn get_stream(url: &str, timeout: Duration) -> Result<StreamResponse, FetchError> {
+    get_stream_with_timeout(url, timeout)
+}
+
+fn get_stream_with_timeout(url: &str, timeout: Duration) -> Result<StreamResponse, FetchError> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        let scheme = url.find("://").map(|i| &url[..i]).unwrap_or(url);
+        return Err(FetchError::Scheme(format!(
+            "unsupported URL scheme `{scheme}`; expected `http://` or `https://`"
+        )));
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(timeout)
+        .timeout_read(timeout)
+        .redirects(0)
+        .build();
+    let response = match agent.get(url).call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(_, response)) => response,
+        Err(error) => return Err(FetchError::http(url, error.to_string())),
+    };
+    let status = response.status();
+    let content_length = response
+        .header("Content-Length")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| FetchError::http(url, "invalid Content-Length".to_string()))
+        })
+        .transpose()?;
+    Ok(StreamResponse {
+        status,
+        content_length,
+        reader: Box::new(response.into_reader()),
+    })
 }
 
 fn classify_http_error(url: &str, detail: &str) -> FetchErrorKind {

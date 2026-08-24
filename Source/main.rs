@@ -17,6 +17,7 @@ use std::process::{exit, Command};
 use jet::Diagnostics::{ColorChoice, Diagnostic, ReportPath};
 use jet::ExitCodes;
 use jet_foundation::BuildEffect;
+use jet_foundation::Report::render_status_json;
 
 // D-ALLOC-PROGRAM1=A: the CLI executable installs the resident instance once.
 // JIT/interpreter entry points only marshal the checked package fact into the
@@ -875,8 +876,13 @@ fn run_project_parts(raw: &[String], mode: OutputMode) -> ! {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"schema_version\":1,\"parts\":[{}],\"conflicts\":[{}]}}",
-            parts, conflicts
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.parts",
+                &format!(",\"parts\":[{}],\"conflicts\":[{}]", parts, conflicts),
+            )
         );
     } else {
         for part in parts {
