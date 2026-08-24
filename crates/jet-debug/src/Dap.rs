@@ -130,7 +130,10 @@ fn run_io(server: &mut DapServer, reader: &mut impl BufRead, out: &mut impl Writ
                 return server.finish(crate::ExitCodes::USER_ERROR);
             }
         };
-        if server.handle(&msg, out).is_none() || server.state == State::Terminated {
+        if server.handle(&msg, out).is_none()
+            || server.state == State::Terminated
+            || server.terminal_failure
+        {
             break;
         }
     }
@@ -467,6 +470,7 @@ impl DapServer {
     fn cleanup_after_terminal_state(&mut self, out: &mut impl Write) -> bool {
         let terminate = self.target == Some(TargetKind::Launched);
         if let Err(error) = self.close_target(terminate) {
+            self.terminal_failure = true;
             let (id, message) = cleanup_error_details(&error);
             let diagnostic = match id {
                 22037 => "E2231",
@@ -558,11 +562,9 @@ impl DapServer {
     fn raw_frames_for_request(&self, args: Option<&JSONValue>) -> Result<bool, &'static str> {
         match args.and_then(|args| json_get(args, "showRawFrames")) {
             None => Ok(self.show_raw_frames),
-            Some(value) => match json_bool(value) {
-                Some(value) if value == self.show_raw_frames => Ok(value),
-                Some(_) => Err("showRawFrames cannot change during a debug session"),
-                None => Err("showRawFrames must be a boolean"),
-            },
+            Some(value) => json_bool(value)
+                .map(|requested| self.show_raw_frames || requested)
+                .ok_or("showRawFrames must be a boolean"),
         }
     }
 
@@ -1077,6 +1079,10 @@ impl DapServer {
                         return Some(());
                     }
                 };
+                if let Err(message) = validate_breakpoint_specs(&specs) {
+                    self.respond_jet_error(out, request_seq, command, 22032, message);
+                    return Some(());
+                }
                 let lines: Vec<usize> = specs.iter().map(|spec| spec.line).collect();
                 let client_ids = self.assign_client_breakpoint_ids(&specs);
                 self.pending_breakpoints = lines.clone();
@@ -2617,7 +2623,9 @@ impl DapServer {
             json_escape(command),
             body
         );
-        let _ = write_message(out, &json);
+        if write_message(out, &json).is_err() {
+            self.terminal_failure = true;
+        }
     }
 
     fn respond_err(
@@ -2701,7 +2709,9 @@ impl DapServer {
             json_escape(message),
             body
         );
-        let _ = write_message(out, &json);
+        if write_message(out, &json).is_err() {
+            self.terminal_failure = true;
+        }
     }
 
     fn event(&mut self, out: &mut impl Write, event: &str, body: &str) {
@@ -2710,7 +2720,9 @@ impl DapServer {
             "{{\"seq\":{},\"type\":\"event\",\"event\":\"{}\",\"body\":{}}}",
             seq, event, body
         );
-        let _ = write_message(out, &json);
+        if write_message(out, &json).is_err() {
+            self.terminal_failure = true;
+        }
     }
 
     fn progress_start(&mut self, out: &mut impl Write, progress_id: &str, title: &str) {
@@ -3175,6 +3187,24 @@ fn valid_condition(condition: &str) -> bool {
         })
 }
 
+fn validate_breakpoint_specs(specs: &[BreakpointSpec]) -> Result<(), &'static str> {
+    if specs.iter().any(|spec| {
+        spec.condition
+            .as_deref()
+            .is_some_and(|condition| !valid_condition(condition))
+    }) {
+        return Err("breakpoint condition must be a bounded read-only Jet local expression");
+    }
+    if specs.iter().any(|spec| {
+        spec.hit_condition
+            .as_deref()
+            .is_some_and(|condition| !valid_hit_condition(condition))
+    }) {
+        return Err("breakpoint hitCondition must be a positive integer or `>=` integer");
+    }
+    Ok(())
+}
+
 fn parse_attach_arguments(args: Option<&JSONValue>) -> Result<AttachArguments, &'static str> {
     let args = args.ok_or("attach arguments are required")?;
     let pid = json_get(args, "processId")
@@ -3538,6 +3568,27 @@ mod tests {
     }
 
     #[test]
+    fn invalid_breakpoint_conditions_fail_before_replacing_active_specs() {
+        let mut server = test_server(State::Ready);
+        server.pending_specs = vec![BreakpointSpec {
+            line: 2,
+            ..BreakpointSpec::default()
+        }];
+        server.pending_breakpoints = vec![2];
+
+        let response = dap_call(
+            &mut server,
+            r#"{"seq":1,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"main.jet"},"breakpoints":[{"line":3,"condition":"not a Jet expression"}]}}"#,
+        );
+
+        assert!(response.contains("\"success\":false"), "{response}");
+        assert!(response.contains("\"id\":22032"), "{response}");
+        assert!(response.contains("\"code\":\"E2236\""), "{response}");
+        assert_eq!(server.pending_breakpoints, vec![2]);
+        assert_eq!(server.pending_specs[0].line, 2);
+    }
+
+    #[test]
     fn dap_breakpoint_lines_require_positive_integers() {
         for raw in [
             r#"{"breakpoints":[{"line":-1}]}"#,
@@ -3602,6 +3653,23 @@ mod tests {
             "{raw_scopes}"
         );
         assert!(!raw_scopes.contains("\"name\":\"Locals\""), "{raw_scopes}");
+    }
+
+    #[test]
+    fn stack_requests_can_opt_into_raw_frames_without_changing_the_session() {
+        let server = test_server(State::Stopped);
+        let requested = parse_json(r#"{"showRawFrames":true}"#).unwrap();
+        assert!(server
+            .raw_frames_for_request(Some(&requested))
+            .expect("valid raw-frame request"));
+
+        let defaulted = parse_json(r#"{"showRawFrames":false}"#).unwrap();
+        assert!(!server
+            .raw_frames_for_request(Some(&defaulted))
+            .expect("valid default-frame request"));
+
+        let invalid = parse_json(r#"{"showRawFrames":"yes"}"#).unwrap();
+        assert!(server.raw_frames_for_request(Some(&invalid)).is_err());
     }
 
     #[test]
@@ -3779,6 +3847,34 @@ mod tests {
             error.to_string(),
             "protocol message exceeds the 16777216-byte limit"
         );
+    }
+
+    #[test]
+    fn broken_dap_output_cannot_finish_as_a_clean_session() {
+        struct BrokenPipe;
+
+        impl Write for BrokenPipe {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "client closed"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "client closed"))
+            }
+        }
+
+        let input = frame(
+            r#"{"seq":1,"type":"request","command":"initialize","arguments":{"adapterID":"jet"}}"#,
+        );
+        let mut server = test_server(State::New);
+        let code = run_io(
+            &mut server,
+            &mut std::io::Cursor::new(input),
+            &mut BrokenPipe,
+        );
+
+        assert_eq!(code, crate::ExitCodes::USER_ERROR);
+        assert!(server.terminal_failure);
     }
 
     #[test]

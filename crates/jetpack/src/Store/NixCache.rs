@@ -604,10 +604,7 @@ impl<'a> AdmissionTransaction<'a> {
                 ("nix.closure.receipt".into(), closure_receipt.0.clone()),
                 ("nix.proof".into(), object.proof.clone()),
             ]);
-            facts.insert(
-                "nix.output.out".into(),
-                object.hangar_path.display().to_string(),
-            );
+            facts.insert("nix.output.out".into(), object.store_path.clone());
             let producer_bytes = super::canonical_producer(
                 "nix",
                 &object.store_path,

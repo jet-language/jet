@@ -18,10 +18,11 @@ Stage all inputs from one immutable channel release and one Hydra evaluation:
 - `hydra-eval`: one Hydra evaluation JSON whose input revision matches
   `git-revision`.
 - `hydra-build-dir`: Hydra build JSON records for the candidate evaluation.
-- `oracle`: JSON emitted by `oracle.nix`, for one explicit system. Each record
-  has `attrpath` as exact segments, `version`, `drvPath`, every named output,
-  and `cache: true` only after the upstream cache verifier accepts every
-  output's `.narinfo`.
+- `oracle`: JSON emitted by `oracle.nix`, for one pinned revision and explicit
+  system. Its top-level `revision` and `system` bind every record to that
+  evaluation. Each record has `attrpath` as exact segments, `version`,
+  `drvPath`, every named output, and `cache: true` only after the upstream
+  cache verifier accepts every output's `.narinfo`.
 
 The producer joins these inputs. It never splits a Hydra `job` to invent an
 attrpath and never uses `.narinfo` `Deriver` as the selected derivation. The
@@ -65,12 +66,12 @@ jetpack-nix-index verify-differential \
 ```
 
 The oracle is the output of a second clean Nix evaluation (the checked-in
-`differential.nix` expression may be used to add attrpath and version to raw
-`nix build --json` output). The command binds the candidate's channel,
+`differential.nix` expression accepts and emits the same pinned `revision` and
+`system`. The command binds both candidate and oracle to the channel,
 revision, and system before comparing every record byte-for-byte: attrpath,
 version, `drvPath`, the complete output-name set, and every output path. Batches
-contain at most 256 attrs and use a fresh evaluator process. Any mismatch
-aborts publication.
+contain at most 256 attrs and use a fresh evaluator process. Any revision,
+system, or record mismatch aborts publication.
 
 Build the signed channel manifest after all target sidecars exist:
 

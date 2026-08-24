@@ -28,7 +28,15 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
     match open(&abs) {
         Ok(idx) => {
             if json {
-                println!("{}", idx.to_json());
+                println!(
+                    "{}",
+                    render_status_json(
+                        "ok",
+                        true,
+                        "inspect.semindex",
+                        &format!(",\"semindex\":{}", idx.to_json()),
+                    )
+                );
             } else {
                 println!("semantic index (schema v{})", SCHEMA_VERSION);
                 println!("  definitions: {}", idx.definitions().len());
@@ -233,7 +241,7 @@ fn parse_find_options(args: &[String]) -> Result<FindOptions, String> {
             options.member = Some(value.clone());
             index += 2;
             continue;
-        } else if arg == "--json"
+        } else if arg == jet::CLI::MACHINE_OUTPUT_FLAG
             || arg == "--quiet"
             || arg == "--color"
             || arg.starts_with("--color=")

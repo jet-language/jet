@@ -99,6 +99,7 @@ fn generate(args: &[String]) -> Result<(), String> {
     let oracle = NixIndex::parse_oracle_for_producer(
         &read_file(&oracle_path, 256 * 1024 * 1024, "oracle")?,
         &system,
+        &requested_revision,
     )
     .map_err(|error| error.to_string())?;
     for candidate in &oracle {
@@ -183,6 +184,7 @@ fn verify_differential(args: &[String]) -> Result<(), String> {
     let oracle = NixIndex::parse_oracle_for_producer(
         &read_file(&oracle_path, NixIndex::MAX_DECODED_BYTES as u64, "oracle")?,
         &system,
+        &revision,
     )
     .map_err(|error| error.to_string())?;
     let mut expected = BTreeMap::new();
@@ -507,8 +509,52 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
         name.to_string_lossy(),
         std::process::id()
     ));
-    fs::write(&partial, bytes).map_err(|error| format!("write temporary output: {error}"))?;
-    fs::rename(&partial, path).map_err(|error| format!("publish output: {error}"))
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(&partial)
+            .map_err(|error| format!("write temporary output: {error}"))?;
+        use std::io::Write as _;
+        file.write_all(bytes)
+            .map_err(|error| format!("write temporary output: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("sync temporary output: {error}"))?;
+        match fs::hard_link(&partial, path) {
+            Ok(()) => {
+                let _ = fs::remove_file(&partial);
+                Ok(())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let metadata = fs::symlink_metadata(path)
+                    .map_err(|error| format!("inspect existing output: {error}"))?;
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(format!(
+                        "immutable output `{}` is not regular",
+                        path.display()
+                    ));
+                }
+                let current =
+                    fs::read(path).map_err(|error| format!("read existing output: {error}"))?;
+                if current == bytes {
+                    let _ = fs::remove_file(&partial);
+                    Ok(())
+                } else {
+                    Err(format!("immutable output `{}` changed", path.display()))
+                }
+            }
+            Err(error) => Err(format!("publish output: {error}")),
+        }
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    result
 }
 
 fn read_json_input(

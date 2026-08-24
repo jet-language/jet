@@ -7,7 +7,9 @@ use jet_env_model::ModuleEval::{PromptPathMode, PromptStripMode};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(target_os = "linux")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -87,6 +89,182 @@ fn run_rootless_projection_child() {
         &["/nix/store/00000000000000000000000000000000-root/bin/rg".into()],
     );
     assert_eq!(code, 0);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nix_projection_runs_dynamically_linked_nix_binary_without_host_store() {
+    let test_name = std::thread::current()
+        .name()
+        .expect("dynamic projection test name")
+        .to_string();
+    if std::env::var_os(no_nix_namespace::CHILD_MARKER).is_some() {
+        no_nix_namespace::run_in_no_nix_namespace(
+            &test_name,
+            no_nix_namespace::NetworkMode::Enabled,
+            run_dynamic_projection_child,
+        );
+        return;
+    }
+
+    let (roots, _guard) = temp_roots();
+    let store_path = admit_dynamic_closure(&roots);
+    let previous_root = std::env::var_os(DYNAMIC_PROJECTION_ROOT);
+    let previous_store_path = std::env::var_os(DYNAMIC_PROJECTION_STORE_PATH);
+    std::env::set_var(DYNAMIC_PROJECTION_ROOT, &roots.root);
+    std::env::set_var(DYNAMIC_PROJECTION_STORE_PATH, &store_path);
+    no_nix_namespace::run_in_no_nix_namespace(
+        &test_name,
+        no_nix_namespace::NetworkMode::Enabled,
+        run_dynamic_projection_child,
+    );
+    match previous_root {
+        Some(value) => std::env::set_var(DYNAMIC_PROJECTION_ROOT, value),
+        None => std::env::remove_var(DYNAMIC_PROJECTION_ROOT),
+    }
+    match previous_store_path {
+        Some(value) => std::env::set_var(DYNAMIC_PROJECTION_STORE_PATH, value),
+        None => std::env::remove_var(DYNAMIC_PROJECTION_STORE_PATH),
+    }
+}
+
+#[cfg(target_os = "linux")]
+const DYNAMIC_PROJECTION_ROOT: &str = "JETPACK_DYNAMIC_PROJECTION_ROOT";
+
+#[cfg(target_os = "linux")]
+const DYNAMIC_PROJECTION_STORE_PATH: &str = "JETPACK_DYNAMIC_PROJECTION_STORE_PATH";
+
+#[cfg(target_os = "linux")]
+fn run_dynamic_projection_child() {
+    let root = PathBuf::from(
+        std::env::var_os(DYNAMIC_PROJECTION_ROOT)
+            .expect("dynamic projection child needs its admitted Hangar root"),
+    );
+    let store_path = std::env::var_os(DYNAMIC_PROJECTION_STORE_PATH)
+        .expect("dynamic projection child needs its Nix store path");
+    let roots = Roots {
+        root,
+        dev_mode: true,
+    };
+    let entry = find_entry(&list_checked(&roots).unwrap(), store_path.to_str().unwrap());
+    let lease = snapshot_lease(&roots, &entry).unwrap();
+    let env = crate::Shell::Env {
+        bin_dirs: Vec::new(),
+        vars: BTreeMap::new(),
+        unset_vars: Vec::new(),
+        refs: vec![entry.reference.clone()],
+        label: "dynamic-nix-projection-test".into(),
+        prompt_path: PromptPathMode::Short,
+        prompt_strip: PromptStripMode::Off,
+        cache_leases: vec![lease],
+    };
+    let code = crate::Shell::run_clean_command(
+        &env,
+        &[format!("{}/bin/true", store_path.to_string_lossy())],
+    );
+    assert_eq!(code, 0);
+}
+
+#[cfg(target_os = "linux")]
+fn admit_dynamic_closure(roots: &Roots) -> String {
+    let binary = PathBuf::from("/run/current-system/sw/bin/true");
+    let binary_root = std::fs::canonicalize(&binary)
+        .expect("Nix dynamic binary")
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("Nix dynamic binary store root")
+        .to_path_buf();
+    let root_path = binary_root.to_string_lossy().into_owned();
+    let ldd = Command::new("ldd")
+        .arg(&binary)
+        .output()
+        .expect("ldd Nix dynamic binary");
+    assert!(
+        ldd.status.success(),
+        "ldd failed: {}",
+        String::from_utf8_lossy(&ldd.stderr)
+    );
+    let mut store_paths = BTreeSet::from([root_path.clone()]);
+    for token in String::from_utf8_lossy(&ldd.stdout).split_whitespace() {
+        let Some(start) = token.find("/nix/store/") else {
+            continue;
+        };
+        let candidate = &token[start..];
+        let Some(end) = candidate["/nix/store/".len()..]
+            .find('/')
+            .map(|offset| "/nix/store/".len() + offset)
+        else {
+            continue;
+        };
+        let path = &candidate[..end];
+        if Path::new(path).is_dir() {
+            store_paths.insert(path.to_string());
+        }
+    }
+    let dependencies = store_paths
+        .iter()
+        .filter(|path| *path != &root_path)
+        .cloned()
+        .collect::<Vec<_>>();
+    let signing_key = SigningKey::from_bytes(&[17; 32]);
+    let key_id = "jetpack-dynamic-projection-test-1";
+    let mut routes = BTreeMap::from([(
+        "/nix-cache-info".into(),
+        b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+    )]);
+    for (index, store_path) in store_paths.iter().enumerate() {
+        let (nar, _) = write_nar(Path::new(store_path)).unwrap();
+        let references = if store_path == &root_path {
+            dependencies.iter().map(String::as_str).collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let nar_name = format!("dynamic-{index}.nar");
+        let basename = store_path.rsplit('/').next().unwrap();
+        routes.insert(
+            format!("/{}.narinfo", &basename[..32]),
+            signed_narinfo(
+                store_path,
+                &nar_name,
+                &nar,
+                &references,
+                key_id,
+                &signing_key,
+            ),
+        );
+        routes.insert(format!("/nar/{nar_name}"), nar);
+    }
+    let server = ProjectionCacheServer::start(routes);
+    fs::create_dir_all(roots.root.join("config")).unwrap();
+    fs::create_dir_all(roots.root.join("trust")).unwrap();
+    fs::write(
+        roots.root.join("config/nix-cache-v1.endpoint"),
+        &server.endpoint,
+    )
+    .unwrap();
+    fs::write(
+        roots.root.join("trust/nix-cache-v1.ed25519.pub"),
+        format!(
+            "{key_id}:{}\n",
+            base64_encode(&signing_key.verifying_key().to_bytes())
+        ),
+    )
+    .unwrap();
+    let admitted = admit_nix_closure(
+        roots,
+        &[NixOutputRequest {
+            name: "out".into(),
+            store_path: root_path.clone(),
+        }],
+        false,
+    )
+    .unwrap();
+    assert!(
+        admitted.objects.len() > 1,
+        "dynamic binary needs a runtime closure"
+    );
+    drop(server);
+    root_path
 }
 
 #[test]

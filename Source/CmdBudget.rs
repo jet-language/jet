@@ -13,7 +13,7 @@ use jet_foundation::PerformanceBudget::{
     LimitDirection, MeasurementPolicy, Percentile, PolicyOutcome, Rational, RelativeGoal,
     TrendLabel,
 };
-use jet_foundation::Report::{render_status_json, ReportEnvelope};
+use jet_foundation::Report::ReportEnvelope;
 use jet_foundation::SHA256::sha256_hex;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -878,7 +878,7 @@ fn parse(raw: &[String]) -> Result<Options, String> {
             return Err(format!("flag `{flag}` is repeated"));
         }
         match flag {
-            "--json" => out.json = true,
+            jet::CLI::MACHINE_OUTPUT_FLAG => out.json = true,
             "--verbose" => out.verbose = true,
             "--quiet" => out.quiet = true,
             "-y" | "--yes" => out.yes = true,
@@ -3232,7 +3232,7 @@ fn emit_json(
     print!(
         "{}",
         ReportEnvelope::status_record("tool", status, exit == 0, options.command)
-            .with_fields(&format!(",\"budget\":{budget}"))
+            .with_json_field("budget", &budget)
             .json()
     )
 }
@@ -3370,12 +3370,9 @@ fn compiler_failure(
         );
         print!(
             "{}",
-            render_status_json(
-                "fail",
-                false,
-                options.command,
-                &format!(",\"budget\":{budget}"),
-            )
+            ReportEnvelope::status_record("tool", "fail", false, options.command)
+                .with_json_field("budget", &budget)
+                .json()
         )
     } else {
         eprint!(
@@ -3400,7 +3397,7 @@ fn tool_failure(options: &Options, why: &str) -> i32 {
         print!(
             "{}",
             ReportEnvelope::status_record("tool", "fail", false, options.command)
-                .with_fields(&format!(",\"budget\":{budget}"))
+                .with_json_field("budget", &budget)
                 .json()
         )
     } else {

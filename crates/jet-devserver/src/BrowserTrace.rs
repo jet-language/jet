@@ -8,12 +8,13 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use jet_foundation::Report::REPORT_SCHEMA;
+use jet_foundation::JSON::{json_escape, json_int, json_str, json_u32, parse, JSONValue};
+use jet_foundation::Report::{render_status_json, REPORT_SCHEMA};
 
 pub const ROW_LIMIT: usize = 4096;
 const ENVELOPE_LIMIT: usize = 512;
-const SCHEMA: &str = REPORT_SCHEMA;
 const REQUEST_SCHEMA: &str = "jet.browser.request.v1";
+const RELAY_ACTION: &str = "browser.relay";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Row {
@@ -66,14 +67,20 @@ impl Relay {
         let pid = std::process::id();
         let started =
             process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
-        let mut header = format!(
-            "{SCHEMA}\t{nonce}\t{pid}\t{started}\t{}",
-            hex(encode_sources(&sources).as_bytes())
+        let mut fields = format!(
+            ",\"nonce\":\"{}\",\"pid\":{},\"started\":\"{}\",\"sources\":\"{}\"",
+            json_escape(&nonce),
+            pid,
+            json_escape(&started),
+            json_escape(&hex(encode_sources(&sources).as_bytes())),
         );
         if let Some(map) = &source_map {
-            header.push('\t');
-            header.push_str(&hex(map.as_bytes()));
+            fields.push_str(&format!(
+                ",\"source_map\":\"{}\"",
+                json_escape(&hex(map.as_bytes()))
+            ));
         }
+        let header = render_status_json("started", true, RELAY_ACTION, &fields);
         writeln!(file, "{header}")
             .map_err(|error| format!("cannot initialize browser trace relay: {error}"))?;
         file.flush()
@@ -128,14 +135,27 @@ impl Relay {
         let mut file = self.file.lock().map_err(|_| RecordError::Unavailable)?;
         if *rows >= ROW_LIMIT {
             if *rows == ROW_LIMIT {
-                writeln!(file, "truncated").map_err(|_| RecordError::Unavailable)?;
+                let truncated = render_status_json(
+                    "truncated",
+                    true,
+                    "browser.relay.truncated",
+                    "",
+                );
+                writeln!(file, "{truncated}").map_err(|_| RecordError::Unavailable)?;
                 file.flush().map_err(|_| RecordError::Unavailable)?;
                 *rows += 1;
             }
             return Ok(());
         }
-        writeln!(file, "row\t{mapped_start}\t{duration}\t{class}\t{symbol}")
-            .map_err(|_| RecordError::Unavailable)?;
+        let fields = format!(
+            ",\"start_ns\":{},\"duration_ns\":{},\"class\":\"{}\",\"symbol\":\"{}\"",
+            mapped_start,
+            duration,
+            json_escape(&class),
+            json_escape(&symbol),
+        );
+        let row = render_status_json("row", true, "browser.relay.row", &fields);
+        writeln!(file, "{row}").map_err(|_| RecordError::Unavailable)?;
         file.flush().map_err(|_| RecordError::Unavailable)?;
         *rows += 1;
         Ok(())
@@ -212,34 +232,16 @@ fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, S
     }
     let mut lines = raw.lines();
     let header = lines.next().ok_or("browser trace relay is empty")?;
-    let mut parts = header.split('\t');
-    if parts.next() != Some(SCHEMA) {
-        return Err("browser trace relay schema is not supported".into());
-    }
-    let _nonce = parts.next().ok_or("browser trace relay nonce is missing")?;
-    let recorded_pid = parts
-        .next()
-        .and_then(|value| value.parse::<u32>().ok())
-        .ok_or("browser trace relay process id is missing")?;
-    let started = parts
-        .next()
-        .ok_or("browser trace relay process identity is missing")?;
-    let sources = decode_sources(&unhex(
-        parts
-            .next()
-            .ok_or("browser trace relay source map is missing")?,
-    )?)?;
-    let source_map = match parts.next() {
-        Some(value) => Some(unhex(value)?),
-        None => None,
-    };
+    let (recorded_pid, started, sources, source_map) = relay_header(header)?;
     if matches!(process, ProcessState::Unknown) {
         return Err("browser trace process identity cannot be verified".into());
     }
-    let stale = recorded_pid != pid
-        || parts.next().is_some()
-        || matches!(&process, ProcessState::Dead)
-        || matches!(&process, ProcessState::Alive(current) if current != started);
+    let stale_process = match &process {
+        ProcessState::Alive(current) => current.as_str() != started.as_str(),
+        ProcessState::Dead => true,
+        ProcessState::Unknown => false,
+    };
+    let stale = recorded_pid != pid || stale_process;
     if stale {
         let _ = fs::remove_file(&path);
         return Err("browser trace relay belongs to a stale process session".into());
@@ -247,27 +249,12 @@ fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, S
     let mut rows = Vec::new();
     let mut truncated = false;
     for line in lines {
-        if line == "truncated" {
+        if relay_status(line, "browser.relay.truncated", "truncated").is_ok() {
             truncated = true;
             continue;
         }
-        let mut parts = line.split('\t');
-        if parts.next() != Some("row") {
-            return Err("browser trace relay row is malformed".into());
-        }
-        let start_ns = number(parts.next().map(str::to_string))
-            .map_err(|_| "browser trace relay start is malformed")?;
-        let duration_ns = number(parts.next().map(str::to_string))
-            .map_err(|_| "browser trace relay duration is malformed")?;
-        let class = parts
-            .next()
-            .ok_or("browser trace relay class is missing")?
-            .to_string();
-        let symbol = parts
-            .next()
-            .ok_or("browser trace relay symbol is missing")?
-            .to_string();
-        if parts.next().is_some() || rows.len() >= ROW_LIMIT {
+        let (start_ns, duration_ns, class, symbol) = relay_row(line)?;
+        if rows.len() >= ROW_LIMIT {
             return Err("browser trace relay exceeds its closed row schema".into());
         }
         rows.push(Row {
@@ -518,6 +505,89 @@ fn number(value: Option<String>) -> Result<u64, RecordError> {
         .map_err(|_| RecordError::Malformed)
 }
 
+fn relay_status(line: &str, action: &str, status: &str) -> Result<JSONValue, String> {
+    let value = parse(line).map_err(|_| "browser trace relay record is malformed")?;
+    let object = value.as_object()?;
+    if object.get("schema").and_then(|value| json_str(value)) != Some(REPORT_SCHEMA)
+        || object.get("moment").and_then(|value| json_str(value)) != Some("tool")
+        || object.get("action").and_then(|value| json_str(value)) != Some(action)
+        || object.get("status").and_then(|value| json_str(value)) != Some(status)
+        || !matches!(object.get("ok"), Some(JSONValue::Bool(true)))
+    {
+        return Err("browser trace relay record is not a shared report".into());
+    }
+    Ok(value)
+}
+
+fn relay_row(line: &str) -> Result<(u64, u64, String, String), String> {
+    let value = relay_status(line, "browser.relay.row", "row")?;
+    let object = value.as_object()?;
+    let start_ns = object
+        .get("start_ns")
+        .and_then(json_int)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or("browser trace relay start is malformed")?;
+    let duration_ns = object
+        .get("duration_ns")
+        .and_then(json_int)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or("browser trace relay duration is malformed")?;
+    let class = object
+        .get("class")
+        .and_then(|value| json_str(value))
+        .ok_or("browser trace relay class is missing")?
+        .to_owned();
+    let symbol = object
+        .get("symbol")
+        .and_then(|value| json_str(value))
+        .ok_or("browser trace relay symbol is missing")?
+        .to_owned();
+    if !matches!(class.as_str(), "event" | "wasm" | "dom")
+        || symbol.is_empty()
+        || symbol.len() > 128
+        || !symbol
+            .bytes()
+            .all(|b| matches!(b, b'_' | b'$') || b.is_ascii_alphanumeric())
+    {
+        return Err("browser trace relay row is malformed".into());
+    }
+    Ok((start_ns, duration_ns, class, symbol))
+}
+
+fn relay_header(header: &str) -> Result<(u32, String, Vec<Source>, Option<String>), String> {
+    let value = relay_status(header, RELAY_ACTION, "started")?;
+    let object = value.as_object()?;
+    let _nonce = object
+        .get("nonce")
+        .and_then(|value| json_str(value))
+        .filter(|value| !value.is_empty())
+        .ok_or("browser trace relay nonce is missing")?;
+    let recorded_pid = object
+        .get("pid")
+        .and_then(json_u32)
+        .ok_or("browser trace relay process id is missing")?;
+    let started = object
+        .get("started")
+        .and_then(|value| json_str(value))
+        .filter(|value| !value.is_empty())
+        .ok_or("browser trace relay process identity is missing")?
+        .to_owned();
+    let sources = object
+        .get("sources")
+        .and_then(|value| json_str(value))
+        .ok_or("browser trace relay source map is missing")?;
+    let sources = decode_sources(&unhex(sources)?)?;
+    let source_map = object
+        .get("source_map")
+        .map(|value| {
+            json_str(value)
+                .ok_or_else(|| "browser trace relay source map is malformed".to_owned())
+                .and_then(unhex)
+        })
+        .transpose()?;
+    Ok((recorded_pid, started, sources, source_map))
+}
+
 fn nonce() -> String {
     let state = RandomState::new();
     let seed = SystemTime::now()
@@ -612,9 +682,15 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         let relay = Relay::new(&manifest()).unwrap();
         let header = fs::read_to_string(relay_path(std::process::id())).unwrap();
-        assert!(
-            header.starts_with(&format!("{REPORT_SCHEMA}\t")),
-            "{header}"
+        let header = header.trim_end();
+        let parsed = parse(header).unwrap();
+        assert_eq!(
+            parsed
+                .as_object()
+                .unwrap()
+                .get("schema")
+                .and_then(json_str),
+            Some(REPORT_SCHEMA)
         );
         #[cfg(unix)]
         {

@@ -66,7 +66,7 @@ fn bind(args: &[String], mode: OutputMode) -> ! {
         "--cache-write",
         "--execute",
         "--fallback-local",
-        "--json",
+        jet::CLI::MACHINE_OUTPUT_FLAG,
     ];
     for argument in args.iter().skip(3) {
         let head = argument

@@ -52,6 +52,7 @@ The extension registers the `jet` DAP adapter. Use **Jet: Debug File** or press
 F5 with a `.jet` file open. The adapter runs `jet debug --dap <file>` and maps
 source breakpoints, stepping, pause, stack frames, and Jet locals through the
 same native debugger path as the terminal command. LLDB must be on `PATH`.
+Debugging requires a trusted VS Code workspace.
 The adapter starts the selected Jet executable with direct argv. It does not
 run a shell. Set `jet.executablePath` when the editor must use a specific
 build.

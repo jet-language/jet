@@ -1191,6 +1191,19 @@ surface growth without a driving example.
 prefixes (E0001 if empty); float exponent `6.022e23`; `1..10` still lexes as
 a range.
 
+**D-LITCARRIER1=D** *(owner, 2026-08-24; card #2164)*: numeric literals have
+two distinct suffix mechanisms. Expected types still settle an untyped literal:
+`3` defaults to `Int`, `3.4` defaults to `Decimal`, and `takes(3.4)` adopts
+`Float` when the parameter expects it. A carrier suffix selects a core carrier
+where context is absent, so `3.4f` is `Float`; suffix length is inversely
+proportional to carrier commonality. The explicit `Float{3.4}` construction
+remains valid when context is absent. Component suffixes `i`, `j`, and `k`
+build imaginary or vector components (`3i`, `2i`, `3j`, `4k`); they are not
+carrier selectors. The reserved names are checked before unit-family
+resolution, so unit families cannot claim them; `D-DIMENSION-OPEN1=D` is
+amended. Existing unit literals keep their meaning, with colliding common units
+using longer suffixes (`inch` becomes `in`; `farad` stays spelled out).
+
 **S70 — Multi-line strings**: `"""…"""`, Swift-style trimming (newline after
 opening and before closing dropped; closing-quote column sets stripped
 indent); escapes and `{interp}` stay active; unterminated is E0002.

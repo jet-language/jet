@@ -297,6 +297,15 @@ impl ReportEnvelope {
         self
     }
 
+    /// Add one named, already-encoded JSON value to a status record.
+    pub fn with_json_field(mut self, name: &str, value: &str) -> Self {
+        self.fields.push(',');
+        self.fields.push_str(&report_json_string(name));
+        self.fields.push(':');
+        self.fields.push_str(value);
+        self
+    }
+
     pub fn json(&self) -> String {
         let mut out = String::from("{");
         out.push_str("\"schema\":");

@@ -98,6 +98,9 @@ function runJetInTerminal(serverPath, args) {
 }
 
 function debugFile(file) {
+  if (!debuggingIsAllowed()) {
+    return;
+  }
   const uri = vscode.Uri.file(canonicalProgram(file));
   const folder = vscode.workspace.getWorkspaceFolder(uri);
   vscode.debug.startDebugging(folder, {
@@ -113,6 +116,9 @@ function activate(context) {
   const serverPath = findServer(workspaceFolder);
   const debugProvider = {
     resolveDebugConfiguration(_folder, config) {
+      if (!debuggingIsAllowed()) {
+        return undefined;
+      }
       const program = config.program || vscode.window.activeTextEditor?.document.uri.fsPath;
       if (!program) {
         vscode.window.showErrorMessage("Jet debugger needs an open .jet file.");
@@ -129,6 +135,9 @@ function activate(context) {
   };
   const debugFactory = {
     createDebugAdapterDescriptor(session) {
+      if (!debuggingIsAllowed()) {
+        throw new Error("Jet debugging requires a trusted workspace.");
+      }
       const program = debugSourceForConfiguration(session.configuration);
       const cwd = session.workspaceFolder?.uri.fsPath || workspaceFolder;
       return new vscode.DebugAdapterExecutable(
@@ -191,6 +200,14 @@ function activate(context) {
         `or set jet.languageServerPath to a jet binary.`
     );
   });
+}
+
+function debuggingIsAllowed() {
+  if (vscode.workspace.isTrusted) {
+    return true;
+  }
+  vscode.window.showErrorMessage("Jet debugging requires a trusted workspace.");
+  return false;
 }
 
 function deactivate() {

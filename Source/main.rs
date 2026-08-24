@@ -719,7 +719,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
         let category = retired.category;
         let rewrite = retired.rewrite;
         if category == jet::CLI::RetirementCategory::Semantic {
-            teach_retired(retired, raw, raw.iter().any(|arg| arg == "--json"));
+            teach_retired(retired, raw, jet::CLI::machine_output_requested(raw));
         }
         let rewrite = rewrite.expect("rename retirement needs a rewrite rule");
         let replacement = (retired.fix)(raw);
@@ -739,7 +739,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
             "infrequent commands live in a named area so daily Jet commands stay easy to scan."
                 .to_string(),
             format!("run `{replacement}`."),
-            raw.iter().any(|arg| arg == "--json"),
+            jet::CLI::machine_output_requested(raw),
         );
         exit(ExitCodes::USAGE);
     }
@@ -750,7 +750,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
             "infrequent commands live in a named area so daily Jet commands stay easy to scan."
                 .to_string(),
             format!("run `{} inspect bind`.", jet::Syntax::BINARY_NAME),
-            raw.iter().any(|arg| arg == "--json"),
+            jet::CLI::machine_output_requested(raw),
         );
         exit(ExitCodes::USAGE);
     }
@@ -792,7 +792,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
             format!("`{sub}` isn't a jet {group} command."),
             format!("jet {group} accepts only commands in its named area."),
             format!("run `jet {group} help`."),
-            raw.iter().any(|arg| arg == "--json"),
+            jet::CLI::machine_output_requested(raw),
         );
         exit(ExitCodes::USAGE);
     }
@@ -1362,7 +1362,10 @@ fn main() {
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
     let fmt_simplify = jet_argv.iter().any(|a| a == "--simplify");
     let dry_run = jet_argv.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
-    let json = jet_argv.iter().any(|a| a == "--json");
+    // D-ONCE-LAW1: the build ability projection is a payload choice, not a
+    // second output grammar. It uses the same machine-output mode as --json.
+    let abilities_json = jet_argv.iter().any(|a| a == "--abilities-json");
+    let json = jet::CLI::machine_output_requested(jet_argv) || abilities_json;
     reject_retired_gate_flags(jet_argv, json);
     let small = jet_argv.iter().any(|a| a == "--small");
     let library_flag = jet_argv.iter().any(|a| a == "--lib");
@@ -1383,8 +1386,6 @@ fn main() {
     // D-A11YGATE1=B (c134 Phase 6): `jet lint --a11y` — opt-in, never blocking.
     let a11y = jet_argv.iter().any(|a| a == "--a11y");
     let complexity = jet_argv.iter().any(|a| a == "--complexity");
-    // D-TOOL5 (E2-M11): ability summary flags.
-    let abilities_json = jet_argv.iter().any(|a| a == "--abilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
     let sbom = jet_argv.iter().any(|a| a == "--sbom");
     // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target` accepts either

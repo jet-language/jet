@@ -7,7 +7,7 @@ use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_foundation::JetTrace::TRACE_VERSION;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::ReportEnvelope;
 use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 use crate::OutputMode;
@@ -596,7 +596,9 @@ fn render_json(trace: &Trace) -> String {
         json_escape(&trace.project), trace.pid, trace.started_unix_ms, trace.updated_unix_ms,
         trace.collections, trace.sites.len(), allocations, retained, sites
     );
-    render_status_json("ok", true, "gc.report", &format!(",\"gc\":{payload}"))
+    ReportEnvelope::status_record("tool", "ok", true, "gc.report")
+        .with_json_field("gc", &payload)
+        .json()
 }
 
 fn paint(value: &str, code: &str, enabled: bool) -> String {

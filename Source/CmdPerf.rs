@@ -17,7 +17,7 @@ use jet_foundation::JetTrace::{
     TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::ReportEnvelope;
 use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -1719,7 +1719,7 @@ fn view(args: &[String]) -> i32 {
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
-        if arg == "--json" {
+        if arg == jet::CLI::MACHINE_OUTPUT_FLAG {
             mode = ViewMode::JSON;
             i += 1;
             continue;
@@ -1992,7 +1992,9 @@ fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
 
 fn render_perf_json(action: &str, value: CanonicalJson) -> String {
     let payload = String::from_utf8(value.bytes()).expect("canonical JSON is UTF-8");
-    render_status_json("ok", true, action, &format!(",\"perf\":{payload}"))
+    ReportEnvelope::status_record("tool", "ok", true, action)
+        .with_json_field("perf", &payload)
+        .json()
 }
 
 fn view_html(trace: &CanonicalJson, frames: FramesMode) -> String {
@@ -2270,7 +2272,7 @@ fn export(args: &[String]) -> i32 {
     while i < args.len() {
         let arg = args[i].as_str();
         match arg {
-            "--json" => {
+            jet::CLI::MACHINE_OUTPUT_FLAG => {
                 mode = ExportMode::JSON;
                 i += 1;
                 continue;

@@ -430,15 +430,18 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
     let home = Scratch::new("user-tools-home");
     let manifest_dir = home.join(".jet/tools");
     fs::create_dir_all(&manifest_dir).unwrap();
-    fs::write(
-        manifest_dir.join("manifest.json"),
-        format!(
-            "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"mine\",\"policy\":\"pinned\",\"provider\":\"core\",\"raw\":{:?},\"upstream\":{:?}}}],\n  \"tools\":[{{\"bins\":[],\"members\":[],\"name\":\"hello\",\"reference\":\"hello@mine\",\"resolved\":\"hello@mine\",\"tier\":\"pinned\"}}]\n}}\n",
-            repo.to_string_lossy(),
-            repo.to_string_lossy(),
-        ),
-    )
-    .unwrap();
+    let write_manifest = |source: &str, repo: &Path| {
+        let upstream = format!("path:{}", repo.to_string_lossy());
+        fs::write(
+            manifest_dir.join("manifest.json"),
+            format!(
+                "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":{:?},\"policy\":\"pinned\",\"provider\":\"core\",\"raw\":{:?},\"upstream\":{:?}}}],\n  \"tools\":[{{\"bins\":[],\"members\":[],\"name\":\"hello\",\"reference\":\"hello@{source}\",\"resolved\":\"hello@{source}\",\"tier\":\"pinned\"}}]\n}}\n",
+                source, upstream, upstream,
+            ),
+        )
+        .unwrap();
+    };
+    write_manifest("mine", &repo);
 
     let switch = || {
         jetpack()
@@ -469,12 +472,40 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
         String::from_utf8_lossy(&first_run.stdout).trim(),
         "hello from jet-pkgs"
     );
+    assert!(
+        fs::read_to_string(home.join(".jet/tools/current"))
+            .unwrap()
+            .contains("generation\t1")
+    );
+    assert!(
+        fs::read_to_string(home.join(".jet/tools/profile.json"))
+            .unwrap()
+            .contains("\"current\": 1")
+    );
 
+    let repo_two = base.join("jet-pkgs-two");
+    fs::create_dir_all(repo_two.join("pkgs/hello/bin")).unwrap();
+    fs::copy(repo.join("package.jet"), repo_two.join("package.jet")).unwrap();
+    fs::copy(
+        repo.join("pkgs/hello/hello.jet"),
+        repo_two.join("pkgs/hello/hello.jet"),
+    )
+    .unwrap();
     fs::write(
-        repo.join("pkgs/hello/bin/hello"),
+        repo_two.join("pkgs/hello/bin/hello"),
         "#!/bin/sh\necho hello from user-tools generation two\n",
     )
     .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            repo_two.join("pkgs/hello/bin/hello"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
+    write_manifest("mine-two", &repo_two);
     let second = switch();
     assert!(
         second.status.success(),
@@ -486,6 +517,16 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
     assert_eq!(
         String::from_utf8_lossy(&second_run.stdout).trim(),
         "hello from user-tools generation two"
+    );
+    assert!(
+        fs::read_to_string(home.join(".jet/tools/current"))
+            .unwrap()
+            .contains("generation\t2")
+    );
+    assert!(
+        fs::read_to_string(home.join(".jet/tools/profile.json"))
+            .unwrap()
+            .contains("\"current\": 2")
     );
 
     let rollback = jetpack()
@@ -505,6 +546,16 @@ fn declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_genera
     assert_eq!(
         String::from_utf8_lossy(&rolled_back.stdout).trim(),
         "hello from jet-pkgs"
+    );
+    assert!(
+        fs::read_to_string(home.join(".jet/tools/current"))
+            .unwrap()
+            .contains("generation\t1")
+    );
+    assert!(
+        fs::read_to_string(home.join(".jet/tools/profile.json"))
+            .unwrap()
+            .contains("\"current\": 1")
     );
 
     let generations = jetpack()

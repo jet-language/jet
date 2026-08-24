@@ -39,11 +39,14 @@ pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
             .get("status")
             .ok_or_else(|| "status record is missing `status`".to_owned())?
             .as_str()?;
-        object
+        let action = object
             .get("action")
             .ok_or_else(|| "status record is missing `action`".to_owned())?
             .as_str()?;
         match object.get("ok") {
+            Some(JSONValue::Bool(_)) if action == "browser.relay" => {
+                Ok(MachineRecord::BrowserRelay)
+            }
             Some(JSONValue::Bool(_)) => Ok(MachineRecord::Status),
             Some(_) => Err("status record field `ok` is not boolean".to_owned()),
             None => Err("status record is missing `ok`".to_owned()),
@@ -52,15 +55,6 @@ pub fn read_machine_line(text: &str) -> Result<MachineRecord, String> {
 }
 
 pub fn read_machine_output(text: &str) -> Result<Vec<MachineRecord>, String> {
-    if let Some(header) = text.lines().find(|line| !line.trim().is_empty()) {
-        if header.starts_with(&format!("{REPORT_SCHEMA}\t")) {
-            let fields = header.split('\t').collect::<Vec<_>>();
-            if fields.len() < 5 {
-                return Err("browser relay envelope is incomplete".to_owned());
-            }
-            return Ok(vec![MachineRecord::BrowserRelay]);
-        }
-    }
     let mut records = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
@@ -114,9 +108,26 @@ mod tests {
 
     #[test]
     fn reader_accepts_the_shared_browser_relay_envelope() {
+        let relay = render_status_json(
+            "started",
+            true,
+            "browser.relay",
+            ",\"nonce\":\"nonce\",\"pid\":42,\"started\":\"1\",\"sources\":\"00\"",
+        );
+        let row = render_status_json(
+            "row",
+            true,
+            "browser.relay.row",
+            ",\"start_ns\":10,\"duration_ns\":5,\"class\":\"event\",\"symbol\":\"load\"",
+        );
+        let truncated = render_status_json("truncated", true, "browser.relay.truncated", "");
         assert_eq!(
-            read_machine_output("jet.report/v1\tnonce\t42\tstarted\tsources\n"),
-            Ok(vec![MachineRecord::BrowserRelay])
+            read_machine_output(&format!("{relay}\n{row}\n{truncated}\n")),
+            Ok(vec![
+                MachineRecord::BrowserRelay,
+                MachineRecord::Status,
+                MachineRecord::Status,
+            ])
         );
     }
 
@@ -159,6 +170,16 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let records = read_machine_output(&output).unwrap();
-        assert_eq!(records, vec![MachineRecord::Status; surfaces.len()]);
+        let expected = surfaces
+            .iter()
+            .map(|(action, _)| {
+                if *action == "browser.relay" {
+                    MachineRecord::BrowserRelay
+                } else {
+                    MachineRecord::Status
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(records, expected);
     }
 }

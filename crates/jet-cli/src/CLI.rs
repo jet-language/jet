@@ -154,6 +154,12 @@ pub fn reserved_report_json() -> String {
 
 /// One global flag that applies across commands.
 pub const DRY_RUN_FLAG: &str = "--dry-run";
+/// The one spelling that selects machine-readable command output.
+pub const MACHINE_OUTPUT_FLAG: &str = "--json";
+
+pub fn machine_output_requested(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == MACHINE_OUTPUT_FLAG)
+}
 
 #[derive(Clone)]
 pub struct FlagSpec {
@@ -1437,7 +1443,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--receipt", help: "with review: proof receipt for the reviewed change-set side" },
     FlagSpec { long: "--out", help: "with structural merge: write the checked result to this path" },
     FlagSpec { long: "--repo", help: "with merge install-driver: Git worktree to configure" },
-    FlagSpec { long: "--json", help: "emit machine-readable facts or diagnostics" },
+    FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "emit machine-readable facts or diagnostics" },
     FlagSpec { long: "--topic", help: "with inspect digest: emit one digest topic" },
     FlagSpec { long: "--list-topics", help: "with inspect digest: list digest topics" },
     FlagSpec { long: "--kind", help: "with inspect gates/authority: filter one gate kind" },
@@ -2714,6 +2720,17 @@ mod tests {
         assert!(is_help_flag("-h"));
         assert!(!is_help_flag("--json"));
         assert!(!is_help_flag("help"));
+    }
+
+    #[test]
+    fn machine_output_has_one_registered_flag_and_reader_spelling() {
+        let args = vec!["inspect".to_string(), MACHINE_OUTPUT_FLAG.to_string()];
+        assert!(machine_output_requested(&args));
+        assert!(!machine_output_requested(&["inspect".to_string()]));
+        assert_eq!(
+            FLAGS.iter().filter(|flag| flag.long == MACHINE_OUTPUT_FLAG).count(),
+            1
+        );
     }
 
     #[test]

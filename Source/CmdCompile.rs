@@ -1158,7 +1158,7 @@ pub(crate) fn run_compile_cmd(
                 });
                 let paths =
                     build_library(file, &rust_code, library, config, profile, verbose, mode);
-                if !mode.quiet {
+                if !mode.quiet && !mode.json {
                     if let Some(shared) = &paths.shared {
                         println!("built: {}", shared.display());
                     }
@@ -1175,7 +1175,7 @@ pub(crate) fn run_compile_cmd(
                         println!("built: {}", binding.display());
                     }
                 }
-                if abilities_json {
+                if mode.json || abilities_json {
                     println!("{}", abilities.to_json());
                 } else {
                     println!("{}", abilities.summary());
@@ -1219,7 +1219,7 @@ pub(crate) fn run_compile_cmd(
             {
                 exit(ExitCodes::USER_ERROR);
             }
-            if !mode.quiet {
+            if !mode.quiet && !mode.json {
                 if is_web {
                     println!("built: build/app.wasm + build/app.js");
                 } else if is_plugin {
@@ -1228,13 +1228,13 @@ pub(crate) fn run_compile_cmd(
                     println!("built: {}", bin_path(file).display());
                 }
             }
-            if explain_partition {
+            if explain_partition && !mode.json {
                 if let Some(report) = &web_partition_report {
                     println!("{report}");
                 }
             }
             if let Some(triple) = cross_target {
-                if !mode.quiet {
+                if !mode.quiet && !mode.json {
                     println!("target: {}", triple);
                 }
             }
@@ -1243,7 +1243,7 @@ pub(crate) fn run_compile_cmd(
                 write_sbom_for_build(file, &bin_path(file), mode);
             }
             // D-TOOL5 (E2-M11): print ability summary after a successful build.
-            if abilities_json {
+            if mode.json || abilities_json {
                 println!("{}", abilities.to_json());
             } else {
                 println!("{}", abilities.summary());
@@ -1563,7 +1563,7 @@ pub(crate) fn run_jobs(file: &str, mode: OutputMode) {
 /// Keep the dropped development surface visible at the build boundary so a
 /// release cannot silently lose a command the author expected to ship.
 fn print_release_job_summary(src: &str, release: bool, mode: OutputMode) {
-    if !release || mode.quiet {
+    if !release || mode.quiet || mode.json {
         return;
     }
     let Ok(jobs) = list_job_names(src) else {
@@ -1637,7 +1637,7 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
         // #1659 criterion 3: the SBOM was still written; `--quiet` only mutes
         // this confirmation line, never the warning below.
         Ok(()) => {
-            if !mode.quiet {
+            if !mode.quiet && !mode.json {
                 println!("sbom: {}", out.display());
             }
         }

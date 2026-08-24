@@ -911,11 +911,40 @@ fn write_atomic(path: &Path, bytes: &[u8], replace: bool) -> Result<(), NixIndex
         let mut file = options.open(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        #[cfg(windows)]
-        if replace && fs::symlink_metadata(path).is_ok() {
-            fs::remove_file(path)?;
+        if replace {
+            #[cfg(windows)]
+            if fs::symlink_metadata(path).is_ok() {
+                fs::remove_file(path)?;
+            }
+            fs::rename(&temporary, path)
+        } else {
+            match fs::hard_link(&temporary, path) {
+                Ok(()) => {
+                    let _ = fs::remove_file(&temporary);
+                    Ok(())
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    let metadata = fs::symlink_metadata(path)?;
+                    if metadata.file_type().is_symlink() || !metadata.is_file() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            "immutable nix index object is not a regular file",
+                        ));
+                    }
+                    let current = fs::read(path)?;
+                    if current == bytes {
+                        let _ = fs::remove_file(&temporary);
+                        Ok(())
+                    } else {
+                        Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            "immutable nix index object changed",
+                        ))
+                    }
+                }
+                Err(error) => Err(error),
+            }
         }
-        fs::rename(&temporary, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -2064,26 +2093,33 @@ fn generated_document(
 }
 
 #[allow(dead_code)]
-fn parse_oracle(bytes: &[u8], system: &str) -> Result<Vec<OracleRecord>, NixIndexError> {
+fn parse_oracle(
+    bytes: &[u8],
+    system: &str,
+    revision: &str,
+) -> Result<Vec<OracleRecord>, NixIndexError> {
+    validate_revision(revision)?;
     let text = std::str::from_utf8(bytes)
         .map_err(|_| NixIndexError::invalid("oracle output is not UTF-8"))?;
     let value = parse_json_exact_numbers(text, true)
         .map_err(|error| NixIndexError::invalid(format!("parse oracle JSON: {}", error.message)))?;
     let records_value = match &value {
-        Value::Array(_) => value,
         Value::Object(_) => {
             let map = object(value.clone(), "oracle")?;
-            reject_unknown(&map, &["system", "records"])?;
-            if let Some((_, value)) = map.iter().find(|(key, _)| key == "system") {
-                if string_value(value, "oracle system")? != system {
-                    return Err(NixIndexError::invalid("oracle has the wrong system"));
-                }
+            reject_unknown(&map, &["revision", "system", "records"])?;
+            if string_field(&map, "revision")? != revision {
+                return Err(NixIndexError::invalid(
+                    "oracle has the wrong pinned revision",
+                ));
+            }
+            if string_field(&map, "system")? != system {
+                return Err(NixIndexError::invalid("oracle has the wrong system"));
             }
             field(&map, "records")?.clone()
         }
         _ => {
             return Err(NixIndexError::invalid(
-                "oracle output must be an array or object",
+                "oracle output must be an object with revision, system, and records",
             ))
         }
     };
@@ -2098,12 +2134,10 @@ fn parse_oracle(bytes: &[u8], system: &str) -> Result<Vec<OracleRecord>, NixInde
                     "system", "attrpath", "version", "drvPath", "outputs", "cache",
                 ],
             )?;
-            let record_system = match map.iter().find(|(key, _)| key == "system") {
-                Some((_, value)) => string_value(value, "oracle record system")?,
-                None => system,
-            };
-            if record_system != system {
-                return Err(NixIndexError::invalid("oracle record has the wrong system"));
+            if let Some((_, value)) = map.iter().find(|(key, _)| key == "system") {
+                if string_value(value, "oracle record system")? != system {
+                    return Err(NixIndexError::invalid("oracle record has the wrong system"));
+                }
             }
             let outputs = parse_oracle_outputs(field(&map, "outputs")?)?;
             let mut output_names = BTreeSet::new();
@@ -2391,8 +2425,9 @@ fn format_generation_report(decoded: &[u8], compressed: &[u8], document: &IndexD
 pub(crate) fn parse_oracle_for_producer(
     bytes: &[u8],
     system: &str,
+    revision: &str,
 ) -> Result<Vec<OracleRecord>, NixIndexError> {
-    parse_oracle(bytes, system)
+    parse_oracle(bytes, system, revision)
 }
 
 #[allow(dead_code)]
@@ -2591,6 +2626,21 @@ mod tests {
         }
     }
 
+    fn document_for(record: RecordWire) -> IndexDocument {
+        IndexDocument {
+            schema: INDEX_SCHEMA,
+            channel: "nixpkgs-unstable".to_string(),
+            revision: REVISION.to_string(),
+            system: "x86_64-linux".to_string(),
+            released_unix: 1,
+            coverage: Coverage {
+                indexed: vec![record.attrpath.clone()],
+                not_indexed: Vec::new(),
+            },
+            records: vec![record],
+        }
+    }
+
     fn signed_fixture() -> (PathBuf, MapTransport, FixedClock, SigningKey, IndexKey) {
         let serial = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let root =
@@ -2750,15 +2800,38 @@ mod tests {
     #[test]
     fn nix_index_differential_oracle_accepts_nix_output_map() {
         let oracle = format!(
-            "[{{\"system\":\"x86_64-linux\",\"attrpath\":[\"ripgrep\"],\"version\":\"15.2.0\",\"drvPath\":\"{RIPGREP_DRV}\",\"outputs\":{{\"out\":{{\"path\":\"{RIPGREP_OUT}\"}}}}}}]"
+            "{{\"revision\":\"{REVISION}\",\"system\":\"x86_64-linux\",\"records\":[{{\"attrpath\":[\"ripgrep\"],\"version\":\"15.2.0\",\"drvPath\":\"{RIPGREP_DRV}\",\"outputs\":{{\"out\":{{\"path\":\"{RIPGREP_OUT}\"}}}},\"cache\":true}}]}}"
         );
-        let records = parse_oracle(oracle.as_bytes(), "x86_64-linux").unwrap();
+        let records = parse_oracle(oracle.as_bytes(), "x86_64-linux", REVISION).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record, ripgrep_record());
+        let store_paths = [RIPGREP_OUT.to_string()].into_iter().collect();
+        let (decoded, _, _) = producer_generate(
+            "nixpkgs-unstable",
+            "x86_64-linux",
+            REVISION,
+            1,
+            &records,
+            &store_paths,
+        )
+        .unwrap();
+        assert_eq!(
+            decode_index_records_for_producer(&decoded).unwrap(),
+            vec![ripgrep_record()]
+        );
     }
 
     #[test]
-    fn nix_index_rejects_forged_cross_system_duplicate_and_ambiguous_input() {
+    fn nix_index_differential_oracle_rejects_a_different_pinned_revision() {
+        let oracle = format!(
+            "{{\"revision\":\"0000000000000000000000000000000000000000\",\"system\":\"x86_64-linux\",\"records\":[]}}"
+        );
+        let error = parse_oracle(oracle.as_bytes(), "x86_64-linux", REVISION).unwrap_err();
+        assert!(error.to_string().contains("wrong pinned revision"));
+    }
+
+    #[test]
+    fn nix_index_signature_verifies_real_bytes_and_rejects_mutation() {
         let key = SigningKey::from_bytes(&[7; 32]);
         let (decoded, _) = canonical_test_index(
             "nixpkgs-unstable",
@@ -2769,39 +2842,81 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
+        let sidecar = signature_sidecar_for_test(
+            "test-key",
+            &key.sign(&producer_signature_request(&decoded)).to_bytes(),
+        );
+        let signature = parse_signature_strict(&sidecar).unwrap();
+        assert!(
+            verify_index_signature(&key.verifying_key(), "test-key", &signature, &decoded).is_ok()
+        );
         let forged = {
             let mut changed = decoded.clone();
             let position = changed.len() - 2;
             changed[position] ^= 1;
             changed
         };
-        let signature = IndexSignature {
-            schema: 1,
-            key_id: "test-key".to_string(),
-            algorithm: "ed25519".to_string(),
-            signature: base64_encode(&key.sign(&producer_signature_request(&decoded)).to_bytes()),
-        };
         assert!(
             verify_index_signature(&key.verifying_key(), "test-key", &signature, &forged).is_err()
         );
+    }
+
+    #[test]
+    fn nix_index_rejects_forged_stale_cross_system_duplicate_and_ambiguous_input() {
         let duplicate = br#"{"schema":1,"schema":1}"#;
         assert!(parse_index_strict(duplicate).is_err());
-        let wrong_system = decoded
-            .windows(b"x86_64-linux".len())
-            .position(|window| window == b"x86_64-linux")
-            .map(|position| {
-                let mut bytes = decoded.clone();
-                bytes.splice(
-                    position..position + b"x86_64-linux".len(),
-                    b"aarch64-linux".iter().copied(),
-                );
-                bytes
-            });
-        assert!(wrong_system.is_some());
+
+        let mut duplicate_records = document_for(wire_from_record(&ripgrep_record()));
+        duplicate_records
+            .records
+            .push(wire_from_record(&ripgrep_record()));
+        assert!(validate_document(&duplicate_records).is_err());
+
+        let mut duplicate_names = wire_from_record(&ripgrep_record());
+        duplicate_names.outputs.push(OutputWire {
+            name: "out".to_string(),
+            store_path: AUX_OUT.to_string(),
+        });
+        assert!(validate_document(&document_for(duplicate_names)).is_err());
+
+        let duplicate_paths = RecordWire {
+            attrpath: vec!["ripgrep".to_string()],
+            version: "15.2.0".to_string(),
+            drv_path: RIPGREP_DRV.to_string(),
+            outputs: vec![
+                OutputWire {
+                    name: "out".to_string(),
+                    store_path: RIPGREP_OUT.to_string(),
+                },
+                OutputWire {
+                    name: "bin".to_string(),
+                    store_path: RIPGREP_OUT.to_string(),
+                },
+            ],
+        };
+        assert!(validate_document(&document_for(duplicate_paths)).is_err());
+
+        let mut empty_version = wire_from_record(&ripgrep_record());
+        empty_version.version.clear();
+        assert!(validate_document(&document_for(empty_version)).is_err());
+
+        let mut no_outputs = wire_from_record(&ripgrep_record());
+        no_outputs.outputs.clear();
+        assert!(validate_document(&document_for(no_outputs)).is_err());
+
+        let no_primary = RecordWire {
+            attrpath: vec!["ripgrep".to_string()],
+            version: "15.2.0".to_string(),
+            drv_path: RIPGREP_DRV.to_string(),
+            outputs: vec![OutputWire {
+                name: "dev".to_string(),
+                store_path: RIPGREP_OUT.to_string(),
+            }],
+        };
+        assert!(validate_document(&document_for(no_primary)).is_err());
         assert!(validate_store_path("/nix/store/not-a-store-path", false).is_err());
 
         let (root, transport, clock, key, mut cross_system_key) = signed_fixture();
-        cross_system_key.system = "aarch64-linux".to_string();
         let client = NixIndexClient::for_test(
             root.clone(),
             "http://127.0.0.1:9999".to_string(),
@@ -2812,6 +2927,41 @@ mod tests {
             false,
         )
         .unwrap();
+        client.resolve(&cross_system_key).unwrap();
+        assert!(client
+            .check_generation(
+                "nixpkgs-unstable",
+                &ChannelManifest {
+                    schema: INDEX_SCHEMA,
+                    channel: "nixpkgs-unstable".to_string(),
+                    generation: 0,
+                    issued_unix: 1_723_000_000,
+                    expires_unix: 1_723_604_800,
+                    targets: Vec::new(),
+                },
+                b"stale",
+            )
+            .is_err());
+        assert!(client
+            .check_generation(
+                "nixpkgs-unstable",
+                &ChannelManifest {
+                    schema: INDEX_SCHEMA,
+                    channel: "nixpkgs-unstable".to_string(),
+                    generation: 1,
+                    issued_unix: 1_724_000_000,
+                    expires_unix: 1_724_604_800,
+                    targets: Vec::new(),
+                },
+                b"same-generation-fork",
+            )
+            .is_err());
+        cross_system_key.attrpath = vec!["not-the-requested-attr".to_string()];
+        assert!(matches!(
+            client.resolve(&cross_system_key),
+            Err(NixIndexError::NotIndexed { .. })
+        ));
+        cross_system_key.system = "aarch64-linux".to_string();
         assert!(matches!(
             client.resolve(&cross_system_key),
             Err(NixIndexError::Invalid(_))

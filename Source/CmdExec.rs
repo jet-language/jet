@@ -83,7 +83,7 @@ fn parse_options(args: &[String], json: bool) -> (ExecOptions, Vec<String>) {
                 }
                 continue;
             }
-            "--json" | "--quiet" => {}
+            jet::CLI::MACHINE_OUTPUT_FLAG | "--quiet" => {}
             value if value.starts_with("--workspace=") => {
                 let value = value.trim_start_matches("--workspace=");
                 if value.is_empty() {

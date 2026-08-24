@@ -361,7 +361,7 @@ fn parse_digest_args(args: &[String]) -> (Option<String>, bool) {
     let mut index = 0;
     while index < args.len() {
         let arg = &args[index];
-        if arg == "--json" {
+        if arg == jet::CLI::MACHINE_OUTPUT_FLAG {
             index += 1;
             continue;
         }

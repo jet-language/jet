@@ -654,6 +654,73 @@ fn linux_process_state(pid: u32) -> Option<String> {
         .and_then(|stat| stat.split_whitespace().nth(2).map(str::to_owned))
 }
 
+#[cfg(target_os = "linux")]
+fn spawn_attachable_native_target(binary: &Path, tag: &str) -> std::process::Child {
+    let root = std::env::temp_dir();
+    let source = root.join(format!("jet_debug_attach_authorizer_{tag}.rs"));
+    let helper = root.join(format!("jet_debug_attach_authorizer_{tag}"));
+    std::fs::write(
+        &source,
+        r#"
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+
+unsafe extern "C" {
+    fn prctl(option: i32, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> i32;
+}
+
+fn main() {
+    let target = std::env::args_os().nth(1).expect("target binary");
+    let result = unsafe { prctl(0x5961_6d61, usize::MAX, 0, 0, 0) };
+    if result != 0 {
+        std::process::exit(125);
+    }
+    let error = Command::new(target).exec();
+    eprintln!("{error}");
+    std::process::exit(126);
+}
+"#,
+    )
+    .expect("write attach authorizer");
+    let compile = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&source)
+        .args(["-o"])
+        .arg(&helper)
+        .output()
+        .expect("compile attach authorizer");
+    assert!(
+        compile.status.success(),
+        "rustc rejected attach authorizer:\n{}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let target = Command::new(&helper)
+        .arg(binary)
+        .spawn()
+        .expect("start attachable native debug target");
+    let _ = std::fs::remove_file(source);
+    let _ = std::fs::remove_file(helper);
+    target
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_target_binary(pid: u32, binary: &Path) {
+    let expected = std::fs::canonicalize(binary).expect("canonicalize attach target");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if std::fs::canonicalize(format!("/proc/{pid}/exe")).ok().as_deref()
+            == Some(expected.as_path())
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "attach target did not exec the matching native debug binary"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[test]
 fn dap_cli_exercises_the_production_wire_and_attach_failure() {
     let tag = format!("dap_cli_failure_{}", std::process::id());
@@ -857,9 +924,8 @@ fn dap_cli_attaches_and_disconnects_through_the_production_wire() {
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    let mut target = Command::new(&binary)
-        .spawn()
-        .expect("start the matching native debug target");
+    let mut target = spawn_attachable_native_target(&binary, &tag);
+    wait_for_target_binary(target.id(), &binary);
     let attach = dap_frame(&format!(
         r#"{{"seq":2,"type":"request","command":"attach","arguments":{{"processId":{},"program":"{}","map":"{}"}}}}"#,
         target.id(),

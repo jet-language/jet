@@ -1,7 +1,7 @@
 # Off-device only. Import the exact nixexprs.tar.xz tree staged by the
 # immutable channel release. No user overlays, registry, config, or flake input
 # enters this evaluator.
-{ nixexprs, system }:
+{ nixexprs, revision, system }:
 let
   pkgs = import "${nixexprs}/default.nix" {
     inherit system;
@@ -42,6 +42,7 @@ let
     (builtins.attrNames packageInfo));
 in
 builtins.toJSON {
+  inherit revision;
   inherit system;
   inherit records;
 }

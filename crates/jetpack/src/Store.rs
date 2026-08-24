@@ -56,10 +56,7 @@ pub use Nar::*;
 pub(crate) mod NixCache;
 #[cfg(test)]
 pub(crate) use NixCache::encode_zstd_deterministic;
-#[allow(unused_imports)]
-pub(crate) use NixCache::{
-    admit_nix_closure, AdmittedNixClosure, AdmittedNixObject, NixOutputRequest, StoreError,
-};
+pub(crate) use NixCache::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, StoreError};
 mod Broker;
 pub use Broker::*;
 mod Reproducibility;
@@ -1892,7 +1889,7 @@ fn nix_store_projection_for_entry(
     // below is either the verified lease snapshot or a Hangar CAS object. A
     // Nix closure record is the authority for transitive runtime objects.
     let mut logical_digests = BTreeMap::new();
-    for (key, path) in &producer.facts {
+    for key in producer.facts.keys() {
         let Some(name) = key.strip_prefix("nix.output.") else {
             continue;
         };
@@ -1908,6 +1905,7 @@ fn nix_store_projection_for_entry(
                 ))
             })?
         };
+        let path = canonical_nix_output_path(&producer, name)?;
         add_nix_projection_path(&mut logical_digests, path, &digest)?;
     }
     if logical_digests.is_empty() {
@@ -1973,15 +1971,12 @@ fn nix_store_projection_for_entry(
                             producer.provider
                         )));
                     }
-                    let path = producer
-                        .facts
-                        .get(&format!("nix.output.{name}"))
-                        .ok_or_else(|| {
-                            std::io::Error::other(format!(
-                                "Nix closure object `{digest}` has no `{name}` output fact"
-                            ))
-                        })?;
-                    paths.insert(path.clone());
+                    let path = canonical_nix_output_path(&producer, name).map_err(|error| {
+                        std::io::Error::other(format!(
+                            "Nix closure object `{digest}` has no canonical `{name}` output fact: {error}"
+                        ))
+                    })?;
+                    paths.insert(path.to_string());
                 }
             }
             if paths.len() != 1 {
@@ -2008,13 +2003,12 @@ fn nix_store_projection_for_entry(
         )));
     }
 
-    let primary_logical = producer
-        .facts
-        .get("nix.output.out")
-        .or_else(|| producer.facts.get("nix.output.bin"));
+    let primary_logical = ["out", "bin"]
+        .into_iter()
+        .find_map(|name| canonical_nix_output_path(&producer, name).ok());
     let mut projection = Vec::new();
     for (logical, digest) in logical_digests {
-        let primary = primary_logical == Some(&logical);
+        let primary = primary_logical == Some(logical.as_str());
         let source = if primary {
             snapshot_root.to_path_buf()
         } else {
@@ -2028,6 +2022,32 @@ fn nix_store_projection_for_entry(
         });
     }
     Ok(projection)
+}
+
+fn canonical_nix_output_path<'a>(
+    producer: &'a ProducerRecord,
+    name: &str,
+) -> std::io::Result<&'a str> {
+    let output = producer
+        .facts
+        .get(&format!("nix.output.{name}"))
+        .filter(|path| path.starts_with("/nix/store/"));
+    let store_path = (name == "out")
+        .then(|| producer.facts.get("nix.store-path"))
+        .flatten()
+        .filter(|path| path.starts_with("/nix/store/"));
+    if let (Some(output), Some(store_path)) = (output, store_path) {
+        if output != store_path {
+            return Err(std::io::Error::other(format!(
+                "Nix output `{name}` disagrees with its canonical store path"
+            )));
+        }
+    }
+    output.or(store_path).map(String::as_str).ok_or_else(|| {
+        std::io::Error::other(format!(
+            "Nix output `{name}` has no canonical `/nix/store` path"
+        ))
+    })
 }
 
 fn add_nix_projection_path(

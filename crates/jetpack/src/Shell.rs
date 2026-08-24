@@ -281,7 +281,12 @@ fn nix_projection_command(
         .iter()
         .find_map(|lease| lease.projected_executable(program))
         .unwrap_or_else(|| PathBuf::from(program));
-    let binary = if binary.is_file() {
+    let binary = if let Some(logical) = logical_executable_path(&projections, &binary) {
+        // Execute through the projected store name. This preserves the ELF
+        // executable identity for `$ORIGIN` and makes PT_INTERP/DT_NEEDED
+        // resolve only after the exact Hangar closure is mounted.
+        (logical, None)
+    } else if binary.is_file() {
         let (path, file, mode) = inherited_tool_path(&binary, Some(program))?;
         keepers.push(file);
         (path, mode)
@@ -415,6 +420,18 @@ fi
         keepers,
         scratch,
     }))
+}
+
+#[cfg(target_os = "linux")]
+fn logical_executable_path(
+    projections: &std::collections::BTreeMap<String, PathBuf>,
+    binary: &Path,
+) -> Option<PathBuf> {
+    projections.iter().find_map(|(logical, source)| {
+        let source = std::fs::canonicalize(source).ok()?;
+        let relative = binary.strip_prefix(source).ok()?;
+        (!relative.as_os_str().is_empty()).then(|| Path::new(logical).join(relative))
+    })
 }
 
 #[cfg(target_os = "linux")]

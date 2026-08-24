@@ -91,7 +91,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
-        if arg == "--json" {
+        if arg == jet::CLI::MACHINE_OUTPUT_FLAG {
             i += 1;
             continue;
         }

@@ -6,8 +6,9 @@
 //! builder can sit beside this same `Realized` boundary.
 //!
 //! Determinism for tests: when a fixtures dir is supplied (the `--offline`
-//! path, or `JETPACK_FIXTURES`), we read a pinned compatibility result. The
-//! package provider has no installed-Nix process fallback.
+//! path, or `JETPACK_FIXTURES`), we read a pinned compatibility result.
+//! Production locked nixpkgs refs resolve through the signed index and native
+//! cache admission. The package provider has no installed-Nix process fallback.
 
 use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
@@ -1354,8 +1355,8 @@ pub(crate) trait Provider {
 }
 
 /// The Nix compatibility provider for package references that are not yet
-/// representable by the native provider. The no-installed-Nix gate admits only
-/// an explicit pinned result or a verified Hangar reuse.
+/// representable by the native provider. The no-installed-Nix gate admits an
+/// explicit pinned result, signed-index/cache substitution, or Hangar reuse.
 pub(crate) struct NixProvider;
 
 struct UnsupportedProvider(&'static str);
@@ -2996,7 +2997,7 @@ fn nix_store_version(out: &str, name: &str) -> String {
 mod tests {
     use super::super::RefSpec::{classify, classify_in};
     use super::*;
-    use crate::Store::AdmittedNixObject;
+    use crate::Store::NixCache::AdmittedNixObject;
 
     fn empty() -> SourceTable {
         SourceTable::empty()

@@ -100,7 +100,10 @@ fn target_arg(args: &[String], cwd: &Path) -> Result<String, String> {
             skip_next = false;
             continue;
         }
-        if matches!(arg.as_str(), "--json" | "--quiet" | "--no-color")
+        if matches!(
+            arg.as_str(),
+            jet::CLI::MACHINE_OUTPUT_FLAG | "--quiet" | "--no-color"
+        )
             || arg.starts_with("--color=")
         {
             continue;

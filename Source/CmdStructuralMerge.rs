@@ -925,7 +925,7 @@ fn flag_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .map(|pair| pair[1].as_str())
 }
 fn report_mode(args: &[String]) -> &str {
-    if args.iter().any(|arg| arg == "--json") {
+    if jet::CLI::machine_output_requested(args) {
         "json"
     } else {
         "text"
