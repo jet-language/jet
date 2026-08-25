@@ -1404,6 +1404,14 @@ impl DapServer {
                 }
                 let lines: Vec<usize> = specs.iter().map(|spec| spec.line).collect();
                 let client_ids = self.assign_client_breakpoint_ids(&specs);
+                // Keep the state the backend is actually running with. Every
+                // path below can still refuse the replacement, and leaving the
+                // new specs recorded would make the adapter disagree with the
+                // inferior about which breakpoints exist.
+                let previous_breakpoints = self.pending_breakpoints.clone();
+                let previous_specs = self.pending_specs.clone();
+                let previous_client_ids = self.client_breakpoint_ids.clone();
+                let previous_hit_counts = self.hit_counts.clone();
                 self.pending_breakpoints = lines.clone();
                 self.pending_specs = specs;
                 self.client_breakpoint_ids = client_ids.clone();
@@ -1465,6 +1473,10 @@ impl DapServer {
                     match self.replace_source_breakpoints() {
                         Ok(statuses) => statuses,
                         Err(_error) => {
+                            self.pending_breakpoints = previous_breakpoints;
+                            self.pending_specs = previous_specs;
+                            self.client_breakpoint_ids = previous_client_ids;
+                            self.hit_counts = previous_hit_counts;
                             self.respond_err(
                                 out,
                                 request_seq,
