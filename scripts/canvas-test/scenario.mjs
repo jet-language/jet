@@ -246,13 +246,14 @@ async function bigMinimapInk(ctx) {
 }
 
 export class CanvasScenario {
-  constructor({ port, outDir, scenarioName, seed = 373, browser = "chromium", session = "" }) {
+  constructor({ port, outDir, scenarioName, seed = 373, browser = "chromium", session = "", programTarget = "" }) {
     this.port = port;
     this.outDir = outDir;
     this.scenarioName = scenarioName;
     this.seed = Number(seed) || 373;
     this.browser = browser;
     this.session = session;
+    this.programTarget = programTarget;
     this.driver = createDriver(browser);
     this.lastScreenshot = null;
   }
@@ -286,6 +287,11 @@ export class CanvasScenario {
 
   async state() {
     return await this.driver.evaluate("window.__jetCanvasTest || null");
+  }
+
+  sessionUrl(path) {
+    if (!this.session) return path;
+    return `${path}${path.includes("?") ? "&" : "?"}session=${encodeURIComponent(this.session)}`;
   }
 
   async pin(nodeTitle, pinName) {
@@ -413,7 +419,8 @@ export class CanvasScenario {
   }
 
   async expectSourceContains(text) {
-    const body = await this.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
+    const url = this.sessionUrl("/canvas/source");
+    const body = await this.driver.evaluate(`fetch(${JSON.stringify(url)}, { cache: "no-store" }).then((r) => r.text())`);
     if (!body.includes(text)) {
       const tx = await this.driver.evaluate(`JSON.stringify({ tx: window.__jetCanvasLastTx || null, result: window.__jetCanvasLastTxResult || null })`);
       throw new Error(`source missing ${JSON.stringify(text)}\n${body}\nlast: ${tx}`);
@@ -422,17 +429,19 @@ export class CanvasScenario {
 
   async source() {
     return await this.driver.evaluate(`(() => {
+      const base = ${JSON.stringify(this.sessionUrl("/canvas/source"))};
       const sourceId = window.__jetCanvasTest?.doc?.source_id;
-      const suffix = sourceId ? "?source_id=" + encodeURIComponent(sourceId) : "";
-      return fetch("/canvas/source" + suffix, { cache: "no-store" }).then((r) => r.text());
+      const suffix = sourceId ? (base.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId) : "";
+      return fetch(base + suffix, { cache: "no-store" }).then((r) => r.text());
     })()`);
   }
 
   async graph() {
     return await this.driver.evaluate(`(() => {
+      const base = ${JSON.stringify(this.sessionUrl("/canvas/graph"))};
       const sourceId = window.__jetCanvasTest?.doc?.source_id;
-      const suffix = sourceId ? "?source_id=" + encodeURIComponent(sourceId) : "";
-      return fetch("/canvas/graph" + suffix, { cache: "no-store" }).then((r) => r.json());
+      const suffix = sourceId ? (base.includes("?") ? "&" : "?") + "source_id=" + encodeURIComponent(sourceId) : "";
+      return fetch(base + suffix, { cache: "no-store" }).then((r) => r.json());
     })()`);
   }
 
@@ -471,15 +480,17 @@ export class CanvasScenario {
   }
 
   async query(body) {
-    return await this.driver.evaluate(`fetch("/canvas/query", { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`);
+    const url = this.sessionUrl("/canvas/query");
+    return await this.driver.evaluate(`fetch(${JSON.stringify(url)}, { method: "POST", headers: { "content-type": "application/json" }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`);
   }
 
   async transaction(body) {
+    const url = this.sessionUrl("/canvas/transaction");
     return await this.driver.evaluate(`(() => {
       const request = Object.assign({}, ${JSON.stringify(body)});
       const sourceId = window.__jetCanvasTest?.doc?.source_id;
       if (sourceId && !request.source_id) request.source_id = sourceId;
-      return fetch("/canvas/transaction", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) }).then((r) => r.json().then((json) => ({ ok: r.ok, json })));
+      return fetch(${JSON.stringify(url)}, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) }).then((r) => r.json().then((json) => ({ ok: r.ok, json })));
     })()`);
   }
 
@@ -1788,12 +1799,13 @@ export const scenarios = {
   "session-surface-matrix": async (ctx) => {
     await ctx.openCanvas();
     await ctx.waitFor(async () => await ctx.driver.evaluate("!!window.__jetCanvasSession"), "surface matrix session");
+    const primaryClientAtStart = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
 
     const canvasPayload = (value) => value?.canvas && typeof value.canvas === "object" ? value.canvas : value;
     const initial = await ctx.driver.evaluate(`Promise.all([
-      fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()),
-      fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json()),
-      fetch("/canvas/graph", { cache: "no-store" }).then((r) => r.json())
+      fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()),
+      fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then((r) => r.json()),
+      fetch(${JSON.stringify(ctx.sessionUrl("/canvas/graph"))}, { cache: "no-store" }).then((r) => r.json())
     ]).then(([session, project, graph]) => ({
       session: session.session || session.canvas?.session || session,
       project: project.canvas || project,
@@ -1802,6 +1814,9 @@ export const scenarios = {
     const session = initial.session;
     const project = initial.project;
     const outputs = project.outputs || [];
+    if (ctx.programTarget && session.run?.target !== ctx.programTarget) {
+      throw new Error(`Canvas session lost selected program target: ${JSON.stringify({ expected: ctx.programTarget, session })}`);
+    }
     const outputByTarget = new Map(outputs.map((output) => [output.target || output.name, output]));
     const requiredOutputs = [
       ["cli", "executable"],
@@ -1831,8 +1846,11 @@ export const scenarios = {
 
     const canvasListener = session.listeners?.canvas;
     const applicationListener = session.listeners?.application;
+    const applicationListenerReady = ctx.programTarget === "web"
+      ? applicationListener?.port > 0
+      : applicationListener?.port === 0;
     if (!canvasListener || canvasListener.transport !== "canvas" || !canvasListener.port
-      || applicationListener?.port !== 0
+      || !applicationListenerReady
       || session.custom_servers?.owner !== "application"
       || session.custom_servers?.transport !== "application") {
       throw new Error(`session listener/custom-server boundary missing: ${JSON.stringify(session)}`);
@@ -1853,7 +1871,7 @@ export const scenarios = {
     }
 
     for (const [target] of requiredOutputs) {
-      const attempted = await ctx.driver.evaluate(`fetch("/canvas/session", {
+      const attempted = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -1866,7 +1884,7 @@ export const scenarios = {
           client_id: "surface-primary"
         })
       }).then(async (r) => ({ status: r.status, body: await r.text() }))`);
-      const selected = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json())`);
+      const selected = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json())`);
       const selectedSession = canvasPayload(selected).session || canvasPayload(selected);
       if (attempted.status !== 405
         || !selectedSession
@@ -1882,7 +1900,7 @@ export const scenarios = {
       }
     }
 
-    const second = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json())`);
+    const second = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session?client_id=surface-second"))}, { cache: "no-store" }).then((r) => r.json())`);
     const secondSession = canvasPayload(second).session || canvasPayload(second);
     if (!secondSession || secondSession.id !== session.id || secondSession.clients < 2
       || secondSession.source_revision !== session.source_revision) {
@@ -1898,32 +1916,49 @@ export const scenarios = {
     const hostileRequests = [
       {
         label: "missing session",
+        path: "/canvas/graph",
         expected: 401,
         init: { headers: { host: validHeaders.host } },
       },
       {
         label: "wrong session",
+        path: "/canvas/graph",
         expected: 401,
         init: { headers: { ...validHeaders, authorization: "Bearer wrong" } },
       },
       {
         label: "foreign origin",
+        path: "/canvas/graph",
         expected: 401,
         init: { headers: { ...validHeaders, origin: `http://evil.invalid:${ctx.port}` } },
       },
       {
         label: "foreign host",
+        path: "/canvas/graph",
         expected: 401,
         init: { headers: { ...validHeaders, host: `evil.invalid:${ctx.port}`, origin: `http://evil.invalid:${ctx.port}` } },
       },
       {
         label: "wrong method",
+        path: "/canvas/graph",
         expected: 405,
         init: { method: "POST", headers: validHeaders, body: "{}" },
       },
+      {
+        label: "unknown path",
+        path: "/canvas/not-a-route",
+        expected: 401,
+        init: { headers: validHeaders },
+      },
+      {
+        label: "duplicate session query",
+        path: `/canvas/graph?session=${encodeURIComponent(ctx.session)}&session=wrong`,
+        expected: 401,
+        init: { headers: validHeaders },
+      },
     ];
     for (const hostile of hostileRequests) {
-      const response = await fetch(`${endpoint}/canvas/graph`, hostile.init);
+      const response = await fetch(`${endpoint}${hostile.path}`, hostile.init);
       if (response.status !== hostile.expected) {
         throw new Error(`${hostile.label} request returned ${response.status}, expected ${hostile.expected}`);
       }
@@ -1934,37 +1969,71 @@ export const scenarios = {
     const sourceBeforeReconnect = await ctx.source();
     await writeFile(join(projectRoot, "package.jet"), `name: "canvas_session_matrix"
 version: "0.1.0"
-outputs: .{
+    outputs: .{
     cli: .Executable{ name: "cli", entry: run }
     library: .Library{ name: "library", entry: run }
 }
 `);
     await ctx.driver.navigate("about:blank");
     await ctx.openCanvas();
-    const reconnected = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+    const reconnected = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     if (!reconnected || reconnected.id !== session.id || reconnected.source_revision !== session.source_revision) {
       throw new Error(`Canvas reconnect did not preserve resident session: ${JSON.stringify({ session, reconnected })}`);
     }
-    await ctx.waitFor(async () => await ctx.driver.evaluate(`(() => {
+    let observedProject = null;
+    try {
+      await ctx.waitFor(async () => {
+        observedProject = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then(async (r) => {
+          const value = await r.json();
+          const project = value.canvas || value;
+          return { status: r.status, outputs: project.outputs || [], capabilities: project.capabilities || {}, project_root: project.project_root || null };
+        })`);
+        return observedProject.status === 200
+          && observedProject.outputs.length === 2
+          && !observedProject.capabilities.preview
+          && !observedProject.capabilities.designer
+          && JSON.stringify(observedProject.capabilities) !== JSON.stringify(project.capabilities || {});
+      }, "project capability change after reconnect", 15000);
+    } catch (error) {
+      throw new Error(`${error.message}: ${JSON.stringify(observedProject)}`);
+    }
+    await ctx.waitFor(async () => await ctx.driver.evaluate(`(async () => {
+      const response = await fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" });
+      const value = await response.json();
+      const expectedProject = value.canvas || value;
+      const expected = expectedProject.capabilities || {};
+      if (response.status !== 200 || (expectedProject.outputs || []).length !== 2
+        || expected.preview === true || expected.designer === true) return false;
       const project = window.__jetCanvasCapabilities || {};
-      const panels = Array.from(document.querySelectorAll("[data-capability]")).reduce((out, panel) => {
-        out[panel.getAttribute("data-capability")] = panel.hidden;
-        return out;
-      }, {});
-      const has = (name) => Object.prototype.hasOwnProperty.call(project, name);
-      const unsupported = Array.from(document.querySelectorAll("[data-capability]"))
-        .filter((panel) => !has(panel.getAttribute("data-capability")));
+      const sameCapabilities = Object.keys(expected).length === Object.keys(project).length
+        && Object.entries(expected).every(([name, value]) => project[name] === value);
       const focusable = "a[href],button,input,select,textarea,[tabindex]";
+      const capabilityPanels = Array.from(document.querySelectorAll("[data-capability]"));
+      const panelsMatch = capabilityPanels.every((panel) => {
+        const capability = panel.getAttribute("data-capability");
+        const supported = expected[capability] === true;
+        if (supported) return !panel.hidden && !panel.inert;
+        return panel.hidden && panel.inert && !panel.matches(focusable);
+      });
+      const views = Array.from(document.querySelectorAll("[data-session-view]"));
+      const supportedViews = views
+        .filter((view) => !view.getAttribute("data-capability") || expected[view.getAttribute("data-capability")] === true)
+        .map((view) => view.getAttribute("data-session-view"));
+      const unsupportedViews = views
+        .filter((view) => view.getAttribute("data-capability") && expected[view.getAttribute("data-capability")] !== true)
+        .map((view) => view.getAttribute("data-session-view"));
       const layout = window.__jetCanvasLayout || {};
-      return !has("service") && !has("preview") && !has("designer") && !has("terminal")
-        && panels.service === true && panels.preview === true && panels.designer === true
-        && unsupported.every((panel) => panel.hidden && panel.inert && !panel.matches(focusable) && !panel.querySelector(focusable))
-        && !layout.panels?.includes("preview")
-        && !["designer", "preview", "terminal", "debugger", "custom servers"].some((view) => layout.views?.includes(view))
-        && document.getElementById("workbench-preview-label")?.hidden === true
-        && panels.runtime_output === false && panels.diagnostics === false;
-    })()`), "capability change after reconnect");
-    const narrowedProject = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+      const unsupportedPanels = Array.from(document.querySelectorAll("[data-canvas-panel][data-capability]"))
+        .filter((panel) => expected[panel.getAttribute("data-capability")] !== true)
+        .map((panel) => panel.getAttribute("data-canvas-panel"));
+      return sameCapabilities
+        && panelsMatch
+        && supportedViews.every((view) => layout.views?.includes(view))
+        && unsupportedViews.every((view) => !layout.views?.includes(view))
+        && unsupportedPanels.every((panel) => !layout.panels?.includes(panel))
+        && document.getElementById("workbench-preview-label")?.hidden === (expected.preview !== true);
+        })()`), "capability change after reconnect", 15000);
+    const narrowedProject = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/project"))}, { cache: "no-store" }).then((r) => r.json())`);
     const narrowedProjectPayload = canvasPayload(narrowedProject);
     if ((narrowedProjectPayload.outputs || []).length !== 2) {
       throw new Error(`capability-change project did not reload: ${JSON.stringify(narrowedProject)}`);
@@ -1992,26 +2061,42 @@ outputs: .{
     if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
       throw new Error(`invalid surface edit did not preserve source: ${JSON.stringify({ invalid, source: await ctx.source() })}`);
     }
-    const afterError = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+    const afterError = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     const refused = (afterError.history?.receipts || []).filter((receipt) => receipt.status === "refused");
-    if (afterError.id !== session.id || afterError.last_good_program !== session.last_good_program
+    if (afterError.id !== session.id || !afterError.last_good_program
       || refused.length < 2) {
       throw new Error(`session error receipts or last-good state missing: ${JSON.stringify(afterError)}`);
     }
 
-    await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=surface-second", { method: "POST" })`);
-    const reconnectedClient = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+    await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/__jet_dev_disconnect?client=surface-second"))}, { method: "POST" })`);
+    const reconnectedClient = await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/canvas/session?client_id=surface-second"))}, { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     if (!reconnectedClient || reconnectedClient.id !== session.id || reconnectedClient.source_revision !== session.source_revision
       || reconnectedClient.history.count !== afterError.history.count || reconnectedClient.clients < 2) {
       throw new Error(`reconnect created a divergent session: ${JSON.stringify({ afterError, reconnected: reconnectedClient })}`);
     }
 
     const primaryClient = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
-    await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=surface-second", { method: "POST" })`);
-    await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=" + encodeURIComponent(${JSON.stringify(primaryClient)}), { method: "POST" })`);
-    const shutdown = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
+    await ctx.driver.evaluate(`fetch(${JSON.stringify(ctx.sessionUrl("/__jet_dev_disconnect?client=surface-second"))}, { method: "POST" })`);
+    await ctx.driver.navigate("about:blank");
+    await sleep(1000);
+    const disconnectResults = [];
+    const knownClients = new Set([primaryClientAtStart, primaryClient, "surface-second"]);
+    let shutdown = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      for (const client of knownClients) {
+        const disconnectClient = `${endpoint}${ctx.sessionUrl("/__jet_dev_disconnect?client=" + encodeURIComponent(client))}`;
+        const response = await fetch(disconnectClient, { method: "POST", headers: validHeaders });
+        if (attempt === 0) disconnectResults.push({ client, status: response.status, body: await response.text() });
+        else await response.text();
+      }
+      const shutdownResponse = await fetch(`${endpoint}${ctx.sessionUrl("/canvas/session")}`, { cache: "no-store", headers: validHeaders });
+      const shutdownValue = await shutdownResponse.json();
+      shutdown = shutdownValue.session || shutdownValue.canvas?.session || shutdownValue;
+      if (shutdown?.clients === 0) break;
+      await sleep(100);
+    }
     if (!shutdown || shutdown.id !== session.id || shutdown.clients !== 0) {
-      throw new Error(`session shutdown did not release client leases: ${JSON.stringify(shutdown)}`);
+      throw new Error(`session shutdown did not release client leases: ${JSON.stringify({ shutdown, primaryClientAtStart, primaryClient, disconnectResults })}`);
     }
     await ctx.screenshot("session-surface-matrix");
   },

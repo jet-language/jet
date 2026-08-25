@@ -10,6 +10,7 @@
 
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -183,74 +184,61 @@ fn use_ephemeral_execs_inside_and_outside_project_without_path_projection() {
     let project = Scratch::new("use-project");
     let outside = Scratch::new("use-outside");
     let fixtures = Scratch::new("use-fx");
-    write_tool_bin_fixture(
-        &root.path,
+    write_native_omp_fixture(
         &fixtures.path,
-        "greet",
-        "greet",
+        "1.0.0",
         "#!/bin/sh\necho hello from jetpack use\n",
     );
-    write_tool_bin_fixture(
-        &root.path,
-        &fixtures.path,
-        "extra",
-        "extra",
-        "#!/bin/sh\necho extra from jetpack use\n",
-    );
-    write_tool_bin_fixture(
-        &root.path,
-        &fixtures.path,
-        "project-only",
-        "project-only",
-        "#!/bin/sh\necho project package\n",
-    );
-    for package in ["greet", "extra"] {
-        fs::copy(
-            fixtures.path.join(format!("nixpkgs-{package}.json")),
-            fixtures.path.join(format!("jetpack-{package}.json")),
-        )
-        .unwrap();
-    }
-    // A valid project package proves `use` does not merge the cwd project
-    // plan into the explicitly named package set.
+    // A project package plan proves `use` does not merge the cwd project plan
+    // into the explicitly named package set.
     fs::write(
         project.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [\n        pkg.source(\"nixpkgs\");\n        pkg.packages([\"project-only\"]);\n    ];\n}\n",
+        "module env.dev { packages: [\"missing@releases#1.0.0\"] }\n",
     )
     .unwrap();
     let home = Scratch::new("use-home");
     for cwd in [&project.path, &outside.path] {
-        let output = jetpack()
-            .args([
-                "use",
-                "greet",
-                "extra",
-                "--no-color",
-                "--offline",
-                "--fixtures",
-            ])
-            .arg(&fixtures.path)
-            .args([
-                "--",
-                "sh",
-                "-c",
-                "test \"$JETPACK_REF\" = 'greet@jetpack extra@jetpack' && command -v greet >/dev/null && command -v extra >/dev/null && ! command -v project-only >/dev/null",
-            ])
+        let command = format!(
+            "stty rows 30 cols 120; exec {} use omp@releases#1.0.0 -y --no-color --offline --fixtures {}",
+            test_shell_quote(common::jetpack_bin()),
+            test_shell_quote(&fixtures.path),
+        );
+        let mut child = Command::new("script")
+            .args(["-qfec", &command, "/dev/null"])
             .current_dir(cwd)
             .env("JETPACK_ROOT", &root.path)
             .env("HOME", &home.path)
-            .output()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                b"if test \"$JETPACK_REF\" = 'omp@releases#1.0.0' && command -v omp >/dev/null; then printf 'JETPACK_USE_OK\\n'; exit 0; else exit 1; fi\n",
+            )
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
         assert!(
             output.status.success(),
-            "cwd={}: stderr: {}",
+            "cwd={}: stdout: {} stderr: {}",
             cwd.display(),
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("JETPACK_USE_OK"),
+            "cwd={}: interactive shell probe did not run: {}",
+            cwd.display(),
+            String::from_utf8_lossy(&output.stdout)
         );
     }
     // `use` is ephemeral: it does not publish a tool profile or PATH bin.
     assert!(
-        !home.join(".jet/bin").join(physical_bin("greet")).exists(),
+        !home.join(".jet/bin").join(physical_bin("omp")).exists(),
         "use must not leave PATH projection"
     );
     assert!(!home.join(".jet/tools/profile.json").exists());

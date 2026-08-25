@@ -20,6 +20,7 @@ const MAX_CANVAS_BROWSERS: usize = 4;
 const BIG_PROJECT_SCENARIO: &str = "big-project-perf";
 const DEVSERVER_REAL_CLIENT_SCENARIO: &str = "devserver-real-client-survival";
 const SESSION_SURFACE_MATRIX_SCENARIO: &str = "session-surface-matrix";
+const EXPLICIT_HOST_TARGET: &str = "x86_64-unknown-linux-gnu";
 const BIG_FUNCTION_COUNT: usize = 300;
 const BIG_MODULE_COUNT: usize = 12;
 const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
@@ -533,6 +534,10 @@ fn resident_session_ide_state_matrix() {
 #[test]
 fn session_surface_matrix() {
     run_target_independent_scenario(SESSION_SURFACE_MATRIX_SCENARIO);
+    run_target_independent_scenario_for_target(
+        SESSION_SURFACE_MATRIX_SCENARIO,
+        EXPLICIT_HOST_TARGET,
+    );
 }
 
 #[test]
@@ -1044,11 +1049,27 @@ fn run_target_independent_scenario(name: &str) {
         &tools.node,
         &[("CHROMIUM", tools.chromium.as_path())],
         true,
+        None,
+    );
+}
+
+fn run_target_independent_scenario_for_target(name: &str, target: &str) {
+    let Some(tools) = canvas_tools() else {
+        panic!("Canvas scenario `{name}` needs dev-shell Chromium and Node");
+    };
+
+    run_browser_scenario_with_server(
+        name,
+        "chromium",
+        &tools.node,
+        &[("CHROMIUM", tools.chromium.as_path())],
+        true,
+        Some(target),
     );
 }
 
 fn run_browser_scenario(name: &str, browser: &str, node: &Path, environment: &[(&str, &Path)]) {
-    run_browser_scenario_with_server(name, browser, node, environment, false);
+    run_browser_scenario_with_server(name, browser, node, environment, false, None);
 }
 
 fn run_browser_scenario_with_server(
@@ -1057,6 +1078,7 @@ fn run_browser_scenario_with_server(
     node: &Path,
     environment: &[(&str, &Path)],
     target_independent: bool,
+    program_target: Option<&str>,
 ) {
     let _browser_permit = CanvasBrowserPermit::acquire();
     ensure_jet_built();
@@ -1064,7 +1086,14 @@ fn run_browser_scenario_with_server(
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let case = CanvasCase::new(&repo, name);
     let port = free_port();
-    let mut server = DevServer::start(&repo, &case.dir, &case.entry, port, target_independent);
+    let mut server = DevServer::start(
+        &repo,
+        &case.dir,
+        &case.entry,
+        port,
+        target_independent,
+        program_target,
+    );
     if case.big_fixture.is_some() {
         assert_big_fixture_preflight(&repo, &case, port);
     }
@@ -1093,6 +1122,9 @@ fn run_browser_scenario_with_server(
         .arg(&case.screenshots)
         .arg("--seed")
         .arg("373");
+    if let Some(program_target) = program_target {
+        command.arg("--program-target").arg(program_target);
+    }
     let output = command.output().expect("run Canvas scenario driver");
     let server_exit = server
         .child
@@ -1264,7 +1296,7 @@ impl CanvasCase {
             .expect("write Canvas session matrix environment fixture");
             fs::write(
                 &entry,
-                "fn run() {\n    print(\"cli\")\n}\n\nfn serve() {\n    print(\"service\")\n}\n\nfn web() {\n    print(\"web\")\n}\n\nfn ui() {\n    print(\"ui\")\n}\n\nfn game() {\n    print(\"game\")\n}\n\nfn build(b: BuildContext) BuildPlan! -> {\n    return b.plan()\n}\n",
+                "fn run() {\n    print(\"cli\")\n}\n\nfn serve() {\n    print(\"service\")\n}\n\nfn web() {\n    print(\"web\")\n}\n\nfn ui() {\n    print(\"ui\")\n}\n\nfn game() {\n    print(\"game\")\n}\n\nfn build(b: BuildContext) BuildPlan ! -> {\n    return b.plan()\n}\n",
             )
             .expect("write Canvas session matrix source fixture");
             None
@@ -1344,17 +1376,16 @@ impl DevServer {
         entry: &Path,
         port: u16,
         target_independent: bool,
+        program_target: Option<&str>,
     ) -> DevServer {
         let jet = cargo_target_dir(repo).join("debug/jet");
         let mut command = Command::new(jet);
-        command
-            .current_dir(cwd)
-            .arg("dev")
-            .arg(entry);
+        command.current_dir(cwd).arg("dev").arg(entry);
         if target_independent {
-            command
-                .arg("--canvas")
-                .arg(format!("--canvas-port={port}"));
+            command.arg("--canvas").arg(format!("--canvas-port={port}"));
+            if let Some(program_target) = program_target {
+                command.arg(format!("--target={program_target}"));
+            }
         } else {
             command
                 .arg("--canvas")

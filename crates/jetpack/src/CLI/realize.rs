@@ -116,12 +116,21 @@ pub(super) fn plan_downloads(
         // Do not resolve the closure just to decide whether a prompt is
         // needed. The identity candidate avoids that work on a warm path;
         // `realize_verified` remains the final integrity gate.
-        let cached = Provider::cache_expectation(spec, table, &probe).is_some_and(|expectation| {
-            Store::cache_candidate_matches(roots, &spec.raw, &expectation)
+        let expectation = Provider::cache_expectation(spec, table, &probe);
+        let cached = expectation.as_ref().is_some_and(|expectation| {
+            Store::cache_candidate_matches(roots, &spec.raw, expectation)
                 && (!uses_nix
                     || nix_catalog_cache_matches(roots, &spec.raw, flags.local_nix_catalog.is_some()))
         });
-        if !cached {
+        // A non-Nix project ref may have a fully verified Hangar closure but
+        // no provider metadata left to derive a fresh expectation offline.
+        // The realization path re-checks that recorded identity and closure;
+        // this cheap candidate check only keeps the prompt path silent.
+        let recorded_project_candidate = scope == RealizeScope::Project
+            && !uses_nix
+            && expectation.is_none()
+            && Store::find_by_reference_read_only(roots, &spec.raw).is_some();
+        if !cached && !recorded_project_candidate {
             pending.push(spec.clone());
         }
     }
@@ -300,7 +309,29 @@ pub(super) fn realize_ref_outcome(
         RealizeScope::Project => current_project_dir(),
         RealizeScope::UserProfile | RealizeScope::Use => None,
     };
-    let user_profile_reuse = if scope == RealizeScope::Use {
+    let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
+    let recorded_project_candidate = scope == RealizeScope::Project
+        && !uses_nix
+        && Store::find_by_reference_read_only(roots, &spec.raw).is_some();
+    let project_metadata_missing = if recorded_project_candidate {
+        let fixtures = if flags.offline {
+            fixtures_for(flags)
+        } else {
+            flags.fixtures.clone()
+        };
+        let probe = Provider::Ctx {
+            fixtures: fixtures.as_deref(),
+            store_dir: &store_dir,
+            offline: flags.offline,
+            project_dir: project_dir.as_deref(),
+            nix_index: None,
+            nix_roots: Some(roots),
+        };
+        Provider::cache_expectation(spec, table, &probe).is_none()
+    } else {
+        false
+    };
+    let recorded_reuse = if scope == RealizeScope::Use || project_metadata_missing {
         match Store::find_verified_user_profile_by_reference(roots, &spec.raw) {
             Ok(reuse) => reuse,
             Err(error) => {
@@ -313,8 +344,7 @@ pub(super) fn realize_ref_outcome(
     } else {
         None
     };
-    let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
-    let user_profile_reuse = user_profile_reuse.filter(|realized| {
+    let recorded_reuse = recorded_reuse.filter(|realized| {
         !uses_nix
             || nix_catalog_cache_entry_matches(
                 realized.metadata(),
@@ -330,7 +360,7 @@ pub(super) fn realize_ref_outcome(
     // A verified imported object is a Jetpack result in every mode. Probe it
     // before the Nix-bridge diagnostic so an online run/build can reuse the
     // locked package without rediscovering or invoking Nix.
-    let cache_candidate_ok = user_profile_reuse.is_some()
+    let cache_candidate_ok = recorded_reuse.is_some()
         || (uses_nix && fixtures_for(flags).is_none() && {
             let probe = Provider::Ctx {
                 fixtures: None,
@@ -486,7 +516,7 @@ pub(super) fn realize_ref_outcome(
     }
     let started = std::time::Instant::now();
     let progress = live.as_deref().map(|live| live.progress_handle());
-    let realize = || match user_profile_reuse {
+    let realize = || match recorded_reuse {
         Some(realized) => Ok(realized),
         None => Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }),
     };

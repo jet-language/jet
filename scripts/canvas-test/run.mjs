@@ -16,6 +16,7 @@ const outDir = arg("--out-dir") || process.env.JET_CANVAS_OUT_DIR
 const seed = Number(arg("--seed") || process.env.JET_CANVAS_SEED || "373");
 const browser = arg("--browser") || process.env.JET_CANVAS_BROWSER || "chromium";
 const session = arg("--session") || process.env.JET_CANVAS_SESSION || "";
+const programTarget = arg("--program-target") || "";
 
 if (!scenarioName || !scenarios[scenarioName]) {
   console.error(`unknown scenario: ${scenarioName || "(missing)"}`);
@@ -27,7 +28,7 @@ if (!port) {
   process.exit(2);
 }
 
-const ctx = new CanvasScenario({ port, outDir, scenarioName, seed, browser, session });
+const ctx = new CanvasScenario({ port, outDir, scenarioName, seed, browser, session, programTarget });
 try {
   await ctx.start();
   await scenarios[scenarioName](ctx);

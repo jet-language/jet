@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2203,
-    "rev": 45052,
+    "rev": 45062,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26,7 +26,8 @@
         "radar:e10",
         "radar:e9",
         "radar:e12",
-        "radar-sq"
+        "radar-sq",
+        "radar:e3"
       ]
     },
     "completionCursor": "2026-08-25T21:25:09.720Z"
@@ -149041,13 +149042,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Trace `solve.Solver.new(42)` from qualified resolution to `NameLedger::record_alias_use` without text matching.\n2. Fix the shared semantic reference path in `crates/jet-sema/src/Sema/CheckerReferences.rs`, not the L0103 reporter.\n3. Record the exact import alias declaration span when a qualified namespace segment resolves through that alias.\n4. Reuse the same path for qualified types, values, constructors, calls, generics, markers, facts, and nested members.\n5. Keep `Bundle/Liveness.rs` as a read-only projection over NameLedger identity facts.\n6. Do not mark an import live for text matches, failed resolution, shadowing, similarly named locals, or another module’s alias.\n7. Add positive and negative cases to `tests/structure_liveness.rs` and exact L0103 UI snapshots.\n8. Cover direct, alias, grouped, quoted-module, package, and re-export imports across module boundaries.\n9. Run focused sema reference, structure liveness, semindex, LSP, UI lint, and solve-puzzle tests through `scripts/agent/jet-env`.\n10. Run `examples/features/tooling/solve_puzzle.jet`; require expected output and no L0103.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -149126,11 +149132,11 @@
         {
           "n": 7,
           "text": "Semindex references, LSP references, rename, and liveness agree on the same alias definition and qualified uses.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:22:24.377Z"
+          "evidence": "`CheckerReferences.rs:236-263`, `Liveness.rs:84-121`, `Build.rs:796-805`; passing `import_alias_references_and_rename_use_the_exact_definition_anchor`",
+          "at": "2026-08-25T23:03:28.609Z"
         },
         {
           "n": 8,
@@ -149153,8 +149159,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:30.144Z",
-      "updated": "2026-08-25T20:42:22.332Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-25T23:03:30.869Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-25T23:03:30.869Z"
     },
     {
       "id": "cz2ys9cb",
@@ -150202,13 +150209,22 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
+        {
+          "at": "2026-08-25",
+          "text": "Requested acceptance — minted D-ACCEPT-2189."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -150252,11 +150268,11 @@
         {
           "n": 3,
           "text": "jetpack use <pkgs> yields a shell containing exactly those packages both inside and outside a project directory, proven by a test that runs it in each",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:53.083Z"
+          "evidence": "`tests/jetpack_tool.rs:182`, passing focused test `use_ephemeral_execs_inside_and_outside_project_without_path_projection`",
+          "at": "2026-08-25T23:03:29.000Z"
         },
         {
           "n": 4,
@@ -150318,8 +150334,8 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T13:17:36.821Z",
-      "updated": "2026-08-25T19:04:35.858Z",
-      "updatedBy": "owner",
+      "updated": "2026-08-25T23:03:31.625Z",
+      "updatedBy": "orchestrator",
       "workOrder": 1
     },
     {
@@ -150415,7 +150431,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -150424,6 +150440,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -150443,11 +150464,11 @@
         {
           "n": 2,
           "text": "jetpack env and jetpack use enter with no prompt when the closure is fully materialized, proven by a run with no network access",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:59.910Z"
+          "evidence": "`fully_materialized_env_and_use_enter_without_network_or_prompt` (`tests/jetpack_env_use_offline.rs:28`)",
+          "at": "2026-08-25T23:03:29.366Z"
         },
         {
           "n": 3,
@@ -150482,9 +150503,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:37.687Z",
-      "updated": "2026-08-25T21:49:31.224Z",
+      "updated": "2026-08-25T23:03:33.381Z",
       "updatedBy": "orchestrator",
-      "workOrder": 5
+      "workOrder": 5,
+      "completedAt": "2026-08-25T23:03:33.381Z"
     },
     {
       "id": "c0vprzqp",
@@ -151058,13 +151080,18 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m09-native-nixpkgs-dogfood",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "orchestrator",
@@ -151075,11 +151102,11 @@
         {
           "n": 1,
           "text": "Two distinct hangar roots realizing the same package hold one copy of each content-addressed object on disk, proven by object count and total bytes rather than by inspection",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T17:32:04.493Z"
+          "evidence": "`distinct_hangar_roots_share_one_cas_object_and_file_bytes`; `tests/jetpack_hangar_store_v2.rs:341,351`.",
+          "at": "2026-08-25T23:03:29.738Z"
         },
         {
           "n": 2,
@@ -151111,11 +151138,11 @@
         {
           "n": 5,
           "text": "Thirty concurrent agent realizations of the same package set produce a total footprint within a small constant of a single realization, measured end to end",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T15:22:11.237Z"
+          "evidence": "passing test `thirty_concurrent_agent_realizations_stay_near_single_footprint` in `tests/jetpack_criterion5.rs:33`",
+          "at": "2026-08-25T23:03:30.095Z"
         },
         {
           "n": 6,
@@ -151132,9 +151159,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T15:22:03.991Z",
-      "updated": "2026-08-25T18:45:36.110Z",
+      "updated": "2026-08-25T23:03:34.988Z",
       "updatedBy": "orchestrator",
-      "workOrder": 0
+      "workOrder": 0,
+      "completedAt": "2026-08-25T23:03:34.988Z"
     },
     {
       "id": "c0rlso3f",
@@ -208260,6 +208288,53 @@
       "created": "2026-08-25T20:01:03.750Z",
       "outcome": "B",
       "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-ACCEPT-2189",
+      "cardId": "c09vy29f",
+      "group": "acceptance",
+      "title": "Accept #2189 — jetpack env and jetpack use: the two shell verbs",
+      "gist": "Close #2189, or bounce it back to building.",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "1. jetpack env with no argument enters the default env module, and jetpack env <name> enters that module positionally — met (`env_enters_default_and_positional_modules`)\n2. jetpack env -- <cmd> runs in the project env and exits with the command's status — met (`parse.rs:189`, `run_enter_dev.rs:1590`, `Shell.rs:657`; `Shell::tests::run_command_returns_child_status` passed.)\n3. jetpack use <pkgs> yields a shell containing exactly those packages both inside and outside a project directory, proven by a test that runs it in each — met (`tests/jetpack_tool.rs:182`, passing focused test `use_ephemeral_execs_inside_and_outside_project_without_path_projection`)\n4. jetpack use <pkgs> -- <cmd> runs once and leaves nothing on PATH or in the tools profile afterwards — met (`crates/jetpack/src/CLI/trust_env_build.rs:371,527`; `use` skips project profile/native PATH projection.)\n5. jetpack tool run is removed and its help, tests and docs no longer mention it — met (no matches in `tests/` or `docs/`; help lists only install/list/uninstall; `prepare_flag_retired.stderr:1` preserves E1353 coverage.)\n6. jet env forwards to jetpack env with identical behaviour, and the D-ENVHOOK1 auto-activation hook still activates on cd — met (jetpack tool run is retired and answers E1353. Verified by running the binary.)\n7. bare jetpack does not enter any environment — met (`crates/jetpack/src/CLI/parse.rs:402`; fresh binary exited `0` and printed `jet env` help.)\n8. The --prep flag on env and on use materializes the closure and exits without entering, and a following entry performs no download — met (`run_enter_dev.rs:1571`, `run_enter_dev.rs:1651`, `Store.rs:1747`, passing test `use_prep_materializes_then_entry_reuses_the_package`)\n9. Owner rules on what bare jetpack does before any TUI code is written — met (`crates/jetpack/src/CLI/parse.rs:397-402`; bare `./target/debug/jetpack` prints help and exits `0`, without entering env.)",
+      "options": [
+        {
+          "key": "accept",
+          "name": "Accept — close the card"
+        },
+        {
+          "key": "bounce",
+          "name": "Bounce — back to building (comment why)"
+        }
+      ],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "checkInstructions": {
+        "proof": [
+          "jetpack env with no argument enters the default env module, and jetpack env <name> enters that modu…",
+          "jetpack env -- <cmd> runs in the project env and exits with the command's status — met (`parse.rs:1…",
+          "jetpack use <pkgs> yields a shell containing exactly those packages both inside and outside a proje…",
+          "jetpack use <pkgs> -- <cmd> runs once and leaves nothing on PATH or in the tools profile afterwards…",
+          "jetpack tool run is removed and its help, tests and docs no longer mention it — met (no matches in …",
+          "jet env forwards to jetpack env with identical behaviour, and the D-ENVHOOK1 auto-activation hook s…",
+          "bare jetpack does not enter any environment — met (`crates/jetpack/src/CLI/parse.rs:402`; fresh bin…",
+          "The --prep flag on env and on use materializes the closure and exits without entering, and a follow…",
+          "Owner rules on what bare jetpack does before any TUI code is written — met (`crates/jetpack/src/CLI…"
+        ],
+        "visualCheck": null,
+        "steps": null
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-25T23:03:31.625Z"
     }
   ],
   "questions": [
@@ -210305,6 +210380,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T23:03:34.988Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0n82vb8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T23:03:33.381Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0o7ipzb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T23:03:31.626Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c09vy29f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T23:03:31.625Z",
+      "by": "agent",
+      "action": "decision.add",
+      "ref": "D-ACCEPT-2189",
+      "note": "Accept #2189 — jetpack env and jetpack use: the two shell verbs"
+    },
+    {
+      "at": "2026-08-25T23:03:30.869Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cyxijw5j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T23:03:30.096Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T23:03:29.739Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-25T23:03:29.367Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0o7ipzb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T23:03:29.001Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T23:03:28.611Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cyxijw5j",
+      "note": "#7"
+    },
     {
       "at": "2026-08-25T21:50:10.729Z",
       "by": "orchestrator",
@@ -213734,76 +213879,6 @@
       "action": "card.criteria-meet",
       "ref": "c0wwqqt2",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-24T23:27:43.971Z",
-      "by": "orchestrator",
-      "action": "card.criteria-meet",
-      "ref": "c0wwqqt2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T23:27:24.996Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c09sm31b",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:24.625Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c09sm31b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:24.248Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c044eho4",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:23.900Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c044eho4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:23.530Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0yhhgx9",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:22.839Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0yhhgx9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:22.265Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0t85k0p",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:21.691Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0t85k0p",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:21.297Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0njm2a6",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
     }
   ],
   "nextNum": 368,

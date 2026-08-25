@@ -1265,16 +1265,15 @@ fn canvas_request_authorized(
     // Browser navigation and script loads omit Origin; only the session-bound
     // bootstrap paths may use their session URL as the origin proof.
     let origin = request.headers.get("origin");
+    let same_origin = request
+        .headers
+        .get("sec-fetch-site")
+        .is_some_and(|site| site.eq_ignore_ascii_case("same-origin"));
     if let Some(origin) = origin {
         if !origin_allowed(origin, bind_host, port) {
             return false;
         }
-    } else if !canvas_bootstrap_path(path, target)
-        && !request
-            .headers
-            .get("sec-fetch-site")
-            .is_some_and(|site| site.eq_ignore_ascii_case("same-origin"))
-    {
+    } else if !canvas_bootstrap_path(path, target) && !same_origin {
         return false;
     }
     let authorization = request.headers.get("authorization");
@@ -1293,7 +1292,7 @@ fn canvas_request_authorized(
         (None, Some(query_session)) => constant_time_equal(query_session, session_secret),
         (None, None) => false,
     };
-    session_valid && (origin.is_some() || canvas_bootstrap_path(path, target))
+    session_valid && (origin.is_some() || canvas_bootstrap_path(path, target) || same_origin)
 }
 
 fn unique_session_param(target: &str) -> Result<Option<String>, ()> {
@@ -2815,7 +2814,7 @@ mod tests {
             "sec-fetch-site".to_string(),
             "same-origin".to_string(),
         );
-        assert!(!canvas_request_authorized(
+        assert!(canvas_request_authorized(
             &request,
             &request.target,
             "127.0.0.1",

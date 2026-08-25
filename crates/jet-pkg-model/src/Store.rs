@@ -59,12 +59,11 @@ impl Roots {
     /// The immutable payload pool this root shares.
     ///
     /// The default user root uses the machine-wide pool, so concurrent agents
-    /// do not each retain a full copy. A root pointed somewhere else by
-    /// `JETPACK_ROOT` owns its own pool instead: that root was chosen for
-    /// isolation, and pooling its bytes into the user's store would both break
-    /// that isolation and leave inode peers outside the hangar being verified.
+    /// do not each retain a full copy. An explicit `JETPACK_SHARED_CAS` also
+    /// opts custom roots into that pool; without it, `JETPACK_ROOT` remains
+    /// isolated and owns its own pool.
     pub fn shared_cas_dir(&self) -> PathBuf {
-        if self.root == user_data_root() {
+        if self.root == user_data_root() || environment_path(SHARED_CAS_ENV).is_some() {
             shared_cas_dir()
         } else {
             self.hangar_dir().join("cas")

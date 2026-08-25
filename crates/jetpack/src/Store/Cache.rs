@@ -58,10 +58,19 @@ pub(crate) fn seal_node(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        permissions.set_mode(permissions.mode() & !0o222);
+        let mode = permissions.mode();
+        let sealed_mode = mode & !0o222;
+        if mode == sealed_mode {
+            return Ok(());
+        }
+        permissions.set_mode(sealed_mode);
     }
     #[cfg(not(unix))]
-    permissions.set_readonly(true);
+    if !permissions.readonly() {
+        permissions.set_readonly(true);
+    } else {
+        return Ok(());
+    }
     fs::set_permissions(path, permissions)
 }
 

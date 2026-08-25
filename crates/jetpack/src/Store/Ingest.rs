@@ -5,10 +5,32 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static QUARANTINE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static SHARED_CAS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn with_shared_cas_lock<T>(
+    roots: &Roots,
+    operation: impl FnOnce() -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    let shared = roots.shared_cas_dir();
+    ensure_real_directory(&shared, "shared CAS pool")?;
+    super::super::RuntimePolicy::with_lock(&shared, "shared-cas", operation)
+}
+
 /// Replace regular files in one immutable Hangar object with hardlinks into
 /// the shared payload pool. Directory entries and metadata stay root-local;
 /// file bytes have one physical copy across independent agent roots.
 pub(crate) fn share_tree_files(
+    roots: &Roots,
+    root: &Path,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<()> {
+    if allow_semantic_xattrs {
+        return Ok(());
+    }
+    with_shared_cas_lock(roots, || {
+        share_tree_files_unlocked(roots, root, allow_semantic_xattrs)
+    })
+}
+
+pub(crate) fn share_tree_files_unlocked(
     roots: &Roots,
     root: &Path,
     allow_semantic_xattrs: bool,
@@ -30,13 +52,11 @@ pub(crate) fn share_tree_files(
         ));
     }
     ensure_real_directory(&shared, "shared CAS pool")?;
-    super::super::RuntimePolicy::with_lock(&shared, "shared-cas", || {
-        make_tree_writable_for_removal(&canonical_root)?;
-        let mut used = BTreeSet::new();
-        share_node(&canonical_root, &shared, &mut used)?;
-        seal_node(&canonical_root)?;
-        fsync_tree(&canonical_root)
-    })
+    make_tree_writable_for_removal(&canonical_root)?;
+    let mut used = BTreeSet::new();
+    share_node(&canonical_root, &shared, &mut used)?;
+    seal_node(&canonical_root)?;
+    fsync_tree(&canonical_root)
 }
 
 fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::io::Result<()> {

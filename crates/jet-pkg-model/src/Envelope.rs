@@ -858,7 +858,15 @@ fn encode_node(
         let after = fs::symlink_metadata(path)
             .map_err(|e| format!("directory `{}` changed while hashing: {e}", path.display()))?;
         let after_entries = directory_snapshot(path)?;
-        if before != stable_file_identity(&after) || before_entries != after_entries {
+        if !stable_identity_unchanged(
+            &before,
+            &stable_file_identity(&after),
+            allow_nix_store_symlinks,
+        ) || !directory_snapshot_unchanged(
+            &before_entries,
+            &after_entries,
+            allow_nix_store_symlinks,
+        ) {
             return Err(format!(
                 "directory `{}` changed while hashing",
                 path.display()
@@ -893,7 +901,7 @@ fn encode_node(
         }
         record_header(archive, b'F', &rel_bytes, mode_of(&meta));
         encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
-        let bytes = read_file_stable(path, &meta, hook)?;
+        let bytes = read_file_stable(path, &meta, allow_nix_store_symlinks, hook)?;
         if let Some(key) = key {
             hardlinks.insert(
                 key,
@@ -957,6 +965,7 @@ fn validate_nix_store_symlink_target(target: &Path) -> Result<(), String> {
 fn read_file_stable(
     path: &Path,
     expected: &fs::Metadata,
+    allow_hardlink_metadata_changes: bool,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<Vec<u8>, String> {
     let mut options = fs::OpenOptions::new();
@@ -975,7 +984,11 @@ fn read_file_stable(
     let before = file
         .metadata()
         .map_err(|e| format!("cannot inspect open file `{}`: {e}", path.display()))?;
-    if stable_file_identity(&before) != stable_file_identity(expected) {
+    if !stable_identity_unchanged(
+        &stable_file_identity(&before),
+        &stable_file_identity(expected),
+        allow_hardlink_metadata_changes,
+    ) {
         return Err(format!("file `{}` changed before hashing", path.display()));
     }
     hook(path, "file-opened");
@@ -985,7 +998,11 @@ fn read_file_stable(
     let after = file
         .metadata()
         .map_err(|e| format!("cannot re-inspect `{}`: {e}", path.display()))?;
-    if stable_file_identity(&before) != stable_file_identity(&after) {
+    if !stable_identity_unchanged(
+        &stable_file_identity(&before),
+        &stable_file_identity(&after),
+        allow_hardlink_metadata_changes,
+    ) {
         return Err(format!("file `{}` changed while hashing", path.display()));
     }
     Ok(bytes)
@@ -1025,6 +1042,23 @@ fn directory_snapshot(path: &Path) -> Result<Vec<DirectoryEntrySnapshot>, String
         .collect::<Result<Vec<_>, String>>()?;
     entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
+}
+
+fn directory_snapshot_unchanged(
+    before: &[DirectoryEntrySnapshot],
+    after: &[DirectoryEntrySnapshot],
+    allow_hardlink_metadata_changes: bool,
+) -> bool {
+    before.len() == after.len()
+        && before.iter().zip(after).all(|(before, after)| {
+            before.name == after.name
+                && before.kind == after.kind
+                && stable_identity_unchanged(
+                    &before.identity,
+                    &after.identity,
+                    allow_hardlink_metadata_changes,
+                )
+        })
 }
 
 fn record_header(out: &mut Vec<u8>, kind: u8, path: &[u8], mode: u32) {
@@ -1085,7 +1119,7 @@ fn link_count(_meta: &fs::Metadata) -> u64 {
     1
 }
 
-type StableIdentity = (u64, u64, u64, i64, i64, i64, i64, u32);
+type StableIdentity = (u64, u64, u64, i64, i64, i64, i64, u32, u64);
 
 #[cfg(unix)]
 fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
@@ -1099,6 +1133,7 @@ fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
         meta.ctime(),
         meta.ctime_nsec(),
         meta.mode(),
+        meta.nlink(),
     )
 }
 
@@ -1116,7 +1151,26 @@ fn stable_file_identity(meta: &fs::Metadata) -> StableIdentity {
         0,
         0,
         u32::from(meta.permissions().readonly()),
+        1,
     )
+}
+
+fn stable_identity_unchanged(
+    before: &StableIdentity,
+    after: &StableIdentity,
+    allow_hardlink_metadata_changes: bool,
+) -> bool {
+    if before == after {
+        return true;
+    }
+    allow_hardlink_metadata_changes
+        && before.0 == after.0
+        && before.1 == after.1
+        && before.2 == after.2
+        && before.3 == after.3
+        && before.4 == after.4
+        && before.7 == after.7
+        && before.8 != after.8
 }
 
 #[cfg(not(unix))]
