@@ -143,7 +143,7 @@ fn bare_jet_logs_is_a_teaching_error_naming_jet_inspect_logs() {
 }
 
 /// `jet inspect logs` is the canonical top-level spelling and still
-/// dispatches through to the jetpack build-debug engine.
+/// dispatches through to the Jetpack package-debug engine.
 #[test]
 fn jet_inspect_logs_dispatches_to_jetpack() {
     let project = Scratch::new("project");

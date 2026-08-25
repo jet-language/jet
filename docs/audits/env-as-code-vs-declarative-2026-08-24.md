@@ -313,7 +313,7 @@ The card's exact current evidence, read without mutation, is:
 ```text
 $ node plugins/tower/tower.mjs card show '#2155'
 "title": "env.jet cannot be entered: a package named like a provider fails E1317, and nixpkgs packages cannot realize"
-"body": "Two blockers found on 2026-08-24 while testing whether jetpack can replace the nix devshell.\n\n1. The repository own env.jet cannot be entered at all. ./target/debug/jetpack enter -- echo hi fails with E1317 `cargo@default` puts the provider first / D-JPK-REF1 puts the package or target before @ and the source after it / Fix: write `default@cargo`. Minimal repro: an env.jet whose packages list is default.[cargo] fails, while default.[ripgrep] parses. The name cargo collides with a builtin recipe provider, so the resolver reads the package as a provider. The committed env.jet lists cargo first, so the project shell it describes is unreachable.\n\n2. Even with a parseable env, realization stops: E1272 1 package lacks a supported Nix compatibility output / `ripgrep@default` need a pinned compatibility output. Jetpack does not invoke an installed Nix executable for package realization."
+"body": "Two blockers found on 2026-08-24 while testing whether jetpack can replace the nix devshell.\n\n1. The repository own env.jet cannot be entered at all. ./target/debug/jetpack env -- echo hi fails with E1317 `cargo@default` puts the provider first / D-JPK-REF1 puts the package or target before @ and the source after it / Fix: write `default@cargo`. Minimal repro: an env.jet whose packages list is default.[cargo] fails, while default.[ripgrep] parses. The name cargo collides with a builtin recipe provider, so the resolver reads the package as a provider. The committed env.jet lists cargo first, so the project shell it describes is unreachable.\n\n2. Even with a parseable env, realization stops: E1272 1 package lacks a supported Nix compatibility output / `ripgrep@default` need a pinned compatibility output. Jetpack does not invoke an installed Nix executable for package realization."
 "phase": "planning"
 ```
 
@@ -322,7 +322,7 @@ Turning the same package references into `fn env` would leave both blockers in p
 A local read-only probe could not independently reach the card's two errors in this workspace. The command exited earlier:
 
 ```text
-$ ./target/debug/jetpack enter --no-color -- echo hi
+$ ./target/debug/jetpack env --no-color -- echo hi
 Error [E2604]: Integrity check failed for `Hangar path migration` `legacy` — expected `complete native per-user Hangar`, got `Read-only file system (os error 30)`.
  Why: The cached artifact failed reversible Hangar path migration. Jetpack stopped before reading or changing package state.
  Fix: Inspect the reported Hangar path and migration staging path; move unsafe nodes aside without deleting them, then retry the command.

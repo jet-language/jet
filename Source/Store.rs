@@ -155,7 +155,7 @@ pub fn verify_entry(
                 "the content hash of the stored source tree doesn't match the fingerprint in {}",
                 Syntax::UNIFIED_LOCK_FILE
             ),
-            "run `jet fetch` to re-download the package, or run `jet hangar verify` to check all entries"
+            "run `jet fetch` to re-download the package, or run `jetpack hangar verify` to check all entries"
                 .to_string(),
             None,
         ));
@@ -164,7 +164,7 @@ pub fn verify_entry(
 }
 
 // ──────────────────────────────────────────────
-// `jet hangar verify`
+// `jetpack hangar verify`
 // ──────────────────────────────────────────────
 
 /// Re-verify all store entries against their expected tree hashes.

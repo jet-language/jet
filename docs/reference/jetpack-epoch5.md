@@ -163,7 +163,7 @@ jet profile rollback dev 3     # activate one exact retained generation
 ```
 
 When `profile.dev` is declared, its switched generation is the dev-shell
-projection. `jet enter`, `jet dev`, and shell-hook activation prepend that
+projection. `jet env`, `jet dev`, and shell-hook activation prepend that
 generation's immutable `root/bin` directory. They do not rebuild the profile
 or add each source output directly to `PATH`. If `profile.dev` has no active
 generation, the shell reports the missing activation and gives the build and
@@ -323,7 +323,7 @@ XDG_DATA_HOME/jet/hangar or ~/.local/share/jet/hangar. On macOS it is
 ~/Library/Application Support/Jet/Hangar. On Windows it is
 %LOCALAPPDATA%/Jet/Hangar. The resolved path is printed by:
 
-jet hangar path
+jetpack hangar path
 
 An old state-directory Hangar, or the retired root-owned Hangar, is copied
 through an atomic staging directory on first use. The old tree stays in place
@@ -355,10 +355,10 @@ external consumer needs to retain an existing closure. The command never
 realizes or downloads the reference.
 
 ```text
-jet hangar register-external-root backup-sdk ripgrep@nixpkgs#2.0.17 \
+jetpack hangar register-external-root backup-sdk ripgrep@nixpkgs#2.0.17 \
     --expires-in 12w --yes
-jet hangar list-external-roots
-jet hangar unregister-external-root backup-sdk --etag 1.1 --yes
+jetpack hangar list-external-roots
+jetpack hangar unregister-external-root backup-sdk --etag 1.1 --yes
 ```
 
 Each root has a compare-and-swap etag. A changed root is not overwritten or
@@ -378,11 +378,11 @@ directory before it changes the closure database. Existing objects are reused
 only when their digest matches.
 
 ```text
-jet hangar export app --to app.hangar
-jet hangar verify app.hangar
-jet hangar import app.hangar
-jet hangar copy app --to /srv/jet-root --yes
-jet hangar repair app --from app.hangar
+jetpack hangar export app --to app.hangar
+jetpack hangar verify app.hangar
+jetpack hangar import app.hangar
+jetpack hangar copy app --to /srv/jet-root --yes
+jetpack hangar repair app --from app.hangar
 ```
 
 Unsigned archives are refused by default. `--allow-unsigned` is an explicit
@@ -397,7 +397,7 @@ Repair takes the Hangar lock for selection, verification, quarantine, and
 publication. It accepts a missing or corrupt canonical object only from a
 signed archive, stages and re-hashes the replacement before registration, and
 restores the quarantined object if import fails. A process crash leaves the
-old object in a `repair-*` quarantine entry; `jet hangar recover` re-hashes and
+old object in a `repair-*` quarantine entry; `jetpack hangar recover` re-hashes and
 restores that entry without following symlinks. If the quarantined bytes were
 already corrupt, recovery preserves them under `rejected-repair-*` and leaves
 the signed archive as the repair source. Repair rejects an entry whose output
@@ -469,7 +469,7 @@ stage, signs it only after admission, and removes stale stages before
 accepting new work. It never receives source or build commands. If the socket
 or a write grant is absent or expired, realization also stays private.
 
-`jet hangar recover` is the repair boundary for interrupted publication. It
+`jetpack hangar recover` is the repair boundary for interrupted publication. It
 replays committed closure projections, removes abandoned ingest and archive
 stages, restores verified repair quarantine entries, and reclaims snapshots
 whose lease owner is no longer alive. A symlinked staging, repair quarantine,

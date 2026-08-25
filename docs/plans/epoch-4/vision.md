@@ -249,7 +249,7 @@ they do not weaken provider inference.
 8. Nix interop works on day one and can be replaced incrementally.
 9. `.jet/` contains generated project state; the hangar contains realized
    artifacts; no `result` symlink or `/tmp` litter — a golden-tested guarantee
-   with auto-GC and honest `jet hangar du` (U22).
+   with auto-GC and honest `jetpack hangar du` (U22).
 10. Deterministic module discovery and locking make old builds reproducible.
 11. Any vendor, latest release: adapters for no-metadata refs (U20) plus
     channel refs and `jet update` (U21) — no forking, no waiting on nixpkgs.

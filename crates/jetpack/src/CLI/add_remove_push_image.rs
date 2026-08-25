@@ -1354,7 +1354,7 @@ fn environment_image_files(
                 "E1336",
                 &format!("environment package `{reference}` is not realized"),
                 "environment images consume the verified Hangar package output; they do not read a project build scratch file",
-                &format!("run `jetpack build {reference}`, then `jet image {name}`"),
+                &format!("run `jetpack use {reference} --prep`, then `jet image {name}`"),
             );
             return Vec::new();
         };

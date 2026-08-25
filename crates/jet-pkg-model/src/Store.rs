@@ -56,11 +56,19 @@ impl Roots {
         })
     }
 
-    /// The immutable payload pool shared by independent Jetpack roots.
-    /// `JETPACK_ROOT` remains caller-owned state; realized file bytes use this
-    /// common pool so concurrent agents do not each retain a full copy.
+    /// The immutable payload pool this root shares.
+    ///
+    /// The default user root uses the machine-wide pool, so concurrent agents
+    /// do not each retain a full copy. A root pointed somewhere else by
+    /// `JETPACK_ROOT` owns its own pool instead: that root was chosen for
+    /// isolation, and pooling its bytes into the user's store would both break
+    /// that isolation and leave inode peers outside the hangar being verified.
     pub fn shared_cas_dir(&self) -> PathBuf {
-        shared_cas_dir()
+        if self.root == user_data_root() {
+            shared_cas_dir()
+        } else {
+            self.hangar_dir().join("cas")
+        }
     }
 
     /// Discover user and custom Hangar roots visible from this machine.

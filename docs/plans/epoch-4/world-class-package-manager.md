@@ -336,7 +336,7 @@ live acceptance, and documentation. Work order is binding.
   The ambient #769 workload harness remains ambient and records network and
   external writes as `unmeasured:#769`; it does not publish a confinement
   claim.
-- `jetpack build` reports the recorded producer receipt for new outputs:
+- `jetpack env --prep` reports the recorded producer receipt for new outputs:
   non-executing copy/prebuilt actions say that no child launched, executable
   actions name the backend and policy, missing receipts are reported as
   missing, and cache or substitution outcomes do not claim a local sandbox
@@ -348,7 +348,7 @@ live acceptance, and documentation. Work order is binding.
 - Roots: project locks, profiles/generations, running-process leases, build
   leases, toolchains, generic external consumers, and manual roots. Epoch 7
   registers JetOS generations through the generic external-root API.
-- Atomic root update, the ratified plan-before-apply mutation UX for `jet clean`,
+- Atomic root update, the ratified plan-before-apply mutation UX for `jetpack hangar clean`,
   why-live/why-dead, and stale-lease recovery.
 - Verify, quarantine, repair from ordered caches, then deterministic rebuild.
 - Hangar receipt substrate: immutable connected package-realization objects,
@@ -692,7 +692,7 @@ projected-root digest, and Store lifecycle root before activation. The
 generation lock preserves raw refs,
 provider facts, output digests, and exact-path collision contenders. A
 switched `profile.dev` generation projects its immutable `root/bin` into
-`jet enter`, `jet dev`, and shell-hook activation. The shell does not add
+`jet env`, `jet dev`, and shell-hook activation. The shell does not add
 source outputs directly or rebuild a profile. JetOS/user composition remains a
 separate delivery slice.
 
@@ -841,9 +841,9 @@ Shipped slice evidence:
   persisted build-attempt lookup, so selector and source-authority spellings
   do not hide the same package's failure record.
 - Import/export/copy/dump/restore/sign/verify/repair/optimize operations.
-- `jet hangar sign <entry-or-archive> --yes` writes a detached signature for a live entry or signs an archive in place.
-- `jet hangar verify [<entry-or-archive>]` verifies live output bytes and any detached archive signature; an unsigned owner-local entry remains usable.
-- `jet hangar copy` locks and snapshots the source closure, verifies its signed
+- `jetpack hangar sign <entry-or-archive> --yes` writes a detached signature for a live entry or signs an archive in place.
+- `jetpack hangar verify [<entry-or-archive>]` verifies live output bytes and any detached archive signature; an unsigned owner-local entry remains usable.
+- `jetpack hangar copy` locks and snapshots the source closure, verifies its signed
   archive with the source Hangar key, then imports it through the locked
   destination staging and closure-registration path. A fresh destination does
   not need an unrelated local signer key.

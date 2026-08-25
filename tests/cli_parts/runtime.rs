@@ -763,7 +763,6 @@ fn owns_flag_vocabulary_help_flag_prints_help_not_execute() {
         ("update", "-h"),
         ("image", "--help"),
         ("trust", "--help"),
-        ("hangar", "--help"),
     ] {
         assert!(
             jet::CLI::owns_flag_vocabulary(cmd),
@@ -829,13 +828,11 @@ fn devtools_help_flag_prints_help_not_execute() {
     );
 }
 
-/// #1659 criterion 2: an exhaustive group's bare `--help`/`-h` (`jet hangar
-/// --help`, `jet registry -h`) prints the group's action table instead of
-/// the E2101 "isn't a jet hangar command" that `--help` used to trigger.
+/// #1659 criterion 2: an exhaustive group's bare `--help`/`-h` (`jet registry
+/// -h`, `jet inspect --help`) prints the group's action table instead of E2101.
 #[test]
 fn exhaustive_group_help_flag_lists_actions_instead_of_e2101() {
     for (group, flag) in [
-        ("hangar", "--help"),
         ("registry", "-h"),
         ("inspect", "--help"),
     ] {

@@ -174,7 +174,7 @@ pub struct FlagSpec {
 }
 
 /// One subcommand of `jet` — a bare leaf (`build`, `run`, …) or a namespaced
-/// group (`hangar`, `registry`, …) that owns nested actions. #1659 criterion 1
+/// group (`registry`, …) that owns nested actions. #1659 criterion 1
 /// (round 2): this is the ONE declaration dispatch, help, man, and completions
 /// all render from — a group is a row here with non-empty `actions`, not a
 /// second parallel table.
@@ -185,8 +185,8 @@ pub struct CommandSpec {
     /// Whether this is one of the three "commands that matter" shown when argv
     /// is flags-only with no subcommand (bare `jet` starts the REPL instead).
     pub headline: bool,
-    /// Nested actions when this is a namespaced group (`hangar`, `registry`,
-    /// …); empty for a bare leaf command.
+    /// Nested actions when this is a namespaced group (`registry`, …); empty
+    /// for a bare leaf command.
     pub actions: &'static [NestedCommandSpec],
     /// Only meaningful when `actions` is non-empty: true when every subword of
     /// this group is modeled by `actions` — the bare group form and `<group>
@@ -215,9 +215,8 @@ impl CommandSpec {
 }
 
 /// One canonical nested spelling and the real legacy dispatcher seam it reaches.
-/// `HandlerKey::Hangar` and `HandlerKey::SharedStore` keep the group because
-/// those handlers consume the group word themselves (`hangar path`,
-/// `shared-store status`, …).
+/// `HandlerKey::SharedStore` keeps the group because that handler consumes the
+/// group word itself (`shared-store status`, …).
 pub struct NestedCommandSpec {
     pub name: &'static str,
     /// Canonical spelling after the group name. Multiple forms use one line each.
@@ -261,7 +260,6 @@ pub enum HandlerKey {
     Logs,
     Info,
     Outdated,
-    Hangar,
     GcReport,
     ProjectParts,
     Push,
@@ -316,7 +314,6 @@ impl HandlerKey {
             Self::Logs => "logs",
             Self::Info => "info",
             Self::Outdated => "outdated",
-            Self::Hangar => "hangar",
             Self::GcReport => "gc",
             Self::ProjectParts => "parts",
             Self::Push => "push",
@@ -343,12 +340,7 @@ impl HandlerKey {
     pub const fn keeps_group(self) -> bool {
         matches!(
             self,
-            Self::Hangar
-                | Self::GcReport
-                | Self::Perf
-                | Self::Env
-                | Self::InspectEnv
-                | Self::SharedStore
+            Self::GcReport | Self::Perf | Self::Env | Self::InspectEnv | Self::SharedStore
         )
     }
 }
@@ -425,102 +417,6 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
     NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "Inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
 ];
-// D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under
-// `hangar`. Archive verbs share Jetpack's signed, versioned archive format,
-// quarantine-first import, and atomic closure publication path.
-const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec {
-        name: "path",
-        usage: "path [--json]",
-        summary: "Show the resolved user Hangar path",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "verify",
-        usage: "verify [--json]",
-        summary: "Check package-store integrity",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "repair",
-        usage: "repair <entry> --from <archive.hangar> [--json]",
-        summary: "Repair a damaged Hangar object from a signed archive",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "copy",
-        usage: "copy <entry> --to <hangar-root> [--json]",
-        summary: "Copy a verified closure between local Hangars",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "import",
-        usage: "import <archive.hangar> [--json]",
-        summary: "Verify and import a signed Hangar archive",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: true,
-    },
-    NestedCommandSpec {
-        name: "export",
-        usage: "export <entry> --to <archive.hangar> [--json]",
-        summary: "Export a signed Hangar closure",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "dump",
-        usage: "dump <entry> [--json]",
-        summary: "Stream a signed Hangar archive",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "restore",
-        usage: "restore [--json]",
-        summary: "Restore a signed Hangar archive from stdin",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "sign",
-        usage: "sign <entry-or-archive> [--to <path>] [--json]",
-        summary: "Sign a Hangar object or archive",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "recover",
-        usage: "recover [--json]",
-        summary: "Recover Hangar staging, build scratch, and leases",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "rollback",
-        usage: "rollback [--json]",
-        summary: "Restore an earlier package-store generation",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "generations",
-        usage: "generations [--json]",
-        summary: "List package-store generations",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-    NestedCommandSpec {
-        name: "du",
-        usage: "du [--all] [--json]",
-        summary: "Show Hangar disk use per root or across the machine",
-        handler: HandlerKey::Hangar,
-        also_canonical_top_level: false,
-    },
-];
 const GC_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "report",
     usage: "report",
@@ -583,7 +479,7 @@ const SHARED_STORE_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec {
         name: "install",
         usage: "install",
-        summary: "Install the optional shared Hangar broker",
+        summary: "Install the optional shared package broker",
         handler: HandlerKey::SharedStore,
         also_canonical_top_level: false,
     },
@@ -793,14 +689,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         summary: "Explore code, builds, packages, and bindings",
         headline: false,
         actions: INSPECT_ACTIONS,
-        exhaustive: true,
-        usage: None,
-    },
-    CommandSpec {
-        name: "hangar",
-        summary: "Inspect and maintain the package store",
-        headline: false,
-        actions: HANGAR_ACTIONS,
         exhaustive: true,
         usage: None,
     },
@@ -1016,7 +904,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "shared-store",
-        summary: "Manage the optional shared Hangar broker",
+        summary: "Manage the optional shared package broker",
         headline: false,
         actions: SHARED_STORE_ACTIONS,
         exhaustive: true,
@@ -1262,7 +1150,7 @@ fn retired_bench_fix(_: &[String]) -> String {
 }
 
 fn retired_store_fix(_: &[String]) -> String {
-    "jet hangar / jet clean / jet fetch".to_string()
+    "jetpack hangar / jet clean / jet fetch".to_string()
 }
 
 fn retired_store_fetch_fix(_: &[String]) -> String {
@@ -1270,18 +1158,15 @@ fn retired_store_fetch_fix(_: &[String]) -> String {
 }
 
 fn retired_store_verify_fix(_: &[String]) -> String {
-    "jet hangar verify".to_string()
+    "jetpack hangar verify".to_string()
 }
 
 fn retired_store_generations_fix(_: &[String]) -> String {
-    "jet hangar generations".to_string()
+    "jetpack hangar".to_string()
 }
 
-fn retired_store_rollback_fix(argv: &[String]) -> String {
-    match argv.get(2).map(String::as_str) {
-        Some(generation) => format!("jet hangar rollback {generation}"),
-        None => "jet hangar rollback <gen>".to_string(),
-    }
+fn retired_store_rollback_fix(_: &[String]) -> String {
+    "jetpack hangar".to_string()
 }
 
 fn retired_store_gc_fix(_: &[String]) -> String {
@@ -1316,7 +1201,7 @@ pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
         spelling: "store",
         category: RetirementCategory::Semantic,
         error_code: "E2101",
-        why: "the store group is dissolved into `jet hangar`, `jet clean`, and `jet fetch` (D-CLI-STORE2=A)",
+        why: "the store group is owned by Jetpack; project commands stay with Jet (D-VERDICT-2188-1)",
         fix: retired_store_fix,
         rewrite: None,
     },
@@ -1332,7 +1217,7 @@ pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
         spelling: "store verify",
         category: RetirementCategory::Semantic,
         error_code: "E2101",
-        why: "package-store integrity checks belong to `jet hangar` (D-CLI-STORE2=A)",
+        why: "package-store integrity checks belong to Jetpack's Hangar (D-VERDICT-2188-1)",
         fix: retired_store_verify_fix,
         rewrite: None,
     },
@@ -1340,7 +1225,7 @@ pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
         spelling: "store generations",
         category: RetirementCategory::Semantic,
         error_code: "E2101",
-        why: "package-store generations belong to `jet hangar` (D-CLI-STORE2=A)",
+        why: "package-store generations belong to Jetpack's Hangar (D-VERDICT-2188-1)",
         fix: retired_store_generations_fix,
         rewrite: None,
     },
@@ -1348,7 +1233,7 @@ pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
         spelling: "store rollback",
         category: RetirementCategory::Semantic,
         error_code: "E2101",
-        why: "package-store rollback belongs to `jet hangar` (D-CLI-STORE2=A)",
+        why: "package-store rollback belongs to Jetpack's Hangar (D-VERDICT-2188-1)",
         fix: retired_store_rollback_fix,
         rewrite: None,
     },
@@ -1489,8 +1374,6 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--pkg", help: "with bind: library name for the generated binding module" },
     FlagSpec { long: "--clang", help: "with bind cpp: path to the clang binary used to parse the header" },
     FlagSpec { long: "--ar", help: "with bind cpp: path to the ar archiver used to build the static library" },
-    FlagSpec { long: "--from", help: "with hangar repair: signed archive to repair the entry from" },
-    FlagSpec { long: "--to", help: "with hangar copy/export/sign: destination Hangar root, archive, or signature path" },
     FlagSpec { long: "--message", help: "with yank: human-readable reason for yanking the version" },
     FlagSpec { long: "--before", help: "with schema squash: re-baseline migrations before this version" },
     FlagSpec { long: "--spdx", help: "with sbom: emit SPDX tag-value format (default)" },
@@ -1705,7 +1588,6 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "remove"
             | "bind"
             | "lsp"
-            | "hangar"
             | "config"
             | "update"
             | "outdated"
@@ -2397,6 +2279,13 @@ mod tests {
     }
 
     #[test]
+    fn hangar_is_not_a_jet_command_or_help_route() {
+        assert!(!is_builtin("hangar"));
+        assert!(command_group("hangar").is_none());
+        assert!(!usage_page("0.0.0").to_ascii_lowercase().contains("hangar"));
+    }
+
+    #[test]
     fn completions_mention_every_command() {
         for shell_out in [
             completions_bash(),
@@ -2451,7 +2340,7 @@ mod tests {
                 let owner = moved_command_group(action.name);
                 assert!(owner.is_some(), "missing moved owner for {}", action.name);
                 // An action name can appear in more than one group (`export` under
-                // hangar and perf). Bare teaching routes to the first registered owner.
+                // multiple groups). Bare teaching routes to the first registered owner.
                 assert!(
                     command_groups().any(|candidate| {
                         candidate.name == owner.unwrap()
@@ -2547,19 +2436,6 @@ mod tests {
             ("inspect", "reserved", Reserved, "reserved", false),
             ("inspect", "facts", Facts, "facts", false),
             ("inspect", "structure", Structure, "structure", false),
-            ("hangar", "path", Hangar, "hangar", true),
-            ("hangar", "verify", Hangar, "hangar", true),
-            ("hangar", "repair", Hangar, "hangar", true),
-            ("hangar", "copy", Hangar, "hangar", true),
-            ("hangar", "import", Hangar, "hangar", true),
-            ("hangar", "export", Hangar, "hangar", true),
-            ("hangar", "dump", Hangar, "hangar", true),
-            ("hangar", "restore", Hangar, "hangar", true),
-            ("hangar", "sign", Hangar, "hangar", true),
-            ("hangar", "recover", Hangar, "hangar", true),
-            ("hangar", "rollback", Hangar, "hangar", true),
-            ("hangar", "generations", Hangar, "hangar", true),
-            ("hangar", "du", Hangar, "hangar", true),
             ("gc", "report", GcReport, "gc", true),
             ("project", "parts", ProjectParts, "parts", false),
             ("self", "toolchain", Toolchain, "toolchain", false),
@@ -2696,9 +2572,7 @@ mod tests {
     /// `COMMANDS` table. A non-keeps_group nested action's dispatch word must
     /// never also appear as its own separate top-level `COMMANDS` row — that
     /// would be the same command declared twice within the one table.
-    /// (`keeps_group` actions like `hangar verify` legitimately share their
-    /// owning group's own row — `hangar` is one row with twelve actions, not
-    /// twelve rows.)
+    /// (`keeps_group` actions legitimately share their owning group's own row.)
     #[test]
     fn no_command_declared_in_both_tables() {
         for group in command_groups() {

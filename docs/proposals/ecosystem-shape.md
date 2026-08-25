@@ -241,7 +241,7 @@ source node.
 Packages, package/user generations, running processes, builds, toolchains, Systems, and Fleets create automatic closure roots. Manual roots cover only external consumers:
 
 ```text
-$ jet hangar register-external-root backup-sdk ripgrep@nixpkgs#2.0.17 --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
+$ jetpack hangar register-external-root backup-sdk ripgrep@nixpkgs#2.0.17 --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
 Plan external root
   + backup-sdk
     closure objects: 3
@@ -249,10 +249,10 @@ Plan external root
     etag: 1.1
 Created external root `backup-sdk` at etag 1.1.
 
-$ jet hangar list-external-roots
+$ jetpack hangar list-external-roots
 backup-sdk  ripgrep@nixpkgs#2.0.17  expires in 12 weeks  etag 1.1
 
-$ jet hangar unregister-external-root backup-sdk --etag 1.1 --yes
+$ jetpack hangar unregister-external-root backup-sdk --etag 1.1 --yes
 Removed external root `backup-sdk`.
 ```
 
@@ -1386,7 +1386,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Atomic generations and rollback | Package/User/System/Fleet outputs | `jet os switch` moves one pointer after proof; `jet os rollback` activates the recorded parent. |
 | Whole-workflow ownership | One `jet` front door | Resolve, lock, build, run, test, publish, environment, image, system, and fleet intents dispatch to versioned engines. |
 | What/why/fix explanations | One graph and diagnostic registry | `jet explain package:tracing` shows introducer, selected and rejected versions, policy source, and removal path. |
-| Shared content store | Hangar | Verified bytes live once; roots and leases retain closures; `jet clean` alone collects and optimizes. |
+| Shared content store | Hangar | Verified bytes live once; roots and leases retain closures; `jetpack hangar clean` alone collects and optimizes. |
 | Hermetic effect-typed builds | Action graph and grants | S4 reports declared reads/writes, remote authority, sandbox result, secret/network use, and unsafe audit reason. |
 | Readable exact lock | `.jet/lock` index | Targeted `jet update <pkg>` changes one rationale subtree while unrelated records stay byte-identical. |
 | Monorepo and single-file parity | Package ladder | S1 inline deps and S5 flat member packages lower to the same package graph and cache identities. |
@@ -1427,7 +1427,7 @@ Raw escape hatches remain explicit and audited. A compatibility file or service 
 | Cache miss triggers an unexplained rebuild | `jet explain cache:<output>` names first mismatching identity or trust fact and the exact fallback. |
 | Update fanout is unclear | `jet update <pkg> --check` previews selected/rejected versions, rebuild set, policy, and untouched lock subtrees. |
 | Deployment needs NixOS plus another fleet tool | System and Fleet are Outputs in one graph with plan, proof, staged push, health gates, and per-host rollback. |
-| Cleanup requires learning roots, generations, and result links | `jet clean --check` lists reclaimable bytes and why retained closures remain live; automatic owners need no manual roots. |
+| Cleanup requires learning roots, generations, and result links | `jetpack hangar clean --check` lists reclaimable bytes and why retained closures remain live; automatic owners need no manual roots. |
 | Documentation spans language, package set, flakes, modules, and wiki eras | Command, schema, option, and diagnostic registries generate one versioned manual with runnable examples. |
 | Team adoption exposes daemon trust, substituters, builders, and secrets at once | Safe local defaults remain implicit; source requests roles while administrators bind endpoints and credentials separately. |
 

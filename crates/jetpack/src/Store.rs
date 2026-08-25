@@ -1740,6 +1740,32 @@ pub fn find_verified_by_reference(
     Ok(Some(VerifiedCacheHit { entry, lease }))
 }
 
+/// Reuse the exact user-profile realization for a package ref. User-profile
+/// refs have no project lock from which to derive a fresh expectation, so the
+/// recorded Hangar identity is the preparation witness; the normal closure,
+/// output, provenance, and reproducibility checks still certify the hit.
+pub(crate) fn find_verified_user_profile_by_reference(
+    roots: &Roots,
+    reference: &str,
+) -> std::io::Result<Option<VerifiedRealization>> {
+    let Some(candidate) = find_by_reference(roots, reference) else {
+        return Ok(None);
+    };
+    let expectation = CacheExpectation {
+        identity: candidate.cache_identity.clone(),
+        owned_output: None,
+        allow_unsigned_local: true,
+    };
+    let Some(hit) = find_verified_by_reference(roots, reference, &expectation)? else {
+        return Ok(None);
+    };
+    Ok(Some(VerifiedRealization {
+        entry: hit.entry,
+        source_state: super::Provider::SourceState::Cached,
+        lease: hit.lease,
+    }))
+}
+
 fn snapshot_lease(roots: &Roots, entry: &StoreEntry) -> std::io::Result<CacheLease> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     use std::sync::atomic::Ordering;

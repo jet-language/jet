@@ -51,13 +51,27 @@ fn selected_output_effects_follow_the_selected_callable() {
             .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
         "{diagnostics:#?}"
     );
+    let bundle = bundle.expect("selected output bundle");
+    let selected = bundle
+        .modules
+        .iter()
+        .flat_map(|module| &module.items)
+        .find_map(|item| match item {
+            jet::AST::Item::Const(constant) => constant
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.selected),
+            _ => None,
+        });
     assert_eq!(
         jet::EffectBudget::summary_line_for_program(
-            &bundle.expect("selected output bundle"),
+            &bundle,
             &facts.summaries,
             jet::Codegen::ENTRY_FN,
         ),
-        "effects: IO"
+        "effects: IO",
+        "selected={selected:#?}\nsummaries={:#?}",
+        facts.summaries
     );
 }
 

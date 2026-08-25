@@ -58,9 +58,9 @@ fn cas_pool_hardlink_preserves_cache_verification_and_rejects_outside_peers() {
     let planned = clean_plan(&roots).unwrap();
     assert!(planned.optimized_files >= 2, "{planned:?}");
 
-    // Ingest leaves nlink=1 (no cas peers yet).
+    // Registration shares payload bytes with the machine CAS pool.
     let pay_c = Path::new(&third.entry.out).join("payload");
-    assert_eq!(fs::metadata(&pay_c).unwrap().nlink(), 1);
+    assert!(fs::metadata(&pay_c).unwrap().nlink() >= 2);
 
     let report = optimize_cas_pool(&roots).unwrap();
     assert!(report.optimized_files >= 2, "{report:?}");

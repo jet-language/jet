@@ -19,8 +19,10 @@ executable spec: a milestone ships with new `examples/` programs and new
 
 > **Naming canon (owner, 2026-06-15):** **jet** is the language + compiler;
 > **jetpack** is the package-manager engine/binary; **jetos** is the operating
-> system (working title), built on jetpack. Single-file `jet run` stays
-> ceremony-free forever (R9).
+> system (working title), built on jetpack. **Boundary law (D-VERDICT-2188-1,
+> owner 2026-08-25):** `jet` acts on your code; `jetpack` acts on your
+> environment; any verb that reads or executes `.jet` source belongs to `jet`,
+> with no exception. Single-file `jet run` stays ceremony-free forever (R9).
 
 **Where detail lives (single source of truth):**
 
@@ -144,7 +146,7 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M5** — tier-2 references: `view`/`ref` hardening, zero-copy patterns.
 - **E2-M6** — library authoring: associated types, error conversion for `?`, argument labels/defaults (S61), trait delegation (S62).
 - **E2-M7** — streaming I/O: file handles, `Reader`/`Writer`, RAII cleanup (S63), `Path`.
-- **E2-M8** — supply chain: `jet registry publish` (pre-publish gate), `jet registry vendor`, `jet inspect audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack hangar cleanup is `jet clean`.
+- **E2-M8** — supply chain: `jet registry publish` (pre-publish gate), `jet registry vendor`, `jet inspect audit`, SBOM; PubGrub resolver. Registry upload deferred (D-PKGS1, M12.2); Jetpack Hangar cleanup is `jetpack hangar clean`.
 - **E2-M9** — first-party library ring: `core.regex`, `core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.time`, `core.crypto`, `core.archive` (zip/tar containers) plus `core.archive` (gzip/zstd streams, D-CORE-COMPRESS1), `core.db` (SQLite via rusqlite bundled — D-DEP-DB1).
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`; client HTTPS became default later under D-TLS1; server HTTPS uses D-TLSSERVE1's named `tls:` option). Advanced client TLS configuration remains `core.net.tls`.
 - **E2-M11** — testing/docs/measurement: doctests, coverage, `jet test --measure`, property testing.
@@ -249,7 +251,7 @@ rollout stays future Epoch 7 work.
 **M12.2** — registry, semver resolver, `jet registry publish` / `vendor` / `audit`
 (architecture: [`epoch-4/README.md`](../../docs/plans/epoch-4/README.md)). M12.1 verified
 2026-06-13. `jet registry publish` runs the pre-publish gate, but registry upload is not
-implemented; use git-based dependencies. Jetpack hangar cleanup uses `jet clean`.
+implemented; use git-based dependencies. Jetpack Hangar cleanup uses `jetpack hangar clean`.
 
 ---
 

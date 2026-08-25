@@ -16,6 +16,27 @@ mod jetpack_fixtures;
 use jetpack_fixtures::*;
 
 #[test]
+fn bare_jetpack_prints_help_without_entering_an_environment() {
+    let project = Scratch::new("bare-jetpack-project");
+    let root = Scratch::new("bare-jetpack-root");
+    fs::write(project.join("env.jet"), "module broken { invalid }").unwrap();
+
+    let output = jetpack()
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "bare `jetpack` should print help and exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let help = String::from_utf8_lossy(&output.stderr);
+    assert!(help.contains("jet env"), "stderr: {help}");
+    assert!(!project.join(".jet").exists(), "bare `jetpack` entered env");
+}
+
+#[test]
 fn jet_clean_delegates_to_jetpack_clean() {
     let root = Scratch::new("root");
     let stale = write_hangar_meta(&root.path, "old-top", "oldtop", "1.0", Some(1)).0;
@@ -445,7 +466,7 @@ module env.full {
 fn top_level_jet_run_nixpkgs_suffix_tool_execs_tool() {
     // U16: `nix run nixpkgs#tool` parity at the public `jet` front door. The
     // top-level spelling uses CLI refs (`tool@nixpkgs`) and lowers to the
-    // same jetpack realization path as `jetpack run tool@nixpkgs -- tool`.
+    // same jetpack realization path as `jetpack use tool@nixpkgs -- tool`.
     let root = Scratch::new("jet-run-nixpkgs-root");
     let proj = Scratch::new("jet-run-nixpkgs-proj");
     let fixtures = Scratch::new("jet-run-nixpkgs-fx");

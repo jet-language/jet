@@ -170,25 +170,11 @@ fn tool_help_lists_install_list_uninstall_and_shell_verbs() {
     let output = jetpack().args(["help"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!stdout.contains("tool run"), "stdout: {stdout}");
     assert!(stdout.contains("tool install"), "stdout: {stdout}");
     assert!(stdout.contains("tool list"), "stdout: {stdout}");
     assert!(stdout.contains("tool uninstall"), "stdout: {stdout}");
     assert!(stdout.contains("env <name>"), "stdout: {stdout}");
     assert!(stdout.contains("use <package>"), "stdout: {stdout}");
-}
-
-#[test]
-fn retired_tool_run_has_teaching_diagnostic() {
-    let output = jetpack()
-        .args(["tool", "run", "greet@nixpkgs", "--no-color"])
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    assert_jetos_stderr_snapshot(
-        "tool_run_retired",
-        &String::from_utf8_lossy(&output.stderr),
-    );
 }
 
 #[test]
@@ -204,20 +190,41 @@ fn use_ephemeral_execs_inside_and_outside_project_without_path_projection() {
         "greet",
         "#!/bin/sh\necho hello from jetpack use\n",
     );
-    // An invalid project manifest proves `use` does not read the cwd project
-    // plan or lock while realizing the explicitly named package.
-    fs::write(project.join("env.jet"), "this is not a project environment\n").unwrap();
+    write_tool_bin_fixture(
+        &root.path,
+        &fixtures.path,
+        "extra",
+        "extra",
+        "#!/bin/sh\necho extra from jetpack use\n",
+    );
+    write_tool_bin_fixture(
+        &root.path,
+        &fixtures.path,
+        "project-only",
+        "project-only",
+        "#!/bin/sh\necho project package\n",
+    );
+    // A valid project package proves `use` does not merge the cwd project
+    // plan into the explicitly named package set.
+    fs::write(
+        project.join("env.jet"),
+        "use jetpack as pkg;\npub fn shell() [JSON] {\n    return [\n        pkg.source(\"nixpkgs\");\n        pkg.packages([\"project-only\"]);\n    ];\n}\n",
+    )
+    .unwrap();
     let home = Scratch::new("use-home");
     for cwd in [&project.path, &outside.path] {
         let output = jetpack()
             .args([
                 "use",
                 "greet",
+                "extra",
                 "--no-color",
                 "--offline",
                 "--fixtures",
                 "--",
-                "greet",
+                "sh",
+                "-c",
+                "test \"$JETPACK_REF\" = 'greet@jetpack extra@jetpack' && command -v greet >/dev/null && command -v extra >/dev/null && ! command -v project-only >/dev/null",
             ])
             .arg(&fixtures.path)
             .current_dir(cwd)
@@ -230,10 +237,6 @@ fn use_ephemeral_execs_inside_and_outside_project_without_path_projection() {
             "cwd={}: stderr: {}",
             cwd.display(),
             String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
-            "hello from jetpack use"
         );
     }
     // `use` is ephemeral: it does not publish a tool profile or PATH bin.
@@ -250,17 +253,11 @@ fn use_prep_materializes_then_entry_reuses_the_package() {
     let project = Scratch::new("use-prep-project");
     let fixtures = Scratch::new("use-prep-fx");
     let home = Scratch::new("use-prep-home");
-    write_tool_bin_fixture(
-        &root.path,
-        &fixtures.path,
-        "greet",
-        "greet",
-        "#!/bin/sh\necho prepared greet\n",
-    );
+    write_native_omp_fixture(&fixtures.path, "1.0.0", "#!/bin/sh\necho prepared omp\n");
     let prep = jetpack()
         .args([
             "use",
-            "greet",
+            "omp@releases#1.0.0",
             "--prep",
             "--no-color",
             "--offline",
@@ -278,18 +275,19 @@ fn use_prep_materializes_then_entry_reuses_the_package() {
         String::from_utf8_lossy(&prep.stderr)
     );
     assert!(prep.stdout.is_empty(), "prep must not enter a shell");
+    fs::remove_file(fixtures.path.join("jetpackage-omp.json")).unwrap();
+    fs::remove_file(fixtures.path.join("omp-1.0.0")).unwrap();
 
     let entry = jetpack()
         .args([
             "use",
-            "greet",
+            "omp@releases#1.0.0",
             "--no-color",
             "--offline",
             "--fixtures",
-            "--",
-            "greet",
         ])
         .arg(&fixtures.path)
+        .args(["--", "omp"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -300,7 +298,7 @@ fn use_prep_materializes_then_entry_reuses_the_package() {
         "entry after use --prep failed: {}",
         String::from_utf8_lossy(&entry.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&entry.stdout).trim(), "prepared greet");
+    assert_eq!(String::from_utf8_lossy(&entry.stdout).trim(), "prepared omp");
 }
 
 #[test]
@@ -1247,7 +1245,7 @@ fn test_runs_unimported_sibling_jet_tests_and_propagates_failure() {
         .unwrap();
     assert!(
         !output.status.success(),
-        "jetpack test must report the failing test\nstdout: {}\nstderr: {}",
+        "jet test must report the failing test\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

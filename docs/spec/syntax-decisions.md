@@ -4670,16 +4670,16 @@ unknown-lens usage error today).
 **Jetpack engine** *(D-JPK1/2/5/9/16, D-JPK-ADAPTER1, D-JPK-BUILDRECIPE1, D-JPK-GC1,
 D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
 D-JPK-OFFLINE1, U5, D-MONOREF1)*: `jetpack` is its own binary
-(`run/build/list/clean/add/remove` + `enter`); Jetpack owns the user model,
+(`env/use/add/remove` plus `hangar list`/`hangar clean`); Jetpack owns the user model,
 refs, lock, shells — Nix is one provider behind the `core`-first resolver
 trait as a temporary compatibility provider; no alternate evaluator ships in
 Jetpack. Ad-hoc
 adapters are `Pkg.adapt(name:, source:, recipe:)` with curated recipes
 (`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`) and finite executable
 `Recipe.build(steps: […])` actions. Hangar GC by age
-(default 30 days), `jet clean` (one verb: garbage-collect + optimize the
+(default 30 days), `jetpack hangar clean` (one verb: garbage-collect + optimize the
 hangar via hardlink/dedup, `nix store optimise` equivalent; owner amendment
-2026-07-03 — there is no `jet store gc`), `jet hangar du`; no daemon, no root
+2026-07-03 — there is no `jet store gc`), `jetpack hangar du`; no daemon, no root
 (transient sudo only for jetos activation). No-Nix machines degrade gracefully (E12xx
 names fixes). Binary cache = output-hash-addressed HTTP(S) protocol with
 signed objects; miss never errors. Linux+macOS+Windows tier-1 native.
@@ -5233,7 +5233,7 @@ stops firing. Unexplained dead code is not protected by convention or guesswork.
 **D-DEV4 / D-DEVMODE1 — Dev loop**: `jet dev <entry>` is the watch loop
 (auto-detects rerun vs resident hot-swap; `--restart`/`--swap`/`--watch=off`
 overrides); `jet env` enters the `env.jet` shell (delegates to
-`jetpack enter`). **D-HOTSWAP1**: reload unit is a module; type-stable edits
+`jetpack env`). **D-HOTSWAP1**: reload unit is a module; type-stable edits
 swap in place, layout changes trigger a clean announced restart.
 
 **D-DBG2/3 — Debugger**: `jet debug` shows only Jet frames by default
@@ -5613,9 +5613,10 @@ endpoint and typed credential-provider mappings. Repositories and flags cannot
 introduce endpoints, keys, or trust roots. `--builder` selects only a previously
 bound and granted name; absent bindings mean silent local operation.
 
-**D-JPK-STORECLI1=D — physical verbs under Hangar**: `jet hangar` owns verify,
+**D-JPK-STORECLI1=D — physical verbs under Hangar**: `jetpack hangar` owns verify,
 repair, copy, import, export, dump/restore, and sign. Causal questions stay
-`jet explain`/`jet inspect dossier`; `jet clean` remains the sole GC+optimize intent.
+`jet explain`/`jet inspect dossier`; `jetpack hangar clean` remains the sole
+GC+optimize intent.
 Mutations use plan-before-apply and stable JSON. Imports are verified and
 quarantined before registration.
 
@@ -5896,11 +5897,12 @@ dev-loop verbs (`run`, `build`, `test`, `check`, `fix`, `new`, `init`, `add`,
 `eval`, `emit`, `explain`, `help`, `version`, plus D-CLI-SURFACE3's `env`,
 `fetch`, `search`, `find`, `info`, `outdated`, `clean`) stay flat and top-level.
 D-DEVR-FIND1 adds `find` for code discovery by contract; `search` remains the
-package-catalog route. The long tail lives under groups on the jet binary:
+package-catalog route. The long tail lives under groups on the jet and jetpack
+binaries:
 `jet registry`
 (publish, yank, keygen, key backup, vendor), `jet inspect` (graph, query,
 explain-build, impact, dossier, semindex, expand, schema, codemod, audit,
-sbom, bind, plus D-CLI-SURFACE3's logs), `jet hangar` (physical store verbs
+sbom, bind, plus D-CLI-SURFACE3's logs), `jetpack hangar` (physical store verbs
 per D-CLI-STORE2), `jet self` (toolchain, upgrade, doctor, completions, man,
 devtools). The bare ungrouped spelling of a moved verb is a teaching error
 naming the grouped form, never a silent alias (I8).
@@ -5912,9 +5914,11 @@ are teaching errors naming the grouped route, never aliases. Help, completions,
 man pages, typo suggestions, and dispatch consume one command registry.
 
 **D-CLI-STORE2=A — hangar is the store noun** *(ratified 2026-07-11, card
-#497)*: `jet hangar` owns every physical store verb — verify, repair, copy,
-import, export, dump/restore, sign, rollback, generations, du. `jet clean`
-stays the sole GC+optimize intent. The `jet store` group is dissolved:
+#497)*: `jetpack hangar` owns every physical store verb — verify, repair, copy,
+import, export, dump/restore, sign, rollback, generations, du. The old flat
+cleanup spelling is retired; `jetpack hangar clean` is the sole GC+optimize
+intent. The `jet store`
+group is dissolved:
 `jet fetch` is a flat daily verb, script locking is `jet fetch --lock
 <script.jet>`, and `jet store …` / bare `jet gc` are teaching errors naming
 the real spelling. Supersedes D-CLI-SURFACE1's `jet store` rows.
@@ -5942,7 +5946,7 @@ ratified job.
 **D-CLI-SURFACE3=B — every verb stays on jet, grouped** *(ratified
 2026-07-11, card #497)*: no verb leaves the jet binary. The four silent
 aliases die (`doctor`/`devtools`/`toolchain` → teaching errors naming
-`jet self …`; `gc` → teaching error naming `jet clean`). `env`, `fetch`,
+`jet self …`; `gc` → teaching error naming `jetpack hangar clean`). `env`, `fetch`,
 `search`, `clean` stay in the flat ring; `info`, `logs`,
 `outdated` group under `jet inspect`; `push`, `bridge`, `services`, `image`,
 `config` group under `jet os`. `jet trust` (D-JPK-GRANTCMD1) and `jet os`
@@ -5966,7 +5970,8 @@ man pages, and completions advertise only canonical grouped spellings.
 function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-job dependency is a plain
 function call, no separate DAG syntax. Invoked canonically with
-`jet run <entry> -- <name>`; `jetpack run <name>` is the Jetpack engine bridge.
+`jet run <entry> -- <name>`; Jetpack has no code-execution bridge for named jobs;
+environment commands use `jetpack use`.
 `run`, `dev`, `build`, and `test` remain reserved lifecycle verb names a job
 cannot reuse.
 
@@ -6041,8 +6046,7 @@ job per this same law).
 
 *Shipped 2026-07-12 (card #476; extended by D-CMD-OVERRIDE1=C)*: reserved-lifecycle reject on `#Job fn
 run|dev|build|test` (E0928); `jet run <entry> -- <name>` dispatches an
-`#Job fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
-(D-JPK-DISPATCH1); unknown names list declared jobs (E1294). Typed job
+`#Job fn`; unknown names list declared jobs (E1294). Typed job
 args reuse D-CLIFLAG1 once the job is selected. The one dispatch table keeps
 the selected function's source name, so a sibling's plain-call dependency
 (ballot: dependency = plain function call) does not die with E0102.
@@ -6224,15 +6228,15 @@ Fleet Outputs. It supersedes D-CLI-SURFACE3's `jet os push` grouping and leaves
 
 **D-JPK-MANUALROOT1=B — external retention uses explicit root verbs**
 *(ratified 2026-07-15)*: the exact commands are
-`jet hangar register-external-root`, `jet hangar unregister-external-root`, and
-`jet hangar list-external-roots`. They retain closures lacking any automatic
+`jetpack hangar register-external-root`, `jetpack hangar unregister-external-root`, and
+`jetpack hangar list-external-roots`. They retain closures lacking any automatic
 Package, package/user generation, process, build, toolchain, System, or Generation owner.
 
 **D-ECO-HANGARPATH1=A — Hangar defaults to native per-user data paths**
 *(ratified 2026-07-15)*: Linux uses `$XDG_DATA_HOME/jet/hangar` or
 `~/.local/share/jet/hangar`, macOS uses
 `~/Library/Application Support/Jet/Hangar`, and Windows uses
-`%LOCALAPPDATA%\\Jet\\Hangar`. `jet hangar path` reports the resolved path;
+`%LOCALAPPDATA%\\Jet\\Hangar`. `jetpack hangar path` reports the resolved path;
 shared storage remains an administrator opt-in. The first command that reaches
 Hangar copies the retired user or root-owned source into a synced staging sibling and
 publishes it with one rename. The source remains intact for rollback; an

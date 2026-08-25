@@ -288,7 +288,7 @@ fn program_effects(
                 .resolved_output
                 .as_ref()
                 .filter(|output| output.selected)
-                .map(|output| output.effects.iter().cloned().collect()),
+                .map(|output| entry_effects(summaries, &output.semantic_name)),
             _ => None,
         })
         .unwrap_or_else(|| entry_effects(summaries, default_entry))

@@ -1,6 +1,6 @@
 //! U19 env/dev trust gate (D-JPK-DEVCOMPOSE1=D, card c9jetpackgates).
 //!
-//! `jetpack env` (`jet env`) and `jetpack dev` (project-level `jet dev`)
+//! `jetpack env` (`jet env`) and `jet dev`
 //! both realize a project's declared env — code the project author wrote,
 //! not the user. First entry to a repo whose env definition is trust-sensitive
 //! (today: it declares any package ref/source, or U13 secrets) shows a summary
@@ -801,7 +801,7 @@ pub fn record_json(record: &TrustRecord) -> String {
     }
 }
 
-/// The trust gate: shared by `jetpack env` and `jetpack dev`. Not
+/// The trust gate: shared by `jetpack env` and `jet dev`. Not
 /// trust-sensitive, already trusted, or `--trust`-bypassed → proceed
 /// silently. Otherwise: a non-TTY stdin gets a clean E1255 error (never a
 /// hung prompt); a TTY gets a summary + y/N prompt, and "yes" persists the

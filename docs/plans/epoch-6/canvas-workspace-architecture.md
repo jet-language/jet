@@ -105,7 +105,7 @@ Canvas should call existing engines instead of owning replacements:
 
 - `jet check`, `jet test`, `jet build`, `jet dev`
 - Jetpack package graph, lock, catalog, overlay, provider, and provenance APIs
-- `jetpack dev`, service health/logs, trust grant checks, env realization
+- `jet dev`, service health/logs, trust grant checks, env realization
 - future build graph commands: `jet inspect graph`, `jet inspect query build`,
   `jet inspect explain-build`
 

@@ -30,7 +30,7 @@ One underlying thing, many coats. Each row is a place where the same job grew a 
 | 8 | Watch files and re-run | `Source/CmdDevTools.rs:64-117` (native) | `Source/CmdCompile.rs:2652-2680` (web) — same engine, loop copy-pasted | Two choreographies to keep in sync |
 | 9 | Measure honestly | Spec promises the optimized measurement profile (`spec.md:2235`) | Code passes `BuildProfile::Default` (`CmdDevTools.rs:2476,2584,2794`) | Numbers came from the wrong tier and nothing said so |
 | 10 | Compare against a stored value | `testing.golden(path, actual) -> Bool` (`FSIoEnvOsTesting.rs:964`) | `expect(value).snapshot()` with paths, update flow, missing-file message | The golden path folds "missing file", "unreadable", and "differs" into one `false` |
-| 11 | Run a package's tests | `jet test` | `jetpack test` — its body ends in `cmd_build` and runs no test (`trust_env_build.rs:918`) | A verb that lies |
+| 11 | Run a package's tests | `jet test` | retired environment command — its body ends in `cmd_build` and runs no test (`trust_env_build.rs:918`) | A verb that lies |
 | 12 | Record and replay a run | `.jetproof-replay` (D-JREPLAY1=A, capture + `jet prove --replay`) | `.jetreplay` game recordings — disjoint by decree | Both exist; neither is reachable from `jet run`, `jet dev`, or `jet debug` |
 
 Glossary in one line each. **Observer**: the thing that watches a run — nothing (plain run), a file watcher, the claim harness, a measurer, a stepper, a prompt, a recorder. **Claim**: one stated fact about the program that can earn evidence. **Evidence grade**: the ratified `jet prove` words — proved, passed, observed, met.
@@ -249,7 +249,7 @@ lib/parse.jet:8     /// doctest                               doc
 package.jet         check: .Check.{ entry: verify }           check
 ```
 
-Same family of fixes: `jetpack test` defers to `jet test` instead of silently building, `jet fmt --check` exits like every other check, and the harness exit rides `ExitCodes` instead of a bare `exit(1)`.
+Same family of fixes: `jet test` runs tests instead of silently building, `jet fmt --check` exits like every other check, and the harness exit rides `ExitCodes` instead of a bare `exit(1)`.
 
 ### Watch is a modifier — ballot D-RUN-WATCH1
 
@@ -443,7 +443,7 @@ one program (I9: one meaning on every tier)
 | D-RUN-SESSION1 | One resident session with in-session keys and attaching tools? | A full session model / B keys only / C status quo | none |
 | D-RUN-RECORD1 | Recorder on user verbs now, as the Epoch 6 on-ramp? | A `--record=` + `jet debug --replay=` / B `jet debug --replay=` only / C wait for Epoch 6 | A amends two D-JREPLAY1 clauses (producer: "no option changes `jet run`"; consumer: "consumption stays exactly `jet prove --replay`"); B amends the consumer clause only; respects D-TIMETRAVEL1=C |
 
-Defect cards (no owner decision needed): package-wide claim collection; test-frame restoration (D-REPORT-TEST1=A); golden/fixture honest errors; `jetpack test` defers to `jet test`; parse-error exit alignment for `jet fmt --check`; `jet serve` leaves the generated help surfaces; the parity-audit triage table gets cards.
+Defect cards (no owner decision needed): package-wide claim collection; test-frame restoration (D-REPORT-TEST1=A); golden/fixture honest errors; `jet test` owns test execution; parse-error exit alignment for `jet fmt --check`; `jet serve` leaves the generated help surfaces; the parity-audit triage table gets cards.
 
 ## Implementation shape
 

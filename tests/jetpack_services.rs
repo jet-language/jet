@@ -2,10 +2,10 @@
 //!
 //! Covers:
 //!   * `jetpack services up/health/logs/wait/down` round-trips a fixture daemon;
-//!   * `jetpack dev`'s health gate blocks until a service is healthy, and
+//!   * the project dev health gate blocks until a service is healthy, and
 //!     reports a clean E1261 (not a hang) when it never becomes so;
 //!   * a `services:` entry with a field jetpack's dev-runtime tier doesn't
-//!     recognize is a clean E1262, both from `jetpack dev` and from
+//!     recognize is a clean E1262, both from the project dev path and from
 //!     `jetpack services up` directly.
 
 use std::collections::BTreeMap;
@@ -362,7 +362,7 @@ fn services_up_readiness_timeout_preserves_startup_failure_receipt() {
     assert!(!service_dir.join("pid").exists());
 }
 
-/// `jetpack dev` health-gates on its declared services (U19's `jetpack dev`
+/// The project dev path health-gates on its declared services (U19's project dev
 /// health-gate plug point, previously a no-op) — it must not run the
 /// project's `fn dev()` until the service is healthy.
 #[test]
@@ -437,7 +437,7 @@ fn dev_service_never_healthy_is_e1261() {
 }
 
 /// A `services:` field jetpack's dev-runtime tier doesn't recognize (a typo,
-/// e.g. `prot` instead of `ports`) is a clean E1262 from `jetpack dev` — the
+/// e.g. `prot` instead of `ports`) is a clean E1262 from the project dev path — the
 /// `Service` record itself stays open at parse time (U12); this is a
 /// supervision-time check, not a field-check-time rejection.
 #[test]

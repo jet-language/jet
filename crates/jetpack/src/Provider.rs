@@ -3880,7 +3880,7 @@ mod tests {
             .unwrap();
         for (k, v) in [
             ("user.email", "jetpack@example.invalid"),
-            ("user.name", "Jetpack Test"),
+            ("user.name", "Jet Test"),
         ] {
             std::process::Command::new("git")
                 .args(["config", k, v])
@@ -3942,7 +3942,7 @@ mod tests {
         };
         run(&["init", "--quiet"]);
         run(&["config", "user.email", "jetpack@example.invalid"]);
-        run(&["config", "user.name", "Jetpack Test"]);
+        run(&["config", "user.name", "Jet Test"]);
         run(&["add", "."]);
         let commit = run(&["commit", "--quiet", "-m", "init"]);
         assert!(

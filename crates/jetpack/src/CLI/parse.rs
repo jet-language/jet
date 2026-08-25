@@ -2,13 +2,12 @@ use super::add_remove_push_image::{cmd_add, cmd_image, cmd_push, cmd_remove};
 use super::bridge_os_studio::{cmd_bridge, cmd_os, cmd_studio, cmd_user};
 use super::browser::cmd_browser;
 use super::cmd_doctor;
-use super::format::cmd_fmt;
 use super::package_hangar_vendor::{cmd_audit, cmd_hangar};
 use super::profile::cmd_profile;
-use super::run_enter_dev::{cmd_dev, cmd_env, cmd_run, cmd_use};
+use super::run_enter_dev::{cmd_env, cmd_use};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
 use super::tool::cmd_tool;
-use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
+use super::trust_env_build::cmd_trust;
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
 };
@@ -107,7 +106,7 @@ pub(super) struct Flags {
     pub(super) cache_credential: Option<String>,
     /// D-JPK-CACHEAUTH1: separate cache write grant.
     pub(super) cache_write: bool,
-    /// D-ECO12: `jetpack fmt --lang <language>` selects the external formatter
+    /// D-ECO12: `jet fmt --lang <language>` selects the external formatter
     /// declared by the active typed environment.
     pub(super) fmt_language: Option<String>,
     pub(super) fmt_check: bool,
@@ -398,7 +397,9 @@ pub fn main(args: Vec<String>) -> i32 {
     let Some((verb, rest)) = args.split_first() else {
         let theme = Theme::resolve_choice(ColorChoice::Auto);
         eprintln!("{}", super::usage_tests::usage_with_color(theme.color));
-        return 2;
+        // Bare `jetpack` is reserved for the future interactive TUI. Until
+        // then, help is the complete operation; never fall through to env.
+        return 0;
     };
     let parsed = parse_args_for(verb, rest);
     let color = if parsed.flags.json {
@@ -465,7 +466,7 @@ pub fn main(args: Vec<String>) -> i32 {
     }
     if let Some((what, why, fix)) = retired_shell_spelling(verb) {
         let theme = Theme::resolve_choice(color);
-        theme.error_coded("E1353", what, why, fix);
+        theme.error_coded("E1353", &what, why, fix);
         return 2;
     }
     let theme = Theme::resolve_choice(color);
@@ -474,7 +475,7 @@ pub fn main(args: Vec<String>) -> i32 {
             "E1354",
             &format!("`{verb}` is retired"),
             "store commands are grouped under `hangar`; project commands stay at the top level",
-            &format!("run `{}` {route}", Syntax::JETPACK_BINARY_NAME,),
+            &format!("run `{} {route}`", Syntax::JETPACK_BINARY_NAME),
         );
         return 2;
     }
@@ -505,15 +506,10 @@ pub fn main(args: Vec<String>) -> i32 {
 
     match verb.as_str() {
         "doctor" => cmd_doctor(&theme, &parsed),
-        "run" => cmd_run(&theme, &parsed),
         "env" => cmd_env(&theme, &parsed),
         "use" => cmd_use(&theme, &parsed),
-        "fmt" => cmd_fmt(&theme, &parsed),
-        v if v == Syntax::DEV_SUBCOMMAND => cmd_dev(&theme, &parsed),
         v if v == Syntax::CONFIG_SUBCOMMAND => cmd_config(&theme, &parsed),
         v if v == Syntax::TRUST_SUBCOMMAND => cmd_trust(&theme, &parsed),
-        "build" => cmd_build(&theme, &parsed),
-        "test" => cmd_test(&theme, &parsed),
         "hangar" => cmd_hangar(&theme, &parsed),
         "audit" => cmd_audit(&theme),
         "add" => cmd_add(&theme, &parsed),
@@ -567,18 +563,30 @@ fn retired_hangar_route(verb: &str) -> Option<&'static str> {
     }
 }
 
-fn retired_shell_spelling(verb: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    match verb {
-        "enter" => Some((
-            "`jetpack enter` is retired",
+fn retired_shell_spelling(verb: &str) -> Option<(String, &'static str, &'static str)> {
+    let (why, fix) = match verb {
+        "dev" => (
+            "development commands execute Jet source and belong to `jet`",
+            "use `jet dev`",
+        ),
+        "test" => ("tests execute Jet source and belong to `jet`", "use `jet test`"),
+        "fmt" => (
+            "source formatting belongs to `jet`, not `jetpack`",
+            "use `jet fmt`",
+        ),
+        "run" => (
+            "running Jet source belongs to `jet`; package shells belong to `use`",
+            "use `jet run` for code, or `jetpack use <package> -- <command>` for a package shell",
+        ),
+        "enter" => (
             "the project shell is the `env` verb, which also owns positional module selection",
             "use `jetpack env [<name>]`",
-        )),
-        "build" => Some((
-            "`jetpack build` is retired",
+        ),
+        "build" => (
             "materialization is an option on the shell verbs",
             "use `jetpack env --prep` or `jetpack use <package> --prep`",
-        )),
-        _ => None,
-    }
+        ),
+        _ => return None,
+    };
+    Some((format!("`jetpack {verb}` is retired"), why, fix))
 }

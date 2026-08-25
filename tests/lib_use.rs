@@ -93,7 +93,7 @@ fn ffi_selective_import_aliases_resolve() {
 }
 
 /// Realize a `core` package from a local `path:` source repo into `hangar`,
-/// recording it in the store exactly as `jetpack build` would. Offline; no Nix.
+/// recording it in the store exactly as `jetpack env --prep` would. Offline; no Nix.
 fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::VerifiedRealization {
     let store_dir = roots.hangar_dir();
     fs::create_dir_all(&store_dir).unwrap();
@@ -242,7 +242,7 @@ fn executable_is_not_importable() {
     );
 }
 
-/// `use <lib>;` on a declared-but-unrealized library points at `jetpack build`
+/// `use <lib>;` on a declared-but-unrealized library points at `jetpack env --prep`
 /// (E0983).
 #[test]
 fn unrealized_library_points_at_build() {
@@ -283,7 +283,7 @@ fn unrealized_library_points_at_build() {
         "why line: {stderr}"
     );
     assert!(
-        stderr.contains("run `jetpack build` to realize `jsonutil`"),
+        stderr.contains("run `jetpack env --prep` to realize `jsonutil`"),
         "fix line: {stderr}"
     );
 }

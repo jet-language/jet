@@ -672,21 +672,45 @@ fn try_output_hash_of_with_hook(
         }
         if let Some(hangar) = hangar_root {
             let hangar = fs::canonicalize(hangar).unwrap_or_else(|_| hangar.to_path_buf());
-            let shared_cas = crate::Store::shared_cas_dir();
-            let shared_cas = fs::canonicalize(&shared_cas).unwrap_or(shared_cas);
-            let mut allowed_roots = vec![hangar.clone()];
-            add_allowed_peer_root(&mut allowed_roots, shared_cas);
+            let shared_cas = canonical_real_directory(&crate::Store::shared_cas_dir());
+            let mut hangars = vec![hangar];
             for machine_root in crate::Store::Roots::machine_roots() {
-                let machine_hangar = machine_root.hangar_dir();
-                let machine_hangar = fs::canonicalize(&machine_hangar).unwrap_or(machine_hangar);
-                add_allowed_peer_root(&mut allowed_roots, machine_hangar);
+                if let Some(machine_hangar) =
+                    canonical_real_directory(&machine_root.hangar_dir())
+                {
+                    add_allowed_hangar_root(&mut hangars, machine_hangar);
+                }
             }
-            let allowed_peers = allowed_roots
-                .iter()
-                .map(|root| count_inode_peers_under(root, *key))
-                .sum::<u64>();
+            let mut allowed_peers = 0;
+            let mut local_cas_paths = Vec::new();
+            for hangar in &hangars {
+                let local_cas = canonical_real_directory(&hangar.join("cas"));
+                let excluded = [local_cas.as_ref(), shared_cas.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|pool| pool.starts_with(hangar) && *pool != hangar)
+                    .map(PathBuf::as_path)
+                    .collect::<Vec<_>>();
+                allowed_peers += count_inode_peers_under_except(hangar, *key, &excluded);
+                if let Some(local_cas) = &local_cas {
+                    local_cas_paths.push(local_cas.clone());
+                    if let Some(cas_key) = link.cas_key.as_deref() {
+                        allowed_peers += count_cas_peer(local_cas, cas_key, *key);
+                    }
+                }
+            }
+            if let (Some(shared_cas), Some(cas_key)) = (shared_cas.as_ref(), link.cas_key.as_deref())
+            {
+                if !local_cas_paths
+                    .iter()
+                    .any(|path| path.as_path() == shared_cas.as_path())
+                {
+                    allowed_peers += count_cas_peer(shared_cas, cas_key, *key);
+                }
+            }
             if allowed_peers == link.total {
-                // All peers live under Hangar or machine/user shared CAS.
+                // In-Hangar dedupe and the exact local/shared CAS entry are
+                // legitimate; every other inode peer remains untrusted.
                 continue;
             }
         }
@@ -700,19 +724,40 @@ fn try_output_hash_of_with_hook(
     Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)))
 }
 
-fn add_allowed_peer_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
-    if roots
-        .iter()
-        .any(|root| candidate.starts_with(root) || root.starts_with(&candidate))
-    {
+fn canonical_real_directory(path: &Path) -> Option<PathBuf> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return None;
+    }
+    fs::canonicalize(path).ok()
+}
+
+fn add_allowed_hangar_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if roots.iter().any(|root| candidate.starts_with(root)) {
         return;
     }
+    roots.retain(|root| !root.starts_with(&candidate));
     roots.push(candidate);
 }
 
-/// Count regular files under `root` that share `(dev, ino)`.
-fn count_inode_peers_under(root: &Path, key: (u64, u64)) -> u64 {
-    fn walk(path: &Path, key: (u64, u64), count: &mut u64) {
+fn count_cas_peer(root: &Path, cas_key: &str, key: (u64, u64)) -> u64 {
+    let path = root.join(cas_key);
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return 0;
+    }
+    u64::from(file_identity(&meta) == Some(key))
+}
+
+/// Count regular files under `root` that share `(dev, ino)`, excluding pool
+/// directories whose peers are admitted only through their exact CAS key.
+fn count_inode_peers_under_except(root: &Path, key: (u64, u64), excluded: &[&Path]) -> u64 {
+    fn walk(path: &Path, key: (u64, u64), excluded: &[&Path], count: &mut u64) {
+        if excluded.iter().any(|excluded| path == *excluded) {
+            return;
+        }
         let Ok(meta) = fs::symlink_metadata(path) else {
             return;
         };
@@ -730,12 +775,12 @@ fn count_inode_peers_under(root: &Path, key: (u64, u64)) -> u64 {
                 return;
             };
             for ent in rd.flatten() {
-                walk(&ent.path(), key, count);
+                walk(&ent.path(), key, excluded, count);
             }
         }
     }
     let mut count = 0u64;
-    walk(root, key, &mut count);
+    walk(root, key, excluded, &mut count);
     count
 }
 
@@ -743,6 +788,7 @@ struct HardlinkState {
     first: PathBuf,
     seen: u64,
     total: u64,
+    cas_key: Option<String>,
 }
 
 fn encode_node(
@@ -843,6 +889,9 @@ fn encode_node(
             push_bytes(archive, &path_bytes(&state.first));
             return Ok(());
         }
+        record_header(archive, b'F', &rel_bytes, mode_of(&meta));
+        encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
+        let bytes = read_file_stable(path, &meta, hook)?;
         if let Some(key) = key {
             hardlinks.insert(
                 key,
@@ -850,12 +899,10 @@ fn encode_node(
                     first: rel.to_path_buf(),
                     seen: 1,
                     total: link_count(&meta),
+                    cas_key: Some(cas_key_for(&meta, &bytes)),
                 },
             );
         }
-        record_header(archive, b'F', &rel_bytes, mode_of(&meta));
-        encode_semantic_xattrs(path, archive, allow_semantic_xattrs)?;
-        let bytes = read_file_stable(path, &meta, hook)?;
         push_bytes(archive, &bytes);
     } else {
         return Err(format!(
@@ -1009,6 +1056,14 @@ fn mode_of(meta: &fs::Metadata) -> u32 {
 #[cfg(not(unix))]
 fn mode_of(meta: &fs::Metadata) -> u32 {
     u32::from(meta.permissions().readonly())
+}
+
+fn cas_key_for(meta: &fs::Metadata, bytes: &[u8]) -> String {
+    format!(
+        "{}-{:08x}",
+        SHA256::sha256_hex(bytes),
+        mode_of(meta) & 0o7777
+    )
 }
 
 #[cfg(unix)]
@@ -1189,6 +1244,24 @@ mod tests {
         assert!(error.contains("only 1 are inside"), "{error}");
         fs::remove_file(outside).ok();
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_archive_rejects_wrong_shared_cas_key() {
+        let hangar = scratch("wrong-cas-key-hangar");
+        let output = hangar.join("objects/output");
+        let pool = hangar.join("cas");
+        fs::create_dir_all(&output).unwrap();
+        fs::create_dir_all(&pool).unwrap();
+        let file = output.join("payload");
+        fs::write(&file, "trusted").unwrap();
+        fs::hard_link(&file, pool.join("not-the-content-key")).unwrap();
+
+        let error = try_output_hash_of_in_hangar(&output.to_string_lossy(), &hangar, false)
+            .unwrap_err();
+        assert!(error.contains("only 1 are inside"), "{error}");
+        fs::remove_dir_all(hangar).ok();
     }
 
     #[cfg(unix)]

@@ -299,7 +299,7 @@ CAPTURED — terminal inventory boundary:
 NO_COLOR=1 target/debug/jet canvas --help
 Error [E2101]: `canvas` isn't a jet command.
  Why: every jet run starts with a command like `run`, `check`, or `new`.
- Fix: did you mean `jet hangar`? Run `jet help` to see them all.
+ Fix: did you mean `jetpack hangar`? Run `jet help` to see them all.
 exit=2.
 
 The dev-server source announces a browser Canvas URL and owns HTTP routes. No

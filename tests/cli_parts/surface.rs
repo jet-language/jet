@@ -192,6 +192,10 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
             .unwrap();
         assert!(out.status.success(), "{flag}: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !stdout.to_ascii_lowercase().contains("hangar"),
+            "jet help advertised the environment Hangar: {stdout}"
+        );
         for command in jet::CLI::COMMANDS
             .iter()
             .filter(|command| jet::CLI::is_canonical_top_level(command.name))
@@ -653,11 +657,11 @@ fn retired_cli_routes_are_absent_but_teach_real_spelling() {
     for (argv, replacement) in [
         (vec!["gc"], "jet clean"),
         (vec!["serve"], "jet dev <file.jet> --swap"),
-        (vec!["store"], "jet hangar / jet clean / jet fetch"),
+        (vec!["store"], "jetpack hangar / jet clean / jet fetch"),
         (vec!["store", "fetch"], "jet fetch"),
-        (vec!["store", "verify"], "jet hangar verify"),
-        (vec!["store", "generations"], "jet hangar generations"),
-        (vec!["store", "rollback", "2"], "jet hangar rollback 2"),
+        (vec!["store", "verify"], "jetpack hangar verify"),
+        (vec!["store", "generations"], "jetpack hangar"),
+        (vec!["store", "rollback", "2"], "jetpack hangar"),
         (vec!["store", "gc"], "jet clean"),
         (
             vec!["store", "lock", "stats.jet"],
@@ -695,7 +699,6 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
         declared,
         vec![
             "inspect audit",
-            "hangar import",
             "env test",
             "gc report",
             "perf run",

@@ -209,12 +209,14 @@ pub(super) fn workspace_root_snapshot(
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn workspace_root_snapshot_or_exit(
     start: &Path,
 ) -> (PathBuf, Option<CheckedWorkspaceSource>) {
     workspace_root_snapshot(start).unwrap_or_else(|diagnostic| report_authority_error(diagnostic))
 }
 
+#[allow(dead_code)]
 pub(super) fn workspace_index_required_diagnostic() -> Diagnostic {
     Diagnostic::error(
         "E1239",
@@ -254,6 +256,7 @@ fn load_workspace(dir: &Path) -> Option<Result<WorkspaceFile::WorkspacePlan, i32
     finish_workspace_load(dir, load_workspace_snapshot(dir))
 }
 
+#[allow(dead_code)]
 pub(super) fn load_workspace_for_source(
     dir: &Path,
     checked: &CheckedWorkspaceSource,
@@ -271,6 +274,7 @@ pub(super) fn load_workspace_for_source(
     )
 }
 
+#[allow(dead_code)]
 fn finish_workspace_load(
     dir: &Path,
     result: Result<Option<WorkspaceFile::WorkspaceSnapshot>, Diagnostic>,

@@ -2122,7 +2122,7 @@ package with no `package.jet` at all, resolves to `executable` when its source s
 a `bin/` or declares a top-level `fn run`, otherwise `library`; an explicit
 `library`/`executable` always wins. Single-file `jet run`/`build file.jet` stays
 executable-requiring (R9; E0101 if it has no `run`). A `library` dependency the project declares but hasn't
-realized yet is **E0983** (run `jetpack build`) — `jet build`/`run` never realize
+realized yet is **E0983** (run `jetpack use <pkg> --prep`) — `jet build`/`run` never realize
 on demand, keeping them offline and deterministic, the same flow as pre-fetched
 deps. Resolver: `Source/Loader.rs` (`collect_pkg_resolution`). Tests: `tests/lib_use.rs`
 (offline realize → `use` → call) and `tests/ui/use_unrealized_library/`.
@@ -3731,7 +3731,7 @@ exact = "acme/tool@github#v1.2.0"
 
 `jetpack update [source]` is the only verb that moves `[[source_channel]]`.
 `jetpack outdated` compares the lock to channel metadata and writes nothing.
-`jetpack build`, `jetpack run`, `jetpack enter`, and `jetpack dev` read only the
+`jet build`, `jet run`, `jetpack env`, and `jet dev` read only the
 exact lock entry; an unlocked channel source is E1271, including under CI or
 `--offline`.
 

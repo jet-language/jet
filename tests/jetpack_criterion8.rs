@@ -181,5 +181,5 @@ fn imported_locked_package_runs_builds_and_restores_without_nix() {
         String::from_utf8_lossy(&restored_run.stdout).trim(),
         "hello from imported jetpack"
     );
-    assert!(!marker.exists(), "restored Jetpack run invoked Nix");
+    assert!(!marker.exists(), "restored package execution invoked Nix");
 }

@@ -1,5 +1,5 @@
 //! Shared fixture helpers for the split `tests/jetpack_*.rs` suites
-//! (Tower card #367 slice 6). Each jetpack test binary includes this file
+//! (Tower card #367 slice 6). Each package-manager test binary includes this file
 //! via `#[path = "support/jetpack_fixtures.rs"] mod jetpack_fixtures;` and
 //! compiles its own copy, mirroring `tests/common/mod.rs` — hence the
 //! file-level `allow(dead_code)` (not every suite uses every helper).

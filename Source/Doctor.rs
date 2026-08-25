@@ -348,7 +348,7 @@ fn check_ffi() -> Vec<Check> {
             "c-ffi",
             "hangar",
             format!("{} is a symlink", hangar.display()),
-            "move the symlink aside without following it, then retry `jet hangar path`",
+            "move the symlink aside without following it, then retry `jetpack hangar path`",
             false,
         )),
         Ok(metadata) if metadata.is_dir() => {
@@ -358,7 +358,7 @@ fn check_ffi() -> Vec<Check> {
             "c-ffi",
             "hangar",
             format!("{} is not a directory", hangar.display()),
-            "move the path aside without deleting it, then retry `jet hangar path`",
+            "move the path aside without deleting it, then retry `jetpack hangar path`",
             false,
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

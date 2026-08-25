@@ -2,7 +2,9 @@ use crate::Syntax;
 use jet_foundation::Terminal::Theme;
 
 pub(super) fn usage_with_color(color: bool) -> String {
-    let bin = Syntax::BINARY_NAME;
+    // This is jetpack's help, so it must name jetpack. Using the compiler's
+    // BINARY_NAME printed `jet env`, a command that does not exist.
+    let bin = Syntax::JETPACK_BINARY_NAME;
     let pack = Syntax::ENV_FILE;
     let theme = Theme::new(color);
     let h = |s: &str| theme.accent(s);
@@ -20,9 +22,6 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} use <package>...               enter a shell with exactly these packages
   {bin} use <package>... -- cmd        run a command in that environment, then exit
   {bin} use <package>... --prep        materialize those packages, do not enter
-  {bin} run   <job> [-- args]          run a declared project job
-  {bin} dev                            realize the env, then run the project's fn dev()
-  {bin} fmt --lang <language> [paths] delegate non-Jet files to env formatter
   {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools generation)
   {bin} tool list                      list globally installed tools
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
@@ -47,7 +46,6 @@ pub(super) fn usage_with_color(color: bool) -> String {
 
 {store}
   {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
-  {bin} test  [-p <member>…]           (workspace) realize/test selected members
   {bin} hangar list                    show realized packages
   {bin} hangar du [--all]              honest hangar disk usage; --all spans machine roots
   {bin} hangar path                    print the resolved user Hangar path
@@ -89,20 +87,20 @@ pub(super) fn usage_with_color(color: bool) -> String {
                                       draft reviewed workspace overlay policy
 
 {machines}
-  jet os check <host>                  validate ./config.jet system.<host>
-  jet os plan <host> --json            print checked plan/proof input without building
-  jet os proof <host> --json           print latest generation proof/provenance facts
-  jet os build <host>                  build a named jetos generation
-  jet os switch <host> [--name <name>] build + activate a named generation
-  jet os generations [<host>]          list generations newest first
-  jet os rollback <host> [<name>]      activate a previous generation
-  jet os init <host> [--manual <path>] write starter ./config.jet
-  jet os lift <host> [<root>]          draft ./config.jet from a host root
-  jet os import <flake-or-dir> --host <host>
+  {bin} os check <host>                  validate ./config.jet system.<host>
+  {bin} os plan <host> --json            print checked plan/proof input without building
+  {bin} os proof <host> --json           print latest generation proof/provenance facts
+  {bin} os build <host>                  build a named jetos generation
+  {bin} os switch <host> [--name <name>] build + activate a named generation
+  {bin} os generations [<host>]          list generations newest first
+  {bin} os rollback <host> [<name>]      activate a previous generation
+  {bin} os init <host> [--manual <path>] write starter ./config.jet
+  {bin} os lift <host> [<root>]          draft ./config.jet from a host root
+  {bin} os import <flake-or-dir> --host <host>
                                       import NixOS/flake-parts/Home Manager facts
-  jet os image <host> [--manual <path>] write jetos hybrid ISO media/proof
-  jet os vm prove <host> --disk <path> boot installer, install, reboot, prove
-  jet os vm test <vmtest> --disk <path> run declared VM scenario proof
+  {bin} os image <host> [--manual <path>] write jetos hybrid ISO media/proof
+  {bin} os vm prove <host> --disk <path> boot installer, install, reboot, prove
+  {bin} os vm test <vmtest> --disk <path> run declared VM scenario proof
   jetos studio [path] --host <host>    open installed jetos Studio app
   jetos studio [path] --serve 127.0.0.1:7417 serve browser/edit fallback
   {bin} push <fleet>                   validate a fleet's hosts (deploy is gated)
@@ -191,7 +189,7 @@ mod tests {
     fn doctor_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&"doctor"));
         assert!(Syntax::JETPACK_VERBS.contains(&"hangar"));
-        assert!(usage_with_color(false).contains("jet doctor [--online]"));
+        assert!(usage_with_color(false).contains("jetpack doctor [--online]"));
         assert_eq!(RuntimePolicy::verb_policy("doctor", &[]).verb, "doctor");
     }
 
@@ -209,12 +207,13 @@ mod tests {
             .iter()
             .filter(|verb| !jetos_verbs.contains(verb))
             .count();
-        assert_eq!(non_jetos, 24);
-        assert_eq!(Syntax::JETPACK_VERBS.len(), 30);
+        assert_eq!(non_jetos, 20);
+        assert_eq!(Syntax::JETPACK_VERBS.len(), 26);
         assert!(Syntax::JETPACK_VERBS.contains(&"env"));
         assert!(Syntax::JETPACK_VERBS.contains(&"use"));
-        assert!(!Syntax::JETPACK_VERBS.contains(&"enter"));
-        assert!(!Syntax::JETPACK_VERBS.contains(&"build"));
+        for retired in ["dev", "test", "fmt", "build", "run", "enter"] {
+            assert!(!Syntax::JETPACK_VERBS.contains(&retired));
+        }
         for retired in ["cache", "shared-store", "vendor", "clean", "list"] {
             assert!(!Syntax::JETPACK_VERBS.contains(&retired));
         }
@@ -238,7 +237,6 @@ mod tests {
     fn tool_is_in_canonical_route_registry_and_help() {
         assert!(Syntax::JETPACK_VERBS.contains(&Syntax::TOOL_SUBCOMMAND));
         let help = usage_with_color(false);
-        assert!(!help.contains("tool run"));
         assert!(help.contains("tool install"));
         assert!(help.contains("env <name>"));
         assert!(help.contains("use <package>"));

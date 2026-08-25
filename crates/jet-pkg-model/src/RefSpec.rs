@@ -226,7 +226,7 @@ pub struct SourceTable {
 
 impl SourceTable {
     /// A table with no declared sources — only the built-ins resolve. This is
-    /// the table for direct CLI refs (`jetpack run fastfetch@nixpkgs`).
+    /// the table for direct CLI refs (`jetpack use fastfetch@nixpkgs`).
     pub fn empty() -> SourceTable {
         SourceTable::default()
     }

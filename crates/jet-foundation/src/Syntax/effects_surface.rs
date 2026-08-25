@@ -544,11 +544,8 @@ pub const REF_SOURCE_PROVIDERS: &[&str] = &[
 pub const JETPACK_VERBS: &[&str] = &[
     // Card #479: reuses D-DX2's existing `doctor` spelling for Jetpack health.
     "doctor",
-    "fmt",
-    "run",
     "env",
     "use",
-    "test",
     "hangar",
     "audit",
     "add",
@@ -563,7 +560,6 @@ pub const JETPACK_VERBS: &[&str] = &[
     "push",
     TRUST_SUBCOMMAND,
     OS_SUBCOMMAND,
-    DEV_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
     SERVICES_SUBCOMMAND,
@@ -579,7 +575,7 @@ pub const JETPACK_VERBS: &[&str] = &[
 /// added to the shell without declaring them in any manifest. Repeatable;
 /// realized once and dropped, same lifecycle as a manifest-declared ref.
 ///
-/// D-JPK-SELECTOR1=C: on `jetpack test` / `run`, the same `-p`
+/// D-JPK-SELECTOR1=C: on `jet test` / `jet run`, the same `-p`
 /// spelling selects workspace members by exact name (cargo-style, repeatable).
 pub const ENV_FLAG_PACKAGE: &str = "-p";
 

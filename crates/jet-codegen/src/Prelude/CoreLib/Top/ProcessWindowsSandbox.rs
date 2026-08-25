@@ -371,8 +371,8 @@ mod jet_process_windows_sandbox {
         fn create(capability: Option<&mut SidAndAttributes>) -> io::Result<Self> {
             let id = PROFILE_COUNTER.fetch_add(1, Ordering::Relaxed);
             let name = wide(&format!("JetpackBuild-{}-{id}", std::process::id()))?;
-            let display = wide("Jetpack build")?;
-            let description = wide("One-shot Jetpack build isolation")?;
+            let display = wide("Jetpack package")?;
+            let description = wide("One-shot Jetpack package isolation")?;
             let mut sid = null_handle();
             let (capabilities, capability_count) = capability
                 .map_or((std::ptr::null_mut(), 0), |value| {

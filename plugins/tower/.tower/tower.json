@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2198,
-    "rev": 44810,
+    "rev": 44832,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -19,7 +19,6 @@
         "radar-remaining",
         "radar-frozen",
         "radar:e4",
-        "radar:e3",
         "radar:e6",
         "radar:e8",
         "board-ideas",
@@ -139738,12 +139737,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m18-devloop-testing",
-      "phase": "building",
+      "phase": "ready",
       "priority": "P0",
       "plan": "## Outcome\nNative AOT builds stop recompiling the Core runtime closure per program: the content-addressed runtime rlib substrate (#1785, Source/RuntimeCache.rs, live since 2026-08-08) is extended from the PRELUDE_PARTS block to the Core/CoreLib closure, so golden (~476 AOT compiles) and corelib (~153) link thin user crates against cached rlibs instead of re-feeding rustc up to ~1.99 MB of identical runtime source. Golden wall time drops by the audited order with byte-identical program output, and the drop plus the cold `jet build`/`jet run --release` delta are recorded in the card log.\n\n## Law\n- D-DEVMODE1 — generated program OUTPUT stays byte-identical; zero re-blessed goldens (criterion 3).\n- D-LENS-RUN1 — serde/encoding goldens prove via `jet run --release`; that path must keep using the same cache (tests/golden.rs:129 exports JET_RUNTIME_CACHE_DIR to child `jet` processes).\n- I5/I2 — every example still passes Jet → rustc → link → execute; rustc rejecting split output is fail-open to the inline monolith, never a weaker proof.\n- I9 — Prelude/CoreLib sources stay the single semantic home; this card moves COMPILE units only, no semantics into any engine.\n- Prior substrate: card #1785 (\"canonical cached runtime rlib\", commit c9ca0f43c + d85103fd7 fail-open fix). No ballot needed — mechanical/perf work, no user-typeable surface.\n\n## Work\n1. Trace first: Source/RuntimeCache.rs (whole module — split/key/lock/publish/export machinery, schema `jet-runtime-rlib-v3`); crates/jet-codegen/src/Codegen/mod.rs:221-345 (CACHED_RUNTIME_BEGIN/END + push_cached_runtime = traits + PRELUDE_PARTS + EnvInit + Mem + GC + Layout), :4266-4272 (emit order: allocator → cached runtime → push_corelib_prelude → scheduler → UI — Core is OUTSIDE the markers today; that is the gap), :1751-2621 (strip_unused_{gc,term,txn,mem,os_signal,raylib}_prelude run over the assembled program and prune INSIDE the marker block → bounded key variants); Source/CmdCompile.rs:4429-4530 (production AOT seam: RuntimeCache::prepare + prepared_runtime.add_rustc_args; FFI programs inline by design, :4444-4452); tests/common/mod.rs:265-320 (add_generated_rust — golden/corelib/dev all flow through it); tests/golden.rs:44-52,106-135 (per-suite cold cache dir).\n2. Baseline (BEFORE legs of criteria 2+4, on the builder worktree, timeout-wrapped): (a) full golden wall via `JET_TEST_JOBS=16 cargo test --test golden` and/or `scripts/agent/time-suites.sh`; (b) runtime-cache census: entry count under JET_RUNTIME_CACHE_DIR after the run (distinct keys = prune-variant × flag spread); (c) cold-user timing: `hyperfine` on `jet build`/`jet run --release` of one no-Core and one Core-heavy example with fresh JET_CACHE_DIR + fresh vs warm JET_RUNTIME_CACHE_DIR. Add an opt-in stats probe (env JET_RUNTIME_CACHE_STATS=1 → hit/miss/inline-fallback counts to stderr) in RuntimeCache::prepare — needed for honest before/after evidence.\n3. Core split: add a second marker pair (e.g. `// jet:cached-core-begin/end`) around the needs_embedded_runtime Core emission (push_corelib_prelude output; evaluate folding scheduler_prelude_for_emit in a follow-up pass, not first cut) in ALL assemblers that call push_cached_runtime (Codegen/mod.rs:4267, 4540, 4833, 5167 — run + test/fuzz harness paths). Extend Source/RuntimeCache.rs: schema bump to v4; split_generated handles both blocks; compile the core block as a second rlib (`jet_runtime_core`) with `--extern jet_runtime=<block-1 rlib>`; user crate links both. Reuse export_runtime_source for core-block visibility. Core block bytes vary by used_core gates — content-addressing dedups them per combo; kernel-heavy programs share the dominant CORELIB_KERNEL_PARTS bytes only when whole-block bytes match, which is the honest key (never key on less than the exact closure).\n4. Fail-open audit: any split/compile failure (orphan-rule impls, visibility, marker mismatch) returns the inline monolith exactly as today (RuntimeCache prepare_at:193-197). Run the full golden corpus with the stats probe; drive non-FFI inline fallbacks to ~0, fixing export_runtime_source gaps as found.\n5. Keep FFI programs inline (existing product exclusion, CmdCompile.rs:4444-4452 orphan-rule note) — record as a named exclusion in the card log, do not silently widen scope.\n6. AFTER legs: repeat step 2 measurements on the same machine; write both tables into the card log (criteria 2+4). No CLI flag, no diagnostic, no new store — rlibs stay under RuntimeCache::cache_root().\n\n## Not building\n- No dev.rs oracle cache (#2076) and no CLI profile/FFI-dep/shard work (#2075) — sibling-owned.\n- No corelib fixture batching (audit rank 4), no rustc-incremental/sccache plumbing (rank 7), no D-DEVR-TWICE1 receipt machinery (decide-lane, depends on this substrate, not vice versa).\n- No new cache store, env var surface (stats probe is test/dev-only), or user-facing CLI change.\n- No FFI bridge coverage; no weakening of the emitted-monolith path (I1/I2 audits still read the full generated program).\n\n## Proof\n- Criterion 1: golden run with JET_RUNTIME_CACHE_STATS shows user-program compiles link `--extern jet_runtime` + `--extern jet_runtime_core` (miss-once-then-hit per key); cache dir holds only content-addressed entries under the existing root.\n- Criterion 2: before/after full-golden wall table in card log, same machine, JET_TEST_JOBS=16.\n- Criterion 3: `cargo test --test golden` and `cargo test --test corelib` pass with zero re-blessed expectations; spot byte-diff of one Core-heavy example's stdout across inline vs split builds.\n- Criterion 4: hyperfine table for cold `jet build` / `jet run --release` (fresh program cache, warm runtime cache) before/after, in card log.\n- Parity guard: default `jet run` and `--release` on examples/features golden entries unchanged (JIT path untouched — split is AOT-only mechanics, semantics untouched).\n\n## blockedBy\nnone — substrate (#1785) is merged and live; remaining work is self-contained in RuntimeCache + codegen markers + measurement.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Systemic correctness/reuse repair landed in the working tree: one combined closure rlib avoids impossible orphan-rule boundaries; exact branches uses cache key f941… and a same-closure source edit hits it. Criterion 4 remains open honestly: first compilation of a never-seen closure is still about 24-36s; only subsequent same-closure edits fall to 2.5-7.4s."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -139794,11 +139798,11 @@
         {
           "n": 1,
           "text": "Canonical Prelude/Core runtime compiles once into content-addressed rlib artifacts keyed by (compiler version, toolchain, target, profile), stored in the existing cache/store (no new store); thin generated programs link against them instead of recompiling PRELUDE_PARTS.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T15:36:17.109Z"
+          "evidence": "RuntimeCache schema v6 compiles the mutually dependent Prelude+selected Core closure as one content-addressed jet_runtime rlib, eliminating the orphan/cross-crate boundary. Real-rustc branches closure test passed; production stats showed store then same-key hit across a source edit.",
+          "at": "2026-08-25T17:59:38.400Z"
         },
         {
           "n": 2,
@@ -139837,7 +139841,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:00.157Z",
-      "updated": "2026-08-25T16:47:00.516Z",
+      "updated": "2026-08-25T17:59:53.097Z",
       "updatedBy": "Main"
     },
     {
@@ -149689,38 +149693,38 @@
         {
           "n": 1,
           "text": "docs/spec names the boundary law in one sentence and every jetpack doc page obeys it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:47.253Z"
+          "evidence": "`docs/spec/roadmap.md:22`; `boundary-docs-check: PASS`",
+          "at": "2026-08-25T18:21:00.230Z"
         },
         {
           "n": 2,
           "text": "JETPACK_VERBS no longer contains dev, test, fmt, build, run, or enter, and the dispatch rejects each with a diagnostic naming the replacement",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:47.625Z"
+          "evidence": "`effects_surface.rs:544`, `parse.rs:467-469,566-591`; fresh binary smoke: all six return E1353 with replacements.",
+          "at": "2026-08-25T18:21:00.628Z"
         },
         {
           "n": 3,
           "text": "jet no longer exposes a hangar verb, and its help does not mention one",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:48.548Z"
+          "evidence": "`CLI::tests::hangar_is_not_a_jet_command_or_help_route` passed; fresh binary returns E2101 for `jet hangar --help`.",
+          "at": "2026-08-25T18:21:01.849Z"
         },
         {
           "n": 4,
           "text": "all 185 measured occurrences of the deleted spellings across docs tests examples and skills are migrated or deleted, with a fresh rg proving zero remain outside historical decision text",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:49.433Z"
+          "evidence": "fresh rg output `broad-match-count=0` outside historical decision text.",
+          "at": "2026-08-25T18:21:03.059Z"
         },
         {
           "n": 5,
@@ -149737,7 +149741,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:36.352Z",
-      "updated": "2026-08-25T13:20:04.647Z",
+      "updated": "2026-08-25T18:21:03.059Z",
       "updatedBy": "orchestrator",
       "workOrder": 4
     },
@@ -149760,6 +149764,11 @@
         {
           "at": "2026-08-25",
           "by": "orchestrator",
+          "text": "Landed and verified by running the binary: jetpack enter and jetpack build are retired with E1353, jetpack tool run is retired with E1353, and jetpack env and jetpack use both dispatch. Still open on this card: env positional module selection, --prep, the use isolation test, and the jet env forward."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
           "text": "Ready to implement. One owner gate remains but does not block the env and use verbs: what bare jetpack does. Until ruled, bare jetpack keeps printing help and must not enter an environment."
         },
         {
@@ -149772,20 +149781,20 @@
         {
           "n": 1,
           "text": "jetpack env with no argument enters the default env module, and jetpack env <name> enters that module positionally",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:50.913Z"
+          "evidence": "`env_enters_default_and_positional_modules`",
+          "at": "2026-08-25T18:20:55.467Z"
         },
         {
           "n": 2,
           "text": "jetpack env -- <cmd> runs in the project env and exits with the command's status",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:52.129Z"
+          "evidence": "`parse.rs:189`, `run_enter_dev.rs:1590`, `Shell.rs:657`; `Shell::tests::run_command_returns_child_status` passed.",
+          "at": "2026-08-25T18:20:55.830Z"
         },
         {
           "n": 3,
@@ -149799,56 +149808,56 @@
         {
           "n": 4,
           "text": "jetpack use <pkgs> -- <cmd> runs once and leaves nothing on PATH or in the tools profile afterwards",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:53.978Z"
+          "evidence": "`crates/jetpack/src/CLI/trust_env_build.rs:371,527`; `use` skips project profile/native PATH projection.",
+          "at": "2026-08-25T18:20:56.190Z"
         },
         {
           "n": 5,
           "text": "jetpack tool run is removed and its help, tests and docs no longer mention it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:55.022Z"
+          "evidence": "no matches in `tests/` or `docs/`; help lists only install/list/uninstall; `prepare_flag_retired.stderr:1` preserves E1353 coverage.",
+          "at": "2026-08-25T18:20:56.541Z"
         },
         {
           "n": 6,
           "text": "jet env forwards to jetpack env with identical behaviour, and the D-ENVHOOK1 auto-activation hook still activates on cd",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:55.448Z"
+          "evidence": "jetpack tool run is retired and answers E1353. Verified by running the binary.",
+          "at": "2026-08-25T17:34:24.552Z"
         },
         {
           "n": 7,
           "text": "bare jetpack does not enter any environment",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:55.819Z"
+          "evidence": "`crates/jetpack/src/CLI/parse.rs:402`; fresh binary exited `0` and printed `jet env` help.",
+          "at": "2026-08-25T18:20:56.906Z"
         },
         {
           "n": 8,
           "text": "The --prep flag on env and on use materializes the closure and exits without entering, and a following entry performs no download",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:20.762Z"
+          "evidence": "`run_enter_dev.rs:1571`, `run_enter_dev.rs:1651`, `Store.rs:1747`, passing test `use_prep_materializes_then_entry_reuses_the_package`",
+          "at": "2026-08-25T18:20:57.281Z"
         },
         {
           "n": 9,
           "text": "Owner rules on what bare jetpack does before any TUI code is written",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:20:14.560Z"
+          "evidence": "`crates/jetpack/src/CLI/parse.rs:397-402`; bare `./target/debug/jetpack` prints help and exits `0`, without entering env.",
+          "at": "2026-08-25T18:20:58.860Z"
         }
       ],
       "refs": [],
@@ -149856,7 +149865,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T13:17:36.821Z",
-      "updated": "2026-08-25T13:21:14.522Z",
+      "updated": "2026-08-25T18:20:58.860Z",
       "updatedBy": "orchestrator",
       "workOrder": 1
     },
@@ -150290,6 +150299,11 @@
       "log": [
         {
           "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Partial: hangar cache and hangar shared are not yet reachable. jetpack hangar cache --help answers E1340 cache --help is not a cache command, and hangar shared answers E1340 hangar shared --help is not a command. The other four moves landed."
+        },
+        {
+          "at": "2026-08-25",
           "by": "owner",
           "text": "Verdict recorded (D-VERDICT-2195-1): The hangar verb groups everything that manipulates the store rather than the project. It absorbs the former top-level cache, shared-store, vendor, clean and list verbs. The name hangar is kept because it is the existing user-facing name for the object store, so no new word is coined. The doctor verb stays top-level because it is what a stuck user runs first."
         }
@@ -150298,11 +150312,11 @@
         {
           "n": 1,
           "text": "cache shared-store vendor clean and list are no longer top-level verbs and each is reachable under hangar with identical behaviour",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:07.060Z"
+          "evidence": "cache, shared-store, vendor, clean and list are retired as top-level verbs, each answering E1354, and the replacements work: jetpack hangar list prints realized packages, hangar clean prints a plan, hangar vendor reports no source-built packages, hangar du reports per-object unique and shared bytes.",
+          "at": "2026-08-25T17:34:20.546Z"
         },
         {
           "n": 2,
@@ -150316,29 +150330,29 @@
         {
           "n": 3,
           "text": "help output groups the hangar sub-verbs and every retired top-level spelling produces a diagnostic naming its new location",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:07.827Z"
+          "evidence": "`crates/jetpack/src/CLI/usage_tests.rs:224`, `crates/jetpack/src/CLI/parse.rs:478`, `tests/jetpack_engine.rs:668`; binary smoke confirms grouped help and all five E1354 routes.",
+          "at": "2026-08-25T18:20:54.740Z"
         },
         {
           "n": 4,
           "text": "doctor remains top-level",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:08.189Z"
+          "evidence": "doctor remains top-level: it is still present in JETPACK_VERBS alongside fmt, run, env, use, test, hangar, audit, add, remove, update, outdated, search, info, explain, logs, override and push.",
+          "at": "2026-08-25T17:34:24.113Z"
         },
         {
           "n": 5,
           "text": "docs tests and skills referencing the retired top-level spellings are migrated, proven by a fresh rg",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:08.563Z"
+          "evidence": "`docs/spec/syntax-decisions.md:4673`; fresh scoped `rg` returned no matches. Targeted test compile blocked by sibling dead-code errors; no `test result:` line.",
+          "at": "2026-08-25T18:20:55.109Z"
         }
       ],
       "refs": [],
@@ -150346,7 +150360,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:39.441Z",
-      "updated": "2026-08-25T13:21:15.552Z",
+      "updated": "2026-08-25T18:20:55.110Z",
       "updatedBy": "orchestrator",
       "workOrder": 3
     },
@@ -150366,6 +150380,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Root-resolution follow-up: replaced two-crate manual runtime/Core boundary with one content-addressed closure rlib; added real-rustc independent closure compile+warm-hit proof; FX status now consumes sema's selected Output fact or canonical Codegen entry; deleted CompileOutput Abilities, derivation helpers, re-exports, tests, CLI flag, and snapshots; jet-env now uses clean HEAD flake identity when flake inputs are unchanged, avoiding multi-minute dirty-tree copies. Exact branches and callbacks builds pass on the published binary."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -150485,7 +150504,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T14:52:17.843Z",
-      "updated": "2026-08-25T16:47:10.732Z",
+      "updated": "2026-08-25T18:00:03.303Z",
       "updatedBy": "Main",
       "completedAt": "2026-08-25T16:47:10.732Z"
     },
@@ -209162,6 +209181,153 @@
   ],
   "events": [
     {
+      "at": "2026-08-25T18:21:03.059Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c024o546",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T18:21:01.849Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c024o546",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T18:21:00.628Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c024o546",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T18:21:00.231Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c024o546",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-25T18:20:58.860Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-25T18:20:57.281Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-25T18:20:56.906Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-25T18:20:56.541Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T18:20:56.191Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T18:20:55.830Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T18:20:55.467Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-25T18:20:55.110Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0h7q2i8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T18:20:54.740Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0h7q2i8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T18:00:03.303Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03kulod",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T17:59:53.097Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09otnjg",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T17:59:38.403Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09otnjg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-25T17:34:25.385Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c09vy29f",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-25T17:34:24.943Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0h7q2i8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-25T17:34:24.552Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c09vy29f",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-25T17:34:24.114Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0h7q2i8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T17:34:20.547Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0h7q2i8",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-25T17:32:04.495Z",
       "by": "orchestrator",
       "action": "card.criteria-reopen",
@@ -212513,153 +212679,6 @@
       "action": "card.criteria-add",
       "ref": "c00xg57g",
       "note": "#6 Slice-specific: the behavior this card alone owns — “jetos i"
-    },
-    {
-      "at": "2026-08-24T23:25:59.046Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c00xg57g",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:58.259Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0vb58xt",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos i"
-    },
-    {
-      "at": "2026-08-24T23:25:57.378Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0vb58xt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:56.589Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0lgsfwe",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos m"
-    },
-    {
-      "at": "2026-08-24T23:25:55.777Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0lgsfwe",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:55.418Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0aatck7",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos o"
-    },
-    {
-      "at": "2026-08-24T23:25:55.050Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0aatck7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:54.691Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c04ucjza",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos o"
-    },
-    {
-      "at": "2026-08-24T23:25:54.330Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c04ucjza",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:53.932Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0v77oqp",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “jet dep"
-    },
-    {
-      "at": "2026-08-24T23:25:53.565Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0v77oqp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:53.199Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0q1ctbc",
-      "note": "#8 Slice-specific: the behavior this card alone owns — “jet dep"
-    },
-    {
-      "at": "2026-08-24T23:25:52.853Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0q1ctbc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:52.500Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kwrsnd",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “jet dep"
-    },
-    {
-      "at": "2026-08-24T23:25:52.154Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0kwrsnd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:51.790Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fdw5bn",
-      "note": "#8 Slice-specific: the behavior this card alone owns — “jet dep"
-    },
-    {
-      "at": "2026-08-24T23:25:51.417Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0fdw5bn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:51.043Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c04phsyd",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos S"
-    },
-    {
-      "at": "2026-08-24T23:25:50.628Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c04phsyd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:50.260Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zbbsy1",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos S"
-    },
-    {
-      "at": "2026-08-24T23:25:49.875Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zbbsy1",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,

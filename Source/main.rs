@@ -1,5 +1,5 @@
 //! jet CLI: check / build / run / test / new / fmt / try / lsp +
-//!          add / remove / fetch / update / hangar (M12.1 package manager).
+//!          add / remove / fetch / update (M12.1 package manager).
 //!
 //! The driver owns invariant I2: rustc's voice never reaches the user as
 //! if it were their fault. A rustc failure on generated code is reported
@@ -64,8 +64,9 @@ mod ProveSolver;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     resolve_named_profile, run_build_query, run_compile_cmd, run_compiler_api, run_debug_native,
-    run_dev_entry, run_dev_web, run_fix, run_fmt, run_fuzz, run_jobs, run_new, run_test_opts,
-    run_test_package, run_web_app_dev_entry, validate_target, FuzzRunOpts, TestRunOpts,
+    run_dev_entry, run_dev_web, run_external_fmt, run_fix, run_fmt, run_fuzz, run_jobs, run_new,
+    run_test_opts, run_test_package, run_web_app_dev_entry, validate_target, FuzzRunOpts,
+    TestRunOpts,
 };
 use CmdDevTools::{
     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
@@ -78,9 +79,7 @@ use CmdExpand::run_expand;
 use CmdFill::run_fill;
 use CmdImpact::run_impact;
 use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
-use CmdPkg::{
-    run_add, run_fetch, run_hangar_generations, run_hangar_rollback, run_remove, run_update,
-};
+use CmdPkg::{run_add, run_fetch, run_remove, run_update};
 use CmdProve::run_prove;
 use CmdRemote::run_remote;
 use CmdReport::run_report;
@@ -768,7 +767,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     if let Some(spec) = jet::CLI::command_group(&group) {
         // #1659 criterion 2: `--help`/`-h` are real help requests here, not
         // an unmodeled subword — retiring the E2101 that used to fire for
-        // e.g. `jet hangar --help`.
+        // an exhaustive group help request.
         let asks_help = if group == "env" {
             matches!(raw.get(1).map(String::as_str), Some("help"))
                 || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a))
@@ -954,6 +953,10 @@ fn teach_retired(spec: &jet::CLI::RetiredCommandSpec, raw: &[String], json: bool
 /// separator form (D-CLI1=A).
 fn check_flags(raw: &[String], subcmd: &str) {
     let bin = jet::Syntax::BINARY_NAME;
+    let external_fmt = subcmd == "fmt"
+        && raw
+            .iter()
+            .any(|arg| arg == jet::Syntax::FMT_FLAG_LANG || arg.starts_with("--lang="));
     // E2102 is an argv diagnostic, not a Jet-source diagnostic: there is no
     // source file and byte span for `jet fix` to apply, so its flag suggestion
     // remains prose-only until the CLI report gains an argv edit surface.
@@ -965,6 +968,24 @@ fn check_flags(raw: &[String], subcmd: &str) {
             continue;
         }
         let head = a.split('=').next().unwrap_or(a);
+        if external_fmt
+            && matches!(
+                head,
+                "--trust"
+                    | "--offline"
+                    | "--online"
+                    | "--no-color"
+                    | "--json"
+                    | "--flake"
+                    | "--pure"
+                    | "--yes"
+                    | "--fixtures"
+                    | "--preset"
+                    | "--env"
+            )
+        {
+            continue;
+        }
         if head == "--emit-rust" {
             eprintln!("Error [E2102]: `--emit-rust` isn't a flag {bin} understands");
             eprintln!(" Why: generated output belongs to the `emit` command");
@@ -1703,7 +1724,7 @@ fn main() {
     // gate `jet self devtools grammars --help` silently executes (writes
     // files) instead of printing help — the exact bug this criterion exists
     // to close. Every other `owns_flags` command
-    // (`prove`/`budget`/`report`/`clean`/`update`/`image`/`trust`/`hangar`/
+    // (`prove`/`budget`/`report`/`clean`/`update`/`image`/`trust`/
     // `devtools`/…) previously either error-taught E2102 or, worse, executed
     // for real — this is checked before the pinned-toolchain re-exec so a
     // help request never pays for one.
@@ -1967,11 +1988,7 @@ fn main() {
                 .iter()
                 .any(|a| a == jet::Syntax::FMT_FLAG_LANG || a.starts_with("--lang="))
             {
-                exit(EngineDispatch::dispatch(
-                    jet::Syntax::JETPACK_BINARY_NAME,
-                    "fmt",
-                    &raw,
-                ));
+                exit(run_external_fmt(&raw, mode));
             }
             // D-FMTPROJECT1=D: project-level formatter. No positional target
             // required — defaults to discovering the workspace/project root.
@@ -2410,8 +2427,8 @@ fn main() {
         }
         "dev" => {
             // D-RUN-LAW1=A: every dev verb runs one program; `jet dev` uses
-            // the file-scoped watcher below. Project-level `jetpack dev`
-            // remains owned by Jetpack.
+            // the file-scoped watcher below. Project-level development
+            // remains a Jet operation.
             // E2-M4 (D-DEV4): re-check and re-run the entry file on every save,
             // streaming output for sub-200ms feedback. The interpreter is a dev
             // convenience only — `jet build`/`jet run` never touch it (I2/I3).
@@ -2608,50 +2625,6 @@ fn main() {
                 exit(jet::Debug::run_debug(&resolved));
             }
             exit(run_debug_native(&resolved, raw_frames, dap, mode));
-        }
-        // D-CLI-STORE2=A / D-JPK-STORECLI1=D: `jet hangar` owns every physical
-        // store verb. `path`/`rollback`/`generations` reuse the existing real
-        // generation-tracking logic (renamed from `store`); `du` and `verify`
-        // use Jetpack's real store accounting and archive verification.
-        // Archive operations cross the version-checked Jetpack boundary so
-        // every transfer verb shares one signed archive and closure
-        // implementation.
-        "hangar" => {
-            let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
-            match sub {
-                "verify" => {
-                    exit(EngineDispatch::dispatch(
-                        jet::Syntax::JETPACK_BINARY_NAME,
-                        "hangar",
-                        &raw,
-                    ));
-                }
-                "rollback" => {
-                    let gen_str = args.get(2).map(|s| s.as_str()).unwrap_or("");
-                    run_hangar_rollback(gen_str, mode.json);
-                }
-                "generations" => run_hangar_generations(mode.json),
-                "path" | "du" => {
-                    exit(EngineDispatch::dispatch(
-                        jet::Syntax::JETPACK_BINARY_NAME,
-                        "hangar",
-                        &raw,
-                    ));
-                }
-                "repair" | "copy" | "import" | "export" | "dump" | "restore" | "sign"
-                | "recover" => {
-                    exit(EngineDispatch::dispatch(
-                        jet::Syntax::JETPACK_BINARY_NAME,
-                        "hangar",
-                        &raw,
-                    ));
-                }
-                _ => {
-                    crate::cli_error!(@fix "E2101", format!("unknown hangar subcommand `{}`", sub), "run `jet hangar help` to see every hangar command");
-                    exit(ExitCodes::USAGE);
-                }
-            }
-            return;
         }
         // D-JPK-CACHECONFIG1=D: cache roles and mirrors are host-owned by
         // Jetpack. The compiler front door forwards the exact argv.

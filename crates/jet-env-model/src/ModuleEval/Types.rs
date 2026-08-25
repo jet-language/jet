@@ -568,7 +568,7 @@ pub struct EnvPlan {
     /// known system.
     pub vmtests: Vec<VmTestPlan>,
     /// U12: every captured dev-supervised `Service` in the selected environment,
-    /// in source order. `jetpack services <verb>`/`jetpack dev`'s health gate
+    /// in source order. `jetpack services <verb>`'s health gate
     /// are the only consumers — the jetos tier never reads this.
     pub dev_services: Vec<DevServicePlan>,
     /// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: every typed declaration

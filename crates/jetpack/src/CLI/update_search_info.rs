@@ -398,7 +398,7 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
                 parsed,
                 "E1274",
                 &format!("no package record or build attempt for `{package}`"),
-                "`jet explain` reads the Hangar Store and persisted Jetpack build attempts; neither contains this package.",
+                "`jet explain` reads the Hangar Store and persisted Jetpack realization attempts; neither contains this package.",
                 &format!("run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help."),
             )
         }
@@ -738,7 +738,7 @@ fn missing_logs(theme: &Theme, package: &str) -> i32 {
     theme.error_coded(
         "E1274",
         &format!("no build log for `{package}`"),
-        "`jet logs` reads persisted Jetpack build attempts; no attempt is recorded for that package.",
+        "`jet logs` reads persisted Jetpack realization attempts; no attempt is recorded for that package.",
         &format!("run `jet build {package}` first."),
     );
     2

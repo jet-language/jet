@@ -198,7 +198,7 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
         .split_whitespace()
         .find(|tok| tok.starts_with("sha256-"))
         .expect("digest in ingest status");
-    let verify = jet()
+    let verify = jetpack()
         .args(["hangar", "verify", digest, "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
@@ -213,7 +213,7 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
     assert!(verify_stderr.contains("verified"), "{verify_stderr}");
     assert!(
         !String::from_utf8_lossy(&verify.stdout).contains("hangar is empty"),
-        "top-level `jet hangar verify` bypassed Jetpack: {}",
+        "Jetpack Hangar verification reported an empty store: {}",
         String::from_utf8_lossy(&verify.stdout)
     );
 

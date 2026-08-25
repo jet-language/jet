@@ -368,7 +368,7 @@ pub(super) fn compose_env_scoped(
         );
         return Err(2);
     }
-    let profile_bin =
+    let profile_bin = if scope == RealizeScope::Project {
         match super::profile::dev_shell_projection(&plan.project_root, &plan.environment) {
             Ok(profile_bin) => profile_bin,
             Err(error) => {
@@ -380,7 +380,10 @@ pub(super) fn compose_env_scoped(
                 );
                 return Err(2);
             }
-        };
+        }
+    } else {
+        None
+    };
     let mut bin_dirs = profile_bin
         .into_iter()
         .map(|path| path.to_string_lossy().into_owned())
@@ -521,12 +524,16 @@ pub(super) fn compose_env_scoped(
         return Err(2);
     }
     let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
-    let native_projection = native_environment_projection(
-        &plan.project_root,
-        &realized_outputs,
-        inherited_loader_path.as_deref(),
-    );
-    bin_dirs.extend(native_projection.bin_dirs());
+    let native_projection = (scope == RealizeScope::Project).then(|| {
+        native_environment_projection(
+            &plan.project_root,
+            &realized_outputs,
+            inherited_loader_path.as_deref(),
+        )
+    });
+    if let Some(native_projection) = &native_projection {
+        bin_dirs.extend(native_projection.bin_dirs());
+    }
     let mut composed_vars: std::collections::BTreeMap<String, String> = provider_vars
         .into_iter()
         .map(|(name, values)| {
@@ -614,7 +621,9 @@ pub(super) fn compose_env_scoped(
     }
     // Native projection is applied last so the Jet-owned root, markers, and
     // generated output paths cannot be shadowed by dotenv or preset values.
-    composed_vars.extend(native_projection.env_vars());
+    if let Some(native_projection) = native_projection {
+        composed_vars.extend(native_projection.env_vars());
+    }
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above are the whole
     // report — `jet env`/`run`/`dev` hand off straight to the shell
     // threshold rule (`Shell::enter`) instead of a redundant summary line.
@@ -999,6 +1008,7 @@ fn name_column_width(refs: &[RefSpec::RefSpec]) -> usize {
 }
 
 /// D-JPK-SELECTOR1=C: turn CLI flags into a workspace selection request.
+#[allow(dead_code)]
 fn select_request_from_flags(flags: &Flags) -> SelectRequest {
     SelectRequest {
         packages: flags.workspace_members.clone(),
@@ -1007,11 +1017,13 @@ fn select_request_from_flags(flags: &Flags) -> SelectRequest {
     }
 }
 
+#[allow(dead_code)]
 fn report_select_error(theme: &Theme, d: &crate::Diagnostics::Diagnostic) -> i32 {
     theme.error_coded(&d.code, &d.what, &d.why, &d.fix);
     2
 }
 
+#[allow(dead_code)]
 fn sandbox_receipt(entry: &Store::StoreEntry) -> Option<(String, String)> {
     let producer = Store::ProducerRecord::decode(&entry.producer_record).ok()?;
     let receipt = (
@@ -1021,6 +1033,7 @@ fn sandbox_receipt(entry: &Store::StoreEntry) -> Option<(String, String)> {
     crate::RuntimePolicy::sandbox_receipt_is_truthful(&receipt.0, &receipt.1).then_some(receipt)
 }
 
+#[allow(dead_code)]
 fn build_sandbox_outcome(
     built: usize,
     substituted: usize,
@@ -1063,6 +1076,7 @@ fn build_sandbox_outcome(
 
 /// Build (or test) each selected workspace member via the core provider.
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum WorkspaceAction {
     Build,
     Test,
@@ -1084,6 +1098,7 @@ impl WorkspaceAction {
     }
 }
 
+#[allow(dead_code)]
 fn run_workspace_members(
     theme: &Theme,
     parsed: &Parsed,
@@ -1203,7 +1218,8 @@ fn run_workspace_members(
     }
 }
 
-/// `jetpack build [<ref>]` — realize without entering a shell.
+/// `jetpack env --prep [<ref>]` — realize without entering a shell.
+#[allow(dead_code)]
 pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let dir = std::env::current_dir().unwrap_or_default();
@@ -1395,9 +1411,10 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
     }
 }
 
-/// `jetpack test` — realize selected workspace members (D-JPK-SELECTOR1=C).
+/// `jet test` — realize selected workspace members (D-JPK-SELECTOR1=C).
 /// Outside a workspace, falls through to the same project-plan realize path as
 /// `build` (tests ride the package after realize).
+#[allow(dead_code)]
 fn run_jet_tests(dir: &std::path::Path) -> bool {
     // Cargo runs integration-test binaries from `target/debug/deps`, while
     // the sibling compiler binary stays in `target/debug`. Find that binary
@@ -1432,6 +1449,7 @@ fn run_jet_tests(dir: &std::path::Path) -> bool {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn cmd_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     let (workspace_dir, workspace_source) = workspace_root_snapshot_or_exit(&dir);

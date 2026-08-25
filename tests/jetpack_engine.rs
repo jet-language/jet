@@ -6805,7 +6805,7 @@ fn typed_core_source_inferred_from_pack_jet() {
 fn core_provider_builds_library_package_without_nix() {
     // U10 Chunk 4: a `library` package realizes through the `core` provider
     // (no nix), staging its module source. Unlike an `executable`, it puts no
-    // `bin/` on PATH — but `jetpack build` realizes it just the same. The kind
+    // `bin/` on PATH — but `jetpack env --prep` realizes it just the same. The kind
     // comes from the repo's `package.jet` `packages:` index.
     let base = Scratch::new("core-library");
     let repo = base.join("jet-pkgs");
@@ -6921,7 +6921,7 @@ fn core_cargo_build_requires_exact_trust_before_running_build_script() {
 #[test]
 fn committed_example_builds_offline_end_to_end() {
     // I5: the committed jetpack project fixture is the executable spec for
-    // a real env.jet. `jetpack build` with no ref reads env.jet and realizes
+    // a real env.jet. `jetpack env --prep` with no ref reads env.jet and realizes
     // everything it declares — nix-backed named sources (`ripgrep@stable`,
     // `neovim@unstable`) resolved from the committed fixtures, plus a
     // first-party `hello@mine` realized through the `core` provider with no
@@ -6991,7 +6991,7 @@ fn failed_first_dependency_reports_zero_completed_nodes() {
 fn typed_module_example_builds_offline_end_to_end() {
     // I5: the committed jetpack-typed fixture is the executable spec
     // for the typed `module { … }` env surface (U3/U6/U8) including U4 import-tree
-    // discovery. `jetpack build` with no ref evaluates env.jet through `modeval`:
+    // discovery. `jetpack env --prep` with no ref evaluates env.jet through `modeval`:
     // the `default` source merges to its pinned nixpkgs upstream,
     // `[default.ripgrep, default.fd]` gives two `Pkg` refs, and `imports:
     // find("./modules")` walks `modules/tools.jet` and folds its `default.jq`
@@ -7054,7 +7054,7 @@ fn core_provider_fetches_remote_git_package_from_env() {
     for args in [
         vec!["init"],
         vec!["config", "user.email", "jetpack@example.invalid"],
-        vec!["config", "user.name", "Jetpack Test"],
+        vec!["config", "user.name", "Jet Test"],
         vec!["add", "."],
         vec!["commit", "-m", "init"],
     ] {
@@ -7601,7 +7601,7 @@ fn mono_example_has_two_package_jet_members() {
 
 #[test]
 fn jet_build_reports_source_states() {
-    // T4: `jetpack build` reports how each package was satisfied. A first build
+    // T4: `jetpack env --prep` reports how each package was satisfied. A first build
     // of a core package is `built`; the content-addressed re-build is `cached`.
     let (_base, proj, root) = core_hello_project("t4-build");
     let run = || {

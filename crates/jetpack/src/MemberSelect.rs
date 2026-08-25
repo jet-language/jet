@@ -1,4 +1,4 @@
-//! Workspace member selection for `jetpack build` / `test` / `run`
+//! Workspace member selection for `jetpack env --prep` and Jet code commands
 //! (D-JPK-SELECTOR1=C).
 //!
 //! `-p <member>` (exact, repeatable) picks named members; unknown names are

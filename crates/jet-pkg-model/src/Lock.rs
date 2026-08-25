@@ -2041,7 +2041,7 @@ pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEn
 /// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the locked
 /// source identity (the resolved ref + realized output path) and the produced
 /// output closure envelope into `.jet/lock`, creating the lock if the project
-/// has none (a bare `jetpack build …@nixpkgs` project may carry no manifest yet).
+/// has none (a bare `jetpack env --prep` project may carry no manifest yet).
 /// This lock entry is the trust root a later offline realize matches before it
 /// may reuse the hangar copy: the recorded `output_hash` is re-verified against
 /// the on-disk closure, never the ref spelling (card #418). Upserts by package

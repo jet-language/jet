@@ -18,8 +18,8 @@ use jet_env_model::ModuleEval;
 use std::path::{Path, PathBuf};
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
-/// current project's env file so `jetpack run ripgrep@stable` works there, and
-/// any workspace member so `jetpack run logging` / `jetpack run packages/logging`
+/// current project's env file so `jetpack use ripgrep@stable` works there, and
+/// any workspace member so `jetpack use logging` / `jetpack use packages/logging`
 /// resolve in a monorepo (Slice B, D-MONOREF1=A). Prints the diagnostic on failure.
 pub(super) fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefError> {
     let table = cwd_table();
@@ -66,6 +66,7 @@ pub(super) fn project_env_root(start: &Path) -> PathBuf {
 
 /// Realize one ref, recording it in the store and printing progress. `table`
 /// resolves named sources (D-JPK17); it is empty for direct CLI refs.
+#[allow(dead_code)]
 pub(super) fn realize_ref(
     theme: &Theme,
     roots: &Roots,
@@ -134,6 +135,7 @@ pub(super) enum RefOutcome {
 pub(super) enum RealizeScope {
     Project,
     UserProfile,
+    Use,
 }
 
 pub(super) fn realize_ref_outcome(
@@ -173,7 +175,19 @@ pub(super) fn realize_ref_outcome(
     let store_dir = roots.hangar_dir();
     let project_dir = match scope {
         RealizeScope::Project => current_project_dir(),
-        RealizeScope::UserProfile => None,
+        RealizeScope::UserProfile | RealizeScope::Use => None,
+    };
+    let user_profile_reuse = if scope == RealizeScope::Use {
+        match Store::find_verified_user_profile_by_reference(roots, &spec.raw) {
+            Ok(reuse) => reuse,
+            Err(error) => {
+                report_realize_error(theme, &Store::RealizeError::Store(error));
+                drop(spinner);
+                return RefOutcome::Failed;
+            }
+        }
+    } else {
+        None
     };
     let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
     // A Nix ref may reuse a Hangar copy only when the committed lock identity
@@ -183,23 +197,24 @@ pub(super) fn realize_ref_outcome(
     // A verified imported object is a Jetpack result in every mode. Probe it
     // before the Nix-bridge diagnostic so an online run/build can reuse the
     // locked package without rediscovering or invoking Nix.
-    let verified_reuse_ok = uses_nix && fixtures_for(flags).is_none() && {
-        let probe = Provider::Ctx {
-            fixtures: None,
-            store_dir: &store_dir,
-            offline: flags.offline,
-            project_dir: project_dir.as_deref(),
-            nix_index: None,
-            nix_roots: None,
-        };
-        Provider::cache_expectation(spec, table, &probe)
-            .and_then(|expectation| {
-                Store::find_verified_by_reference(roots, &spec.raw, &expectation)
-                    .ok()
-                    .flatten()
-            })
-            .is_some()
-    };
+    let verified_reuse_ok = user_profile_reuse.is_some()
+        || (uses_nix && fixtures_for(flags).is_none() && {
+            let probe = Provider::Ctx {
+                fixtures: None,
+                store_dir: &store_dir,
+                offline: flags.offline,
+                project_dir: project_dir.as_deref(),
+                nix_index: None,
+                nix_roots: None,
+            };
+            Provider::cache_expectation(spec, table, &probe)
+                .and_then(|expectation| {
+                    Store::find_verified_by_reference(roots, &spec.raw, &expectation)
+                        .ok()
+                        .flatten()
+                })
+                .is_some()
+        });
     let indexed_nix = flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
@@ -326,8 +341,12 @@ pub(super) fn realize_ref_outcome(
         }
     }
     let started = std::time::Instant::now();
-    let result =
-        Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table });
+    let result = match user_profile_reuse {
+        Some(realized) => Ok(realized),
+        None => {
+            Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
+        }
+    };
     drop(spinner);
     match result {
         Ok(realized) => {

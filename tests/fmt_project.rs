@@ -16,6 +16,7 @@
 //!     had to refuse
 
 mod common;
+use common::jetpack_bin;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,7 +59,79 @@ fn read(p: &Path) -> String {
     fs::read_to_string(p).unwrap()
 }
 
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+/// D-ECO12=A: the public `jet fmt` front door reaches the realized
+/// environment formatter for a non-Jet file.
+#[test]
+fn top_level_jet_fmt_delegates_non_jet_file_to_realized_formatter() {
+    let dir = tmpdir(&line!().to_string());
+    let root = dir.join("root");
+    let formatter_repo = dir.join("formatter-repo");
+    let formatter = formatter_repo.join("bin/nixfmt");
+    fs::create_dir_all(formatter.parent().unwrap()).unwrap();
+    fs::write(
+        &formatter,
+        "#!/bin/sh\nset -e\nfor path do\n    printf 'formatted\\n' > \"$path\"\ndone\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    make_executable(&formatter);
+    fs::write(
+        formatter_repo.join("package.jet"),
+        "name: \"formatter-repo\"\nversion: \"0.1.0\"\npackages: { nixfmt: executable }\n",
+    )
+    .unwrap();
+    fs::write(formatter_repo.join("nixfmt.jet"), "module nixfmt { }\n").unwrap();
+    fs::write(
+        dir.join("env.jet"),
+        format!(
+            "module env.dev {{\n    sources: {{ local: {} }}\n    formatter: \"nixfmt@local\"\n}}\n",
+            formatter_repo.to_string_lossy()
+        ),
+    )
+    .unwrap();
+    let file = write(&dir, "flake.nix", "unformatted\n");
+    let jetpack_dir = jetpack_bin().parent().unwrap();
+    let mut path_entries = vec![jetpack_dir.to_path_buf()];
+    path_entries.extend(
+        std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>()),
+    );
+    let path = std::env::join_paths(path_entries).unwrap();
+
+    let out = Command::new(jet())
+        .args([
+            "fmt",
+            "--lang",
+            "nix",
+            "--trust",
+            "--offline",
+            "--no-color",
+        ])
+        .current_dir(&dir)
+        .env("JETPACK_ROOT", &root)
+        .env("JETPACK_SHARED_CAS", dir.join("shared-cas"))
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "jet fmt delegation failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(read(&file), "formatted\n");
+}
 
 /// `jet fmt` with no args from a directory containing .jet files formats them.
 #[test]

@@ -139,10 +139,11 @@ fn secret_activation_missing(
 }
 
 /// U12: bring up every enabled dev `services:` entry and block until each is
-/// healthy (or E1261 on timeout) before `jetpack dev` runs the project's
+/// healthy (or E1261 on timeout) before `jet dev` runs the project's
 /// `fn dev()`/`fn run()`. Takes the composed `Env` so a catalog binary (e.g.
 /// `redis-server`, realized alongside the project's own packages) resolves
 /// on PATH the same way the project's own command does.
+#[allow(dead_code)]
 pub(super) fn wait_for_services_ready(
     theme: &Theme,
     parsed: &Parsed,
@@ -1262,7 +1263,7 @@ pub(super) fn find_jet_binary() -> String {
     Syntax::BINARY_NAME.to_string()
 }
 
-/// Project entry for bare `jetpack dev`, matching `jet`'s run-first convention.
+/// Project entry for bare `jet dev`, matching `jet`'s run-first convention.
 /// Kept local because jetpack and jet are separate binaries (D-JPK-DISPATCH1).
 pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
     let resolver = match AuthorityResolver::open(project_dir) {
@@ -1333,6 +1334,7 @@ fn report_entry_authority_error(diagnostic: crate::Diagnostics::Diagnostic) -> !
 /// dev-with-fallback rule, E1254 otherwise). A parse failure just means "no"
 /// here — the real diagnostics surface a moment later when the compiler
 /// actually loads the file.
+#[allow(dead_code)]
 pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
     let Ok(src) = std::fs::read_to_string(file) else {
         return false;

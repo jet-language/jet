@@ -470,7 +470,7 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                         "E1340",
                         "could not read Hangar disk usage",
                         &error.to_string(),
-                        "run `jet hangar recover`, repair the reported state, then retry.",
+                        "run `jetpack hangar recover`, repair the reported state, then retry.",
                     )
                 }
             };

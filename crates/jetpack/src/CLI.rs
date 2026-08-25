@@ -1,6 +1,6 @@
 //! Jetpack Phase 1 command dispatch (D-JPK2/9).
 //!
-//! `jetpack run/hangar list/hangar clean/add/remove`. Independent from the `jet`
+//! `jetpack use/hangar list/hangar clean/add/remove`. Independent from the `jet`
 //! binary (D-JPK1). All user-facing output flows through `Output::Theme`.
 
 use super::Doctor;
@@ -12,6 +12,7 @@ pub mod ProfileDispatch;
 mod add_remove_push_image;
 mod bridge_os_studio;
 mod browser;
+#[allow(dead_code)]
 mod format;
 mod package_hangar_vendor;
 mod parse;

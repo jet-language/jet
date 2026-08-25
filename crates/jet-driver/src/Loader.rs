@@ -257,7 +257,7 @@ fn project_parts_loader_error(
 /// resolves to that staged tree — it is just an extra module search root. An
 /// `executable` named in `use` is a teaching error (executables go on PATH,
 /// E0982); a declared-but-unrealized `library` dependency points the user at
-/// `jetpack build` (E0983).
+/// `jetpack env --prep` (E0983).
 #[derive(Default)]
 pub struct PkgResolution {
     /// Realized `library` packages → their staged source dir in the hangar
@@ -464,11 +464,11 @@ fn record_import_edge_fact(
 /// shared hangar store.
 ///
 /// Reading the hangar is a *pure lookup*: the compiler never realizes on demand
-/// (that is `jetpack build`'s job). This keeps `jet build`/`run` offline and
+/// (that is `jetpack env --prep`'s job). This keeps `jet build`/`run` offline and
 /// deterministic, exactly like the existing pre-fetched-dependency flow
 /// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
 /// the separate realize step). So a declared-but-unbuilt library is a friendly
-/// "run `jetpack build`" (E0983), never a silent network fetch.
+/// "run `jetpack env --prep`" (E0983), never a silent network fetch.
 fn collect_pkg_resolution(raw: &str) -> Result<PkgResolution, Diagnostic> {
     let mut declared_deps = HashSet::new();
     let facts =
@@ -2831,7 +2831,7 @@ fn resolve_module_import(
         if pkg_resolution.realized_exes.contains(first_segment) {
             return Err(e0982_executable_use(first_segment, span));
         }
-        // Declared as a dependency but not realized yet → run `jetpack build`
+        // Declared as a dependency but not realized yet → run `jetpack env --prep`
         // (E0983), rather than a generic unknown-module error.
         if pkg_resolution.declared_deps.contains(first_segment)
             && find_module_files(name, project_root)?.is_empty()
@@ -3024,7 +3024,7 @@ fn e0983_unrealized_library(name: &str, span: Span) -> Diagnostic {
         "a `library` package must be realized — its source staged in the shared store (hangar) — before `use` can find it (U17)"
             .to_string(),
         format!(
-            "run `jetpack build` to realize `{}`, then `{} {};` will resolve it",
+            "run `jetpack env --prep` to realize `{}`, then `{} {};` will resolve it",
             name, Syntax::KW_USE, name
         ),
         Some(span),

@@ -110,10 +110,24 @@ if command -v direnv >/dev/null 2>&1; then
   fi
 fi
 
+# A dirty Git flake makes Nix copy the entire checkout into the store before
+# every command. The shell depends only on flake.nix/flake.lock, so use the
+# current clean commit whenever those two inputs are unchanged. Source edits
+# then reach target/debug/jet directly without entering the flake identity.
+flake_ref="$repo"
+if command -v git >/dev/null 2>&1 \
+  && git -C "$repo" diff --quiet -- flake.nix flake.lock \
+  && git -C "$repo" diff --cached --quiet -- flake.nix flake.lock
+then
+  if revision="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"; then
+    flake_ref="git+file://$repo?rev=$revision"
+  fi
+fi
+
 # Inside `nix develop`, re-enter this script's cache selection via bash -c so
 # the check sees the shell's PATH.
 joined="$(printf '%q ' "$@")"
 if [ "$profile" = "full" ]; then
-  exec nix develop "$repo#full" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
+  exec nix develop "${flake_ref}#full" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
 fi
-exec nix develop "$repo" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
+exec nix develop "$flake_ref" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"

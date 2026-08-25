@@ -1,4 +1,4 @@
-//! D-JPK-TASKRUN1 (card #476): `jetpack run <job>` discovers `#Job fn`s.
+//! D-JPK-TASKRUN1 (card #476): `jet run <job>` discovers `#Job fn`s.
 
 use std::fs;
 use std::process::Command;

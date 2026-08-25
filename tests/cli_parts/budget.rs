@@ -1256,16 +1256,6 @@ fn frequency_ring_groups_execute_real_handlers() {
         "group must reach semindex handler"
     );
     assert!(String::from_utf8_lossy(&out.stderr).contains("needs an entry file"));
-
-    let out = Command::new(jet())
-        .args(["hangar", "generations"])
-        .output()
-        .unwrap();
-    assert_ne!(
-        out.status.code(),
-        Some(2),
-        "existing grouped handler must remain live"
-    );
 }
 
 #[test]

@@ -1937,7 +1937,7 @@ use std::fmt::Debug;
     }
 
     #[test]
-    fn branches_core_closure_compiles_as_split_rlibs() {
+    fn branches_core_closure_compiles_as_cached_rlib() {
         if Command::new("rustc").arg("-vV").output().is_err() {
             return;
         }

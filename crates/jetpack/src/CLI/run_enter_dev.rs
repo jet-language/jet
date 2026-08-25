@@ -29,11 +29,12 @@ use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// `jetpack run [<ref>|<job>] [-- cmd…]`
+/// `jetpack use [<ref>] [-- cmd…]`
 ///
 /// D-JPK-TASKRUN1: a bare first positional that names a `#Job fn` in the
 /// project entry runs that job (via `jet run <entry> -- <name>`). Package
 /// refs (`source:pkg`, workspace members) keep the existing realize path.
+#[allow(dead_code)]
 pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
@@ -150,7 +151,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme.error_coded(
                         "E1294",
                         &format!("no job named `{raw}`"),
-                        "`jetpack run <name>` invokes a `#Job fn` in the project entry (D-JPK-TASKRUN1).",
+                        "`jet run <entry> -- <name>` invokes a `#Job fn` in the project entry (D-JPK-TASKRUN1).",
                         "mark a function `#Job` to make it runnable, or check the spelling.",
                     );
                     theme.detail(&format!("declared jobs: {list}"));
@@ -1391,6 +1392,7 @@ fn write_job_cache(
     std::fs::rename(&temporary, &path).map_err(|error| error.to_string())
 }
 
+#[allow(dead_code)]
 fn run_visible_command(theme: &Theme, env: &Env, refs: &[RefSpec::RefSpec], cmd: &[String]) -> i32 {
     if let Some(program) = cmd.first() {
         let ref_label = refs
@@ -1636,13 +1638,7 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env_scoped(
-        theme,
-        &roots,
-        &parsed.flags,
-        &plan,
-        RealizeScope::UserProfile,
-    ) {
+    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::Use) {
         Ok(env) => env,
         Err(code) => return code,
     };
@@ -3016,7 +3012,7 @@ fn enter_foreign_flake(
     }
 }
 
-/// `jetpack dev` — U19 project-level dev (distinct from the already-shipped
+/// `jet dev` — U19 project-level dev (distinct from the already-shipped
 /// `jet dev <file.jet>` file-watch interpreter loop, D-DEV4, which this never
 /// touches). Realizes the project's declared env — today `load_project_plan`
 /// already merges every `env.*` contribution into one plan, which is
@@ -3027,6 +3023,7 @@ fn enter_foreign_flake(
 /// inside the composed env. Running Jet source is the compiler's job, never
 /// jetpack's (D-JPK-DISPATCH1) — this shells out to the sibling `jet` binary
 /// exactly the way `-- cmd` already shells out to an arbitrary command.
+#[allow(dead_code)]
 pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     if roots.dev_mode {
@@ -3126,7 +3123,7 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
         entry.to_string_lossy().into_owned(),
     ];
     // Any leftover positional token (e.g. `--watch=off`) is a flag `jet dev
-    // <file>` itself understands — bare `jetpack dev` takes no file argument
+    // <file>` itself understands — bare `jet dev` takes no file argument
     // of its own, so everything here is pass-through.
     cmd.extend(parsed.positional.iter().cloned());
     Shell::run_command(&env, &cmd)

@@ -384,7 +384,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
     if obj.and_then(|m| m.get("shellHook")).is_some() {
         plan.todos.push(ImportTodo {
             source_path: source_path.to_string(),
-            message: "`shellHook` needs an explicit Jetpack build/env action".to_string(),
+            message: "`shellHook` needs an explicit Jetpack realization/env action".to_string(),
             suggested_surface: Some("role module env.dev plus declared build action".to_string()),
         });
     }

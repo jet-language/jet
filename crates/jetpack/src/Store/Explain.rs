@@ -1886,7 +1886,7 @@ impl ExplainReport {
             if conflict {
                 "repair the conflicting Hangar or provider record, then run `jet explain` again"
             } else {
-                "run `jet hangar verify` and repair or rebuild the affected package before relying on this fact"
+                "run `jetpack hangar verify` and repair or rebuild the affected package before relying on this fact"
             },
         )
         .json();

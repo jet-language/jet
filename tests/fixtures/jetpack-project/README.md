@@ -23,7 +23,7 @@ fixtures so the commands run without Nix or a network.
 
 ```
 $ cd tests/fixtures/jetpack-project
-$ JETPACK_FIXTURES=fixtures jetpack build --offline
+$ JETPACK_FIXTURES=fixtures jetpack env --prep --offline
 
   jetpack  resolving ripgrep@stable …
   jetpack  ripgrep ready ✓
@@ -37,7 +37,7 @@ $ JETPACK_FIXTURES=fixtures jetpack build --offline
   jetpack  built 3 package(s).
 ```
 
-`jetpack build`/`jetpack run` (no ref) read `env.jet` and resolve everything it
+`jetpack env --prep`/`jetpack env` (no ref) read `env.jet` and resolve everything it
 declares — `ripgrep@stable` against the `nixos-24.05` pin, `neovim@unstable`
 against the unstable channel, and `hello@mine` through the first-party `core`
 provider (no Nix). `jetpack add fd@unstable` / `jetpack remove fd@unstable`
@@ -49,7 +49,7 @@ Package refs use a pinned fixture or verified Hangar output. Jetpack does not
 shell out to an installed Nix executable for package realization:
 
 ```
-$ JETPACK_FIXTURES=fixtures jetpack run fastfetch@nixpkgs -- fastfetch
+$ JETPACK_FIXTURES=fixtures jetpack use fastfetch@nixpkgs -- fastfetch
 ```
 
 See `docs/guide/07-jetpack.md` for the full command surface.

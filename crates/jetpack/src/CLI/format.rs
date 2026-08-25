@@ -64,7 +64,7 @@ pub(super) fn cmd_fmt(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(language) = parsed.flags.fmt_language.as_deref() else {
         theme.error_coded(
             "E2104",
-            "jetpack fmt needs --lang <language>",
+            "jet fmt needs --lang <language>",
             "the engine route is reserved for the environment formatter passthrough",
             "run jet fmt --lang <language>, or run jet fmt for native Jet files",
         );

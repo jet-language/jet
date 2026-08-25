@@ -203,7 +203,7 @@ fn env_runs_no_project_function() {
     );
 }
 
-/// Bare `jetpack dev` (no file — the project-level U19 command, distinct from
+/// Bare project dev (no file — the project-level U19 command, distinct from
 /// the already-shipped `jet dev <file.jet>` watch loop) finds the project's
 /// `main.jet`, waits for services (U12 no-op today), and runs its `fn dev()`.
 #[test]

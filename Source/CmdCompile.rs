@@ -1,14 +1,14 @@
 //! check / build / run / test / new / fmt / fix subcommand handlers + the
 //! rustc bridge.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 use std::sync::LazyLock;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use jet::ExitCodes;
 use jet_foundation::Report::render_status_json;
@@ -3595,6 +3595,496 @@ fn format_package_manifest_for_fmt(
 /// `changed_only`   — `--changed`: limit to VCS-changed `.jet` files (git).
 /// `simplify`       — `--simplify`: enable ratified simplest-spelling rewrites.
 /// `mode`           — output mode (`--json`, color).
+struct ExternalFmtTempDir(PathBuf);
+
+impl ExternalFmtTempDir {
+    fn new() -> Result<Self, String> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos();
+        for attempt in 0..32u32 {
+            let path = std::env::temp_dir()
+                .join(format!("jet-fmt-{stamp}-{}-{attempt}", std::process::id()));
+            match fs::create_dir(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Err("could not allocate a formatter staging directory".to_string())
+    }
+}
+
+impl Drop for ExternalFmtTempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+struct ExternalFmtStagedFile {
+    source: PathBuf,
+    staged: PathBuf,
+    before: Vec<u8>,
+}
+
+/// D-ECO12=A: Jet owns the `fmt` verb. For a non-Jet language, it discovers
+/// the formatter fact locally, stages the inputs, and asks the Jetpack engine
+/// only to realize the environment and execute that formatter.
+pub(crate) fn run_external_fmt(raw: &[String], mode: OutputMode) -> i32 {
+    let mut language = None;
+    let mut explicit_paths = Vec::new();
+    let mut child_flags = Vec::new();
+    let mut preset = None;
+    let mut environment = None;
+    let mut check_only = false;
+    let mut show_diff = false;
+    let mut changed_only = false;
+    let mut index = 1;
+    while index < raw.len() {
+        let arg = &raw[index];
+        match arg.as_str() {
+            "--lang" => {
+                index += 1;
+                language = raw.get(index).cloned();
+            }
+            a if a.starts_with("--lang=") => {
+                language = Some(a.trim_start_matches("--lang=").to_string());
+            }
+            "--check" => check_only = true,
+            "--diff" => {
+                check_only = true;
+                show_diff = true;
+            }
+            "--dry-run" => {
+                check_only = true;
+                show_diff = true;
+            }
+            "--changed" => changed_only = true,
+            "--fixtures" | "--preset" | "--env" => {
+                index += 1;
+                let Some(value) = raw.get(index).cloned() else {
+                    crate::cli_error!(
+                        @full "E2104",
+                        format!("{arg} needs a value"),
+                        "these options select the realized environment",
+                        "pass a value after the option"
+                    );
+                    return ExitCodes::USAGE;
+                };
+                match arg.as_str() {
+                    "--fixtures" => {
+                        child_flags.push(arg.clone());
+                        child_flags.push(value);
+                    }
+                    "--preset" => {
+                        preset = Some(value.clone());
+                        child_flags.push(arg.clone());
+                        child_flags.push(value);
+                    }
+                    "--env" => {
+                        environment = Some(value.clone());
+                        child_flags.push(arg.clone());
+                        child_flags.push(value);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            a if a.starts_with("--fixtures=") => {
+                let value = a.trim_start_matches("--fixtures=").to_string();
+                child_flags.extend(["--fixtures".to_string(), value]);
+            }
+            a if a.starts_with("--preset=") => {
+                let value = a.trim_start_matches("--preset=").to_string();
+                preset = Some(value.clone());
+                child_flags.extend(["--preset".to_string(), value]);
+            }
+            a if a.starts_with("--env=") => {
+                let value = a.trim_start_matches("--env=").to_string();
+                environment = Some(value.clone());
+                child_flags.extend(["--env".to_string(), value]);
+            }
+            "--trust" | "--offline" | "--online" | "--no-color" | "--json" | "--flake"
+            | "--pure" | "--yes" | "-y" => child_flags.push(arg.clone()),
+            a if a.starts_with("--color=") => child_flags.push(arg.clone()),
+            "--" => {
+                crate::cli_error!(
+                    @full "E2104",
+                    "jet fmt --lang does not accept a command separator",
+                    "Jet supplies the staged files to the environment formatter",
+                    "pass formatter input paths before `--`"
+                );
+                return ExitCodes::USAGE;
+            }
+            a if a.starts_with('-') => {
+                crate::cli_error!(
+                    @full "E2102",
+                    format!("unknown external formatter option `{a}`"),
+                    "Jet forwards only environment selection and formatter mode flags",
+                    "run `jet fmt --help` or remove the unknown option"
+                );
+                return ExitCodes::USAGE;
+            }
+            _ => explicit_paths.push(arg.clone()),
+        }
+        index += 1;
+    }
+
+    let Some(language) = language
+        .as_deref()
+        .map(str::trim)
+        .map(|value| value.trim_start_matches('.'))
+        .filter(|value| {
+            !value.is_empty()
+                && !value.chars().any(char::is_whitespace)
+                && !value.contains('/')
+                && !value.contains('\\')
+        })
+        .map(str::to_string)
+    else {
+        crate::cli_error!(
+            @full "E2104",
+            "jet fmt needs --lang <language>",
+            "non-Jet formatting is selected by a file-language name",
+            "run `jet fmt --lang nix` or omit `--lang` for Jet files"
+        );
+        return ExitCodes::USAGE;
+    };
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let Some(project_dir) = jetpack::EnvHook::find_env_root(&cwd) else {
+        crate::cli_error!(
+            @full "E1340",
+            "jet fmt --lang needs an env.jet",
+            "the external formatter is an environment package fact",
+            "run from a realized environment project containing env.jet"
+        );
+        return ExitCodes::USER_ERROR;
+    };
+    let env_path = project_dir.join(jet::Syntax::ENV_FILE);
+    let source = match fs::read_to_string(&env_path) {
+        Ok(source) => source,
+        Err(error) => {
+            crate::cli_error!(
+                @full "E1340",
+                format!("could not read `{}`", env_path.display()),
+                error.to_string(),
+                "fix the environment file and retry"
+            );
+            return ExitCodes::USER_ERROR;
+        }
+    };
+    let plan = match jet_env_model::ModuleEval::evaluate_env_with_selections(
+        &source,
+        &project_dir,
+        preset.as_deref(),
+        environment.as_deref(),
+    ) {
+        Ok(plan) => plan,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::Diagnostics::render_all(
+                    jet::Syntax::ENV_FILE,
+                    &source,
+                    std::slice::from_ref(&diagnostic),
+                )
+            );
+            return ExitCodes::USER_ERROR;
+        }
+    };
+    let Some(formatter) = plan.lifecycle.formatter.as_ref() else {
+        crate::cli_error!(
+            @full "E1340",
+            format!("no formatter is declared for language {language}"),
+            "jet fmt --lang delegates through the selected environment formatter fact",
+            "declare a formatter package in the selected env module"
+        );
+        return ExitCodes::USER_ERROR;
+    };
+    let Some(formatter_program) = external_formatter_program(&formatter.package) else {
+        crate::cli_error!(
+            @full "E1340",
+            "the environment formatter package has no executable name",
+            "Jetpack realizes formatter packages, and Jet invokes their package name",
+            "use a formatter package such as `pkgs.nixfmt`"
+        );
+        return ExitCodes::USER_ERROR;
+    };
+
+    let mut files = match collect_external_fmt_files(&cwd, &project_dir, &explicit_paths, &language)
+    {
+        Ok(files) => files,
+        Err(error) => {
+            crate::cli_error!(
+                @full "E1340",
+                "could not discover formatter input files",
+                error,
+                "fix the named path or run the formatter from the environment root"
+            );
+            return ExitCodes::USAGE;
+        }
+    };
+    if changed_only {
+        let changed = match external_fmt_changed_files(&project_dir) {
+            Ok(changed) => changed,
+            Err(error) => {
+                crate::cli_error!(
+                    @full "E1340",
+                    "--changed needs a readable Git worktree",
+                    error,
+                    "run inside a Git worktree or remove --changed"
+                );
+                return ExitCodes::USAGE;
+            }
+        };
+        files.retain(|path| {
+            path.strip_prefix(&project_dir)
+                .ok()
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                .is_some_and(|relative| changed.contains(&relative))
+        });
+    }
+    if files.is_empty() {
+        if mode.json {
+            println!("{}", fmt_json_ok());
+        }
+        return ExitCodes::OK;
+    }
+
+    let temp = match ExternalFmtTempDir::new() {
+        Ok(temp) => temp,
+        Err(error) => {
+            crate::cli_error!(
+                @full "E1340",
+                "could not stage formatter inputs",
+                error,
+                "fix the temporary directory and retry"
+            );
+            return ExitCodes::USAGE;
+        }
+    };
+    let mut staged = Vec::with_capacity(files.len());
+    let mut command = vec!["env".to_string()];
+    command.extend(child_flags);
+    command.push("--".to_string());
+    command.push(formatter_program);
+    for (index, source_path) in files.iter().enumerate() {
+        let before = match fs::read(source_path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                crate::cli_error!(
+                    @full "E1340",
+                    format!("could not read `{}`", source_path.display()),
+                    error.to_string(),
+                    "fix the file permissions and retry"
+                );
+                return ExitCodes::USAGE;
+            }
+        };
+        let name = source_path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| std::borrow::Cow::Borrowed("input"));
+        let staged_path = temp.0.join(format!("{index:04}-{name}"));
+        if let Err(error) = fs::write(&staged_path, &before) {
+            crate::cli_error!(
+                @full "E1340",
+                "could not stage formatter inputs",
+                error.to_string(),
+                "fix the temporary directory and retry"
+            );
+            return ExitCodes::USAGE;
+        }
+        command.push(staged_path.to_string_lossy().into_owned());
+        staged.push(ExternalFmtStagedFile {
+            source: source_path.clone(),
+            staged: staged_path,
+            before,
+        });
+    }
+
+    let code = crate::EngineDispatch::dispatch(jet::Syntax::JETPACK_BINARY_NAME, "env", &command);
+    if code != ExitCodes::OK {
+        return code;
+    }
+
+    let mut changed = Vec::new();
+    for file in staged {
+        let after = match fs::read(&file.staged) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                crate::cli_error!(
+                    @full "E1340",
+                    "environment formatter did not produce readable output",
+                    error.to_string(),
+                    "check the formatter package and retry"
+                );
+                return ExitCodes::USER_ERROR;
+            }
+        };
+        if file.before != after {
+            changed.push((file.source, file.before, after));
+        }
+    }
+    if changed.is_empty() {
+        if mode.json {
+            println!("{}", fmt_json_ok());
+        }
+        return ExitCodes::OK;
+    }
+    if check_only {
+        let paths = changed
+            .iter()
+            .map(|(path, _, _)| external_fmt_display_path(&project_dir, path))
+            .collect::<Vec<_>>();
+        if mode.json {
+            if show_diff {
+                let diff_strings = changed
+                    .iter()
+                    .zip(paths.iter())
+                    .map(|((_, before, after), path)| {
+                        let before = String::from_utf8_lossy(before);
+                        let after = String::from_utf8_lossy(after);
+                        jet::Formatter::unified_diff(path, &before, &after)
+                    })
+                    .collect::<Vec<_>>();
+                let diffs = paths
+                    .iter()
+                    .zip(diff_strings.iter())
+                    .map(|(path, diff)| (path.as_str(), diff.as_str()))
+                    .collect::<Vec<_>>();
+                println!("{}", fmt_json_dirty_diffs(&diffs));
+            } else {
+                let paths = paths.iter().map(String::as_str).collect::<Vec<_>>();
+                println!("{}", fmt_json_dirty_paths(&paths));
+            }
+        } else {
+            for ((_, before, after), path) in changed.iter().zip(paths.iter()) {
+                println!("{path}");
+                if show_diff {
+                    let before = String::from_utf8_lossy(before);
+                    let after = String::from_utf8_lossy(after);
+                    print!("{}", jet::Formatter::unified_diff(path, &before, &after));
+                }
+            }
+        }
+        return ExitCodes::USER_ERROR;
+    }
+    for (path, _, after) in changed {
+        if let Err(error) = fs::write(&path, after) {
+            crate::cli_error!(
+                @full "E1340",
+                format!("could not write `{}`", path.display()),
+                error.to_string(),
+                "fix the file permissions and rerun the formatter"
+            );
+            return ExitCodes::USAGE;
+        }
+    }
+    if mode.json {
+        println!("{}", fmt_json_ok());
+    }
+    ExitCodes::OK
+}
+
+fn external_formatter_program(package: &str) -> Option<String> {
+    let package = package.split('@').next().unwrap_or(package);
+    let package = package.split('#').next().unwrap_or(package);
+    let program = package.rsplit(['/', ':']).next().unwrap_or(package).trim();
+    (!program.is_empty() && !program.chars().any(char::is_whitespace)).then(|| program.to_string())
+}
+
+fn collect_external_fmt_files(
+    cwd: &Path,
+    project_dir: &Path,
+    explicit_paths: &[String],
+    language: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let mut files = BTreeSet::new();
+    if explicit_paths.is_empty() {
+        walk_external_fmt_files(project_dir, language, &mut files);
+    } else {
+        for raw in explicit_paths {
+            let path = Path::new(raw);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            };
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            if metadata.is_dir() {
+                walk_external_fmt_files(&path, language, &mut files);
+            } else if metadata.is_file() && matches_external_language(&path, language) {
+                files.insert(path);
+            }
+        }
+    }
+    Ok(files.into_iter().collect())
+}
+
+fn walk_external_fmt_files(dir: &Path, language: &str, files: &mut BTreeSet<PathBuf>) {
+    const IGNORED: &[&str] = &[".git", ".jet", "target", "build", "vendor", "node_modules"];
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries = entries.flatten().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            let ignored = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| IGNORED.contains(&name));
+            if !ignored {
+                walk_external_fmt_files(&path, language, files);
+            }
+        } else if kind.is_file() && matches_external_language(&path, language) {
+            files.insert(path);
+        }
+    }
+}
+
+fn matches_external_language(path: &Path, language: &str) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some(language)
+}
+
+fn external_fmt_changed_files(root: &Path) -> Result<BTreeSet<String>, String> {
+    let mut changed = BTreeSet::new();
+    for args in [
+        vec!["diff", "--name-only", "HEAD"],
+        vec!["diff", "--name-only", "--cached"],
+        vec!["ls-files", "--others", "--exclude-standard"],
+    ] {
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(root)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() && args.first() == Some(&"diff") {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let relative = line.trim().replace('\\', "/");
+            if !relative.is_empty() && root.join(&relative).is_file() {
+                changed.insert(relative);
+            }
+        }
+    }
+    Ok(changed)
+}
+
+fn external_fmt_display_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().into_owned())
+}
+
 pub(crate) fn run_fmt(
     explicit_paths: &[String],
     stdin_mode: bool,
