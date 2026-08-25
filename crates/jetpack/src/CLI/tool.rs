@@ -1132,7 +1132,7 @@ fn build_tool_manifest_generation(theme: &Theme, parsed: &Parsed) -> io::Result<
                         "user-tools entry needs a Nix compatibility output",
                     ));
                 }
-                RefOutcome::Failed => {
+                RefOutcome::Unavailable | RefOutcome::Failed => {
                     return Err(io::Error::other(format!(
                         "could not realize user-tools entry `{}`",
                         entry.name

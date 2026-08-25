@@ -645,7 +645,7 @@ fn build_generation(
                     "profile package needs the provider bridge before it can be generated",
                 ));
             }
-            RefOutcome::Failed => {
+            RefOutcome::Unavailable | RefOutcome::Failed => {
                 return Err(io::Error::other("profile package realization failed"));
             }
         };

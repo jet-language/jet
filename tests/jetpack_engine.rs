@@ -4173,21 +4173,23 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
         }
         _ => panic!("indexed Nix project/root environment must be configured together"),
     };
-    fs::write(
-        project_dir.join("env.jet"),
-        "module dev {\n    sources: { default: NixOS/nixpkgs/nixos-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
-    )
-    .unwrap();
-    fs::create_dir_all(project_dir.join(".jet")).unwrap();
-    fs::write(
-        project_dir.join(".jet/lock"),
-        format!(
-            "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
-            nix_index_cache_server::CHANNEL,
-            nix_index_cache_server::REVISION,
-        ),
-    )
-    .unwrap();
+    if !child {
+        fs::write(
+            project_dir.join("env.jet"),
+            "module dev {\n    sources: { default: NixOS/nixpkgs/nixos-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
+        )
+        .unwrap();
+        fs::create_dir_all(project_dir.join(".jet")).unwrap();
+        fs::write(
+            project_dir.join(".jet/lock"),
+            format!(
+                "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+                nix_index_cache_server::CHANNEL,
+                nix_index_cache_server::REVISION,
+            ),
+        )
+        .unwrap();
+    }
 
     let run = |offline: bool| {
         let mut command = jetpack();
@@ -4216,7 +4218,6 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
             let output = run(phase.starts_with("offline-"));
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("DBG {phase} stderr: {stderr}");
             match phase.as_str() {
                 "online-initial" | "offline-reuse" | "online-repair" => {
                     assert!(

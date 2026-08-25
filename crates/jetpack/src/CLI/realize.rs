@@ -76,7 +76,7 @@ pub(super) fn realize_ref(
             report_nix_bridge_required(theme, flags, &[need], &[]);
             None
         }
-        RefOutcome::Failed => None,
+        RefOutcome::Unavailable | RefOutcome::Failed => None,
     }
 }
 
@@ -107,6 +107,9 @@ pub(super) enum RefOutcome {
         Store::CacheLease,
     ),
     NeedsNix(Provider::NixBridgeNeed),
+    /// The package cannot be provided on this host and its coded diagnostic
+    /// has already been printed. The user must act, so callers exit 2.
+    Unavailable,
     Failed,
 }
 
@@ -179,11 +182,20 @@ pub(super) fn realize_ref_outcome(
             project_dir.as_deref(),
         )
         .is_none();
+    // A reference the project lock already pins was realized here before, so a
+    // failure now is a damaged or incomplete closure, not an unknown package.
+    // Let it reach the indexed provider, which names the exact missing logical
+    // path (E1350), instead of answering with the generic "not in the hangar".
+    let locked_pin = project_dir
+        .as_deref()
+        .and_then(|project| Lock::nix_realization(project, &spec.raw))
+        .is_some();
     if flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
         && !offline_reuse_ok
         && !indexed_nix
+        && !locked_pin
     {
         drop(spinner);
         report_provider_error(
@@ -213,7 +225,7 @@ pub(super) fn realize_ref_outcome(
     // not mistakenly asked for nix fixtures.
     let fixtures = if flags.offline && uses_nix {
         let fx = fixtures_for(flags);
-        if fx.is_none() && !offline_reuse_ok {
+        if fx.is_none() && !offline_reuse_ok && !indexed_nix && !locked_pin {
             drop(spinner);
             report_provider_error(
                 theme,
@@ -224,8 +236,9 @@ pub(super) fn realize_ref_outcome(
             );
             return RefOutcome::Failed;
         }
-        // `fx` may be `None` here only when `offline_reuse_ok` — the hangar copy
-        // is served from the lock-verified cache, no fixtures needed.
+        // `fx` may be `None` here when the hangar copy is served from the
+        // lock-verified cache, or when an indexed or already-pinned reference
+        // goes to the provider so it can report the exact missing object.
         fx
     } else {
         // `--fixtures <dir>` without `--offline` is still honored (explicit
@@ -341,8 +354,19 @@ pub(super) fn realize_ref_outcome(
             RefOutcome::Realized(entry, source_state, line, lease)
         }
         Err(Store::RealizeError::Provider(e)) => {
+            // A package the user asked for cannot be provided here, and the
+            // coded diagnostic already told them what to do. That is the same
+            // class as a missing Nix bridge, so it exits 2 rather than 1.
+            let unavailable = matches!(
+                e,
+                ProviderError::NixCache(_) | ProviderError::NixIndex(_) | ProviderError::Offline(_)
+            );
             report_provider_error(theme, &e);
-            RefOutcome::Failed
+            if unavailable {
+                RefOutcome::Unavailable
+            } else {
+                RefOutcome::Failed
+            }
         }
         Err(error) => {
             report_realize_error(theme, &error);

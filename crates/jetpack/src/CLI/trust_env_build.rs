@@ -312,6 +312,7 @@ pub(super) fn compose_env(
     let mut realized_outputs = Vec::new();
     let mut holes = Vec::new();
     let mut failed = false;
+    let mut unavailable = false;
     let mut cache_leases = Vec::new();
     let name_w = name_column_width(&plan.refs);
     // Tier 1 (D-FE-CLI1): `jet env`/`run`/`dev` composing a project's
@@ -380,6 +381,7 @@ pub(super) fn compose_env(
                 cache_leases.push(lease);
             }
             RefOutcome::NeedsNix(need) => holes.push(need),
+            RefOutcome::Unavailable => unavailable = true,
             RefOutcome::Failed => failed = true,
         }
     }
@@ -406,6 +408,9 @@ pub(super) fn compose_env(
     }
     if !holes.is_empty() {
         report_nix_bridge_required(theme, flags, &holes, &realized_refs);
+        return Err(2);
+    }
+    if unavailable {
         return Err(2);
     }
     if failed {
@@ -1236,7 +1241,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             }
             RefOutcome::NeedsNix(need) => holes.push(need),
-            RefOutcome::Failed => ok = false,
+            RefOutcome::Unavailable | RefOutcome::Failed => ok = false,
         }
     }
     for adapter in &plan.adapters {

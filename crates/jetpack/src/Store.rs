@@ -2380,7 +2380,6 @@ pub fn realize_verified(
     ctx: &super::Provider::Ctx<'_>,
     request: RealizeRequest<'_>,
 ) -> Result<VerifiedRealization, RealizeError> {
-    eprintln!("DBG realize_verified");
     if let RealizeRequest::Package { spec, .. } = &request {
         enforce_manifest_provenance_floor(ctx.project_dir, &spec.package)?;
     }
@@ -2535,7 +2534,6 @@ pub fn realize_verified(
         record_realized_mode(roots, &realized)
     }
     .map_err(RealizeError::Store)?;
-    eprintln!("DBG before record_nix_lock_after_store");
     entry = super::Provider::record_nix_lock_after_store(ctx, roots, &entry)
         .map_err(RealizeError::Provider)?;
     project_receipt_projection(ctx, &entry)?;

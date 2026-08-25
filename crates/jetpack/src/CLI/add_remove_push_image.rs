@@ -117,7 +117,7 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
             report_nix_bridge_required(theme, &parsed.flags, &[need], &[]);
             return 2;
         }
-        RefOutcome::Failed => return 1,
+        RefOutcome::Unavailable | RefOutcome::Failed => return 1,
     };
     match EnvFile::add(&dir, &spec) {
         Ok(ef) => {
