@@ -208,9 +208,25 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
         "/11111111111111111111111111111111.narinfo".to_string(),
         leaf_info,
     );
-    routes.insert("/nar/leaf.nar".to_string(), leaf_nar);
+    routes.insert("/nar/leaf.nar".to_string(), leaf_nar.clone());
     server.replace_routes(routes);
-    let admitted = admit_nix_closure(&roots, &[request], false).unwrap();
+    let progress = crate::Output::ByteProgress::new();
+    let admitted = admit_nix_closure_with_progress(
+        &roots,
+        &[request],
+        false,
+        Some(progress.clone()),
+    )
+    .unwrap();
+    let root_compressed = encode_zstd_deterministic(&root_nar).unwrap();
+    assert_eq!(
+        progress.snapshot().total,
+        Some(root_compressed.len() as u64 + leaf_nar.len() as u64)
+    );
+    assert_eq!(
+        progress.snapshot().transferred,
+        Some(root_compressed.len() as u64 + leaf_nar.len() as u64)
+    );
     assert_eq!(admitted.objects.len(), 2);
     assert_eq!(admitted.outputs.len(), 1);
     assert_eq!(

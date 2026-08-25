@@ -708,11 +708,22 @@ fn try_output_hash_of_with_hook(
                     allowed_peers += count_cas_peer(shared_cas, cas_key, *key);
                 }
             }
-            if allowed_peers == link.total {
-                // In-Hangar dedupe and the exact local/shared CAS entry are
-                // legitimate; every other inode peer remains untrusted.
+            if allowed_peers >= link.total {
+                // In-Hangar dedupe and local/shared CAS entries are legitimate;
+                // every other inode peer remains untrusted. Overlapping
+                // trusted roots may count an admitted peer more than once.
                 continue;
             }
+            eprintln!(
+                "[DEBUG-CAS] key={} total={} seen={} allowed={} hangar={} shared={} cas={:?}",
+                key.0,
+                link.total,
+                link.seen,
+                allowed_peers,
+                hangar.display(),
+                shared_cas.display(),
+                link.cas_key,
+            );
         }
         return Err(format!(
             "hardlink `{}` has {} link(s), but only {} are inside the output",

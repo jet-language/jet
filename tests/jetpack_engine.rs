@@ -4880,7 +4880,7 @@ fn update_of_pinned_source_is_e1352() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { stable: rustc@nixpkgs }
+    sources: { stable: rustc@jetpack }
     env.dev: Env{ packages: [] }
 }
 "#,
@@ -4908,9 +4908,9 @@ fn outdated_labels_pinned_manual_and_automatic_sources() {
         r#"
 module dev {
     sources: {
-        pinned: rustc@nixpkgs,
-        manual: jq@nixpkgs#latest,
-        automatic: omp@nixpkgs#auto,
+        pinned: rustc@jetpack,
+        manual: jq@jetpack#latest,
+        automatic: omp@jetpack#auto,
     }
     env.dev: Env{ packages: [] }
 }
@@ -6956,6 +6956,43 @@ fn committed_example_builds_offline_end_to_end() {
         );
     }
     assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
+}
+
+#[test]
+fn use_many_packages_settles_one_row_per_package_without_output_flood() {
+    let project = Scratch::new("use-many-packages");
+    copy_dir_recursive(&example_dir(), &project.path);
+    let root = Scratch::new("use-many-packages-root");
+    let mut args = vec![
+        "use".to_string(),
+        "--prep".to_string(),
+        "--offline".to_string(),
+        "--no-color".to_string(),
+        "-y".to_string(),
+    ];
+    args.extend((0..26).map(|_| "ripgrep@stable".to_string()));
+    let output = jetpack()
+        .args(&args)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let settled = stderr
+        .lines()
+        .filter(|line| line.trim_start().starts_with('✓'))
+        .count();
+    assert_eq!(settled, 26, "one settled row per package: {stderr}");
+    assert!(
+        stderr.lines().count() <= 27,
+        "26-package run must fit one aggregate line plus settled rows: {stderr}"
+    );
 }
 
 #[test]

@@ -1592,7 +1592,7 @@ mod tests {
             .output()
             .expect("fish must be present for prompt PTY coverage");
         let init = fish_init("web-api", PromptPathMode::Short, PromptStripMode::On);
-        let shell = format!("fish -C {} -i", shell_single_quote(&init));
+        let shell = format!("fish --no-config -C {} -i", shell_single_quote(&init));
         let output = pty(
             &shell,
             "echo JETPACK_CAPTURE_START\nfunction jet; sleep .3; test $argv[1] = build; end\njet build\njet test\n\x07\n__jetpack_status_words\necho JETPACK_FISH_PTY_DONE\nexit 0\n",

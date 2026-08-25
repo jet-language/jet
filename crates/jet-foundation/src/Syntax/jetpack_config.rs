@@ -73,8 +73,10 @@ pub const ENGINE_PROTOCOL_FLAG: &str = "--engine-protocol";
 /// dispatching an engine process. Migration code also verifies the live parent.
 pub const ROOT_ENGINE_DISPATCH_PID_ENV: &str = "JET_INTERNAL_ROOT_DISPATCH_PID";
 
-/// D-JPK14: the default visible prompt label inside a Jet shell.
-pub const JETPACK_PROMPT_LABEL: &str = "jet";
+/// D-JPK14, amended by owner ruling 2026-08-25: the visible prompt label
+/// inside a Jetpack shell. The environment belongs to jetpack, so the prompt
+/// names jetpack rather than the compiler.
+pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
 
 /// D-JPK14: shell marker env var set inside a Jetpack shell.
 pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";
@@ -518,6 +520,10 @@ pub const OS_FLAG_DISK: &str = "--disk";
 /// bypassing mutation confirmation gates.
 pub const CLI_FLAG_YES_SHORT: &str = "-y";
 pub const CLI_FLAG_YES_LONG: &str = "--yes";
+
+/// D-VERDICT-2192-1: `jetpack update` scope selectors.
+pub const UPDATE_FLAG_DEPS: &str = "--deps";
+pub const UPDATE_FLAG_TOOLS: &str = "--tools";
 
 /// D-JPK-OSNS1=B: full-word option namespaces.
 pub const OS_OPTION_NS_FILESYSTEM: &str = "filesystem";

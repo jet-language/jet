@@ -42,6 +42,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} add    <Component>             copy a starter component into ./components
   {bin} remove <package>@<source>      remove a package from ./{pack}
   {bin} update [<source>|tools]        refresh project or user-tools channel pins
+  {bin} update --deps                   refresh project dependency pins only
+  {bin} update --tools                  refresh user-tools pins only
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
 
 {store}

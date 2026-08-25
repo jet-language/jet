@@ -16,7 +16,10 @@ use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
 use crate::NixIndex::{IndexKey, NixIndexClient, NixIndexError};
-use crate::Store::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, Roots, StoreError};
+use crate::Store::{
+    admit_nix_closure_with_progress, current_progress, plan_nix_downloads, AdmittedNixClosure,
+    NixOutputRequest, Roots, StoreError,
+};
 use crate::SHA256;
 use crate::Syntax;
 use crate::{ProviderFactValue, ProviderFacts};
@@ -1484,7 +1487,12 @@ impl Provider for NixProvider {
                 store_path: store_path.clone(),
             })
             .collect::<Vec<_>>();
-        let admitted = admit_nix_closure(roots, &requests, ctx.offline)
+        let admitted = admit_nix_closure_with_progress(
+            roots,
+            &requests,
+            ctx.offline,
+            current_progress(),
+        )
             .map_err(|error| nix_cache_error(roots, error))?;
         let realized = realization_from_index(spec, &key, verified, admitted)?;
         finalize_nix_realization(spec, table, ctx, realized)
@@ -2504,6 +2512,99 @@ pub fn uses_nix_provider(
     )
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct DownloadPlan {
+    pub packages: usize,
+    pub bytes: Option<u64>,
+}
+
+impl DownloadPlan {
+    fn add(&mut self, packages: usize, bytes: Option<u64>) {
+        self.packages = self.packages.saturating_add(packages);
+        self.bytes = match (self.bytes, bytes) {
+            (Some(left), Some(right)) => left.checked_add(right),
+            _ => None,
+        };
+    }
+}
+
+/// Resolve acquisition metadata without realizing a provider. Nix uses the
+/// signed index plus narinfo closure; native release fixtures contribute their
+/// exact artifact length. Providers without a byte-bearing metadata seam keep
+/// the total unknown instead of inventing one.
+pub(crate) fn plan_downloads(
+    specs: &[RefSpec],
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<DownloadPlan, ProviderError> {
+    let mut plan = DownloadPlan::default();
+    let mut nix_paths = Vec::new();
+
+    for spec in specs {
+        match resolve_kind(spec, table, ctx.offline, ctx.store_dir) {
+            ProviderKind::Nix => {
+                let index = ctx.nix_index.ok_or_else(|| {
+                    ProviderError::Unsupported(format!(
+                        "download planning needs a signed index for `{}`",
+                        spec.raw
+                    ))
+                })?;
+                let host_system = host_nix_system().ok_or_else(|| {
+                    ProviderError::Unsupported(
+                        "the host system is not supported by the signed nixpkgs index".into(),
+                    )
+                })?;
+                let key = locked_nix_index_key(spec, table, ctx, host_system)?;
+                let verified = match index.resolve(&key) {
+                    Ok(verified) => verified,
+                    Err(NixIndexError::NotIndexed { .. })
+                        if crate::NixFallbackPolicy::allowed_from_environment(ctx.offline) =>
+                    {
+                        plan.add(1, None);
+                        continue;
+                    }
+                    Err(error) => return Err(ProviderError::NixIndex(error)),
+                };
+                nix_paths.extend(verified.record.outputs.values().cloned());
+            }
+            ProviderKind::JetPackage => {
+                plan.add(1, native::download_size(spec, table, ctx)?);
+            }
+            ProviderKind::Core => {
+                if table
+                    .upstream(spec.source.label())
+                    .is_none_or(|upstream| !upstream.starts_with("path:"))
+                {
+                    plan.add(1, None);
+                }
+            }
+            ProviderKind::Cran
+            | ProviderKind::LuaRocks
+            | ProviderKind::RubyGems
+            | ProviderKind::Cpan
+            | ProviderKind::Packagist => plan.add(1, None),
+            ProviderKind::Infer
+            | ProviderKind::JetRegistry
+            | ProviderKind::Npm
+            | ProviderKind::Cargo
+            | ProviderKind::PyPI
+            | ProviderKind::SwiftPM => {}
+        }
+    }
+
+    if !nix_paths.is_empty() {
+        let roots = ctx.nix_roots.ok_or_else(|| {
+            ProviderError::BadOutput(
+                "download planning has no Hangar roots for closure admission".into(),
+            )
+        })?;
+        let nix = plan_nix_downloads(roots, &nix_paths, ctx.offline)
+            .map_err(|error| nix_cache_error(roots, error))?;
+        plan.add(nix.packages, Some(nix.bytes));
+    }
+    Ok(plan)
+}
+
 /// U23 / D-JPK-NIXSTORE1=D: package refs that resolve through the Nix
 /// compatibility provider need an explicit compatibility output unless a
 /// locked nixpkgs ref is representable by the signed index. This fact is
@@ -3271,7 +3372,7 @@ mod tests {
             ]),
             closure_receipt_sha256: "6".repeat(64),
         };
-        let spec = classify("ripgrep@nixpkgs").unwrap();
+        let spec = classify("ripgrep@jetpack").unwrap();
         let realized = realization_from_index(
             &spec,
             &IndexKey {
@@ -3349,7 +3450,7 @@ mod tests {
     #[test]
     fn translates_ref_to_flake() {
         assert_eq!(
-            flake_ref(&classify("fastfetch@nixpkgs").unwrap(), &empty()),
+            flake_ref(&classify("fastfetch@jetpack").unwrap(), &empty()),
             "nixpkgs#fastfetch"
         );
         assert_eq!(
@@ -3360,7 +3461,7 @@ mod tests {
 
     #[test]
     fn flake_ref_strips_jet_version_selector_only_for_nix() {
-        let nix = classify("rustc@nixpkgs#version=1.80.0").unwrap();
+        let nix = classify("rustc@jetpack#version=1.80.0").unwrap();
         assert_eq!(flake_ref(&nix, &empty()), "nixpkgs#rustc");
         let cran = classify("jsonlite@cran#version=1.9.0").unwrap();
         assert_eq!(flake_ref(&cran, &empty()), "cran:jsonlite#version=1.9.0");
@@ -3493,7 +3594,7 @@ mod tests {
 
     #[test]
     fn parses_good_output() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let stdout = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
         let r = parse_realization(&spec, stdout).unwrap();
         assert_eq!(r.out, "/nix/store/abc-fastfetch-2.0");
@@ -3517,7 +3618,7 @@ mod tests {
 
     #[test]
     fn fallback_imports_closed_graph_and_all_projections() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let stdout = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0","dev":"/nix/store/abc-fastfetch-2.0-dev"},"closedGraph":{"root":{"dependencies":["dep"]},"nodes":["dep"]},"dependencies":{"build":["dep"]},"sources":[{"path":"/nix/store/source","sha256":"source-hash"}],"hashes":{"out":"out-hash","dev":"dev-hash"},"losses":["shellHook"],"proof":{"evaluator":"nix-2.34","signature":"proof-signature"},"recipe":{"steps":[]},"lock":{"system":"x86_64-linux"}}]"#;
         let realized = parse_realization(&spec, stdout).unwrap();
         let facts = realized.producer.facts;
@@ -3622,7 +3723,7 @@ mod tests {
     /// bug", for any user on a large optimised store.
     #[test]
     fn tolerates_nix_store_noise_around_output() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let stdout = "\"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n\
              [{\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\"outputs\":{\"out\":\"/nix/store/abc-fastfetch-2.0\"}}]\n\
              \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n";
@@ -3632,7 +3733,7 @@ mod tests {
 
     #[test]
     fn tolerates_nix_hard_link_noise_between_multiline_realization_lines() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let stdout = "[\n\
              {\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\n\
              \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n\
@@ -3644,7 +3745,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_realization_payloads() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let payload = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
         assert!(matches!(
             parse_realization(&spec, &format!("{payload}\n{payload}\n")),
@@ -3654,7 +3755,7 @@ mod tests {
 
     #[test]
     fn rejects_multiple_nix_realization_results_in_one_payload() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let stdout = r#"[
             {"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}},
             {"drvPath":"/nix/store/def-fastfetch.drv","outputs":{"out":"/nix/store/def-fastfetch-2.0"}}
@@ -3667,7 +3768,7 @@ mod tests {
 
     #[test]
     fn realization_schema_error_retains_filtered_provider_noise() {
-        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let spec = classify("fastfetch@jetpack").unwrap();
         let noise = "warning: ignoring untrusted substituter";
         let error = parse_realization(&spec, &format!("{noise}\n[{{}}]\n")).unwrap_err();
         let ProviderError::BadOutput(reason) = error else {
@@ -3679,7 +3780,7 @@ mod tests {
 
     #[test]
     fn prefers_bin_output() {
-        let spec = classify("git@nixpkgs").unwrap();
+        let spec = classify("git@jetpack").unwrap();
         let stdout = r#"[{"drvPath":"/nix/store/x.drv","outputs":{"out":"/nix/store/x","bin":"/nix/store/x-bin"}}]"#;
         let r = parse_realization(&spec, stdout).unwrap();
         assert_eq!(r.out, "/nix/store/x");
@@ -3689,7 +3790,7 @@ mod tests {
 
     #[test]
     fn empty_output_is_bad() {
-        let spec = classify("x@nixpkgs").unwrap();
+        let spec = classify("x@jetpack").unwrap();
         assert!(matches!(
             parse_realization(&spec, "[]"),
             Err(ProviderError::BadOutput(_))
@@ -3698,7 +3799,7 @@ mod tests {
 
     #[test]
     fn garbage_output_is_bad() {
-        let spec = classify("x@nixpkgs").unwrap();
+        let spec = classify("x@jetpack").unwrap();
         assert!(matches!(
             parse_realization(&spec, "not json"),
             Err(ProviderError::BadOutput(_))
@@ -3707,7 +3808,7 @@ mod tests {
 
     #[test]
     fn missing_outputs_key_is_bad() {
-        let spec = classify("x@nixpkgs").unwrap();
+        let spec = classify("x@jetpack").unwrap();
         assert!(matches!(
             parse_realization(&spec, r#"[{"drvPath":"/x.drv"}]"#),
             Err(ProviderError::BadOutput(_))
@@ -3716,7 +3817,7 @@ mod tests {
 
     #[test]
     fn missing_exact_derivation_is_bad() {
-        let spec = classify("x@nixpkgs").unwrap();
+        let spec = classify("x@jetpack").unwrap();
         assert!(matches!(
             parse_realization(&spec, r#"[{"outputs":{"out":"/nix/store/x"}}]"#),
             Err(ProviderError::BadOutput(_))
@@ -3725,7 +3826,7 @@ mod tests {
 
     #[test]
     fn fixture_missing_errors() {
-        let spec = classify("nope@nixpkgs").unwrap();
+        let spec = classify("nope@jetpack").unwrap();
         let dir = std::env::temp_dir();
         let ctx = Ctx {
             fixtures: Some(&dir.join("definitely-not-here-xyz")),

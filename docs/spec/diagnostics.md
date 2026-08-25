@@ -875,6 +875,7 @@ reports, not compiler warnings.
 | E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1352 | jetpack | an explicitly updated source is pinned and cannot move (D-CHANNEL-AUTO1) |
 | E1354 | jetpack | a retired Jetpack store spelling was used |
+| E1355 | jet | a Jet verb needing a declared project environment was run outside that environment (D-VERDICT-2188-1) |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
 | E1264 | sema  | a function reaches `core.crypto.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
 | E1265 | comptime | `core.crypto.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
@@ -2079,6 +2080,7 @@ front-end `.jet` diagnostics).
 | E1341 | This `Library` output requests an invalid target, binding, or export shape. | D-LIB-EXPORT1=C is a closed native projection: a Library emits only the checked static/shared, C-header, and named binding surfaces. Unknown bindings and backend combinations cannot be guessed safely. | Select the Library output directly, use `c`, `python`, or `swift`, and give native bindings `native: true`; otherwise remove the invalid field. |
 | E1352 | Source `{name}` is pinned and cannot be updated. | D-CHANNEL-AUTO1 keeps a declaration with no channel marker pinned forever; an update command must not move its lock or rewrite its manifest. | Declare `{name}` with `#latest` for manual movement or `#auto` for automatic movement. |
 | E1354 | `{what}` | Store commands are grouped under `hangar`; project commands stay at the top level. | `{fix}` |
+| E1355 | this project declares `{environment}`; you are not inside it | Jet acts on code only; it never enters or realizes a project environment, so it acquires nothing. | `jetpack env -- jet {verb}` |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.crypto.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `-[…]>` row, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `-[Secret]>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
 | E1265 | `core.crypto.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `-[Secret]>` function. There is no audited gate escape because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |

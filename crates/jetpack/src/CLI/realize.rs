@@ -54,6 +54,114 @@ fn current_project_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// Assemble the acquisition plan before provider realization. Nix narinfo is
+/// read here for its signed closure sizes; payload admission remains behind
+/// the caller's single confirmation gate.
+pub(super) fn plan_downloads(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    table: &RefSpec::SourceTable,
+    specs: &[RefSpec::RefSpec],
+    scope: RealizeScope,
+) -> Result<Provider::DownloadPlan, i32> {
+    let store_dir = roots.hangar_dir();
+    let project_dir = match scope {
+        RealizeScope::Project => current_project_dir(),
+        RealizeScope::UserProfile | RealizeScope::Use => None,
+    };
+    let fixtures = if flags.offline {
+        fixtures_for(flags)
+    } else {
+        flags.fixtures.clone()
+    };
+    let mut pending = Vec::new();
+
+    for spec in specs {
+        let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
+        if uses_nix && fixtures.is_some() {
+            continue;
+        }
+        if uses_nix
+            && Provider::needs_nix_bridge(
+                spec,
+                table,
+                flags.offline,
+                &store_dir,
+                project_dir.as_deref(),
+            )
+            .is_some()
+        {
+            continue;
+        }
+        // Prompt planning is a routing pass, not the cache authority. A
+        // persisted user-profile candidate is enough to keep the fully
+        // cached entry path out of closure verification; the subsequent Store
+        // realization still proves the complete closure before reuse.
+        if matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
+            && Store::find_by_reference(roots, &spec.raw).is_some()
+        {
+            continue;
+        }
+        let probe = Provider::Ctx {
+            fixtures: fixtures.as_deref(),
+            store_dir: &store_dir,
+            offline: flags.offline,
+            project_dir: project_dir.as_deref(),
+            nix_index: None,
+            nix_roots: Some(roots),
+        };
+        // Do not resolve the closure just to decide whether a prompt is
+        // needed. The identity candidate avoids that work on a warm path;
+        // `realize_verified` remains the final integrity gate.
+        let cached = Provider::cache_expectation(spec, table, &probe).is_some_and(|expectation| {
+            Store::cache_candidate_matches(roots, &spec.raw, &expectation)
+        });
+        if !cached {
+            pending.push(spec.clone());
+        }
+    }
+
+    if pending.is_empty() {
+        return Ok(Provider::DownloadPlan::default());
+    }
+
+    let uses_nix = pending
+        .iter()
+        .any(|spec| Provider::uses_nix_provider(spec, table, flags.offline, &store_dir));
+    let nix_index_client = if uses_nix && fixtures.is_none() {
+        Some(
+            NixIndexClient::from_roots_with_mode(roots, flags.offline)
+                .map_err(ProviderError::NixIndex),
+        )
+    } else {
+        None
+    };
+    let nix_index_client = match nix_index_client {
+        Some(Ok(client)) => Some(client),
+        Some(Err(error)) => {
+            report_provider_error(theme, &error);
+            return Err(2);
+        }
+        None => None,
+    };
+    let ctx = Provider::Ctx {
+        fixtures: fixtures.as_deref(),
+        store_dir: &store_dir,
+        offline: flags.offline,
+        project_dir: project_dir.as_deref(),
+        nix_index: nix_index_client.as_ref(),
+        nix_roots: Some(roots),
+    };
+    match Provider::plan_downloads(&pending, table, &ctx) {
+        Ok(plan) => Ok(plan),
+        Err(error) => {
+            report_provider_error(theme, &error);
+            Err(2)
+        }
+    }
+}
+
 /// Resolve the nearest directory that owns an `env.jet` or `workspace.jet`.
 ///
 /// Environment and workspace commands are allowed from a project
@@ -138,6 +246,12 @@ pub(super) enum RealizeScope {
     Use,
 }
 
+fn clear_live_region(live: &mut Option<&mut Output::LiveRegion>) {
+    if let Some(live) = live.as_deref_mut() {
+        live.clear();
+    }
+}
+
 pub(super) fn realize_ref_outcome(
     theme: &Theme,
     roots: &Roots,
@@ -152,16 +266,18 @@ pub(super) fn realize_ref_outcome(
     // Tier 2 (D-FE-CLI1 acceptance: "erase live regions before diagnostics").
     // The caller draws the live region's status lines (`building K/N …`) once
     // per item, before calling this function; nothing else redraws them
-    // during the call, so clearing once up front is enough to guarantee any
-    // print this call makes — a promoted row or a diagnostic — lands on a
-    // clean line instead of over stale progress-bar text.
-    if let Some(l) = live.as_deref_mut() {
-        l.clear();
+    // during the call, so clear up front and again at each diagnostic boundary
+    // to guarantee every print this call makes lands on a clean line instead
+    // of over stale progress-bar text. A `Silent` caller owns the aggregate
+    // line and the progress sink redraws it while this call runs; clear only
+    // the spinner/ledger path up front and keep the aggregate line pinned.
+    if style != RowStyle::Silent {
+        clear_live_region(&mut live);
     }
     // A TTY gets a live spinner that the final ledger row replaces; without
     // one (piped output, NO_COLOR) the plain status line stands instead.
     // `Silent` (tier-2 live region) draws its own status instead.
-    let spinner = if style == RowStyle::Silent {
+    let mut spinner = if style == RowStyle::Silent {
         None
     } else if theme.color {
         Some(theme.spinner(&format!("resolving {} …", spec.raw)))
@@ -181,8 +297,9 @@ pub(super) fn realize_ref_outcome(
         match Store::find_verified_user_profile_by_reference(roots, &spec.raw) {
             Ok(reuse) => reuse,
             Err(error) => {
-                report_realize_error(theme, &Store::RealizeError::Store(error));
                 drop(spinner);
+                clear_live_region(&mut live);
+                report_realize_error(theme, &Store::RealizeError::Store(error));
                 return RefOutcome::Failed;
             }
         }
@@ -193,11 +310,13 @@ pub(super) fn realize_ref_outcome(
     // A Nix ref may reuse a Hangar copy only when the committed lock identity
     // and the complete closure both verify. A missing transitive object must
     // reach the indexed provider so it can report the exact missing logical
-    // path instead of becoming a vague integrity failure.
+    // path instead of becoming a vague integrity failure. This preflight only
+    // checks the persisted identity; Store realization performs the complete
+    // closure proof exactly once on the cached path.
     // A verified imported object is a Jetpack result in every mode. Probe it
     // before the Nix-bridge diagnostic so an online run/build can reuse the
     // locked package without rediscovering or invoking Nix.
-    let verified_reuse_ok = user_profile_reuse.is_some()
+    let cache_candidate_ok = user_profile_reuse.is_some()
         || (uses_nix && fixtures_for(flags).is_none() && {
             let probe = Provider::Ctx {
                 fixtures: None,
@@ -208,12 +327,9 @@ pub(super) fn realize_ref_outcome(
                 nix_roots: None,
             };
             Provider::cache_expectation(spec, table, &probe)
-                .and_then(|expectation| {
-                    Store::find_verified_by_reference(roots, &spec.raw, &expectation)
-                        .ok()
-                        .flatten()
+                .is_some_and(|expectation| {
+                    Store::cache_candidate_matches(roots, &spec.raw, &expectation)
                 })
-                .is_some()
         });
     let indexed_nix = flags.offline
         && uses_nix
@@ -237,11 +353,12 @@ pub(super) fn realize_ref_outcome(
     if flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
-        && !verified_reuse_ok
+        && !cache_candidate_ok
         && !indexed_nix
         && !locked_pin
     {
         drop(spinner);
+        clear_live_region(&mut live);
         report_provider_error(
             theme,
             &ProviderError::Offline(format!(
@@ -251,7 +368,7 @@ pub(super) fn realize_ref_outcome(
         );
         return RefOutcome::Failed;
     }
-    if uses_nix && !package_fixture_available(flags, spec) && !verified_reuse_ok {
+    if uses_nix && !package_fixture_available(flags, spec) && !cache_candidate_ok {
         if let Some(need) = Provider::needs_nix_bridge(
             spec,
             table,
@@ -269,8 +386,9 @@ pub(super) fn realize_ref_outcome(
     // not mistakenly asked for nix fixtures.
     let fixtures = if flags.offline && uses_nix {
         let fx = fixtures_for(flags);
-        if fx.is_none() && !verified_reuse_ok && !indexed_nix && !locked_pin {
+        if fx.is_none() && !cache_candidate_ok && !indexed_nix && !locked_pin {
             drop(spinner);
+            clear_live_region(&mut live);
             report_provider_error(
                 theme,
                 &ProviderError::Offline(format!(
@@ -289,7 +407,7 @@ pub(super) fn realize_ref_outcome(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
-    let nix_index_client = if uses_nix && fixtures.is_none() && !verified_reuse_ok {
+    let nix_index_client = if uses_nix && fixtures.is_none() && !cache_candidate_ok {
         Some(
             NixIndexClient::from_roots_with_mode(roots, flags.offline)
                 .map_err(ProviderError::NixIndex),
@@ -300,8 +418,9 @@ pub(super) fn realize_ref_outcome(
     let nix_index_client = match nix_index_client {
         Some(Ok(client)) => Some(client),
         Some(Err(error)) => {
-            report_provider_error(theme, &error);
             drop(spinner);
+            clear_live_region(&mut live);
+            report_provider_error(theme, &error);
             return RefOutcome::Failed;
         }
         None => None,
@@ -320,32 +439,37 @@ pub(super) fn realize_ref_outcome(
     // metadata before Store realization can reach the provider.
     match Provider::core_build_identity(spec, table, &ctx) {
         Ok(Some(identity)) => {
+            drop(spinner.take());
+            clear_live_region(&mut live);
             RuntimePolicy::warn_sandbox_fallback(theme);
             if Trust::gate_build_identity(theme, &Trust::store_path(), &identity, flags.trust)
                 .is_err()
             {
-                drop(spinner);
                 return RefOutcome::Failed;
             }
         }
         Ok(None) => {}
         Err(reason) => {
+            drop(spinner);
+            clear_live_region(&mut live);
             report_provider_error(
                 theme,
                 &ProviderError::SandboxUnavailable(format!(
                     "could not establish the exact Core Cargo build identity: {reason}"
                 )),
             );
-            drop(spinner);
             return RefOutcome::Failed;
         }
     }
     let started = std::time::Instant::now();
-    let result = match user_profile_reuse {
+    let progress = live.as_deref().map(|live| live.progress_handle());
+    let realize = || match user_profile_reuse {
         Some(realized) => Ok(realized),
-        None => {
-            Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table })
-        }
+        None => Store::realize_verified(roots, &ctx, Store::RealizeRequest::Package { spec, table }),
+    };
+    let result = match progress {
+        Some(progress) => Store::with_progress(progress, realize),
+        None => realize(),
     };
     drop(spinner);
     match result {
@@ -357,6 +481,7 @@ pub(super) fn realize_ref_outcome(
                         Ok(path) => path,
                         Err(error) => {
                             let failure = lease.consumption_failure(&error);
+                            clear_live_region(&mut live);
                             Store::report_integrity(theme, &failure);
                             return RefOutcome::Failed;
                         }
@@ -368,6 +493,7 @@ pub(super) fn realize_ref_outcome(
                         Ok(path) => path,
                         Err(error) => {
                             let failure = lease.consumption_failure(&error);
+                            clear_live_region(&mut live);
                             Store::report_integrity(theme, &failure);
                             return RefOutcome::Failed;
                         }
@@ -409,6 +535,7 @@ pub(super) fn realize_ref_outcome(
                 e,
                 ProviderError::NixCache(_) | ProviderError::NixIndex(_) | ProviderError::Offline(_)
             );
+            clear_live_region(&mut live);
             report_provider_error(theme, &e);
             if unavailable {
                 RefOutcome::Unavailable
@@ -417,6 +544,7 @@ pub(super) fn realize_ref_outcome(
             }
         }
         Err(error) => {
+            clear_live_region(&mut live);
             report_realize_error(theme, &error);
             RefOutcome::Failed
         }

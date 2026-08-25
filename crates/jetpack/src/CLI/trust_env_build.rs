@@ -2,7 +2,8 @@ use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::{Flags, Parsed};
 use super::realize::{
     apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
-    realize_ref_outcome, report_nix_bridge_required, RealizeScope, RefOutcome, RowStyle, RunPlan,
+    plan_downloads, realize_ref_outcome, report_nix_bridge_required, RealizeScope, RefOutcome,
+    RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
 use super::workspace_sources::{
@@ -23,6 +24,7 @@ use crate::WorkspaceFile::WorkspaceMember;
 use jet_env_model::ModuleEval;
 use jet_pkg_model::Authority::AuthorityResolver;
 use jet_pkg_model::WorkspacePlan::{WorkspaceSource, WorkspaceSourceRole};
+use std::io::IsTerminal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NativeDevTool {
@@ -346,7 +348,7 @@ pub(super) fn compose_env(
     flags: &Flags,
     plan: &RunPlan,
 ) -> Result<Env, i32> {
-    compose_env_scoped(theme, roots, flags, plan, RealizeScope::Project)
+    compose_env_scoped(theme, roots, flags, plan, RealizeScope::Project, false)
 }
 
 /// A user tool is installed into the user profile, so it must not be
@@ -357,7 +359,13 @@ pub(super) fn compose_env_scoped(
     flags: &Flags,
     plan: &RunPlan,
     scope: RealizeScope,
+    confirm_download: bool,
 ) -> Result<Env, i32> {
+    if confirm_download {
+        if let Err(code) = reject_unprompted_acquisition(theme, roots, flags, plan, scope) {
+            return Err(code);
+        }
+    }
     enforce_required_sandbox_policy(theme, flags.json)?;
     if let Err(error) = validate_integration_facts(plan) {
         theme.error_coded(
@@ -398,11 +406,34 @@ pub(super) fn compose_env_scoped(
     let mut unavailable = false;
     let mut cache_leases = Vec::new();
     let name_w = name_column_width(&plan.refs);
-    // Tier 1 (D-FE-CLI1): `jet env`/`run`/`dev` composing a project's
-    // packages is the trivial-op case — one `✓ name version` row per
-    // package, no state/duration column.
+    // Multi-package realization gets one pinned aggregate on a TTY and one
+    // settled row per package. Plain output keeps only those settled rows so
+    // a large package set does not become a duplicate status/row ledger.
     let total_steps = plan.refs.len() + plan.adapters.len();
+    let live_mode = total_steps > 1;
+    let aggregate_mode = scope == RealizeScope::Use && live_mode;
+    let live_tty = live_mode && theme.color && std::io::stderr().is_terminal();
+    let mut live = theme.live_region();
+    let mut completed_steps = 0usize;
     for spec in plan.refs.iter() {
+        if aggregate_mode {
+            live.set_aggregate_status("resolving", completed_steps, total_steps);
+        } else if live_tty {
+            live.set_dependency_status(
+                "resolving",
+                completed_steps,
+                total_steps,
+                spec.source.label(),
+                &spec.package,
+                "resolving",
+            );
+        }
+        let style = if live_mode {
+            RowStyle::Silent
+        } else {
+            RowStyle::Ready
+        };
+        let live_arg = live_mode.then_some(&mut live);
         match realize_ref_outcome(
             theme,
             roots,
@@ -410,11 +441,15 @@ pub(super) fn compose_env_scoped(
             &plan.table,
             spec,
             name_w,
-            RowStyle::Ready,
-            None,
+            style,
+            live_arg,
             scope,
         ) {
-            RefOutcome::Realized(entry, _state, _line, lease) => {
+            RefOutcome::Realized(entry, _state, line, lease) => {
+                if live_mode {
+                    live.finish(&line);
+                }
+                completed_steps += 1;
                 // A `library` package realizes with an empty `bin` (U10) — it
                 // stages source for import and contributes nothing to PATH.
                 if !entry.bin.is_empty() {
@@ -447,6 +482,7 @@ pub(super) fn compose_env_scoped(
                     }
                 }
                 if let Some(file) = invalid_metadata {
+                    live.clear();
                     theme.error(
                         "couldn't compose package environment",
                         &format!(
@@ -470,6 +506,7 @@ pub(super) fn compose_env_scoped(
         }
     }
     for (idx, adapter) in plan.adapters.iter().enumerate() {
+        live.clear();
         if total_steps > 1 {
             theme.progress_chain(
                 "adapt",
@@ -491,6 +528,7 @@ pub(super) fn compose_env_scoped(
         }
     }
     if !holes.is_empty() {
+        live.clear();
         report_nix_bridge_required(theme, flags, &holes, &realized_refs);
         return Err(2);
     }
@@ -515,6 +553,7 @@ pub(super) fn compose_env_scoped(
         })
         .collect::<Vec<_>>();
     if !missing_language_tools.is_empty() {
+        live.clear();
         theme.error_coded(
             "E1333",
             "a language pack tool is missing from the realized environment",
@@ -564,6 +603,7 @@ pub(super) fn compose_env_scoped(
                 .components()
                 .any(|component| component == std::path::Component::ParentDir)
         {
+            live.clear();
             theme.error(
                 "couldn't load dotenv file",
                 &format!("`{path}` is not a project-relative path"),
@@ -582,6 +622,7 @@ pub(super) fn compose_env_scoped(
                 }
             }
             Err(error) => {
+                live.clear();
                 theme.error(
                     "couldn't load dotenv file",
                     &format!("{}: {error}", dotenv_path.display()),
@@ -598,6 +639,7 @@ pub(super) fn compose_env_scoped(
                 "GIT_CONFIG_COUNT" | "GIT_CONFIG_KEY_0" | "GIT_CONFIG_VALUE_0"
             )
         }) {
+            live.clear();
             theme.error_coded(
                 "E1333",
                 "the environment Git hook configuration conflicts with `unset`",
@@ -609,6 +651,7 @@ pub(super) fn compose_env_scoped(
         match EnvHook::git_hooks_environment(&plan.project_root, relative) {
             Ok(values) => composed_vars.extend(values),
             Err(error) => {
+                live.clear();
                 theme.error_coded(
                     "E1333",
                     "the environment Git hook path is not usable",
@@ -637,6 +680,79 @@ pub(super) fn compose_env_scoped(
         prompt_strip: plan.prompt_strip,
         cache_leases,
     })
+}
+
+/// A piped `jetpack env`/`use` command must not start realization without an
+/// explicit `-y`. Existing Hangar entries are allowed through so fully cached
+/// environments stay silent; every missing package is rejected before the
+/// provider or Store realization boundary can acquire bytes.
+fn reject_unprompted_acquisition(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    plan: &RunPlan,
+    scope: RealizeScope,
+) -> Result<(), i32> {
+    let specs = plan
+        .refs
+        .iter()
+        .filter(|spec| ref_needs_acquisition(spec, &plan.table))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut download = plan_downloads(theme, roots, flags, &plan.table, &specs, scope)?;
+    if !plan.adapters.is_empty() {
+        download.packages = download.packages.saturating_add(plan.adapters.len());
+        download.bytes = None;
+    }
+    if download.packages == 0 {
+        return Ok(());
+    }
+    let label = match scope {
+        RealizeScope::Project => plan
+            .environment
+            .active_environment
+            .as_deref()
+            .map_or_else(|| "env".to_string(), |name| format!("env.{name}")),
+        RealizeScope::Use => "use".to_string(),
+        RealizeScope::UserProfile => "tool".to_string(),
+    };
+    if theme.confirm_download(
+        &label,
+        download.packages,
+        download.bytes,
+        flags.assume_yes,
+    ) {
+        Ok(())
+    } else {
+        Err(2)
+    }
+}
+
+fn ref_needs_acquisition(spec: &RefSpec::RefSpec, table: &RefSpec::SourceTable) -> bool {
+    let provider = match &spec.source {
+        RefSpec::Source::Named(name) => table.provider(name),
+        RefSpec::Source::Releases => ProviderKind::JetPackage,
+        RefSpec::Source::Cran => ProviderKind::Cran,
+        RefSpec::Source::LuaRocks => ProviderKind::LuaRocks,
+        RefSpec::Source::RubyGems => ProviderKind::RubyGems,
+        RefSpec::Source::Cpan => ProviderKind::Cpan,
+        RefSpec::Source::Packagist => ProviderKind::Packagist,
+        RefSpec::Source::JetRegistry => ProviderKind::JetRegistry,
+        RefSpec::Source::Npm => ProviderKind::Npm,
+        RefSpec::Source::Cargo => ProviderKind::Cargo,
+        RefSpec::Source::PyPI => ProviderKind::PyPI,
+        RefSpec::Source::SwiftPM => ProviderKind::SwiftPM,
+        RefSpec::Source::Jetpack
+        | RefSpec::Source::Nixpkgs
+        | RefSpec::Source::Github
+        | RefSpec::Source::Path => ProviderKind::Nix,
+    };
+    if provider != ProviderKind::Core {
+        return true;
+    }
+    table
+        .upstream(spec.source.label())
+        .is_none_or(|upstream| !upstream.starts_with("path:"))
 }
 
 pub(super) fn validate_integration_facts(plan: &RunPlan) -> Result<(), String> {

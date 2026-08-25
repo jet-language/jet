@@ -421,6 +421,67 @@ fn load_pkg_manifest(source_file: &str) -> Option<(PathBuf, jet::Package::Packag
     Some((root, manifest))
 }
 
+/// Find the project's declared environment without realizing or mutating it.
+/// `jet` may inspect this boundary, but acquisition and activation belong to
+/// `jetpack` (D-VERDICT-2188-1).
+fn declared_project_environment(start: &Path) -> Option<(PathBuf, String)> {
+    let search_from = if start.is_dir() {
+        start
+    } else {
+        start.parent().unwrap_or_else(|| Path::new("."))
+    };
+    let root = jetpack::EnvHook::find_env_root(search_from)?;
+    let source = fs::read_to_string(root.join(jet::Syntax::ENV_FILE)).ok()?;
+
+    if jet_env_model::ModuleEval::is_module_surface(&source) {
+        let plan = match jet_env_model::ModuleEval::evaluate_env(&source, &root) {
+            Ok(plan) => plan,
+            // A malformed typed environment still declares the boundary. Let
+            // jetpack report the source diagnostic after the user enters it.
+            Err(_) => return Some((root, "env".to_string())),
+        };
+        let name = plan
+            .active_environment
+            .clone()
+            .or_else(|| plan.environment_names.first().cloned())?;
+        return Some((root, format!("env.{name}")));
+    }
+
+    let env = jetpack::EnvFile::parse(&source);
+    (env.default_source.is_some() || !env.named.is_empty() || !env.packages.is_empty())
+        .then(|| (root, "env".to_string()))
+}
+
+fn same_environment_root(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+/// Refuse an env-backed `jet` verb unless the caller is already inside the
+/// realized project environment. This check is intentionally before any
+/// profile, source, lock, or toolchain work so `jet` cannot acquire anything.
+pub(crate) fn require_project_environment(cmd: &str, start: &Path, mode: OutputMode) {
+    let Some((root, environment)) = declared_project_environment(start) else {
+        return;
+    };
+    let active = std::env::var_os(jet::Syntax::JETPACK_ENV_MARKER)
+        .is_some_and(|value| !value.is_empty() && value != "0")
+        && std::env::var_os(jet::Syntax::ENV_HOOK_ACTIVE_DIR_VAR)
+            .is_none_or(|active| same_environment_root(&root, Path::new(&active)));
+    if active {
+        return;
+    }
+
+    crate::emit_cli_row(
+        "E1355",
+        &[("environment", environment.as_str()), ("verb", cmd)],
+        mode.json,
+    );
+    exit(ExitCodes::USER_ERROR);
+}
+
 pub(crate) fn run_compile_cmd(
     cmd: &str,
     file: &str,
@@ -446,6 +507,7 @@ pub(crate) fn run_compile_cmd(
     package_scope: bool,
     build_override: bool,
 ) {
+    require_project_environment(cmd, Path::new(file), mode);
     // D-BUILD-DEFAULT1/D-BUILDPROFILE1: profile selection. Precedence:
     // --freestanding > --small > --release/--profile=<name> > command default.
     // `run` uses Fast; `build` keeps Default (optimized). Named profiles are
@@ -2279,6 +2341,7 @@ pub(crate) struct TestRunOpts {
 /// non-reserved `.jet` file found, in sorted path order.
 pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     let p = Path::new(path);
+    require_project_environment("test", p, mode);
     if !p.exists() {
         crate::cli_error!("E2105", "can't find `{}`", path);
         exit(ExitCodes::USER_ERROR);
@@ -2343,6 +2406,7 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
 /// ordinary file path so its own report (E0601, or E2105 for a missing entry)
 /// is the one the user sees, exactly once.
 pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode) {
+    require_project_environment("test", root, mode);
     let entry = crate::find_project_entry(root);
     let mut ran = 0usize;
     let mut any_fail = false;

@@ -737,7 +737,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
             root.join(Syntax::ENV_FILE),
-            "module env.dev { reload: Reload.{ watch: [\"tracked.txt\"], debounce: 250 } }\n",
+            "module env.dev { reload: .Watch{ paths: [\"tracked.txt\"], debounce_ms: 250 } }\n",
         )
         .unwrap();
         std::fs::write(root.join("tracked.txt"), "one\n").unwrap();

@@ -82,6 +82,10 @@ pub(super) struct Flags {
     pub(super) trust_scope: Option<String>,
     /// D-FE-CLI1: bypass mutation confirmation gates (`-y` / `--yes`).
     pub(super) assume_yes: bool,
+    /// D-VERDICT-2192-1: narrow `jetpack update` to project dependencies.
+    pub(super) update_deps: bool,
+    /// D-VERDICT-2192-1: narrow `jetpack update` to user tools.
+    pub(super) update_tools: bool,
     /// D-JPK-TOOLRUN1: `jetpack tool install <ref> --as <name>` bin rename.
     pub(super) as_name: Option<String>,
     /// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock --binary <path>`.
@@ -155,6 +159,8 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         shell_on_fail: false,
         trust_scope: None,
         assume_yes: false,
+        update_deps: false,
+        update_tools: false,
         as_name: None,
         browser_binary: None,
         browser_version: None,
@@ -198,6 +204,10 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
             "--online" => flags.online = true,
             a if a == Syntax::CLI_FLAG_YES_SHORT || a == Syntax::CLI_FLAG_YES_LONG => {
                 flags.assume_yes = true;
+            }
+            a if verb == "update" && a == Syntax::UPDATE_FLAG_DEPS => flags.update_deps = true,
+            a if verb == "update" && a == Syntax::UPDATE_FLAG_TOOLS => {
+                flags.update_tools = true
             }
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,

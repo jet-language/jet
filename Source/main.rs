@@ -63,10 +63,10 @@ mod ProveSolver;
 
 use CmdCodemod::run_codemod;
 use CmdCompile::{
-    resolve_named_profile, run_build_query, run_compile_cmd, run_compiler_api, run_debug_native,
-    run_dev_entry, run_dev_web, run_external_fmt, run_fix, run_fmt, run_fuzz, run_jobs, run_new,
-    run_test_opts, run_test_package, run_web_app_dev_entry, validate_target, FuzzRunOpts,
-    TestRunOpts,
+    require_project_environment, resolve_named_profile, run_build_query, run_compile_cmd,
+    run_compiler_api, run_debug_native, run_dev_entry, run_dev_web, run_external_fmt, run_fix,
+    run_fmt, run_fuzz, run_jobs, run_new, run_test_opts, run_test_package, run_web_app_dev_entry,
+    validate_target, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust, run_eval,
@@ -1741,6 +1741,10 @@ fn main() {
     // downstream (so their flags aren't measured against the global set).
     if !owns_flags {
         check_flags(jet_argv, cmd);
+    }
+    if cmd == "test" {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        require_project_environment("test", &cwd, mode);
     }
     if let Some(status) = jet::ReceiptStore::run_if_needed(&raw) {
         exit(status);

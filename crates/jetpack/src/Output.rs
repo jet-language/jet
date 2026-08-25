@@ -11,11 +11,273 @@ use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::Terminal::{ColorChoice, Theme as SharedTheme};
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy)]
 pub struct Theme {
     pub color: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteProgressSnapshot {
+    /// `None` means the counter overflowed and must not be rendered as a
+    /// guessed number.
+    pub transferred: Option<u64>,
+    /// `None` means no fetched object has disclosed a trusted byte total yet.
+    pub total: Option<u64>,
+}
+
+#[derive(Debug, Default)]
+struct ByteProgressState {
+    transferred: Option<u64>,
+    total: Option<u64>,
+    total_overflowed: bool,
+    phase: String,
+    package_done: usize,
+    package_total: usize,
+    object_done: usize,
+    object_total: usize,
+    object_base_done: usize,
+    object_base_total: usize,
+    last_rendered_phase: String,
+    last_rendered_package_done: usize,
+    last_rendered_package_total: usize,
+    last_rendered_object_done: usize,
+    last_rendered_object_total: usize,
+    last_rendered_transferred: Option<u64>,
+    last_rendered_total: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct AggregateProgressSnapshot {
+    phase: String,
+    package_done: usize,
+    package_total: usize,
+    object_done: usize,
+    object_total: usize,
+    transferred: Option<u64>,
+    total: Option<u64>,
+}
+
+#[derive(Clone, Copy)]
+struct AggregateProgressRenderer {
+    theme: Theme,
+    tty: bool,
+    drawn: usize,
+}
+
+/// Thread-safe byte ledger for a realization's closure. Narinfo discovery and
+/// NAR reads happen on parallel workers, so updates must be additive and
+/// separately represent an unknown denominator.
+pub(crate) struct ByteProgress {
+    state: Mutex<ByteProgressState>,
+    renderer: Mutex<Option<AggregateProgressRenderer>>,
+}
+
+impl Default for ByteProgress {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(ByteProgressState {
+                transferred: Some(0),
+                ..ByteProgressState::default()
+            }),
+            renderer: Mutex::new(None),
+        }
+    }
+}
+
+impl ByteProgress {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub(crate) fn snapshot(&self) -> ByteProgressSnapshot {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        ByteProgressSnapshot {
+            transferred: state.transferred,
+            total: state.total,
+        }
+    }
+
+    pub(crate) fn has_facts(&self) -> bool {
+        let snapshot = self.snapshot();
+        snapshot.total.is_some() || snapshot.transferred != Some(0)
+    }
+
+    pub(crate) fn render(&self) -> String {
+        let snapshot = self.snapshot();
+        let transferred = snapshot
+            .transferred
+            .map(human_size)
+            .unwrap_or_else(|| "?".to_string());
+        let total = snapshot
+            .total
+            .map(human_size)
+            .unwrap_or_else(|| "?".to_string());
+        format!("{transferred} / {total}")
+    }
+
+    fn discovered_bytes(&self, bytes: u64) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            if state.total_overflowed {
+                return;
+            }
+            state.total = match state.total {
+                Some(total) => match total.checked_add(bytes) {
+                    Some(total) => Some(total),
+                    None => {
+                        state.total_overflowed = true;
+                        None
+                    }
+                },
+                None => Some(bytes),
+            };
+        }
+        self.render_if_needed(false);
+    }
+
+    fn transferred_bytes(&self, bytes: u64) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.transferred = state
+                .transferred
+                .and_then(|transferred| transferred.checked_add(bytes));
+        }
+        self.render_if_needed(false);
+    }
+
+    fn activate_renderer(&self, theme: Theme, tty: bool) {
+        let mut renderer = self
+            .renderer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        renderer.get_or_insert(AggregateProgressRenderer {
+            theme,
+            tty,
+            drawn: 0,
+        });
+    }
+
+    fn clear_renderer(&self) {
+        let mut renderer = self
+            .renderer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(renderer) = renderer.as_mut() else {
+            return;
+        };
+        if renderer.tty && renderer.drawn > 0 {
+            eprint!("\x1b[{}F\x1b[0J", renderer.drawn);
+        }
+        renderer.drawn = 0;
+    }
+
+    fn phase(&self, phase: &str) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.phase = phase.to_string();
+        }
+        self.render_if_needed(false);
+    }
+
+    fn object_progress(&self, done: usize, total: usize) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.object_done = state.object_base_done.saturating_add(done);
+            state.object_total = state.object_base_total.saturating_add(total);
+        }
+        self.render_if_needed(false);
+    }
+
+    fn render_if_needed(&self, force: bool) {
+        const BYTE_REDRAW_THRESHOLD: u64 = 1_000_000;
+        let (snapshot, structural) = {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            let structural = force
+                || state.phase != state.last_rendered_phase
+                || state.package_done != state.last_rendered_package_done
+                || state.package_total != state.last_rendered_package_total
+                || state.object_done != state.last_rendered_object_done
+                || state.object_total != state.last_rendered_object_total
+                || state.total != state.last_rendered_total;
+            let byte_delta = match (state.transferred, state.last_rendered_transferred) {
+                (Some(current), Some(previous)) => current.saturating_sub(previous),
+                (Some(_), None) | (None, Some(_)) => BYTE_REDRAW_THRESHOLD,
+                (None, None) => 0,
+            };
+            let byte_redraw = byte_delta >= BYTE_REDRAW_THRESHOLD
+                || state.total == state.transferred && state.transferred != Some(0);
+            if !(structural || byte_redraw) {
+                return;
+            }
+            state.last_rendered_phase = state.phase.clone();
+            state.last_rendered_package_done = state.package_done;
+            state.last_rendered_package_total = state.package_total;
+            state.last_rendered_object_done = state.object_done;
+            state.last_rendered_object_total = state.object_total;
+            state.last_rendered_transferred = state.transferred;
+            state.last_rendered_total = state.total;
+            (
+                AggregateProgressSnapshot {
+                    phase: state.phase.clone(),
+                    package_done: state.package_done,
+                    package_total: state.package_total,
+                    object_done: state.object_done,
+                    object_total: state.object_total,
+                    transferred: state.transferred,
+                    total: state.total,
+                },
+                structural,
+            )
+        };
+        let mut renderer = self
+            .renderer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(renderer) = renderer.as_mut() else {
+            return;
+        };
+        if !renderer.tty && !structural {
+            return;
+        }
+        let line = renderer.theme.render_aggregate_progress(
+            &snapshot.phase,
+            snapshot.package_done,
+            snapshot.package_total,
+            snapshot.object_done,
+            snapshot.object_total,
+            snapshot.transferred,
+            snapshot.total,
+        );
+        if renderer.tty {
+            if renderer.drawn > 0 {
+                eprint!("\x1b[{}F\x1b[0J", renderer.drawn);
+            }
+            eprintln!("{}{}", LiveRegion::pad(), line);
+            renderer.drawn = 1;
+        } else {
+            eprintln!("{}{}", LiveRegion::pad(), line);
+        }
+    }
+}
+
+impl crate::Store::ProgressSink for ByteProgress {
+    fn discovered_bytes(&self, bytes: u64) {
+        ByteProgress::discovered_bytes(self, bytes);
+    }
+
+    fn transferred_bytes(&self, bytes: u64) {
+        ByteProgress::transferred_bytes(self, bytes);
+    }
+
+    fn phase(&self, phase: &str) {
+        ByteProgress::phase(self, phase);
+    }
+
+    fn object_progress(&self, done: usize, total: usize) {
+        ByteProgress::object_progress(self, done, total);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -224,6 +486,40 @@ impl Theme {
         )
     }
 
+    /// One aggregate realization line. Package counts describe resolution;
+    /// object counts describe substitution and admission. A missing byte
+    /// denominator remains `?` until signed metadata discloses it.
+    pub fn render_aggregate_progress(
+        &self,
+        phase: &str,
+        package_done: usize,
+        package_total: usize,
+        object_done: usize,
+        object_total: usize,
+        transferred: Option<u64>,
+        total_bytes: Option<u64>,
+    ) -> String {
+        let (done, total, noun) = if phase == "resolving" {
+            (package_done, package_total, "packages")
+        } else {
+            (object_done, object_total, "objects")
+        };
+        let total = if total == 0 {
+            "?".to_string()
+        } else {
+            total.to_string()
+        };
+        let transferred = transferred
+            .map(human_size)
+            .unwrap_or_else(|| "?".to_string());
+        let total_bytes = total_bytes
+            .map(human_size)
+            .unwrap_or_else(|| "?".to_string());
+        format!(
+            "{phase:<12} {done}/{total} {noun}  {transferred} / {total_bytes}"
+        )
+    }
+
     /// Dependency-chain progress for long realization/build phases. TTY output
     /// can later pin/redraw this same line; non-TTY appends it as stable ledger.
     pub fn progress_chain(&self, phase: &str, done: usize, total: usize, node: &str, edge: &str) {
@@ -305,6 +601,7 @@ impl Theme {
             theme: self,
             tty: self.color && std::io::stderr().is_terminal(),
             drawn: 0,
+            progress: ByteProgress::new(),
         }
     }
 
@@ -357,6 +654,52 @@ impl Theme {
         let apply = answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes");
         if !apply {
             self.status("plan cancelled.");
+        }
+        apply
+    }
+
+    /// Confirm the first acquisition for an environment. The closure has
+    /// already been resolved, so this gate reports its package count and
+    /// trusted byte total before any payload is fetched.
+    pub fn confirm_download(
+        &self,
+        label: &str,
+        packages: usize,
+        bytes: Option<u64>,
+        assume_yes: bool,
+    ) -> bool {
+        let noun = if packages == 1 { "package" } else { "packages" };
+        let size = bytes
+            .map(human_size)
+            .unwrap_or_else(|| "size unknown".to_string());
+        let summary = format!("{label} needs {packages} {noun}, {size}");
+        if assume_yes {
+            self.status(&summary);
+            return true;
+        }
+        if !std::io::stdin().is_terminal() {
+            self.error_coded(
+                "E1340",
+                &format!("{summary} and cannot prompt here"),
+                "the environment needs package downloads and stdin is not a terminal to ask for confirmation",
+                "pass -y to accept, or pre-warm with `jetpack env --prep -y`",
+            );
+            return false;
+        }
+        eprint!("  {}  {} - continue? [Y/n] ", self.gutter(), summary);
+        use std::io::Write;
+        let _ = std::io::stderr().flush();
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() {
+            self.status("download cancelled.");
+            return false;
+        }
+        let answer = answer.trim();
+        let apply = answer.is_empty()
+            || answer.eq_ignore_ascii_case("y")
+            || answer.eq_ignore_ascii_case("yes");
+        if !apply {
+            self.status("download cancelled.");
         }
         apply
     }
@@ -484,6 +827,7 @@ pub struct LiveRegion<'a> {
     /// Number of lines currently drawn by the live region, so the next
     /// redraw can erase exactly that many before writing new ones.
     drawn: usize,
+    progress: Arc<ByteProgress>,
 }
 
 impl<'a> LiveRegion<'a> {
@@ -496,6 +840,7 @@ impl<'a> LiveRegion<'a> {
     /// clear right before any diagnostic print, so stale progress-bar text
     /// never sits above/below an error.
     pub(crate) fn clear(&mut self) {
+        self.progress.clear_renderer();
         if !self.tty || self.drawn == 0 {
             self.drawn = 0;
             return;
@@ -529,6 +874,32 @@ impl<'a> LiveRegion<'a> {
         self.drawn = lines.len();
     }
 
+    /// Start or advance the aggregate realization line. Byte and object
+    /// updates arrive through the shared progress sink while admission runs;
+    /// this call supplies the package-level count and the current resolve
+    /// phase before the provider begins work.
+    pub(crate) fn set_aggregate_status(
+        &mut self,
+        phase: &str,
+        completed_packages: usize,
+        total_packages: usize,
+    ) {
+        {
+            let mut state = self
+                .progress
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            state.object_base_done = state.object_done;
+            state.object_base_total = state.object_total;
+            state.package_done = completed_packages;
+            state.package_total = total_packages;
+            state.phase = phase.to_string();
+        }
+        self.progress.activate_renderer(*self.theme, self.tty);
+        self.progress.render_if_needed(true);
+    }
+
     /// Project one dependency edge. TTY redraws a two-line pinned region;
     /// non-TTY appends exactly one stable chain line per node so CI retains
     /// progress without cursor control, timing noise, or duplicate bars.
@@ -541,9 +912,14 @@ impl<'a> LiveRegion<'a> {
         node: &str,
         state: &str,
     ) {
-        let line = self
+        let base_line = self
             .theme
             .render_dependency_status(phase, completed, total, source, node, state);
+        let line = if self.progress.has_facts() {
+            format!("{base_line}  {}", self.theme.gray(&self.progress.render()))
+        } else {
+            base_line
+        };
         if !self.tty {
             eprintln!("{}{}", Self::pad(), line);
             return;
@@ -563,6 +939,10 @@ impl<'a> LiveRegion<'a> {
     pub fn collapse(&mut self, summary: &str) {
         self.clear();
         eprintln!("  {}  {}", self.theme.gutter(), summary);
+    }
+
+    pub(crate) fn progress_handle(&self) -> crate::Store::ProgressHandle {
+        self.progress.clone()
     }
 }
 
@@ -779,6 +1159,65 @@ mod tests {
     }
 
     #[test]
+    fn live_region_plain_fallback_is_deterministic_when_no_color_and_piped() {
+        const CHILD: &str = "JETPACK_OUTPUT_PLAIN_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let theme = Theme::resolve_choice(ColorChoice::Auto);
+            assert!(!theme.color, "NO_COLOR must disable color");
+            let mut live = theme.live_region();
+            assert!(!live.tty, "piped stderr must not use live cursor control");
+            live.set_dependency_status("resolving", 0, 2, "jetpack", "ripgrep", "fetching");
+            live.finish(&theme.render_row("ripgrep", 8, "15.2.0", "substituted"));
+            live.set_dependency_status("admitting", 1, 2, "jetpack", "jq", "writing");
+            live.finish(&theme.render_row("jq", 8, "1.8.2", "substituted"));
+            live.collapse("build ready ✓");
+            return;
+        }
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "Output::tests::live_region_plain_fallback_is_deterministic_when_no_color_and_piped",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("NO_COLOR", "")
+            .env_remove("FORCE_COLOR")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+
+        let theme = Theme { color: false };
+        let pad = LiveRegion::pad();
+        let expected = [
+            format!(
+                "{pad}{}",
+                theme.render_dependency_status("resolving", 0, 2, "jetpack", "ripgrep", "fetching")
+            ),
+            format!(
+                "{pad}{}",
+                theme.render_row("ripgrep", 8, "15.2.0", "substituted")
+            ),
+            format!(
+                "{pad}{}",
+                theme.render_dependency_status("admitting", 1, 2, "jetpack", "jq", "writing")
+            ),
+            format!("{pad}{}", theme.render_row("jq", 8, "1.8.2", "substituted")),
+            format!("  {}  build ready ✓", theme.gutter()),
+        ]
+        .join("\n")
+            + "\n";
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(stderr, expected);
+        assert!(
+            !stderr.as_bytes().contains(&0x1b),
+            "plain output: {stderr:?}"
+        );
+    }
+
+    #[test]
     fn progress_chain_has_deterministic_plain_fallback() {
         let theme = Theme { color: false };
         assert_eq!(
@@ -803,6 +1242,24 @@ mod tests {
             theme.render_dependency_status("building", 0, 1, "", "local-app", "building"),
             "building completed 0/1 · current: local-app · building"
         );
+    }
+
+    #[test]
+    fn byte_progress_grows_known_total_and_marks_unknown_honestly() {
+        let progress = ByteProgress::default();
+        assert_eq!(progress.render(), "0 B / ?");
+
+        progress.discovered_bytes(100);
+        progress.transferred_bytes(40);
+        assert_eq!(progress.render(), "40 B / 100 B");
+
+        progress.discovered_bytes(200);
+        assert_eq!(progress.render(), "40 B / 300 B");
+
+        progress.discovered_bytes(u64::MAX);
+        progress.discovered_bytes(1);
+        assert_eq!(progress.snapshot().total, None);
+        assert_eq!(progress.render(), "40 B / ?");
     }
 
     // -- Tier 1: ready rows / summary --

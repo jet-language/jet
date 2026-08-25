@@ -941,6 +941,26 @@ mod tests {
     }
 
     #[test]
+    fn cache_candidate_preflight_does_not_read_closure_graph() {
+        let (roots, _g) = temp_roots();
+        let ingested = ingest_fixture(
+            &roots,
+            "candidate-preflight",
+            &[("out", "trusted")],
+            Vec::new(),
+        );
+        let expectation = test_expectation(Path::new(&ingested.entry.out));
+        let closure_db = roots.hangar_dir().join("closure-db");
+        fs::remove_dir_all(&closure_db).unwrap();
+
+        assert!(cache_candidate_matches(
+            &roots,
+            &ingested.entry.reference,
+            &expectation
+        ));
+    }
+
+    #[test]
     fn verified_cache_rejects_wrong_platform_and_incomplete_proof() {
         let (roots, _g) = temp_roots();
         let out = roots.root.join("owned-output");

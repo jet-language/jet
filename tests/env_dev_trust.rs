@@ -203,6 +203,91 @@ fn env_runs_no_project_function() {
     );
 }
 
+/// A fully materialized closure needs no second confirmation. Warm the
+/// project env from an offline fixture, remove that provider metadata, then
+/// enter both shell paths with network disabled. The cached Hangar object is
+/// the only possible source.
+#[test]
+fn cached_env_and_use_enter_offline_without_confirmation() {
+    let proj = Scratch::new("cached-entry");
+    let root = Scratch::new("cached-entry-root");
+    let home = Scratch::new("cached-entry-home");
+    let fixtures = Scratch::new("cached-entry-fixtures");
+    let fastfetch_out = Scratch::new("cached-entry-fastfetch-out");
+    write_package_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
+
+    let pattern = format!("{}*", proj.path.display());
+    let grant = jetpack()
+        .args(["config", "trust", "add", &pattern, "--no-color"])
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert!(
+        grant.status.success(),
+        "trust grant failed: {}",
+        String::from_utf8_lossy(&grant.stderr)
+    );
+
+    let prep = jetpack()
+        .args(["env", "--prep", "--yes", "--no-color", "--offline"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_FIXTURES", &fixtures.path)
+        .output()
+        .unwrap();
+    assert!(
+        prep.status.success(),
+        "env prep failed: {}",
+        String::from_utf8_lossy(&prep.stderr)
+    );
+    fs::remove_file(fixtures.join("nixpkgs-fastfetch.json")).unwrap();
+    fs::remove_file(fixtures.join("fastfetch.drv")).unwrap();
+
+    let env = jetpack()
+        .args(["env", "--no-color", "--offline", "--", "fastfetch"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env_remove("JETPACK_FIXTURES")
+        .output()
+        .unwrap();
+    assert!(
+        env.status.success(),
+        "cached env entry failed: {}",
+        String::from_utf8_lossy(&env.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&env.stdout).trim(), "fastfetch stub");
+    assert!(!String::from_utf8_lossy(&env.stderr).contains("continue?"));
+
+    let use_shell = jetpack()
+        .args([
+            "use",
+            "fastfetch@nixpkgs",
+            "--no-color",
+            "--offline",
+            "--",
+            "fastfetch",
+        ])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env_remove("JETPACK_FIXTURES")
+        .output()
+        .unwrap();
+    assert!(
+        use_shell.status.success(),
+        "cached use entry failed: {}",
+        String::from_utf8_lossy(&use_shell.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&use_shell.stdout).trim(),
+        "fastfetch stub"
+    );
+    assert!(!String::from_utf8_lossy(&use_shell.stderr).contains("continue?"));
+}
+
 /// Bare project dev (no file — the project-level U19 command, distinct from
 /// the already-shipped `jet dev <file.jet>` watch loop) finds the project's
 /// `main.jet`, waits for services (U12 no-op today), and runs its `fn dev()`.

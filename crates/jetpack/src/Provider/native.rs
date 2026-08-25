@@ -56,6 +56,26 @@ pub(crate) fn cache_expectation(
     })
 }
 
+/// Return the artifact size already available in a fixture. Remote release
+/// metadata does not currently carry a trusted size in the native recipe, so
+/// callers keep that total unknown rather than printing a fabricated number.
+pub(crate) fn download_size(
+    spec: &PackageRef,
+    table: &SourceTable,
+    ctx: &Ctx,
+) -> Result<Option<u64>, ProviderError> {
+    let facts = release_facts(spec, table, ctx)?;
+    facts
+        .fixture_artifact
+        .as_deref()
+        .map(|path| {
+            fs::symlink_metadata(path)
+                .map(|metadata| metadata.len())
+                .map_err(|error| native_error(format!("could not stat fixture artifact: {error}")))
+        })
+        .transpose()
+}
+
 pub(crate) struct NativeProvider;
 
 impl Provider for NativeProvider {

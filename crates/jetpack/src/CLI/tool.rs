@@ -7,10 +7,12 @@
 
 use super::parse::Parsed;
 use super::realize::{
-    channel_sources, classify_or_report, realize_ref_outcome, RealizeScope, report_nix_bridge_required,
-    resolve_source_channel, RefOutcome, RowStyle, RunPlan,
+    channel_download_size_from_fixture, channel_sources, classify_or_report, realize_ref_outcome,
+    report_nix_bridge_required, resolve_source_channel, RealizeScope, RefOutcome, RowStyle,
+    RunPlan,
 };
 use super::trust_env_build::compose_env_scoped;
+use super::update_search_info::{render_channel_update_row, UpdateConfirmation};
 use super::workspace_sources::cwd_table;
 use super::ProfileDispatch;
 use crate::Output::Theme;
@@ -328,7 +330,11 @@ fn report_tool_profile_error(theme: &Theme, error: &io::Error) -> i32 {
 /// Refresh the moving source pins recorded by the standalone user-tools
 /// declaration. `#latest` reaches this path only through an explicit update;
 /// `#auto` is also refreshed by profile realization.
-pub(super) fn update_user_tools(theme: &Theme, parsed: &Parsed) -> i32 {
+pub(super) fn update_user_tools(
+    theme: &Theme,
+    parsed: &Parsed,
+    confirmation: &mut UpdateConfirmation,
+) -> i32 {
     if parsed.flags.offline {
         theme.error(
             "cannot update user-tools offline",
@@ -340,9 +346,34 @@ pub(super) fn update_user_tools(theme: &Theme, parsed: &Parsed) -> i32 {
     let result = RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
         recover_profile_state()?;
         let mut manifest = read_tool_manifest()?;
-        let changed = refresh_tool_manifest_sources(theme, parsed, &mut manifest, true)?;
+        let (changed, updates) = refresh_tool_manifest_sources(theme, parsed, &mut manifest, true)?;
         if changed {
-            if !theme.confirm_apply(parsed.flags.assume_yes) {
+            let name_w = updates
+                .iter()
+                .map(|update| update.name.len())
+                .max()
+                .unwrap_or(8)
+                .max(8);
+            for update in &updates {
+                render_channel_update_row(
+                    theme,
+                    &update.name,
+                    name_w,
+                    &update.before,
+                    &update.after,
+                    update.package_count,
+                    update.download_bytes,
+                );
+            }
+            let download_bytes = updates
+                .iter()
+                .map(|update| update.download_bytes)
+                .collect::<Option<Vec<_>>>()
+                .map(|sizes| sizes.into_iter().sum());
+            if let Some(bytes) = download_bytes {
+                theme.download_line(bytes);
+            }
+            if !confirmation.confirm(theme, parsed.flags.assume_yes) {
                 return Ok(false);
             }
             write_tool_manifest(&manifest)?;
@@ -399,7 +430,14 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::UserProfile) {
+    let env = match compose_env_scoped(
+        theme,
+        &roots,
+        &parsed.flags,
+        &plan,
+        RealizeScope::UserProfile,
+        false,
+    ) {
         Ok(env) => env,
         Err(code) => return code,
     };
@@ -703,6 +741,14 @@ struct InstalledTool {
 struct ToolManifest {
     sources: Vec<ManifestSource>,
     tools: Vec<ManifestTool>,
+}
+
+struct ToolSourceUpdate {
+    name: String,
+    before: String,
+    after: String,
+    package_count: usize,
+    download_bytes: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -1078,7 +1124,8 @@ fn build_tool_manifest_generation(theme: &Theme, parsed: &Parsed) -> io::Result<
     RuntimePolicy::with_lock(&tools_state_dir(), PROFILE_LOCK_SCOPE, || {
         recover_profile_state()?;
         let mut manifest = read_tool_manifest()?;
-        let sources_changed = refresh_tool_manifest_sources(theme, parsed, &mut manifest, false)?;
+        let (sources_changed, _) =
+            refresh_tool_manifest_sources(theme, parsed, &mut manifest, false)?;
         let table = source_table_from_manifest(&manifest);
         let roots = Store::resolve();
         let name_w = manifest
@@ -1208,10 +1255,11 @@ fn refresh_tool_manifest_sources(
     parsed: &Parsed,
     manifest: &mut ToolManifest,
     manual: bool,
-) -> io::Result<bool> {
+) -> io::Result<(bool, Vec<ToolSourceUpdate>)> {
     let mut table = source_table_from_manifest(manifest);
     let sources = channel_sources(&table);
     let mut changed = false;
+    let mut updates = Vec::new();
     for source in sources {
         let should_refresh = source.policy == ChannelPolicy::Automatic
             || (manual && source.policy == ChannelPolicy::Manual);
@@ -1221,6 +1269,23 @@ fn refresh_tool_manifest_sources(
         match resolve_source_channel(&source, &parsed.flags) {
             Ok(exact) => {
                 if table.upstream(&source.name) != Some(exact.as_str()) {
+                    let package_count = manifest
+                        .tools
+                        .iter()
+                        .filter(|tool| {
+                            tool_source_name(&tool.resolved) == Some(source.name.as_str())
+                        })
+                        .count();
+                    updates.push(ToolSourceUpdate {
+                        name: source.name.clone(),
+                        before: table
+                            .upstream(&source.name)
+                            .unwrap_or(source.raw.as_str())
+                            .to_string(),
+                        after: exact.clone(),
+                        package_count,
+                        download_bytes: channel_download_size_from_fixture(&source, &parsed.flags),
+                    });
                     table.set_upstream(&source.name, exact);
                     changed = true;
                 }
@@ -1245,7 +1310,17 @@ fn refresh_tool_manifest_sources(
         refresh_manifest_tool_pins(manifest, &table);
         manifest.sources = manifest_sources_from_table(&table);
     }
-    Ok(changed)
+    Ok((changed, updates))
+}
+
+fn tool_source_name(reference: &str) -> Option<&str> {
+    reference
+        .rsplit_once(Syntax::REF_PROVIDER_AT)
+        .map(|(_, source)| {
+            source
+                .split_once(Syntax::REF_CHANNEL_MARKER)
+                .map_or(source, |(source, _)| source)
+        })
 }
 
 /// A moving source keeps its visible tier marker, but the realization input

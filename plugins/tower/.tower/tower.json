@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2198,
-    "rev": 44832,
+    "rev": 44859,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22,7 +22,6 @@
         "radar:e6",
         "radar:e8",
         "board-ideas",
-        "radar-sq",
         "radar:e7",
         "radar:e10",
         "radar:e9",
@@ -147073,11 +147072,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Add `--canvas` to the canonical `jet dev` surface only.\n2. Keep plain interactive dev terminal-first and print one compact Canvas command hint after ready.\n3. Suppress the hint for Canvas sessions, JSON, non-interactive output, and machine consumers.\n4. Open the full Canvas IDE over the same resident dev session, not a second compiler or watcher.\n5. Keep command, help, completions, man output, lifecycle, and diagnostics in one CLI registry.\n6. Prove terminal, Canvas, headless, browser-failure, and repeated-launch paths.",
+      "plan": "1. Follow D-CANVAS-CMD1=A after #2169 supplies the target-neutral control host.\n2. Add `--canvas` only to the `dev` command in `crates/jet-cli/src/CLI.rs` and its generated help surfaces.\n3. Route the flag through `Source/main.rs` into the existing resident dev process. Attach one Canvas client and control host.\n4. Keep plain interactive `jet dev` terminal-first. Print one exact `jet dev <source> --canvas` hint after readiness.\n5. Suppress the hint for Canvas, JSON, redirected, non-interactive, and machine-protocol output through the shared output-mode check.\n6. Define deterministic ownership for Ctrl-C, browser close, launch failure, and a second Canvas request. Never start a second watcher.\n7. Update CLI registry tests, help, completions, man output, dev integration tests, and Canvas browser scenarios.\n8. Prove `jet dev` and `jet dev --canvas` with a real terminal. Observe the process, URL, browser, second request, and shutdown.\n9. Run `scripts/agent/jet-env cargo test -p jet-cli` and the focused dev command tests.\n10. Run `scripts/agent/jet-env full cargo test --test canvas_scenarios` for the real browser paths.",
       "checkSteps": "Run the chosen command on a native hello program. Canvas opens once, edits the same source, and stops cleanly with Ctrl-C.",
-      "blockedBy": [],
+      "blockedBy": [
+        "cmtyww5f"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the sole Canvas command plan. Narrowed this card to CLI attachment, added #2169 as its host dependency, and made duplicate-session and lifecycle proof explicit."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147096,66 +147102,75 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`jet dev <source> --canvas` is the only Canvas entry command; `jet canvas` and other aliases do not exist.",
+          "text": "`jet dev <source> --canvas` is the only Canvas entry command; `jet canvas`, aliases, and automatic opening do not exist.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
+          "at": "2026-08-25T19:09:34.965Z"
         },
         {
           "n": 2,
+          "text": "`--canvas` is accepted only by `jet dev`; other commands reject it through the canonical CLI error path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:34.965Z"
+        },
+        {
+          "n": 3,
           "text": "Plain interactive `jet dev` remains terminal-first and does not start the Canvas endpoint or browser.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
+          "at": "2026-08-25T19:09:34.965Z"
         },
         {
-          "n": 3,
-          "text": "Every interactive terminal dev start prints one compact hint with the exact command `jet dev <source> --canvas`.",
+          "n": 4,
+          "text": "Every interactive terminal dev start prints one compact hint with the exact command `jet dev <source> --canvas` after readiness.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
+          "at": "2026-08-25T19:09:34.965Z"
         },
         {
-          "n": 4,
+          "n": 5,
           "text": "The hint is absent from Canvas sessions, JSON, redirected output, non-interactive runs, and machine protocols.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
-        },
-        {
-          "n": 5,
-          "text": "Canvas opens as the full Jet IDE/workbench over the same session, revisions, state, debugger, tests, receipts, and last-good program.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
+          "at": "2026-08-25T19:09:34.965Z"
         },
         {
           "n": 6,
-          "text": "Help, completions, man output, status text, and diagnostics use the same command and description.",
+          "text": "`jet dev --canvas` attaches the #2169 control host to the same dev process, compiler session, and watcher; observable session identity proves no duplicate.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
+          "at": "2026-08-25T19:09:34.965Z"
         },
         {
           "n": 7,
-          "text": "Ctrl-C, browser close, source-not-found, browser-launch failure, and a second Canvas request have deterministic lifecycle behavior.",
+          "text": "Help, completions, man output, status text, diagnostics, and unknown-flag behavior come from one CLI registry and use the same command.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:16.168Z"
+          "at": "2026-08-25T19:09:34.965Z"
+        },
+        {
+          "n": 8,
+          "text": "Ctrl-C, browser close, source-not-found, browser-launch failure, and a second Canvas request have tested exit, reuse, and cleanup behavior.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:34.965Z"
         }
       ],
       "refs": [
@@ -147171,7 +147186,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:04.054Z",
-      "updated": "2026-08-25T13:35:16.168Z",
+      "updated": "2026-08-25T19:09:36.270Z",
       "updatedBy": "Main"
     },
     {
@@ -147185,11 +147200,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Start a target-neutral Canvas control host for any checked Jet source.\n2. Bind a free loopback port and create a session secret without requiring target or endpoint flags.\n3. Keep program target and output selection independent from the IDE transport.\n4. Adapt graph, code, diagnostics, terminal, service, preview, and designer panels to checked capabilities.\n5. Expose host, port, transport, output, and target overrides only as named expert controls.\n6. Prove security, collisions, capability changes, target changes, and all supported project kinds.",
+      "plan": "1. Follow D-CANVAS-TARGET1=A. Keep the Canvas transport independent from the selected program output and target.\n2. Extract Canvas HTTP routes from `crates/jet-devserver/src/WebHost.rs` into one target-neutral control host under `crates/jet-devserver/src/`.\n3. Reuse the existing dev session and checked `ProgramBundle`. Do not add a compiler, watcher, or semantic model.\n4. Bind `127.0.0.1:0` by default. Generate one session secret and require it on every Canvas request.\n5. Enforce origin, method, path, body-size, and session checks before route dispatch. Fail closed for non-loopback exposure.\n6. Derive panel capabilities from checked output and target facts. Hide unsupported panels in `crates/jet-canvas/src/html.rs` and `js/**`.\n7. Register expert host, port, transport, authority, output, and target controls in `crates/jet-cli/src/CLI.rs`.\n8. Cover host and protocol behavior in `crates/jet-devserver`, `tests/canvas.rs`, and `tests/canvas_scenarios.rs`.\n9. Prove library tests with `scripts/agent/jet-env cargo test -p jet-devserver` and `cargo test --test canvas`.\n10. Prove the real browser matrix with `scripts/agent/jet-env full cargo test --test canvas_scenarios`.",
       "checkSteps": "Open the same source once as native and once as web. The Canvas graph stays the same while each program uses its own target.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the ratified target-neutral host plan. Added exact ownership, security boundaries, proof commands, and a complete project and protocol matrix."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147213,70 +147233,88 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 2,
-          "text": "With no endpoint flags, Canvas binds loopback on a free port, creates a session secret, opens the exact URL, and reports it.",
+          "text": "With no endpoint flags, Canvas binds `127.0.0.1:0`, gets the assigned port, creates a unique session secret, opens the exact URL, and reports it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 3,
-          "text": "The Canvas endpoint never changes the selected program target, output, execution tier, or preview adapter.",
+          "text": "The Canvas endpoint never changes the selected program target, output, execution tier, run entry, or preview adapter.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 4,
-          "text": "Graph, code, diagnostics, and runtime output work for every project; preview and designer panels appear only when checked capabilities support them.",
+          "text": "Graph, code, diagnostics, and runtime output work for every checked project; preview and designer panels appear only for supported capabilities.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 5,
-          "text": "Unsupported panels do not occupy the normal workspace as disabled clutter.",
+          "text": "Unsupported panels are absent from navigation, focus order, shortcuts, saved layout, and protocol capabilities instead of appearing as disabled clutter.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 6,
-          "text": "Experts can select output, target, host, port, transport, authority, and audit controls through explicit named settings.",
+          "text": "Named expert settings can select output, target, host, port, transport, authority, and audit behavior without changing beginner defaults.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 7,
-          "text": "Non-loopback exposure requires explicit policy and authentication; strict origin and request checks fail closed.",
+          "text": "Every request validates the session secret, method, path, body limit, and origin before dispatch; missing or invalid values fail closed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
         },
         {
           "n": 8,
-          "text": "Tests cover every project kind, port collision, invalid override, session secret, target switch, capability change, and two IDE clients.",
+          "text": "Non-loopback exposure requires explicit network policy and authentication; the default listener is unreachable through non-loopback interfaces.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:18.840Z"
+          "at": "2026-08-25T19:09:33.570Z"
+        },
+        {
+          "n": 9,
+          "text": "Two Canvas sessions get distinct ports and secrets; port collision, invalid override, browser failure, and shutdown release resources deterministically.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:33.570Z"
+        },
+        {
+          "n": 10,
+          "text": "Automated browser scenarios cover every project kind, target switch, capability change, two clients, hostile requests, and reconnect.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:33.570Z"
         }
       ],
       "refs": [
@@ -147291,7 +147329,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:18.096Z",
-      "updated": "2026-08-25T13:35:18.840Z",
+      "updated": "2026-08-25T19:09:33.948Z",
       "updatedBy": "Main"
     },
     {
@@ -147305,11 +147343,19 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Give the resident dev session one identity, revision stream, last-good program, state store, debugger, test harness, and receipt stream.\n2. Attach the Canvas IDE, text editor, graph, designer, preview, terminal, debugger, tests, and custom servers as views of that session.\n3. Keep app and Canvas listeners separate so custom routes and middleware remain application-owned.\n4. Put project, output, target, and run selection in the normal IDE workspace. Do not block opening on a transient prelaunch chooser.\n5. Use one source transaction, conflict, undo, recovery, and stale-revision model across every editor surface.\n6. Exercise rebuild failure, reconnect, multiple clients, custom servers, output switches, and target switches.\n7. Present the full IDE state matrix for owner visual acceptance.",
-      "checkSteps": "Open the Canvas IDE for a multi-output project. Check the project launcher, adaptive panels, custom server, output switch, compile error, reconnect, graph edit, text edit, and preview at desktop and narrow widths.",
-      "blockedBy": [],
+      "plan": "1. Follow D-CANVAS-SESSION1=A after #2168 and #2169 establish the command and target-neutral control host.\n2. Extend `crates/jet-devserver/src/WatchService.rs` as the one session broker. Do not add a parallel state store.\n3. Give the broker one identity, monotonic revision, last-good program, debugger state, test state, receipt stream, and client leases.\n4. Route Canvas APIs in `crates/jet-devserver/src/Canvas/**` through the broker and its checked source transaction boundary.\n5. Keep application listeners in `WebHost.rs` and custom server adapters separate from the Canvas control listener.\n6. Add the project, output, target, and run launcher to the normal workbench in `crates/jet-canvas/src/html.rs` and `js/**`.\n7. Make code, graph, designer, preview, terminal, debugger, and tests report the same session identity and accepted revision.\n8. Preserve last-good views on rebuild failure. Reject stale edits and record accepted edits, conflicts, undo, and recovery.\n9. Extend `tests/canvas.rs` for broker invariants and `tests/canvas_scenarios.rs` for the complete browser state matrix.\n10. Run `cargo test -p jet-devserver`, `cargo test --test canvas`, and full browser scenarios through `scripts/agent/jet-env`.\n11. Exercise the actual CLI, service, web, native UI, game, custom server, multi-output, two-client, failure, and reconnect paths.\n12. Present the live workbench for the owner visual check after every machine criterion is met.",
+      "checkSteps": "Open one multi-output project in Canvas. Confirm that project, output, preview, graph, code, diagnostics, and run state read as one stable workbench. Switch output and target, cause one compile error, then reconnect. The layout must stay coherent, and the last-good view must remain usable.",
+      "blockedBy": [
+        "cldqlgbu",
+        "cmtyww5f"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the unified Canvas session plan. Added dependency order, the existing WatchService seam, exact UI and protocol ownership, concurrency proof, and the owner visual checklist."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147333,25 +147379,25 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
           "n": 2,
-          "text": "Multiple valid outputs appear in the IDE project/output launcher, not a transient terminal or prelaunch chooser.",
+          "text": "Multiple valid outputs appear in the IDE project and output launcher, not a transient terminal or prelaunch chooser.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
           "n": 3,
-          "text": "Canvas, text, graph, designer, preview, terminal, debugger, tests, and custom servers report one session identity and source revision.",
+          "text": "Canvas, code, graph, designer, preview, terminal, debugger, tests, and custom servers report one session identity and accepted source revision.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
           "n": 4,
@@ -147360,52 +147406,70 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
           "n": 5,
+          "text": "Canvas reserves no application route or middleware namespace, and a custom server remains fully application-owned.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:38.215Z"
+        },
+        {
+          "n": 6,
           "text": "All editor surfaces use one source transaction history with conflict checks, undo, stale-revision refusal, and accepted-revision receipts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
-          "n": 6,
-          "text": "A failed rebuild keeps the last good preview and graph while the IDE shows diagnostics for current source.",
+          "n": 7,
+          "text": "Concurrent clients cannot overwrite a newer accepted revision; the loser gets the current revision and a structured conflict.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
-          "n": 7,
+          "n": 8,
+          "text": "A failed rebuild keeps the last-good preview, graph, debugger state, and runtime while the IDE shows current-source diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:38.215Z"
+        },
+        {
+          "n": 9,
           "text": "Disconnect and reconnect preserve accepted edits, selected project context, run configuration, debugger state, and last-good program.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
-          "n": 8,
-          "text": "Browser scenarios cover CLI, service, web, native UI, game, custom server, multiple outputs, two clients, errors, and reconnect.",
+          "n": 10,
+          "text": "Browser scenarios cover CLI, service, web, native UI, game, custom server, multiple outputs, two clients, errors, reconnect, and shutdown.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         },
         {
-          "n": 9,
+          "n": 11,
           "text": "Owner visual acceptance confirms an Unreal-like IDE model: project, output, preview, graph, code, diagnostics, and run state read as one workbench.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:35:21.347Z"
+          "at": "2026-08-25T19:09:38.215Z"
         }
       ],
       "refs": [
@@ -147423,7 +147487,7 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-24T22:55:24.226Z",
-      "updated": "2026-08-25T13:35:21.347Z",
+      "updated": "2026-08-25T19:09:38.607Z",
       "updatedBy": "Main"
     },
     {
@@ -149763,6 +149827,11 @@
       "log": [
         {
           "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2189-2): The visible prompt label inside a Jetpack shell is jetpack, not jet. The environment belongs to jetpack under the boundary law, so the prompt names the tool that owns it. This amends the D-JPK14 default."
+        },
+        {
+          "at": "2026-08-25",
           "by": "orchestrator",
           "text": "Landed and verified by running the binary: jetpack enter and jetpack build are retired with E1353, jetpack tool run is retired with E1353, and jetpack env and jetpack use both dispatch. Still open on this card: env positional module selection, --prep, the use isolation test, and the jet env forward."
         },
@@ -149865,8 +149934,8 @@
       "parentId": null,
       "needsAcceptance": true,
       "created": "2026-08-25T13:17:36.821Z",
-      "updated": "2026-08-25T18:20:58.860Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-25T19:04:35.858Z",
+      "updatedBy": "owner",
       "workOrder": 1
     },
     {
@@ -150110,13 +150179,13 @@
     {
       "id": "c02wcldf",
       "num": 2193,
-      "title": "Installed tools become shims so self-update reaches the declarative pin",
-      "body": "Owner-ratified in chat 2026-08-25. This is the owner's original ask: an imperative update through a tool's own CLI must be able to update the declarative setup.\n\nMEASURED TODAY: `~/.jet/bin/omp` is a HARDLINK into a read-only Hangar object (verified: nlink=3, and deleting a hangar object gives Permission denied). Consequences: jetpack has NO interception point, and a tool that self-updates in place hits a confusing permission error rather than a real diagnostic.\n\nNEW LAW: every tool installed by `jetpack tool install` is projected as a jetpack SHIM, not a hardlink. The shim execs the real binary for normal use. When it detects the tool attempting to update itself, it refuses the in-place write cleanly and offers to update the declarative pin instead.\n\nDESIRED SHAPE:\n```\n$ omp update\n  jet  omp is managed by jetpack (#auto)\n       update the declarative pin instead? [Y/n]\n  jet  omp 18.0.4 -> 18.1.0, manifest updated\n```\n\nACCEPTED COSTS, owner informed: every tool invocation goes through jetpack, so a shim bug breaks every installed tool at once; and `which omp` reports the shim rather than the real path.\n\nOPEN SUB-DECISIONS the owner has NOT ruled on — ASK, do not choose:\n- whether the shim is per-tool or one shared dispatcher\n- what `which omp` should report\n- whether detection is a prompt inline or a deferred marker read by the next jetpack command\n\nWHERE THE CODE IS: projection and linking in `crates/jetpack/src/CLI/tool.rs` around `project_install`; the tools manifest and generations under `~/.jet/tools/`; `profile_install_receipt` on the cache lease.\n\nTRAPS: (1) shim startup cost is paid on every invocation, so it must be small and must not resolve the closure. (2) The hardlink today means the installed file and the hangar object share an inode; a shim breaks that sharing, so measure the disk delta — one omp install already costs about 1 GB. (3) Do not break `jetpack tool uninstall` or generation rollback.",
+      "title": "Detect tool drift on the next jetpack command and offer to move the pin",
+      "body": "OWNER RULING 2026-08-25, reversing the earlier shim direction: there is NO shim. Installed tools keep their current projection, and jetpack notices drift the next time it runs.\n\nWHY THE REVERSAL IS RIGHT: a shim puts jetpack in the execution path of every installed tool, so one shim bug breaks every tool at once, and it changes what `which omp` reports. Drift detection costs nothing per invocation and cannot break a tool.\n\nMEASURED TODAY: `~/.jet/bin/omp` is a hardlink into a read-only Hangar object (verified nlink=3; deleting a hangar object gives Permission denied). A tool that tries to rewrite itself in place therefore fails with a raw permission error rather than a diagnostic. That is the user-visible defect to fix, alongside the drift offer.\n\nWHAT TO BUILD:\n\n1. On any jetpack command that reads the user tools profile, compare the installed tool identity against the pin recorded in `~/.jet/tools/manifest.json`. When they differ, report the drift and offer to reconcile: move the declarative pin to what is installed, or restore what is pinned. Honour `-y` for non-interactive use and never prompt without a TTY.\n\n2. When a managed tool cannot update itself because its bytes are read-only, the failure must be a registered jetpack diagnostic that names the tool, says it is managed by jetpack, and gives the exact command to move the pin. A bare EACCES from the kernel is not acceptable.\n\n3. Detection must be cheap. It compares recorded identity against on-disk identity; it must not resolve a closure, contact the network, or hash a 676 MB binary on every command.\n\nEXAMPLE SHAPE:\n```\n$ omp update\nomp: cannot write /home/you/.jet/bin/omp\n\n$ jetpack env\n  jet  omp drifted: installed 18.1.0, pinned 18.0.4\n       move the pin to 18.1.0? [Y/n]\n```\n\nWHERE THE CODE IS: the tools manifest and generations under `~/.jet/tools/`, projection and linking in `crates/jetpack/src/CLI/tool.rs` around `project_install`, and `profile_install_receipt` on the cache lease.\n\nNON-GOALS: no shim, no dispatcher, no change to what `which` reports, and no interception of another tool's process.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -150125,6 +150194,16 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2193-2): There is no shim. Installed tools keep their current projection and jetpack detects drift on its next command, reporting the installed and pinned versions and offering to move the declarative pin. A managed tool that cannot rewrite itself gets a registered jetpack diagnostic naming the tool and the exact command, never a bare permission error. Detection must add no closure resolution, no network call and no full-binary hash to a normal command. Non-interactive runs never prompt."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Owner ruled: no shim. Installed tools keep their current projection and jetpack detects drift on its next command, offering to move the declarative pin. Criteria 1-6 are withdrawn as superseded; 7-12 are the ruled scope. Card is unblocked and ready to implement."
+        },
         {
           "at": "2026-08-25",
           "by": "orchestrator",
@@ -150140,65 +150219,119 @@
         {
           "n": 1,
           "text": "a tool installed by jetpack tool install is a shim, and running it produces byte-identical output and exit status to the underlying binary for a normal invocation",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:03.260Z"
+          "evidence": "WITHDRAWN by owner ruling 2026-08-25: the shim direction was reversed. There is no shim, so this criterion no longer describes the product. The replacement criteria are rows 7 through 12 on this card, covering drift detection on the next jetpack command.",
+          "at": "2026-08-25T19:09:38.960Z"
         },
         {
           "n": 2,
           "text": "a self-update attempt is detected, refused without a permission error, and answered with a registered diagnostic that names the declarative alternative",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:03.644Z"
+          "evidence": "WITHDRAWN by owner ruling 2026-08-25: the shim direction was reversed. There is no shim, so this criterion no longer describes the product. The replacement criteria are rows 7 through 12 on this card, covering drift detection on the next jetpack command.",
+          "at": "2026-08-25T19:09:39.320Z"
         },
         {
           "n": 3,
           "text": "accepting the offer moves the pin in the tools manifest and the tool reports the new version afterwards",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:04.025Z"
+          "evidence": "WITHDRAWN by owner ruling 2026-08-25: the shim direction was reversed. There is no shim, so this criterion no longer describes the product. The replacement criteria are rows 7 through 12 on this card, covering drift detection on the next jetpack command.",
+          "at": "2026-08-25T19:09:39.679Z"
         },
         {
           "n": 4,
           "text": "shim overhead on a normal invocation is measured and reported, and the shim performs no closure resolution",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:04.392Z"
+          "evidence": "WITHDRAWN by owner ruling 2026-08-25: the shim direction was reversed. There is no shim, so this criterion no longer describes the product. The replacement criteria are rows 7 through 12 on this card, covering drift detection on the next jetpack command.",
+          "at": "2026-08-25T19:09:40.036Z"
         },
         {
           "n": 5,
           "text": "tool uninstall and profile rollback still work with shims in place, and the disk cost per installed tool is measured against the hardlink baseline",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:04.792Z"
+          "evidence": "WITHDRAWN by owner ruling 2026-08-25: the shim direction was reversed. There is no shim, so this criterion no longer describes the product. The replacement criteria are rows 7 through 12 on this card, covering drift detection on the next jetpack command.",
+          "at": "2026-08-25T19:09:40.392Z"
         },
         {
           "n": 6,
           "text": "Owner rules on the three open shim sub-decisions: per-tool shim or one shared dispatcher, what which reports, and inline prompt or deferred marker",
+          "status": "met",
+          "metBy": "orchestrator",
+          "verifiedBy": null,
+          "evidence": "WITHDRAWN by owner ruling 2026-08-25: the shim direction was reversed. There is no shim, so this criterion no longer describes the product. The replacement criteria are rows 7 through 12 on this card, covering drift detection on the next jetpack command.",
+          "at": "2026-08-25T19:09:40.780Z"
+        },
+        {
+          "n": 7,
+          "text": "A jetpack command that reads the user tools profile reports a tool whose installed identity differs from its recorded pin, naming both versions",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:20:14.191Z"
+          "at": "2026-08-25T19:09:01.169Z"
+        },
+        {
+          "n": 8,
+          "text": "Accepting the offer moves the pin in the tools manifest, and the tool reports the new version afterwards",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:01.526Z"
+        },
+        {
+          "n": 9,
+          "text": "Declining leaves both the tool and the manifest untouched, and the same drift is reported again on the next command",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:01.890Z"
+        },
+        {
+          "n": 10,
+          "text": "A managed tool that cannot rewrite itself produces a registered jetpack diagnostic naming the tool and the exact command to move the pin, never a bare permission error",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:03.374Z"
+        },
+        {
+          "n": 11,
+          "text": "Drift detection adds no closure resolution, no network call, and no full-binary hash to a normal jetpack command, measured against the pre-change command time",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:06.851Z"
+        },
+        {
+          "n": 12,
+          "text": "Non-interactive runs never prompt, and -y reconciles without prompting",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:09:08.360Z"
         }
       ],
       "refs": [],
       "tags": [],
       "parentId": null,
-      "needsAcceptance": true,
+      "needsAcceptance": false,
       "created": "2026-08-25T13:17:38.575Z",
-      "updated": "2026-08-25T13:21:14.008Z",
-      "updatedBy": "orchestrator",
+      "updated": "2026-08-25T19:09:51.517Z",
+      "updatedBy": "owner",
       "workOrder": 8
     },
     {
@@ -150523,7 +150656,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Orchestrator fix landed: shared_cas_dir ignored JETPACK_ROOT and always resolved to the user default pool, so an isolated root pooled bytes into the global store and its inode peers sat outside the hangar being verified, which made admission refuse every object. Roots::shared_cas_dir now returns the machine pool only for the default user root and the roots own hangar cas otherwise (crates/jet-pkg-model/src/Store.rs:66). This also stops tests polluting the user store. cargo test -p jetpack went 89 failing to 41."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -150585,7 +150724,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T15:22:03.991Z",
-      "updated": "2026-08-25T17:32:04.495Z",
+      "updated": "2026-08-25T18:45:36.110Z",
       "updatedBy": "orchestrator",
       "workOrder": 0
     }
@@ -207135,6 +207274,60 @@
       "created": "2026-08-25T13:30:32.597Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2189-2",
+      "cardId": "c09vy29f",
+      "group": "verdict",
+      "title": "Shell prompt label reads jetpack",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "The visible prompt label inside a Jetpack shell is jetpack, not jet. The environment belongs to jetpack under the boundary law, so the prompt names the tool that owns it. This amends the D-JPK14 default.",
+      "comment": "The visible prompt label inside a Jetpack shell is jetpack, not jet. The environment belongs to jetpack under the boundary law, so the prompt names the tool that owns it. This amends the D-JPK14 default.",
+      "supersededBy": "D-ENVHOOK1",
+      "created": "2026-08-25T19:04:35.858Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2193-2",
+      "cardId": "c02wcldf",
+      "group": "verdict",
+      "title": "No shim: detect tool drift on the next jetpack command",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "There is no shim. Installed tools keep their current projection and jetpack detects drift on its next command, reporting the installed and pinned versions and offering to move the declarative pin. A managed tool that cannot rewrite itself gets a registered jetpack diagnostic naming the tool and the exact command, never a bare permission error. Detection must add no closure resolution, no network call and no full-binary hash to a normal command. Non-interactive runs never prompt.",
+      "comment": "There is no shim. Installed tools keep their current projection and jetpack detects drift on its next command, reporting the installed and pinned versions and offering to move the declarative pin. A managed tool that cannot rewrite itself gets a registered jetpack diagnostic naming the tool and the exact command, never a bare permission error. Detection must add no closure resolution, no network call and no full-binary hash to a normal command. Non-interactive runs never prompt.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T19:09:51.517Z",
+      "ratifiedAt": "2026-08-25"
     }
   ],
   "questions": [
@@ -209180,6 +209373,188 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T19:09:51.517Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2193-2",
+      "note": "There is no shim. Installed tools keep their current projection and jetpack detects drift on its next command, reporting the installed and pinned versions and offering to move the declarative pin. A managed tool that cannot rewrite itself gets a registered jetpack diagnostic naming the tool and the exact command, never a bare permission error. Detection must add no closure resolution, no network call and no full-binary hash to a normal command. Non-interactive runs never prompt."
+    },
+    {
+      "at": "2026-08-25T19:09:41.345Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02wcldf",
+      "note": "phase,logEntry,needsAcceptance"
+    },
+    {
+      "at": "2026-08-25T19:09:40.781Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02wcldf",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-25T19:09:40.393Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02wcldf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T19:09:40.036Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02wcldf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T19:09:39.680Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02wcldf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T19:09:39.320Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02wcldf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T19:09:38.960Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c02wcldf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-25T19:09:38.608Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cnnczx0n",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:09:38.215Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cnnczx0n",
+      "note": "phase,plan,blockedBy,checkSteps,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:09:37.648Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cnnczx0n",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:09:36.271Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cldqlgbu",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:09:34.965Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cldqlgbu",
+      "note": "phase,plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:09:34.445Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cldqlgbu",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:09:33.948Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cmtyww5f",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:09:33.570Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cmtyww5f",
+      "note": "phase,plan,blockedBy,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:09:33.032Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cmtyww5f",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:09:08.361Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#12 Non-interactive runs never prompt, and -y reconciles without"
+    },
+    {
+      "at": "2026-08-25T19:09:06.851Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#11 Drift detection adds no closure resolution, no network call,"
+    },
+    {
+      "at": "2026-08-25T19:09:03.374Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#10 A managed tool that cannot rewrite itself produces a registe"
+    },
+    {
+      "at": "2026-08-25T19:09:01.890Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#9 Declining leaves both the tool and the manifest untouched, a"
+    },
+    {
+      "at": "2026-08-25T19:09:01.527Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#8 Accepting the offer moves the pin in the tools manifest, and"
+    },
+    {
+      "at": "2026-08-25T19:09:01.169Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#7 A jetpack command that reads the user tools profile reports "
+    },
+    {
+      "at": "2026-08-25T19:09:00.270Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02wcldf",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-08-25T19:04:35.858Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2189-2",
+      "note": "The visible prompt label inside a Jetpack shell is jetpack, not jet. The environment belongs to jetpack under the boundary law, so the prompt names the tool that owns it. This amends the D-JPK14 default."
+    },
+    {
+      "at": "2026-08-25T18:45:36.110Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0n82vb8",
+      "note": "logEntry"
+    },
     {
       "at": "2026-08-25T18:21:03.059Z",
       "by": "orchestrator",
@@ -212497,188 +212872,6 @@
       "action": "card.criteria-add",
       "ref": "c0gqfgov",
       "note": "#6 Slice-specific: the behavior this card alone owns — “jetos p"
-    },
-    {
-      "at": "2026-08-24T23:26:08.290Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0gqfgov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:07.930Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c08en8ex",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos p"
-    },
-    {
-      "at": "2026-08-24T23:26:07.578Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c08en8ex",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:07.222Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0xnjpjq",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos p"
-    },
-    {
-      "at": "2026-08-24T23:26:06.880Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0xnjpjq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:06.538Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0r7qh3o",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos p"
-    },
-    {
-      "at": "2026-08-24T23:26:06.187Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0r7qh3o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:05.828Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0u8cs6x",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos s"
-    },
-    {
-      "at": "2026-08-24T23:26:05.485Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0u8cs6x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:05.112Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0p1zm2a",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos s"
-    },
-    {
-      "at": "2026-08-24T23:26:04.761Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0p1zm2a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:04.398Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0jsg61e",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos s"
-    },
-    {
-      "at": "2026-08-24T23:26:04.045Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0jsg61e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:03.686Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c09hoi6l",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos i"
-    },
-    {
-      "at": "2026-08-24T23:26:03.319Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c09hoi6l",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:02.953Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0zu27v0",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos l"
-    },
-    {
-      "at": "2026-08-24T23:26:02.606Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0zu27v0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:02.253Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ufilnz",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos l"
-    },
-    {
-      "at": "2026-08-24T23:26:01.899Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ufilnz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:01.547Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kv3mji",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos h"
-    },
-    {
-      "at": "2026-08-24T23:26:01.182Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0kv3mji",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:00.828Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fryjkw",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos h"
-    },
-    {
-      "at": "2026-08-24T23:26:00.484Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0fryjkw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:00.140Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06791le",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos i"
-    },
-    {
-      "at": "2026-08-24T23:25:59.783Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c06791le",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:59.409Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c00xg57g",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos i"
     }
   ],
   "nextNum": 368,

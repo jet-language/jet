@@ -285,7 +285,7 @@ fn authorize(
         Mode::NonInteractive
     };
     let valid_allow = policy == ALLOW_VALUE;
-    let allowed = !offline && (interactive || valid_allow);
+    let allowed = !offline && ((!ci && interactive) || valid_allow);
     let reason = if offline {
         "--offline forbids local Nix fallback; no executable was inspected or invoked".into()
     } else if (ci || !interactive) && !valid_allow {

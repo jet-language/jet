@@ -32,6 +32,7 @@ pub use jet_pkg_model::Store::{
 use crate::TrustRoot::{cache_builder_identity, is_cache_builder_revoked};
 use crate::SHA256;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,6 +40,7 @@ use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod Producer;
@@ -56,7 +58,12 @@ pub use Nar::*;
 pub(crate) mod NixCache;
 #[cfg(test)]
 pub(crate) use NixCache::encode_zstd_deterministic;
-pub(crate) use NixCache::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, StoreError};
+pub(crate) use NixCache::{
+    admit_nix_closure_with_progress, plan_nix_downloads, AdmittedNixClosure, NixOutputRequest,
+    StoreError,
+};
+#[cfg(test)]
+pub(crate) use NixCache::admit_nix_closure;
 mod Broker;
 pub use Broker::*;
 mod Reproducibility;
@@ -64,6 +71,44 @@ pub(crate) use Reproducibility::{
     certify_registration_unlocked, certify_registration_unlocked_with_fresh_agreement,
     reproducibility_blocked,
 };
+
+/// Progress facts emitted by a provider while it acquires bytes. The sink is
+/// additive so parallel closure workers can report independently; the
+/// terminal owns rendering and decides when to redraw.
+pub(crate) trait ProgressSink: Send + Sync {
+    fn discovered_bytes(&self, bytes: u64);
+    fn transferred_bytes(&self, bytes: u64);
+    fn phase(&self, _phase: &str) {}
+    fn object_progress(&self, _done: usize, _total: usize) {}
+}
+
+pub(crate) type ProgressHandle = Arc<dyn ProgressSink>;
+
+thread_local! {
+    static CURRENT_PROGRESS: RefCell<Option<ProgressHandle>> = const { RefCell::new(None) };
+}
+
+struct ProgressScope {
+    previous: Option<ProgressHandle>,
+}
+
+impl Drop for ProgressScope {
+    fn drop(&mut self) {
+        CURRENT_PROGRESS.with(|current| {
+            current.replace(self.previous.take());
+        });
+    }
+}
+
+pub(crate) fn with_progress<T>(progress: ProgressHandle, operation: impl FnOnce() -> T) -> T {
+    let previous = CURRENT_PROGRESS.with(|current| current.replace(Some(progress)));
+    let _scope = ProgressScope { previous };
+    operation()
+}
+
+pub(crate) fn current_progress() -> Option<ProgressHandle> {
+    CURRENT_PROGRESS.with(|current| current.borrow().clone())
+}
 
 fn list_unlocked(roots: &Roots) -> std::io::Result<Vec<StoreEntry>> {
     jet_pkg_model::Store::list_checked(roots)
@@ -977,6 +1022,18 @@ pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
         .into_iter()
         .filter(|e| e.reference == reference)
         .max_by_key(|e| e.last_used_at)
+}
+
+/// Cheap provider-routing preflight for an exact cache identity. This is only
+/// a candidate check: `realize_verified` remains the authority that validates
+/// the output and its complete closure before reuse.
+pub(crate) fn cache_candidate_matches(
+    roots: &Roots,
+    reference: &str,
+    expectation: &CacheExpectation,
+) -> bool {
+    find_by_reference(roots, reference)
+        .is_some_and(|entry| entry.cache_identity == expectation.identity)
 }
 
 /// Proof attached to a cache reuse decision. Every field must pass; callers

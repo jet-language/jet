@@ -638,7 +638,11 @@ impl Diagnostic {
             // Color only the caret glyphs, not the leading pad (keeps columns).
             if color {
                 let (pad, marks) = carets.split_at(color_start);
-                out.push_str(&format!("    | {}{}\n", pad, theme.error(marks)));
+                let marks = match self.severity {
+                    Severity::Error => theme.error(marks),
+                    Severity::Lint => theme.warn(marks),
+                };
+                out.push_str(&format!("    | {}{}\n", pad, marks));
             } else {
                 out.push_str(&format!("    | {}\n", carets));
             }
@@ -1237,6 +1241,112 @@ mod unicode_display_width_tests {
         assert_eq!(display_width("©️"), 2);
         assert_eq!(display_width("\u{301}\u{200D}"), 0);
         assert_eq!(display_width("界"), 2);
+    }
+}
+
+#[cfg(test)]
+mod renderer_tests {
+    use super::*;
+
+    fn error() -> Diagnostic {
+        Diagnostic::error(
+            "E0001",
+            "error what".into(),
+            "error why".into(),
+            "error fix".into(),
+            Some(Span::new(1, 3)),
+        )
+    }
+
+    fn warning() -> Diagnostic {
+        Diagnostic::lint(
+            "L2001",
+            "warning what".into(),
+            "warning why".into(),
+            "warning fix".into(),
+            Some(Span::new(1, 3)),
+        )
+    }
+
+    #[test]
+    fn colored_carets_follow_error_and_warning_severity() {
+        let source = "abc\n";
+        assert_eq!(
+            error().render_colored("main.jet", source, true),
+            concat!(
+                "\x1b[31mError\x1b[0m [E0001]: error what\n",
+                "  \x1b[2;37m--> main.jet:1:2\x1b[0m\n",
+                "    |\n",
+                "  1 | abc\n",
+                "    | \x1b[31m^^\x1b[0m\n",
+                " \x1b[1mWhy:\x1b[0m error why\n",
+                " \x1b[1mFix:\x1b[0m error fix\n",
+            )
+        );
+        assert_eq!(
+            warning().render_colored("main.jet", source, true),
+            concat!(
+                "\x1b[33mWarning\x1b[0m [L2001] (deprecated_item): warning what\n",
+                "  \x1b[2;37m--> main.jet:1:2\x1b[0m\n",
+                "    |\n",
+                "  1 | abc\n",
+                "    | \x1b[33m^^\x1b[0m\n",
+                " \x1b[1mWhy:\x1b[0m warning why\n",
+                " \x1b[1mFix:\x1b[0m warning fix\n",
+            )
+        );
+    }
+
+    #[test]
+    fn plain_error_and_warning_renderings_are_byte_exact() {
+        let source = "abc\n";
+        assert_eq!(
+            error().render_colored("main.jet", source, false),
+            concat!(
+                "Error [E0001]: error what\n",
+                "  --> main.jet:1:2\n",
+                "    |\n",
+                "  1 | abc\n",
+                "    | ^^\n",
+                " Why: error why\n",
+                " Fix: error fix\n",
+            )
+        );
+        assert_eq!(
+            warning().render("main.jet", source),
+            concat!(
+                "Warning [L2001] (deprecated_item): warning what\n",
+                "  --> main.jet:1:2\n",
+                "    |\n",
+                "  1 | abc\n",
+                "    | ^^\n",
+                " Why: warning why\n",
+                " Fix: warning fix\n",
+            )
+        );
+    }
+
+    #[test]
+    fn wide_character_span_keeps_columns_and_caret_width() {
+        assert_eq!(
+            Diagnostic::error(
+                "E0001",
+                "error what".into(),
+                "error why".into(),
+                "error fix".into(),
+                Some(Span::new(1, 4)),
+            )
+            .render("wide.jet", "a界b\n"),
+            concat!(
+                "Error [E0001]: error what\n",
+                "  --> wide.jet:1:2\n",
+                "    |\n",
+                "  1 | a界b\n",
+                "    | ^^\n",
+                " Why: error why\n",
+                " Fix: error fix\n",
+            )
+        );
     }
 }
 

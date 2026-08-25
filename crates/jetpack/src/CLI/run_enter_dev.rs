@@ -1564,7 +1564,14 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
 
-    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+    let env = match compose_env_scoped(
+        theme,
+        &roots,
+        &parsed.flags,
+        &plan,
+        RealizeScope::Project,
+        true,
+    ) {
         Ok(env) => env,
         Err(code) => return code,
     };
@@ -1638,7 +1645,14 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::Use) {
+    let env = match compose_env_scoped(
+        theme,
+        &roots,
+        &parsed.flags,
+        &plan,
+        RealizeScope::Use,
+        true,
+    ) {
         Ok(env) => env,
         Err(code) => return code,
     };

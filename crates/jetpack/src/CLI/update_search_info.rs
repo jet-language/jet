@@ -3,26 +3,122 @@ use super::realize::{
     channel_download_size_from_fixture, channel_sources, load_project_plan, offline_refusal,
     report_provider_error, resolve_source_channel, rewrite_channel_manifest,
 };
-use super::workspace_sources::{fixtures_for, workspace_root};
+use super::workspace_sources::{fixtures_for, project_root, workspace_root};
 use crate::Output::{self, Theme};
 use crate::Store::{self, ExplainLens, Roots};
 use crate::{BuildDebug, Discovery, EnvFile, Lock, Overlay, SemanticLock, Syntax, WorkspaceFile};
 use std::path::{Path, PathBuf};
 
-/// `jetpack update [<source>]` — resolve channel source refs and move only
-/// their lock entries. Does not realize packages.
-pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
-    if parsed.positional.first().map(String::as_str) == Some(Syntax::TOOL_PROFILE_NAME) {
-        return super::tool::update_user_tools(theme, parsed);
+pub(super) fn render_channel_update_row(
+    theme: &Theme,
+    name: &str,
+    name_w: usize,
+    before: &str,
+    after: &str,
+    package_count: usize,
+    download_bytes: Option<u64>,
+) {
+    let after = format!(
+        "{after}   {}, {}",
+        package_noun(package_count),
+        download_size(download_bytes),
+    );
+    theme.plan_row(Output::PlanMark::Change, name, name_w, before, &after);
+}
+
+#[derive(Default)]
+pub(super) struct UpdateConfirmation {
+    decision: Option<bool>,
+}
+
+impl UpdateConfirmation {
+    pub(super) fn confirm(&mut self, theme: &Theme, assume_yes: bool) -> bool {
+        *self
+            .decision
+            .get_or_insert_with(|| theme.confirm_apply(assume_yes))
     }
+}
+
+fn package_noun(count: usize) -> String {
+    format!(
+        "{count} {}",
+        if count == 1 { "package" } else { "packages" }
+    )
+}
+
+fn download_size(bytes: Option<u64>) -> String {
+    bytes
+        .map(|bytes| {
+            Theme::render_download_line(bytes)
+                .trim_start_matches("Download ")
+                .to_string()
+        })
+        .unwrap_or_else(|| "size unknown".to_string())
+}
+
+/// `jetpack update` — select project dependency and/or user-tool scopes from
+/// the current directory context, then refresh only those scopes.
+pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
+    let mut confirmation = UpdateConfirmation::default();
+    let (update_deps, update_tools) = update_scopes(parsed);
+    let project_scope = project_scope_root();
+    if update_deps && update_tools {
+        if let Some(root) = &project_scope {
+            theme.status(&format!("scope: project dependencies ({})", root.display()));
+        }
+        theme.status("scope: user tools");
+    }
+    if update_deps && update_tools {
+        let project_code = if project_scope.is_some() {
+            cmd_update_project(theme, parsed, &mut confirmation)
+        } else {
+            0
+        };
+        let tools_code = super::tool::update_user_tools(theme, parsed, &mut confirmation);
+        return if project_code != 0 || tools_code != 0 {
+            2
+        } else {
+            0
+        };
+    }
+    if update_tools {
+        return super::tool::update_user_tools(theme, parsed, &mut confirmation);
+    }
+    cmd_update_project(theme, parsed, &mut confirmation)
+}
+
+fn update_scopes(parsed: &Parsed) -> (bool, bool) {
+    if parsed.flags.update_deps || parsed.flags.update_tools {
+        return (parsed.flags.update_deps, parsed.flags.update_tools);
+    }
+    match parsed.positional.first().map(String::as_str) {
+        Some(Syntax::TOOL_PROFILE_NAME) => (false, true),
+        Some(_) => (true, false),
+        None => (true, true),
+    }
+}
+
+fn project_scope_root() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = project_root(&cwd);
+    EnvFile::path_in(&root).is_file().then_some(root)
+}
+
+/// `jetpack update --deps` / `jetpack update <source>` — resolve project
+/// channel source refs and move only their lock entries. Does not realize packages.
+fn cmd_update_project(
+    theme: &Theme,
+    parsed: &Parsed,
+    confirmation: &mut UpdateConfirmation,
+) -> i32 {
     if parsed.flags.offline {
         return offline_refusal(theme, "update");
     }
-    let project_dir = std::env::current_dir().unwrap_or_default();
     let plan = match load_project_plan(theme) {
         Ok(plan) => plan,
         Err(code) => return code,
     };
+    let project_dir = &plan.project_root;
     let only = parsed.positional.first().map(String::as_str);
     let sources = channel_sources(&plan.table);
     if let Some(name) = only {
@@ -64,7 +160,18 @@ pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut updates = Vec::new();
     for source in &selected {
         match resolve_source_channel(source, &parsed.flags) {
-            Ok(exact) => updates.push((source, exact)),
+            Ok(exact) => {
+                let before = Lock::locked_source_channel(&project_dir, &source.name)
+                    .map(|lock| lock.exact)
+                    .unwrap_or_else(|| "unlocked".to_string());
+                let package_count = plan
+                    .refs
+                    .iter()
+                    .filter(|spec| spec.source.label() == source.name)
+                    .count();
+                let download_bytes = channel_download_size_from_fixture(source, &parsed.flags);
+                updates.push((source, before, exact, package_count, download_bytes));
+            }
             Err(e) => {
                 report_provider_error(theme, &e);
                 ok = false;
@@ -77,31 +184,33 @@ pub(super) fn cmd_update(theme: &Theme, parsed: &Parsed) -> i32 {
     theme.status("Plan channel update");
     let name_w = updates
         .iter()
-        .map(|(source, _)| source.name.len())
+        .map(|(source, _, _, _, _)| source.name.len())
         .max()
         .unwrap_or(0)
         .max(8);
-    for (source, exact) in &updates {
-        theme.plan_row(
-            Output::PlanMark::Change,
+    for (source, before, exact, package_count, download_bytes) in &updates {
+        render_channel_update_row(
+            theme,
             &source.name,
             name_w,
-            source.channel.as_str(),
+            before,
             exact,
+            *package_count,
+            *download_bytes,
         );
     }
     let download_bytes = updates
         .iter()
-        .map(|(source, _)| channel_download_size_from_fixture(source, &parsed.flags))
+        .map(|(_, _, _, _, bytes)| *bytes)
         .collect::<Option<Vec<_>>>()
         .map(|sizes| sizes.into_iter().sum());
     if let Some(bytes) = download_bytes {
         theme.download_line(bytes);
     }
-    if !theme.confirm_apply(parsed.flags.assume_yes) {
-        return 0;
+    if !confirmation.confirm(theme, parsed.flags.assume_yes) {
+        return 2;
     }
-    for (source, exact) in updates {
+    for (source, _before, exact, _package_count, _download_bytes) in updates {
         if let Err(error) = rewrite_channel_manifest(&project_dir, &source, &exact) {
             theme.error_coded(
                 "E1340",
@@ -832,6 +941,21 @@ fn verified_failed_scratch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scope(args: &[&str]) -> (bool, bool) {
+        let args = args.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>();
+        update_scopes(&super::super::parse::parse_args_for("update", &args))
+    }
+
+    #[test]
+    fn update_scope_flags_select_only_requested_context() {
+        assert_eq!(scope(&[]), (true, true));
+        assert_eq!(scope(&["--deps"]), (true, false));
+        assert_eq!(scope(&["--tools"]), (false, true));
+        assert_eq!(scope(&["--deps", "--tools"]), (true, true));
+        assert_eq!(scope(&["tools"]), (false, true));
+        assert_eq!(scope(&["default"]), (true, false));
+    }
 
     #[test]
     fn failed_shell_rejects_recorded_scratch_escape() {

@@ -6,7 +6,7 @@
 
 use super::{
     entry_id, CacheIdentity, Closure, NixCompression, NixNarInfo, NixPublicKey, ProducerRecord,
-    Roots, StoreEntry,
+    ProgressHandle, Roots, StoreEntry,
 };
 use crate::{Envelope, RuntimePolicy, SHA256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -133,17 +133,113 @@ pub(crate) struct AdmittedNixClosure {
     pub closure_receipt_sha256: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NixDownloadPlan {
+    pub packages: usize,
+    pub bytes: u64,
+}
+
+#[allow(dead_code)]
 pub(crate) fn admit_nix_closure(
     roots: &Roots,
     outputs: &[NixOutputRequest],
     offline: bool,
 ) -> Result<AdmittedNixClosure, StoreError> {
+    admit_nix_closure_with_progress(roots, outputs, offline, None)
+}
+
+pub(crate) fn admit_nix_closure_with_progress(
+    roots: &Roots,
+    outputs: &[NixOutputRequest],
+    offline: bool,
+    progress: Option<ProgressHandle>,
+) -> Result<AdmittedNixClosure, StoreError> {
     let mut transaction = AdmissionTransaction::new(roots)?;
-    let result = transaction.admit(outputs, offline);
+    let result = transaction.admit(outputs, offline, progress);
     if result.is_err() {
         transaction.rollback();
     }
     result
+}
+
+/// Resolve the signed closure metadata without downloading or publishing any
+/// NAR. The admission path repeats this metadata lookup after the user accepts
+/// the plan; this function is deliberately read-only so a rejected plan has
+/// no acquisition side effect.
+pub(crate) fn plan_nix_downloads(
+    roots: &Roots,
+    store_paths: &[String],
+    offline: bool,
+) -> Result<NixDownloadPlan, StoreError> {
+    let endpoint = CacheEndpoint::from_roots(roots)?;
+    let cache_info = if offline {
+        None
+    } else {
+        Some(endpoint.cache_info()?)
+    };
+    let store_dir = cache_info
+        .as_ref()
+        .map(|info| info.store_dir.as_str())
+        .unwrap_or("/nix/store");
+    let mut queue = BTreeSet::new();
+    for store_path in store_paths {
+        validate_store_path(store_path, store_dir)?;
+        queue.insert(store_path.clone());
+    }
+    let mut scheduled = queue.clone();
+    let mut packages = 0usize;
+    let mut bytes = 0u64;
+
+    while let Some(store_path) = queue.iter().next().cloned() {
+        queue.remove(&store_path);
+        if let Some(existing) = existing_object(roots, &store_path, store_dir)? {
+            for reference in existing.references {
+                if scheduled.insert(reference.clone()) {
+                    queue.insert(reference);
+                }
+            }
+            continue;
+        }
+        if offline {
+            return Err(NixCacheError::new(
+                NixCacheErrorKind::MissingReference,
+                "offline admission found no complete verified Hangar object",
+            ));
+        }
+        let info = endpoint.narinfo(&store_path, store_dir)?.ok_or_else(|| {
+            NixCacheError::new(
+                NixCacheErrorKind::MissingReference,
+                "a requested Nix reference returned no narinfo",
+            )
+        })?;
+        let file_size = info.info.file_size.ok_or_else(|| {
+            NixCacheError::new(
+                NixCacheErrorKind::Metadata,
+                "Nix narinfo has no signed FileSize for download planning",
+            )
+        })?;
+        bytes = bytes.checked_add(file_size).ok_or_else(|| {
+            NixCacheError::new(
+                NixCacheErrorKind::Metadata,
+                "Nix closure download size overflowed",
+            )
+        })?;
+        packages = packages.checked_add(1).ok_or_else(|| {
+            NixCacheError::new(
+                NixCacheErrorKind::Metadata,
+                "Nix closure package count overflowed",
+            )
+        })?;
+        for reference in info.info.references {
+            let reference = format!("{store_dir}/{reference}");
+            validate_store_path(&reference, store_dir)?;
+            if scheduled.insert(reference.clone()) {
+                queue.insert(reference);
+            }
+        }
+    }
+
+    Ok(NixDownloadPlan { packages, bytes })
 }
 
 /// Encode the producer's canonical zstd payload with stable single-threaded
@@ -195,6 +291,7 @@ impl<'a> AdmissionTransaction<'a> {
         &mut self,
         requested: &[NixOutputRequest],
         offline: bool,
+        progress: Option<ProgressHandle>,
     ) -> Result<AdmittedNixClosure, NixCacheError> {
         let requests = validate_requests(requested)?;
         let endpoint = CacheEndpoint::from_roots(self.roots)?;
@@ -213,6 +310,10 @@ impl<'a> AdmissionTransaction<'a> {
             .collect::<BTreeSet<_>>();
         let mut scheduled = queue.clone();
         let mut fetched = BTreeMap::new();
+        if let Some(progress) = progress.as_ref() {
+            progress.phase("substituting");
+            progress.object_progress(0, scheduled.len());
+        }
 
         while !queue.is_empty() {
             let wave = queue
@@ -236,6 +337,9 @@ impl<'a> AdmissionTransaction<'a> {
                         }
                     }
                     fetched.insert(store_path, existing);
+                    if let Some(progress) = progress.as_ref() {
+                        progress.object_progress(fetched.len(), scheduled.len());
+                    }
                 } else {
                     pending.push(store_path);
                 }
@@ -262,7 +366,12 @@ impl<'a> AdmissionTransaction<'a> {
                                         "a requested Nix reference returned no narinfo",
                                     )
                                 })?;
-                            let object = self.fetch_object(&endpoint, &info, store_dir)?;
+                            let object = self.fetch_object(
+                                &endpoint,
+                                &info,
+                                store_dir,
+                                progress.clone(),
+                            )?;
                             Ok::<_, NixCacheError>((store_path.clone(), object))
                         })
                     })
@@ -294,10 +403,17 @@ impl<'a> AdmissionTransaction<'a> {
                     }
                 }
                 fetched.insert(store_path, object);
+                if let Some(progress) = progress.as_ref() {
+                    progress.object_progress(fetched.len(), scheduled.len());
+                }
             }
         }
 
-        let closure_receipt = self.publish(&mut fetched, &requests, store_dir)?;
+        if let Some(progress) = progress.as_ref() {
+            progress.phase("admitting");
+            progress.object_progress(0, fetched.len());
+        }
+        let closure_receipt = self.publish(&mut fetched, &requests, store_dir, progress)?;
         let mut objects = BTreeMap::new();
         for (store_path, object) in &fetched {
             objects.insert(
@@ -334,6 +450,7 @@ impl<'a> AdmissionTransaction<'a> {
         endpoint: &CacheEndpoint,
         info: &FetchedInfo,
         store_dir: &str,
+        progress: Option<ProgressHandle>,
     ) -> Result<FetchedObject, NixCacheError> {
         if matches!(
             info.info.compression,
@@ -375,6 +492,9 @@ impl<'a> AdmissionTransaction<'a> {
                 ));
             }
         };
+        if let Some(progress) = progress.as_ref() {
+            progress.discovered_bytes(compressed_limit);
+        }
         let tree = self
             .stage
             .join("trees")
@@ -388,7 +508,7 @@ impl<'a> AdmissionTransaction<'a> {
             })?,
             NixCacheErrorKind::Admission,
         )?;
-        let mut body = HashingReader::new(response, compressed_limit);
+        let mut body = HashingReader::new(response, compressed_limit, progress);
         let stats = match info.info.compression {
             NixCompression::None => super::read_nar_stream(&mut body, &tree, info.info.nar_size),
             NixCompression::Zstd => {
@@ -505,10 +625,11 @@ impl<'a> AdmissionTransaction<'a> {
         fetched: &mut BTreeMap<String, FetchedObject>,
         requests: &BTreeMap<String, NixOutputRequest>,
         store_dir: &str,
+        progress: Option<ProgressHandle>,
     ) -> Result<String, NixCacheError> {
         let lock_root = self.roots.root.clone();
         Ok(RuntimePolicy::with_lock(&lock_root, "hangar", || {
-            self.publish_locked(fetched, requests, store_dir)
+            self.publish_locked(fetched, requests, store_dir, progress)
                 .map_err(|error| std::io::Error::other(error.detail))
         })
         .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?)
@@ -519,6 +640,7 @@ impl<'a> AdmissionTransaction<'a> {
         fetched: &mut BTreeMap<String, FetchedObject>,
         requests: &BTreeMap<String, NixOutputRequest>,
         _store_dir: &str,
+        progress: Option<ProgressHandle>,
     ) -> Result<String, NixCacheError> {
         let objects_dir = self.roots.hangar_dir().join("objects");
         ensure_dir(&objects_dir, NixCacheErrorKind::Admission)?;
@@ -547,6 +669,8 @@ impl<'a> AdmissionTransaction<'a> {
             .iter()
             .map(|(store_path, object)| (store_path.clone(), object.hangar_digest.clone()))
             .collect::<BTreeMap<_, _>>();
+        let total_objects = fetched.len();
+        let mut admitted_objects = 0usize;
         for (store_path, object) in fetched.iter_mut() {
             let final_path = objects_dir.join(&object.hangar_digest);
             if let Some(stage) = &object.stage {
@@ -601,6 +725,10 @@ impl<'a> AdmissionTransaction<'a> {
             refs.sort();
             object.direct_reference_digests = refs;
             let _ = store_path;
+            admitted_objects += 1;
+            if let Some(progress) = progress.as_ref() {
+                progress.object_progress(admitted_objects, total_objects);
+            }
         }
 
         let closure_receipt = closure_receipt_digest(fetched, requests);
@@ -952,15 +1080,17 @@ struct HashingReader<R> {
     limit: u64,
     count: u64,
     hasher: SHA256::StreamingSha256,
+    progress: Option<ProgressHandle>,
 }
 
 impl<R: Read> HashingReader<R> {
-    fn new(reader: R, limit: u64) -> Self {
+    fn new(reader: R, limit: u64, progress: Option<ProgressHandle>) -> Self {
         Self {
             reader,
             limit,
             count: 0,
             hasher: SHA256::StreamingSha256::new(),
+            progress,
         }
     }
 }
@@ -984,6 +1114,9 @@ impl<R: Read> Read for HashingReader<R> {
                 io::Error::new(io::ErrorKind::InvalidData, "Nix cache byte count overflow")
             })?;
             self.hasher.update(&buffer[..count]);
+            if let Some(progress) = self.progress.as_ref() {
+                progress.transferred_bytes(count as u64);
+            }
         }
         Ok(count)
     }

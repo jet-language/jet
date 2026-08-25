@@ -2050,7 +2050,7 @@ authority: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], 
             nix_roots: None,
         };
         let table = SourceTable::empty();
-        let spec = crate::RefSpec::classify_in("demo#version=1.0@ruby", &table).unwrap();
+        let spec = crate::RefSpec::classify_in("demo@ruby#version=1.0", &table).unwrap();
         let authority = cache_authority(Kind::RubyGems, &ctx).unwrap();
         crate::Lock::record_registry_realization(
             &project,
