@@ -6,23 +6,29 @@
     return capabilities[name] === true;
   }
 
+  function canvasSurfaceSupported(element) {
+    const capability = element.getAttribute("data-capability");
+    return (!capability || canvasCapability(capability)) && !element.hidden;
+  }
+
   function syncCanvasLayout(project) {
     if (!project || !project.capabilities || !editorState) return;
     const panels = Array.from(document.querySelectorAll("[data-canvas-panel]"))
-      .filter((panel) => !panel.hidden)
+      .filter(canvasSurfaceSupported)
       .map((panel) => panel.getAttribute("data-canvas-panel"))
       .filter(Boolean);
     const views = Array.from(document.querySelectorAll("[data-session-view]"))
-      .filter((view) => !view.hidden)
+      .filter(canvasSurfaceSupported)
       .map((view) => view.getAttribute("data-session-view"))
       .filter(Boolean);
     const saved = editorState.layout && typeof editorState.layout === "object"
       ? editorState.layout
       : {};
     const retainSupported = (values, available) => {
-      const ordered = Array.isArray(values)
-        ? values.filter((value) => available.includes(value))
-        : [];
+      const ordered = [];
+      for (const value of Array.isArray(values) ? values : []) {
+        if (available.includes(value) && !ordered.includes(value)) ordered.push(value);
+      }
       for (const value of available) {
         if (!ordered.includes(value)) ordered.push(value);
       }
@@ -46,6 +52,7 @@
       const supported = ready && capabilities[capability] === true;
       if (!supported && panel.contains(document.activeElement) && canvas) canvas.focus();
       panel.hidden = !supported;
+      panel.inert = !supported;
       if (supported) panel.removeAttribute("aria-hidden");
       else panel.setAttribute("aria-hidden", "true");
     });

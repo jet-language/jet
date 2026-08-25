@@ -4272,7 +4272,9 @@ fn canvas_project_capabilities_follow_checked_package_target() {
     assert!(json.contains("\"diagnostics\":true"), "{json}");
     assert!(json.contains("\"runtime_output\":true"), "{json}");
     assert!(json.contains("\"preview\":true"), "{json}");
-    assert!(json.contains("\"designer\":false"), "{json}");
+    assert!(!json.contains("\"designer\":"), "{json}");
+    assert!(!json.contains("\"service\":"), "{json}");
+    assert!(!json.contains("\"terminal\":"), "{json}");
 }
 
 #[test]

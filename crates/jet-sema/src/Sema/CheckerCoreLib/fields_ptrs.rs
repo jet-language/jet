@@ -13,8 +13,7 @@ impl<'a> Checker<'a> {
         alias_span: Span,
         span: Span,
     ) -> Option<Type> {
-        self.record_import_alias_reference(alias, alias_span);
-        match (module, name) {
+        let result = match (module, name) {
             ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,
             // `mem.Pool`, `mem.Fixed` — accessed as a field on the `core.mem` alias,
@@ -75,7 +74,11 @@ impl<'a> Checker<'a> {
                 let _ = alias_span;
                 None
             }
+        };
+        if result.is_some() {
+            self.record_import_alias_reference(alias, alias_span);
         }
+        result
     }
 
     /// S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`. Gated by `use core.mem`

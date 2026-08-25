@@ -360,6 +360,7 @@ impl<'a> Checker<'a> {
             )
         } else if let Some(module_idx) = target.module_idx {
             self.infer_import_call(
+                target.alias.as_deref().unwrap_or_default(),
                 module_idx,
                 &target.name,
                 method_span,
@@ -576,8 +577,8 @@ impl<'a> Checker<'a> {
                         modules[module_idx].code_modules.contains_key(inline_module)
                     });
                     if is_inline_module {
-                        self.record_import_alias_reference(alias, *alias_span);
                         return self.infer_import_call(
+                            alias,
                             module_idx,
                             &format!("{inline_module}.{method}"),
                             *alias_span,
@@ -1324,8 +1325,15 @@ impl<'a> Checker<'a> {
                     .inline_reexport_foreign
                     .get(&(inline_alias.clone(), leaf.clone()))
                 {
-                    self.record_import_alias_reference(inline_alias, *inline_alias_span);
-                    return self.infer_import_call(mod_idx, method, span, span, type_args, args);
+                    return self.infer_import_call(
+                        inline_alias,
+                        mod_idx,
+                        method,
+                        *inline_alias_span,
+                        span,
+                        type_args,
+                        args,
+                    );
                 }
             }
         }
@@ -1366,8 +1374,15 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             if let Some(&mod_idx) = self.imports.get(alias) {
-                self.record_import_alias_reference(alias, *alias_span);
-                return self.infer_import_call(mod_idx, method, *alias_span, span, type_args, args);
+                return self.infer_import_call(
+                    alias,
+                    mod_idx,
+                    method,
+                    *alias_span,
+                    span,
+                    type_args,
+                    args,
+                );
             }
             // D-MOD2: inline code module call — `math.double(x)` where `math` is an
             // inline `module math { … }` in this file. Resolve via mangled name.

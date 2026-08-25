@@ -1264,7 +1264,7 @@ impl CanvasCase {
             .expect("write Canvas session matrix environment fixture");
             fs::write(
                 &entry,
-                "fn run() {\n    print(\"cli\")\n}\n\nfn serve() {\n    print(\"service\")\n}\n\nfn web() {\n    print(\"web\")\n}\n\nfn ui() {\n    print(\"ui\")\n}\n\nfn game() {\n    print(\"game\")\n}\n\nfn build(b: BuildContext) BuildPlan! -> {\n    return b.plan()\n}\n",
+                "fn run() {\n    print(\"cli\")\n}\n\nfn serve() {\n    print(\"service\")\n}\n\nfn web() {\n    print(\"web\")\n}\n\nfn ui() {\n    print(\"ui\")\n}\n\nfn game() {\n    print(\"game\")\n}\n\nfn build(b: BuildContext) BuildPlan ? {\n    return b.plan()\n}\n",
             )
             .expect("write Canvas session matrix source fixture");
             None

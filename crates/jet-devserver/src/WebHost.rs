@@ -1278,7 +1278,10 @@ fn canvas_request_authorized(
         return false;
     }
     let authorization = request.headers.get("authorization");
-    let query_session = query_param(target, "session");
+    let query_session = match unique_session_param(target) {
+        Ok(session) => session,
+        Err(()) => return false,
+    };
     let session_valid = match (authorization, query_session.as_deref()) {
         (Some(authorization), Some(query_session)) => authorization
             .strip_prefix("Bearer ")
@@ -1291,6 +1294,23 @@ fn canvas_request_authorized(
         (None, None) => false,
     };
     session_valid && (origin.is_some() || canvas_bootstrap_path(path, target))
+}
+
+fn unique_session_param(target: &str) -> Result<Option<String>, ()> {
+    let Some((_, query)) = target.split_once('?') else {
+        return Ok(None);
+    };
+    let mut found = false;
+    for part in query.split('&') {
+        let name = part.split_once('=').map(|(name, _)| name).unwrap_or(part);
+        if name == "session" {
+            if found {
+                return Err(());
+            }
+            found = true;
+        }
+    }
+    Ok(query_param(target, "session"))
 }
 
 fn canvas_bootstrap_path(path: &str, target: &str) -> bool {
@@ -2762,6 +2782,15 @@ mod tests {
             8123,
             &secret
         ));
+        request.target = format!("/canvas/graph?session={secret}&session=wrong");
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.target = "/canvas/graph".to_string();
         request.headers.remove("authorization");
         assert!(!canvas_request_authorized(
             &request,
@@ -2775,6 +2804,17 @@ mod tests {
             format!("Bearer {secret}"),
         );
         request.headers.remove("origin");
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.headers.insert(
+            "sec-fetch-site".to_string(),
+            "same-origin".to_string(),
+        );
         assert!(!canvas_request_authorized(
             &request,
             &request.target,

@@ -322,6 +322,7 @@ fn nix_store_projection_rejects_missing_conflicting_or_external_objects() {
             .values()
             .find(|object| object.store_path != root_path)
             .unwrap();
+        make_tree_writable_for_removal(&leaf.hangar_path).unwrap();
         fs::remove_dir_all(&leaf.hangar_path).unwrap();
         let error = snapshot_lease(&roots, &entry)
             .err()

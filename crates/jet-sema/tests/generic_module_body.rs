@@ -725,6 +725,25 @@ fn run() {
 }
 
 #[test]
+fn failed_qualified_core_use_does_not_consume_alias() {
+    let (_, diagnostics) = check(
+        r#"
+use core.compute.solve as solve
+
+fn run() {
+    solve.not_a_real_call()
+}
+"#,
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "L0103" && diagnostic.what.contains("solve")),
+        "failed qualified use must leave alias unused: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn selective_alias_ledger_keeps_local_binding_span() {
     let src = r#"
 module util {

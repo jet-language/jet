@@ -42,6 +42,7 @@ impl<'a> Checker<'a> {
             .get(&(alias.to_string(), item.clone()))
             .cloned()
         {
+            self.record_import_alias_reference(alias, alias_span);
             return self.infer_code_module_call(
                 &real_alias,
                 &real_mangled,
@@ -57,13 +58,23 @@ impl<'a> Checker<'a> {
             .get(&(alias.to_string(), item.clone()))
             .cloned()
         {
-            return self.infer_import_call(real_idx, &real_name, alias_span, span, type_args, args);
+            self.record_import_alias_reference(alias, alias_span);
+            return self.infer_import_call(
+                alias,
+                real_idx,
+                &real_name,
+                alias_span,
+                span,
+                type_args,
+                args,
+            );
         }
         if let Some((module, real_item)) = self
             .inline_reexport_core
             .get(&(alias.to_string(), item.clone()))
             .cloned()
         {
+            self.record_import_alias_reference(alias, alias_span);
             let ret = self.infer_core_call(
                 &module,
                 &real_item,
@@ -130,6 +141,7 @@ impl<'a> Checker<'a> {
             }
             return None;
         }
+        self.record_import_alias_reference(alias, alias_span);
         let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
         if Syntax::classify_identifier(item) == Syntax::IdentifierClass::SoftPublic {
             self.diags.push(soft_public_use(item, span));
@@ -321,6 +333,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn infer_import_call(
         &mut self,
+        alias: &str,
         mod_idx: usize,
         name: &str,
         alias_span: Span,
@@ -328,11 +341,21 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
-        self.infer_import_call_with_warning(mod_idx, name, alias_span, span, type_args, args, true)
+        self.infer_import_call_with_warning(
+            alias,
+            mod_idx,
+            name,
+            alias_span,
+            span,
+            type_args,
+            args,
+            true,
+        )
     }
 
     fn infer_import_call_with_warning(
         &mut self,
+        alias: &str,
         mod_idx: usize,
         name: &str,
         alias_span: Span,
@@ -358,7 +381,14 @@ impl<'a> Checker<'a> {
             }
             let (real_name, real_idx) = (real_name.clone(), *real_idx);
             return self.infer_import_call_with_warning(
-                real_idx, &real_name, alias_span, span, type_args, args, false,
+                alias,
+                real_idx,
+                &real_name,
+                alias_span,
+                span,
+                type_args,
+                args,
+                false,
             );
         }
         if target.funcs.contains_key(&semantic_name) {
@@ -372,6 +402,7 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
+            self.record_import_alias_reference(alias, alias_span);
             if warn_soft_public
                 && mod_idx != self.module_idx
                 && is_pub

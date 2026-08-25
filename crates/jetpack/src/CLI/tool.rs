@@ -2247,7 +2247,7 @@ fn format_generation_meta(gen: u64, tools: &[InstalledTool]) -> io::Result<Strin
                 name: tool.name.clone(),
                 version: tool.version.clone(),
                 source: tool.source.clone(),
-                reference: tool.reference.clone(),
+                reference: RefSpec::migrate_persisted_ref(&tool.reference).canonical,
                 output_hash: tool.output_hash.clone(),
                 store_root: tool.store_root.clone(),
                 bins: tool.bins.clone(),
@@ -2602,5 +2602,37 @@ fn run() { }
         )
         .is_err());
         assert!(ProfileDispatch::parse_current_pointer(pointer.trim_end()).is_err());
+    }
+
+    #[test]
+    fn tool_ref_writeback_migrates_legacy_spellings() {
+        let legacy = "#auto can1357/oh-my-pi#v18.0.4@github";
+        let manifest = parse_tool_manifest(&format!(
+            "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"#auto\",\"provider\":\"jetpackage\",\"raw\":{raw:?},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{raw:?},\"resolved\":\"can1357/oh-my-pi#v18.0.4@github\",\"tier\":\"#auto\"}}]\n}}",
+            raw = legacy
+        ))
+        .expect("legacy tool manifest parses");
+        let formatted = format_tool_manifest(&manifest);
+        assert!(formatted.contains("can1357/oh-my-pi@github#v18.0.4"));
+        assert!(!formatted.contains(legacy));
+        assert!(!formatted.contains("can1357/oh-my-pi#v18.0.4@github"));
+
+        let metadata = format_generation_meta(
+            7,
+            &[InstalledTool {
+                name: "omp".into(),
+                version: "18.0.4".into(),
+                source: "github".into(),
+                reference: legacy.into(),
+                bins: vec!["omp".into()],
+                members: vec!["omp".into()],
+                member_digests: vec![format!("sha256-{}", "e".repeat(64))],
+                output_hash: format!("sha256-{}", "f".repeat(64)),
+                store_root: "/store".into(),
+            }],
+        )
+        .expect("generation metadata formats");
+        assert!(metadata.contains("can1357/oh-my-pi@github#v18.0.4"));
+        assert!(!metadata.contains(legacy));
     }
 }

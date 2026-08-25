@@ -94,7 +94,7 @@ impl EnvFile {
     /// Resolve one package entry to a full `package@source` ref: entries
     /// that already carry a source pass through; bare entries take the default.
     fn entry_ref(&self, entry: &str) -> String {
-        let entry = super::RefSpec::migrate_public_ref(entry).canonical;
+        let entry = entry.trim().to_string();
         if entry.contains(Syntax::REF_PROVIDER_AT) || super::RefSpec::is_bare_path(&entry) {
             entry
         } else {
@@ -196,7 +196,7 @@ pub fn parse(text: &str) -> EnvFile {
         named,
         packages: list_arg(text, Syntax::PACK_DIRECTIVE_PACKAGES)
             .into_iter()
-            .map(|package| super::RefSpec::migrate_public_ref(&package).canonical)
+            .map(|package| package.trim().to_string())
             .collect(),
         prompt: string_arg(text, Syntax::PACK_DIRECTIVE_PROMPT),
     }

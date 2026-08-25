@@ -2042,7 +2042,7 @@ fn canvas_command_action_jsons(authority: &CanvasAuthority) -> Vec<String> {
     actions.push(canvas_command_action_json(
         "service.start",
         "Start service",
-        &["jetpack", "dev", "service", "start"],
+        &["jetpack", "services", "up"],
         "service_process",
         &["canvas.service:start", "canvas.env:service"],
         services_available,

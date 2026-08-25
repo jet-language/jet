@@ -1038,7 +1038,11 @@ impl<'a> Checker<'a> {
             if let Some(mangled) =
                 inline_mangled.or_else(|| self.unqualified.get(&call.name).cloned())
             {
-                self.record_import_alias_reference(&call.name, call.name_span);
+                if self.funcs.contains_key(&mangled)
+                    && self.name_ledger.exported(self.module_idx, &mangled)
+                {
+                    self.record_import_alias_reference(&call.name, call.name_span);
+                }
                 let alias = mangled.split("__").next().unwrap_or(&mangled).to_string();
                 let result = self.infer_code_module_call(
                     &alias,
@@ -1063,8 +1067,8 @@ impl<'a> Checker<'a> {
             if let Some((fn_name, mod_idx)) =
                 inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned())
             {
-                self.record_import_alias_reference(&call.name, call.name_span);
                 let result = self.infer_import_call(
+                    &call.name,
                     mod_idx,
                     &fn_name,
                     call.name_span,

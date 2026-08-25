@@ -1848,21 +1848,37 @@ export const scenarios = {
       }
     }
     if (!commands["canvas.command:service.start"]?.available
-      || commands["canvas.command:service.start"].command?.[0] !== "jetpack") {
+      || JSON.stringify(commands["canvas.command:service.start"].command) !== JSON.stringify(["jetpack", "services", "up"])) {
       throw new Error(`service command surface missing: ${JSON.stringify(commands["canvas.command:service.start"])}`);
     }
 
     for (const [target] of requiredOutputs) {
-      const selected = await ctx.driver.evaluate(`fetch("/canvas/session", {
+      const attempted = await ctx.driver.evaluate(`fetch("/canvas/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ op: "select_output", output: ${JSON.stringify(target)}, target: ${JSON.stringify(target)}, client_id: "surface-primary" })
-      }).then((r) => r.json())`);
+        body: JSON.stringify({
+          op: "select_output",
+          output: ${JSON.stringify(target)},
+          target: ${JSON.stringify(target)},
+          tier: "native-lldb",
+          entry: "other.jet",
+          preview_adapter: "canvas",
+          client_id: "surface-primary"
+        })
+      }).then(async (r) => ({ status: r.status, body: await r.text() }))`);
+      const selected = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json())`);
       const selectedSession = canvasPayload(selected).session || canvasPayload(selected);
-      if (!selectedSession || selectedSession.id !== session.id
+      if (attempted.status !== 405
+        || !selectedSession
+        || selectedSession.id !== session.id
         || selectedSession.source_revision !== session.source_revision
-        || selectedSession.run?.output !== target) {
-        throw new Error(`output selection left resident session: ${JSON.stringify({ target, selected })}`);
+        || selectedSession.entry !== session.entry
+        || selectedSession.run?.output !== session.run?.output
+        || selectedSession.run?.target !== session.run?.target
+        || selectedSession.debugger?.tier !== session.debugger?.tier
+        || JSON.stringify(selectedSession.listeners?.application) !== JSON.stringify(session.listeners?.application)
+        || JSON.stringify(selectedSession.custom_servers) !== JSON.stringify(session.custom_servers)) {
+        throw new Error(`Canvas endpoint changed program selection: ${JSON.stringify({ target, attempted, before: session, after: selectedSession })}`);
       }
     }
 
@@ -1935,8 +1951,17 @@ outputs: .{
         out[panel.getAttribute("data-capability")] = panel.hidden;
         return out;
       }, {});
-      return project.service === false && project.preview === false && project.designer === false
+      const has = (name) => Object.prototype.hasOwnProperty.call(project, name);
+      const unsupported = Array.from(document.querySelectorAll("[data-capability]"))
+        .filter((panel) => !has(panel.getAttribute("data-capability")));
+      const focusable = "a[href],button,input,select,textarea,[tabindex]";
+      const layout = window.__jetCanvasLayout || {};
+      return !has("service") && !has("preview") && !has("designer") && !has("terminal")
         && panels.service === true && panels.preview === true && panels.designer === true
+        && unsupported.every((panel) => panel.hidden && panel.inert && !panel.matches(focusable) && !panel.querySelector(focusable))
+        && !layout.panels?.includes("preview")
+        && !["designer", "preview", "terminal", "debugger", "custom servers"].some((view) => layout.views?.includes(view))
+        && document.getElementById("workbench-preview-label")?.hidden === true
         && panels.runtime_output === false && panels.diagnostics === false;
     })()`), "capability change after reconnect");
     const narrowedProject = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);

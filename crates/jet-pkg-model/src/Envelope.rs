@@ -708,7 +708,8 @@ fn try_output_hash_of_with_hook(
                     allowed_peers += count_cas_peer(shared_cas, cas_key, *key);
                 }
             }
-            if allowed_peers >= link.total {
+            let required_peers = link.total.saturating_sub(link.seen);
+            if allowed_peers >= required_peers {
                 // In-Hangar dedupe and local/shared CAS entries are legitimate;
                 // every other inode peer remains untrusted. Overlapping
                 // trusted roots may count an admitted peer more than once.

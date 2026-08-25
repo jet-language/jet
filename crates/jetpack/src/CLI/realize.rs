@@ -99,7 +99,7 @@ pub(super) fn plan_downloads(
         // cached entry path out of closure verification; the subsequent Store
         // realization still proves the complete closure before reuse.
         if matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
-            && Store::find_by_reference(roots, &spec.raw).is_some_and(|entry| {
+            && Store::find_by_reference_read_only(roots, &spec.raw).is_some_and(|entry| {
                 !uses_nix || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some())
             })
         {
@@ -601,7 +601,7 @@ fn nix_catalog_cache_entry_matches(entry: &Store::StoreEntry, local: bool) -> bo
 }
 
 fn nix_catalog_cache_matches(roots: &Roots, reference: &str, local: bool) -> bool {
-    Store::find_by_reference(roots, reference)
+    Store::find_by_reference_read_only(roots, reference)
         .is_some_and(|entry| nix_catalog_cache_entry_matches(&entry, local))
 }
 

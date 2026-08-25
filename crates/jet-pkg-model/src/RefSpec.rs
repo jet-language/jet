@@ -551,20 +551,8 @@ pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
 pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
 
-    let persisted = migrate_persisted_ref(raw);
-    let migrated = migrate_public_ref(raw);
-    if migrated.canonical != raw {
-        return Err(if migrated.canonical != persisted.canonical {
-            RefError::RetiredNixpkgs {
-                raw: raw.to_string(),
-                replacement: migrated.canonical,
-            }
-        } else {
-            RefError::NonCanonical {
-                raw: raw.to_string(),
-                replacement: migrated.canonical,
-            }
-        });
+    if let Some(error) = noncanonical_input_error(raw) {
+        return Err(error);
     }
 
     if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
@@ -957,6 +945,62 @@ pub fn migrate_public_ref(raw: &str) -> MigratedRef {
     }
 }
 
+/// Return the user-facing error for a retired source spelling without routing
+/// canonical input through the persisted-data migrator.
+fn noncanonical_input_error(raw: &str) -> Option<RefError> {
+    let retired = retired_selector_replacement(raw);
+    let canonical = retired.as_deref().unwrap_or(raw);
+    if let Some(replacement) = rewrite_public_nixpkgs(canonical) {
+        return Some(RefError::RetiredNixpkgs {
+            raw: raw.to_string(),
+            replacement,
+        });
+    }
+    retired.map(|replacement| RefError::NonCanonical {
+        raw: raw.to_string(),
+        replacement,
+    })
+}
+
+/// Rewrite only the deleted selector positions for a diagnostic. This is not
+/// a parser and is never used to classify or accept user input.
+fn retired_selector_replacement(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let (legacy_policy, raw_ref) = legacy_policy_prefix(raw);
+    let (left, source_with_selector) = raw_ref.rsplit_once(Syntax::REF_PROVIDER_AT)?;
+    if left.is_empty() || source_with_selector.is_empty() {
+        return None;
+    }
+    let (source, source_selector) = source_with_selector
+        .split_once(Syntax::REF_CHANNEL_MARKER)
+        .map_or((source_with_selector, None), |(source, selector)| {
+            (source, Some(selector))
+        });
+    let (package, target_selector) = left
+        .rsplit_once(Syntax::REF_CHANNEL_MARKER)
+        .map_or((left, None), |(package, selector)| {
+            (package, Some(selector))
+        });
+    if target_selector.is_none() && legacy_policy.is_none() {
+        return None;
+    }
+    let selector = source_selector.or(target_selector).or_else(|| {
+        legacy_policy.map(|policy| match policy {
+            ChannelPolicy::Automatic => Syntax::REF_CHANNEL_AUTO,
+            ChannelPolicy::Manual => Syntax::REF_CHANNEL_LATEST,
+            ChannelPolicy::Pinned => "",
+        })
+    })?;
+    if package.is_empty() || selector.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{package}{}{source}{}{selector}",
+        Syntax::REF_PROVIDER_AT,
+        Syntax::REF_CHANNEL_MARKER
+    ))
+}
+
 fn rewrite_public_nixpkgs(raw: &str) -> Option<String> {
     let (package, source_with_selector) = raw.rsplit_once(Syntax::REF_PROVIDER_AT)?;
     if package.is_empty() || source_with_selector.is_empty() {
@@ -1042,20 +1086,8 @@ fn policy_for_upstream(upstream: &str) -> ChannelPolicy {
 /// Classify a `target@provider[#selector]` source ref or a bare local path.
 pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
     let raw = raw.trim();
-    let persisted = migrate_persisted_ref(raw);
-    let migrated = migrate_public_ref(raw);
-    if migrated.canonical != raw {
-        return Err(if migrated.canonical != persisted.canonical {
-            RefError::RetiredNixpkgs {
-                raw: raw.to_string(),
-                replacement: migrated.canonical,
-            }
-        } else {
-            RefError::NonCanonical {
-                raw: raw.to_string(),
-                replacement: migrated.canonical,
-            }
-        });
+    if let Some(error) = noncanonical_input_error(raw) {
+        return Err(error);
     }
     if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
         return Ok(ProviderRef {
@@ -1549,6 +1581,25 @@ mod tests {
             Err(RefError::NonCanonical { replacement, .. })
                 if replacement == "omp@jetpack#auto"
         ));
+    }
+
+    #[test]
+    fn retired_selector_forms_do_not_fall_back_to_canonical_parsers() {
+        for (raw, replacement) in [
+            ("#auto omp@releases", "omp@releases#auto"),
+            ("omp#v18.0.4@releases", "omp@releases#v18.0.4"),
+        ] {
+            assert!(matches!(
+                classify(raw),
+                Err(RefError::NonCanonical { replacement: actual, .. })
+                    if actual == replacement
+            ));
+            assert!(matches!(
+                classify_provider_ref(raw),
+                Err(RefError::NonCanonical { replacement: actual, .. })
+                    if actual == replacement
+            ));
+        }
     }
 
     #[test]

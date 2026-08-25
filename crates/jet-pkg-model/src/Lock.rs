@@ -3568,6 +3568,38 @@ mod a4_envelope_tests {
         assert_eq!(back.packages[0].envelope, None);
     }
 
+    #[test]
+    fn lock_writer_migrates_legacy_ref_spellings() {
+        let legacy = "#auto can1357/oh-my-pi#v18.0.4@github";
+        let mut package = pkg_with("omp", None);
+        package.source = LockSource::Nix {
+            reference: legacy.into(),
+            output: "/nix/store/omp".into(),
+        };
+        let mut lock = base_lock(vec![package], Vec::new());
+        lock.source_channels.push(LockedSourceChannel {
+            name: "releases".into(),
+            channel: "latest".into(),
+            exact: legacy.into(),
+        });
+
+        let text = write(&lock);
+        assert!(text.contains("can1357/oh-my-pi@github#v18.0.4"));
+        assert!(!text.contains(legacy));
+        assert!(!text.contains("can1357/oh-my-pi#v18.0.4@github"));
+
+        let back = parse(&text).expect("migrated lock parses");
+        assert!(matches!(
+            &back.packages[0].source,
+            LockSource::Nix { reference, .. }
+                if reference == "can1357/oh-my-pi@github#v18.0.4"
+        ));
+        assert_eq!(
+            back.source_channels[0].exact,
+            "can1357/oh-my-pi@github#v18.0.4"
+        );
+    }
+
     /// A `[[toolchain]]` block — a toolchain is an ordinary hangar object, so it
     /// carries the same envelope — round-trips through write→parse.
     #[test]

@@ -29,7 +29,7 @@ Top-level fields:
 | `project_revision` | Stable hash of the projected source-truth file set. |
 | `entry` | Entry source path relative to `project_root`. |
 | `mode` | `single_file`, `package`, or `workspace`. |
-| `capabilities` | Checked panel capabilities. Graph, code, diagnostics, runtime output, and terminal are always present; service, preview, and designer are projected only when supported. |
+| `capabilities` | Checked panel capabilities. Graph, code, and diagnostics are always present; runtime output, terminal, service, preview, and designer appear only when supported. |
 | `workspace` | `workspace.jet` projection with member package names/paths, or `null`. |
 | `packages` | Parsed `package.jet` facts for the root package and workspace members. |
 | `targets` | Package/build targets projected from `package.jet` with package path and manifest source. |

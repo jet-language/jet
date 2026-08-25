@@ -1024,6 +1024,16 @@ pub fn find_by_reference(roots: &Roots, reference: &str) -> Option<StoreEntry> {
         .max_by_key(|e| e.last_used_at)
 }
 
+/// Return a cache candidate without taking the checked Store path. Prompt
+/// planning may inspect identity metadata, but must not replay or migrate the
+/// closure graph; `realize_verified` remains the integrity authority.
+pub(crate) fn find_by_reference_read_only(roots: &Roots, reference: &str) -> Option<StoreEntry> {
+    list_read_only(roots)
+        .into_iter()
+        .filter(|e| e.reference == reference)
+        .max_by_key(|e| e.last_used_at)
+}
+
 /// Cheap provider-routing preflight for an exact cache identity. This is only
 /// a candidate check: `realize_verified` remains the authority that validates
 /// the output and its complete closure before reuse.
@@ -1032,7 +1042,7 @@ pub(crate) fn cache_candidate_matches(
     reference: &str,
     expectation: &CacheExpectation,
 ) -> bool {
-    find_by_reference(roots, reference)
+    find_by_reference_read_only(roots, reference)
         .is_some_and(|entry| entry.cache_identity == expectation.identity)
 }
 
@@ -4756,6 +4766,9 @@ fn object_dirs(hangar: &Path) -> std::io::Result<Vec<fs::DirEntry>> {
             || name == "quarantine"
             || name.starts_with('.');
         let metadata = fs::symlink_metadata(&path)?;
+        if reserved {
+            continue;
+        }
         if metadata.file_type().is_symlink() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

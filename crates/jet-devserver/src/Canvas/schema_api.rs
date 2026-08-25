@@ -383,14 +383,23 @@ fn project_capabilities_json(
         || target_text.contains("\"kind\":\"game\"")
         || target_text.contains("\"target\":\"ui\"")
         || target_text.contains("\"target\":\"game\"");
-    format!(
-        "{{\"graph\":true,\"code\":true,\"diagnostics\":true,\"runtime_output\":{},\"terminal\":{},\"service\":{},\"preview\":{},\"designer\":{}}}",
-        runtime_output,
-        runtime_output && !preview,
-        service,
-        preview,
-        designer
-    )
+    let mut capabilities = vec!["\"graph\":true", "\"code\":true", "\"diagnostics\":true"];
+    if runtime_output {
+        capabilities.push("\"runtime_output\":true");
+    }
+    if runtime_output && !preview {
+        capabilities.push("\"terminal\":true");
+    }
+    if service {
+        capabilities.push("\"service\":true");
+    }
+    if preview {
+        capabilities.push("\"preview\":true");
+    }
+    if designer {
+        capabilities.push("\"designer\":true");
+    }
+    format!("{{{}}}", capabilities.join(","))
 }
 
 /// Project package/workspace source truth into the public Canvas project schema.

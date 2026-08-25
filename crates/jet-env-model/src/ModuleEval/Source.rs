@@ -311,20 +311,13 @@ fn is_external_provider(provider: &str) -> bool {
 }
 
 fn classify_profile_ref(raw: &str, table: &SourceTable) -> Result<RefSpec::RefSpec, String> {
-    let migrated = RefSpec::migrate_persisted_ref(raw);
-    if migrated.canonical != raw {
-        return Err(format!(
-            "non-canonical package ref; write `{}`",
-            migrated.canonical
-        ));
-    }
     if let Some((package, source_with_selector)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
         let (source, selector) = source_with_selector
             .split_once(Syntax::REF_CHANNEL_MARKER)
             .map_or((source_with_selector, None), |(source, selector)| {
                 (source, Some(selector))
             });
-        if source == Syntax::DEFAULT_SOURCE {
+        if source == Syntax::DEFAULT_SOURCE && !package.contains(Syntax::REF_CHANNEL_MARKER) {
             let package = selector.map_or_else(
                 || package.to_string(),
                 |selector| format!("{package}{}{selector}", Syntax::REF_CHANNEL_MARKER),

@@ -7078,20 +7078,28 @@ fn use_many_packages_settles_one_row_per_package_without_output_flood() {
     copy_dir_recursive(&example_dir(), &project.path);
     let root = Scratch::new("use-many-packages-root");
     let fixtures = example_fixtures(&root.path);
-    fs::copy(
-        fixtures.join("nixpkgs-ripgrep.json"),
-        fixtures.join("jetpack-ripgrep.json"),
+    let artifact = fixtures.join("omp-1.0.0");
+    fs::write(&artifact, "#!/bin/sh\nprintf '%s\\n' omp\n").unwrap();
+    let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+    fs::write(
+        fixtures.join("jetpackage-omp.json"),
+        format!(
+            "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}"
+        ),
     )
     .unwrap();
     let refs = (0..26)
-        .map(|_| "ripgrep@jetpack")
+        .map(|_| "omp@releases#1.0.0")
         .collect::<Vec<_>>()
         .join(" ");
     let binary = common::jetpack_bin()
         .display()
         .to_string()
         .replace('\'', "'\\''");
-    let command = format!("stty rows 30 cols 120; exec '{binary}' use --prep --offline -y {refs}");
+    let fixtures_arg = fixtures.display().to_string().replace('\'', "'\\''");
+    let command = format!(
+        "stty rows 30 cols 120; exec '{binary}' use --prep --offline --fixtures '{fixtures_arg}' -y {refs}"
+    );
     let output = Command::new("script")
         .args(["-qfec", &command, "/dev/null"])
         .current_dir(&project.path)

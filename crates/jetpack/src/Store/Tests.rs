@@ -958,6 +958,10 @@ mod tests {
             &ingested.entry.reference,
             &expectation
         ));
+        assert!(
+            !closure_db.exists(),
+            "candidate preflight must not create or migrate the closure graph"
+        );
     }
 
     #[test]

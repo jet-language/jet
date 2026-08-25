@@ -28,6 +28,23 @@ fn core_effect_for_call(module: &str, name: &str) -> Option<crate::Sema::Effects
     }
 }
 
+fn core_call_is_known(module: &str, name: &str) -> bool {
+    matches!(
+        (module, name),
+        ("core.compiler", "lex" | "parse" | "check" | "source_map")
+            | ("core.service", "tree")
+            | ("core.auth", "verify_jwt" | "verify_paseto")
+            | ("core.net.tls", "client")
+            | ("core.net", "unix_connect")
+            | ("core.process", "run")
+            | ("core.plugin", "load")
+    ) || Syntax::core_call(module, name).is_some()
+        || super::is_polymorphic_core_special(module, name)
+        || core_fixed_sig(module, name).is_some()
+        || super::core_param_contract(module, name).is_some()
+        || Syntax::core_marker_application(module, name).is_some()
+}
+
 fn analytics_sql_literal(expr: &Expr) -> Option<String> {
     let Expr::TypedLit {
         head: Some(Type::Named(head)),
@@ -1019,7 +1036,7 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
-        if let Some(alias) = alias {
+        if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
         }
         // D-FRONTENDAPI1=A: the compiler surface is a read-only

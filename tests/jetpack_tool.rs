@@ -204,6 +204,13 @@ fn use_ephemeral_execs_inside_and_outside_project_without_path_projection() {
         "project-only",
         "#!/bin/sh\necho project package\n",
     );
+    for package in ["greet", "extra"] {
+        fs::copy(
+            fixtures.path.join(format!("nixpkgs-{package}.json")),
+            fixtures.path.join(format!("jetpack-{package}.json")),
+        )
+        .unwrap();
+    }
     // A valid project package proves `use` does not merge the cwd project
     // plan into the explicitly named package set.
     fs::write(
@@ -221,12 +228,14 @@ fn use_ephemeral_execs_inside_and_outside_project_without_path_projection() {
                 "--no-color",
                 "--offline",
                 "--fixtures",
+            ])
+            .arg(&fixtures.path)
+            .args([
                 "--",
                 "sh",
                 "-c",
                 "test \"$JETPACK_REF\" = 'greet@jetpack extra@jetpack' && command -v greet >/dev/null && command -v extra >/dev/null && ! command -v project-only >/dev/null",
             ])
-            .arg(&fixtures.path)
             .current_dir(cwd)
             .env("JETPACK_ROOT", &root.path)
             .env("HOME", &home.path)
