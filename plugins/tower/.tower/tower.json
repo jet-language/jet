@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2203,
-    "rev": 45036,
+    "rev": 45052,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29,7 +29,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-25T17:00:59.210Z"
+    "completionCursor": "2026-08-25T21:25:09.720Z"
   },
   "epochs": [
     {
@@ -147158,7 +147158,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "1. Follow D-CANVAS-CMD1=A after #2169 supplies the target-neutral control host.\n2. Add `--canvas` only to the `dev` command in `crates/jet-cli/src/CLI.rs` and its generated help surfaces.\n3. Route the flag through `Source/main.rs` into the existing resident dev process. Attach one Canvas client and control host.\n4. Keep plain interactive `jet dev` terminal-first. Print one exact `jet dev <source> --canvas` hint after readiness.\n5. Suppress the hint for Canvas, JSON, redirected, non-interactive, and machine-protocol output through the shared output-mode check.\n6. Define deterministic ownership for Ctrl-C, browser close, launch failure, and a second Canvas request. Never start a second watcher.\n7. Update CLI registry tests, help, completions, man output, dev integration tests, and Canvas browser scenarios.\n8. Prove `jet dev` and `jet dev --canvas` with a real terminal. Observe the process, URL, browser, second request, and shutdown.\n9. Run `scripts/agent/jet-env cargo test -p jet-cli` and the focused dev command tests.\n10. Run `scripts/agent/jet-env full cargo test --test canvas_scenarios` for the real browser paths.",
       "checkSteps": "Run the chosen command on a native hello program. Canvas opens once, edits the same source, and stops cleanly with Ctrl-C.",
@@ -147167,6 +147167,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -147254,11 +147259,11 @@
         {
           "n": 8,
           "text": "Ctrl-C, browser close, source-not-found, browser-launch failure, and a second Canvas request have tested exit, reuse, and cleanup behavior.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:09:34.965Z"
+          "evidence": "`tests/canvas_cli_lifecycle.rs:9`, `jet_dev_canvas_lifecycle_exit_reuse_and_cleanup`; all five lifecycle paths passed.",
+          "at": "2026-08-25T21:49:29.055Z"
         }
       ],
       "refs": [
@@ -147274,8 +147279,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:04.054Z",
-      "updated": "2026-08-25T19:45:58.653Z",
-      "updatedBy": "orchestrator"
+      "updated": "2026-08-25T21:49:45.925Z",
+      "updatedBy": "orchestrator",
+      "completedAt": "2026-08-25T21:49:45.925Z"
     },
     {
       "id": "cmtyww5f",
@@ -147335,11 +147341,11 @@
         {
           "n": 3,
           "text": "The Canvas endpoint never changes the selected program target, output, execution tier, run entry, or preview adapter.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:09:33.570Z"
+          "evidence": "`WebHost::tests::canvas_session_post_cannot_change_program_selection`; `scripts/canvas-test/scenario.mjs:1855`",
+          "at": "2026-08-25T21:49:29.430Z"
         },
         {
           "n": 4,
@@ -147353,11 +147359,11 @@
         {
           "n": 5,
           "text": "Unsupported panels are absent from navigation, focus order, shortcuts, saved layout, and protocol capabilities instead of appearing as disabled clutter.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:09:33.570Z"
+          "evidence": "`canvas_project_capabilities_follow_checked_package_target`; `session-workbench.js:14-62`; `schema_api.rs:386-402`",
+          "at": "2026-08-25T21:49:29.775Z"
         },
         {
           "n": 6,
@@ -147371,11 +147377,11 @@
         {
           "n": 7,
           "text": "Every request validates the session secret, method, path, body limit, and origin before dispatch; missing or invalid values fail closed.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T19:09:33.570Z"
+          "evidence": "`WebHost::tests::canvas_request_gate_requires_secret_and_strict_request_context`",
+          "at": "2026-08-25T21:49:30.137Z"
         },
         {
           "n": 8,
@@ -147417,7 +147423,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:18.096Z",
-      "updated": "2026-08-25T20:42:28.816Z",
+      "updated": "2026-08-25T21:49:30.138Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -150109,7 +150115,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -150119,6 +150125,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -150165,11 +150176,11 @@
         {
           "n": 5,
           "text": "the non-Jet formatter delegation that jetpack fmt performed is reachable from jet fmt inside a realized env, proven by formatting a non-Jet file",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:49.991Z"
+          "evidence": "`tests/fmt_project.rs:74`, `top_level_jet_fmt_delegates_non_jet_file_to_realized_formatter`",
+          "at": "2026-08-25T21:49:32.419Z"
         }
       ],
       "refs": [],
@@ -150177,9 +150188,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:36.352Z",
-      "updated": "2026-08-25T18:21:03.059Z",
+      "updated": "2026-08-25T21:49:47.525Z",
       "updatedBy": "orchestrator",
-      "workOrder": 4
+      "workOrder": 4,
+      "completedAt": "2026-08-25T21:49:47.525Z"
     },
     {
       "id": "c09vy29f",
@@ -150319,13 +150331,18 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -150363,20 +150380,20 @@
         {
           "n": 4,
           "text": "tool manifest writeback and the project lock writer emit the new spelling, and a manifest written in the old spelling is migrated rather than rejected",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:57.247Z"
+          "evidence": "`crates/jetpack/src/CLI/tool.rs:1001,1043,1110,1125,2250`; `crates/jet-pkg-model/src/Lock.rs:508,643`; `Lock::a4_envelope_tests::lock_writer_migrates_legacy_ref_spellings`",
+          "at": "2026-08-25T21:49:30.511Z"
         },
         {
           "n": 5,
           "text": "the old parse path is deleted with no fallback parser retained",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:17:57.598Z"
+          "evidence": "`RefSpec::tests::retired_selector_forms_do_not_fall_back_to_canonical_parsers`",
+          "at": "2026-08-25T21:49:30.861Z"
         }
       ],
       "refs": [],
@@ -150384,9 +150401,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:37.250Z",
-      "updated": "2026-08-25T14:11:31.450Z",
+      "updated": "2026-08-25T21:49:49.284Z",
       "updatedBy": "orchestrator",
-      "workOrder": 2
+      "workOrder": 2,
+      "completedAt": "2026-08-25T21:49:49.284Z"
     },
     {
       "id": "c0o7ipzb",
@@ -150452,11 +150470,11 @@
         {
           "n": 5,
           "text": "the fully-cached entry path performs no closure-wide resolution work that the prompt would need, measured against the pre-change entry time",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:01.346Z"
+          "evidence": "`crates/jetpack/src/Store.rs:1030-1045`; passing test `cache_candidate_preflight_does_not_read_closure_graph`",
+          "at": "2026-08-25T21:49:31.223Z"
         }
       ],
       "refs": [],
@@ -150464,7 +150482,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:37.687Z",
-      "updated": "2026-08-25T20:42:23.065Z",
+      "updated": "2026-08-25T21:49:31.224Z",
       "updatedBy": "orchestrator",
       "workOrder": 5
     },
@@ -150721,7 +150739,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -150730,6 +150748,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met with cited implementation evidence; patch integrated; workspace cargo check clean at 0 errors 0 warnings."
+        },
         {
           "at": "2026-08-25",
           "by": "owner",
@@ -150749,11 +150772,11 @@
         {
           "n": 2,
           "text": "each package prints one settled completion row as it finishes, and a 26-package run does not exceed one screen of settled output",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:05.543Z"
+          "evidence": "`tests/jetpack_engine.rs:7076`, passing test `use_many_packages_settles_one_row_per_package_without_output_flood`",
+          "at": "2026-08-25T21:49:31.571Z"
         },
         {
           "n": 3,
@@ -150788,9 +150811,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:39.010Z",
-      "updated": "2026-08-25T19:45:52.776Z",
+      "updated": "2026-08-25T21:49:50.576Z",
       "updatedBy": "orchestrator",
-      "workOrder": 7
+      "workOrder": 7,
+      "completedAt": "2026-08-25T21:49:50.576Z"
     },
     {
       "id": "c0h7q2i8",
@@ -150801,13 +150825,18 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m10-cli-surface",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "All exit criteria met; store plumbing grouped under hangar; verb count asserted at 20 and cannot drift silently."
+        },
         {
           "at": "2026-08-25",
           "by": "orchestrator",
@@ -150832,11 +150861,11 @@
         {
           "n": 2,
           "text": "JETPACK_VERBS contains 24 non-jetos verbs and the count is asserted by a test so it cannot drift silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T13:18:07.427Z"
+          "evidence": "The verb count is asserted by a test so it cannot drift silently: crates/jetpack/src/CLI/usage_tests.rs:209-214 asserts the exact JETPACK_VERBS count. The number is 20 rather than the 24 estimated when this card was written, because sibling card #2188 additionally retired run, dev, test and fmt from the jetpack side. The criterion intent, an asserted count, is satisfied.",
+          "at": "2026-08-25T21:50:09.935Z"
         },
         {
           "n": 3,
@@ -150871,9 +150900,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T13:17:39.441Z",
-      "updated": "2026-08-25T18:20:55.110Z",
+      "updated": "2026-08-25T21:50:10.728Z",
       "updatedBy": "orchestrator",
-      "workOrder": 3
+      "workOrder": 3,
+      "completedAt": "2026-08-25T21:50:10.728Z"
     },
     {
       "id": "c03kulod",
@@ -210276,6 +210306,118 @@
   ],
   "events": [
     {
+      "at": "2026-08-25T21:50:10.729Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0h7q2i8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T21:50:09.936Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0h7q2i8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T21:49:50.576Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0a3h9ta",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T21:49:49.284Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0gziu7u",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T21:49:47.525Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c024o546",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T21:49:45.925Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "cldqlgbu",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T21:49:32.419Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c024o546",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T21:49:31.572Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0a3h9ta",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T21:49:31.224Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0o7ipzb",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T21:49:30.862Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gziu7u",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T21:49:30.512Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0gziu7u",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T21:49:30.138Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cmtyww5f",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-25T21:49:29.775Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cmtyww5f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-25T21:49:29.431Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cmtyww5f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T21:49:29.057Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "cldqlgbu",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-25T21:25:09.720Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-25T21:25:09.720Z"
+    },
+    {
       "at": "2026-08-25T20:42:51.074Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -213662,118 +213804,6 @@
       "action": "card.criteria-add",
       "ref": "c0njm2a6",
       "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:20.935Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0njm2a6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:20.574Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0hxk6vx",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:20.216Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0hxk6vx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:19.857Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ci2vkk",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:19.474Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ci2vkk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:19.099Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c06tpil4",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “MCP SDK"
-    },
-    {
-      "at": "2026-08-24T23:27:18.716Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c06tpil4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:18.319Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0vrgh9b",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Cross c"
-    },
-    {
-      "at": "2026-08-24T23:27:17.962Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0vrgh9b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:17.588Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0q9cyd5",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Cross c"
-    },
-    {
-      "at": "2026-08-24T23:27:17.179Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0q9cyd5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:16.812Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kne6oz",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Cross c"
-    },
-    {
-      "at": "2026-08-24T23:27:16.445Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0kne6oz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:16.075Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0u57yrs",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Compile"
-    },
-    {
-      "at": "2026-08-24T23:27:15.703Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0u57yrs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:27:15.328Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0omljqx",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “Compile"
     }
   ],
   "nextNum": 368,
