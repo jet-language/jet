@@ -13,6 +13,7 @@ use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 const MAX_CLIENT_ID: usize = 128;
 const MAX_RECEIPTS: usize = 128;
+const MAX_RETAINED_VIEW_BYTES: usize = 2 * 1024 * 1024;
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
 struct Receipt {
@@ -33,6 +34,13 @@ struct DebuggerSnapshot {
     tier: String,
 }
 
+#[derive(Clone, Default)]
+struct RetainedView {
+    revision: String,
+    source_id: String,
+    payload: String,
+}
+
 /// One semantic resident development session.
 ///
 /// Every field is session state, not browser state.  Browser views can
@@ -51,11 +59,13 @@ pub struct ResidentDevSession {
     state: Mutex<String>,
     diagnostic_code: Mutex<String>,
     diagnostic: Mutex<String>,
+    diagnostic_revision: Mutex<String>,
     selected_source_id: Mutex<String>,
     selected_output: Mutex<String>,
     selected_target: Mutex<String>,
     debugger: Mutex<DebuggerSnapshot>,
     test_state: Mutex<String>,
+    last_good_views: Mutex<HashMap<String, RetainedView>>,
     clients: Mutex<HashMap<String, Instant>>,
     receipts: Mutex<Vec<Receipt>>,
 }
@@ -85,6 +95,7 @@ impl ResidentDevSession {
             state: Mutex::new("starting".to_string()),
             diagnostic_code: Mutex::new(String::new()),
             diagnostic: Mutex::new(String::new()),
+            diagnostic_revision: Mutex::new(String::new()),
             selected_source_id: Mutex::new(String::new()),
             selected_output: Mutex::new(String::new()),
             selected_target: Mutex::new(String::new()),
@@ -96,6 +107,7 @@ impl ResidentDevSession {
                 tier: String::new(),
             }),
             test_state: Mutex::new("idle".to_string()),
+            last_good_views: Mutex::new(HashMap::new()),
             clients: Mutex::new(HashMap::new()),
             receipts: Mutex::new(Vec::new()),
         }
@@ -129,12 +141,15 @@ impl ResidentDevSession {
         *self.state.lock().unwrap() = "ready".to_string();
         self.diagnostic_code.lock().unwrap().clear();
         self.diagnostic.lock().unwrap().clear();
+        self.diagnostic_revision.lock().unwrap().clear();
     }
 
     pub fn mark_error(&self, code: &str, diagnostic: &str) {
         *self.state.lock().unwrap() = "error".to_string();
         *self.diagnostic_code.lock().unwrap() = code.to_string();
         *self.diagnostic.lock().unwrap() = diagnostic.to_string();
+        *self.diagnostic_revision.lock().unwrap() =
+            self.current_revision.lock().unwrap().clone();
     }
 
     pub fn mark_last_good(&self, revision: &str, program: &str) {
@@ -143,6 +158,51 @@ impl ResidentDevSession {
         }
         *self.last_good_revision.lock().unwrap() = revision.to_string();
         *self.last_good_program.lock().unwrap() = program.to_string();
+    }
+
+    /// Retain the last successful payload for a view.  The payload is opaque
+    /// to the broker: each view remains responsible for its own report shape,
+    /// while reconnecting clients can recover the last-good projection after
+    /// a failed source rebuild.
+    pub fn remember_last_good_view(
+        &self,
+        kind: &str,
+        source_id: &str,
+        revision: &str,
+        payload: &str,
+    ) {
+        if !matches!(kind, "graph" | "debugger" | "runtime")
+            || revision.is_empty()
+            || payload.is_empty()
+            || payload.len() > MAX_RETAINED_VIEW_BYTES
+        {
+            return;
+        }
+        self.last_good_views.lock().unwrap().insert(
+            kind.to_string(),
+            RetainedView {
+                revision: revision.to_string(),
+                source_id: source_id.to_string(),
+                payload: payload.to_string(),
+            },
+        );
+    }
+
+    pub(crate) fn last_good_view(
+        &self,
+        kind: &str,
+        source_id: &str,
+    ) -> Option<(String, String)> {
+        let views = self.last_good_views.lock().unwrap();
+        let view = views.get(kind)?;
+        if view.source_id != source_id {
+            return None;
+        }
+        Some((view.revision.clone(), view.payload.clone()))
+    }
+
+    fn clear_last_good_view(&self, kind: &str) {
+        self.last_good_views.lock().unwrap().remove(kind);
     }
 
     pub fn accept_transaction(&self, request: &str, revision: &str) {
@@ -181,15 +241,7 @@ impl ResidentDevSession {
 
     pub fn record_command(&self, request: &str) {
         let action = request_string(request, "action_id");
-        let output = request_string(request, "output");
-        let target = request_string(request, "target");
         self.select_project_source(&request_string(request, "source_id"));
-        if !output.is_empty() {
-            *self.selected_output.lock().unwrap() = output;
-        }
-        if !target.is_empty() {
-            *self.selected_target.lock().unwrap() = target;
-        }
         if action.contains("test") {
             *self.test_state.lock().unwrap() = "requested".to_string();
         }
@@ -212,6 +264,8 @@ impl ResidentDevSession {
         let mut debugger = self.debugger.lock().unwrap();
         if request_bool(request, "stop") || request_string(request, "op") == "disconnect" {
             *debugger = idle_debugger();
+            drop(debugger);
+            self.clear_last_good_view("debugger");
             return;
         }
         debugger.state = "active".to_string();
@@ -229,19 +283,38 @@ impl ResidentDevSession {
         let Some(snapshot) = find_debugger_snapshot(response) else {
             return;
         };
-        let mut debugger = self.debugger.lock().unwrap();
-        let state = match snapshot.state.as_str() {
-            "running" => "active".to_string(),
-            "stopped" => "idle".to_string(),
-            state => state.to_string(),
+        let (source_id, debugger_revision) = {
+            let mut debugger = self.debugger.lock().unwrap();
+            let state = match snapshot.state.as_str() {
+                "running" => "active".to_string(),
+                "stopped" => "idle".to_string(),
+                state => state.to_string(),
+            };
+            *debugger = DebuggerSnapshot {
+                state,
+                session_id: snapshot.session_id,
+                source_id: snapshot.source_id,
+                revision: snapshot.revision,
+                tier: snapshot.tier,
+            };
+            let source_id = if debugger.source_id.is_empty() {
+                request_string(request, "source_id")
+            } else {
+                debugger.source_id.clone()
+            };
+            (source_id, debugger.revision.clone())
         };
-        *debugger = DebuggerSnapshot {
-            state,
-            session_id: snapshot.session_id,
-            source_id: snapshot.source_id,
-            revision: snapshot.revision,
-            tier: snapshot.tier,
+        let revision = if debugger_revision.is_empty() {
+            let requested = request_string(request, "revision");
+            if requested.is_empty() {
+                self.current_revision.lock().unwrap().clone()
+            } else {
+                requested
+            }
+        } else {
+            debugger_revision
         };
+        self.remember_last_good_view("debugger", &source_id, &revision, response);
     }
 
     pub fn select_project_source(&self, source_id: &str) {
@@ -290,11 +363,13 @@ impl ResidentDevSession {
         let state = self.state.lock().unwrap().clone();
         let diagnostic_code = self.diagnostic_code.lock().unwrap().clone();
         let diagnostic = self.diagnostic.lock().unwrap().clone();
+        let diagnostic_revision = self.diagnostic_revision.lock().unwrap().clone();
         let selected_source_id = self.selected_source_id.lock().unwrap().clone();
         let output = self.selected_output.lock().unwrap().clone();
         let target = self.selected_target.lock().unwrap().clone();
         let debugger = self.debugger.lock().unwrap().clone();
         let tests = self.test_state.lock().unwrap().clone();
+        let views = self.last_good_views.lock().unwrap().clone();
         let clients = self.clients.lock().unwrap().len();
         let receipts = self
             .receipts
@@ -315,7 +390,7 @@ impl ResidentDevSession {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"id\":{},\"entry\":{},\"project_context\":{{\"source_id\":{}}},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{},\"session_id\":{},\"source_id\":{},\"revision\":{},\"tier\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{{\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\"}},\"application\":{{\"host\":\"127.0.0.1\",\"port\":{},\"transport\":\"application\",\"routes\":\"application-owned\"}}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\"}}}}",
+            "{{\"id\":{},\"entry\":{},\"project_context\":{{\"source_id\":{}}},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"diagnostic_revision\":{},\"last_good_views\":{{\"graph\":{},\"debugger\":{},\"runtime\":{}}},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{},\"session_id\":{},\"source_id\":{},\"revision\":{},\"tier\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{{\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\"}},\"application\":{{\"host\":\"127.0.0.1\",\"port\":{},\"transport\":\"application\",\"routes\":\"application-owned\"}}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\"}}}}",
             json_value(&self.id),
             json_value(&self.entry),
             json_value(&selected_source_id),
@@ -326,6 +401,10 @@ impl ResidentDevSession {
             json_value(&state),
             json_value(&diagnostic_code),
             json_value(&diagnostic),
+            json_value(&diagnostic_revision),
+            retained_view_json(views.get("graph")),
+            retained_view_json(views.get("debugger")),
+            retained_view_json(views.get("runtime")),
             clients,
             json_value(&output),
             json_value(&target),
@@ -350,6 +429,16 @@ impl ResidentDevSession {
             receipts.remove(0);
         }
     }
+}
+
+fn retained_view_json(view: Option<&RetainedView>) -> String {
+    let view = view.cloned().unwrap_or_default();
+    format!(
+        "{{\"revision\":{},\"source_id\":{},\"payload\":{}}}",
+        json_value(&view.revision),
+        json_value(&view.source_id),
+        json_value(&view.payload)
+    )
 }
 
 fn json_value(value: &str) -> String {
@@ -506,6 +595,7 @@ mod tests {
             "\"last_good_revision\":\"good-revision\"",
             "\"last_good_program\":\"web-build-1\"",
             "\"last_good_views\":{\"graph\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"graph-good\"},\"debugger\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"debug-good\"},\"runtime\":{\"revision\":\"good-revision\",\"source_id\":null,\"payload\":\"runtime-good\"}}",
+            "\"diagnostic_revision\":\"broken-revision\"",
             "\"state\":\"error\"",
             "\"diagnostic_code\":\"E0102\"",
             "Error [E0102]: missing name",

@@ -358,7 +358,7 @@ pub(crate) fn compute_references(
 
 #[cfg(test)]
 mod generic_instance_tests {
-    use super::compute_references;
+    use super::{compute_references, compute_rename};
 
     #[test]
     fn references_join_applicative_generic_module_aliases() {
@@ -447,6 +447,62 @@ mod generic_instance_tests {
             !references.iter().any(|(path, _)| path == &shown_right),
             "distinct value(4) instance joined by alias spelling: {references:?}"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_alias_references_and_rename_use_the_exact_definition_anchor() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_lsp_import_alias_identity_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let library = root.join("library.jet");
+        let main = root.join("main.jet");
+        let source = "use \"./library\" as api\nfn run() { api.report() }\n";
+        std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
+        std::fs::write(&main, source).unwrap();
+        let shown = main.to_string_lossy().into_owned();
+        let mut bundle = crate::Loader::load_entry(&shown).unwrap();
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "{diagnostics:#?}"
+        );
+        let db = jet_semindex::build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let use_offset = source.find("api.report").unwrap();
+        let alias_offset = source.find("as api").unwrap() + 3;
+        let references = compute_references(&db, &tokens, &shown, use_offset, true);
+        assert!(
+            references
+                .iter()
+                .any(|(path, span)| { path == &shown && &source[span.start..span.end] == "api" }),
+            "references={references:?}"
+        );
+        let renamed_from_use = compute_rename(&db, &tokens, &shown, use_offset, "backend")
+            .expect("alias use should be renameable");
+        let renamed_from_definition = compute_rename(&db, &tokens, &shown, alias_offset, "backend")
+            .expect("alias definition should be renameable");
+        for spans in [renamed_from_use, renamed_from_definition] {
+            assert!(
+                spans.iter().any(|(path, span)| {
+                    path == &shown && &source[span.start..span.end] == "api"
+                }),
+                "rename spans={spans:?}"
+            );
+            assert!(
+                spans.len() >= 2,
+                "rename must include the declaration and qualified use: {spans:?}"
+            );
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 }
@@ -574,12 +630,10 @@ pub(crate) fn compute_rename(
         }
     }
     if let Some(target) = alias_target {
-        let mut spans = vec![
-            (
-                target.module_path.clone(),
-                Span::new(target.def_span.start, target.def_span.end),
-            ),
-        ];
+        let mut spans = vec![(
+            target.module_path.clone(),
+            Span::new(target.def_span.start, target.def_span.end),
+        )];
         spans.extend(db.refs.iter().filter_map(|reference| {
             let candidate = reference.target.as_ref()?;
             (candidate.kind == "import_alias"

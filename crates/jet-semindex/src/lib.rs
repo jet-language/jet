@@ -717,6 +717,22 @@ mod tests {
         assert!(target_kind("report").contains(&"function"));
         assert!(target_kind("alias_report").contains(&"function"));
         assert!(target_kind("step").contains(&"function"));
+        let alias_definition = index
+            .definitions()
+            .iter()
+            .find(|definition| definition.name == "api")
+            .expect("module alias definition");
+        let alias_reference = index
+            .references()
+            .iter()
+            .find(|reference| reference.name == "api")
+            .and_then(|reference| reference.target.as_ref())
+            .expect("module alias reference target");
+        assert_eq!(alias_reference.def_span, alias_definition.def_span);
+        assert_eq!(
+            alias_reference.semantic_identity.as_deref(),
+            Some(alias_definition.identity.as_str())
+        );
         let step_targets = index
             .references()
             .iter()

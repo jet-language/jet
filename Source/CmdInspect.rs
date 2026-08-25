@@ -142,11 +142,8 @@ fn check_projection_with_options_and_preflight(
             "Driver::check_file_with_effect_facts_for_output",
         )
     } else if run_mode {
-        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_run(
-            &entry,
-            profile,
-            setting_overrides,
-        );
+        let (diagnostics, bundle, facts) =
+            jet::Driver::check_file_with_effect_facts_for_run(&entry, profile, setting_overrides);
         (
             diagnostics,
             bundle,
@@ -330,6 +327,102 @@ pub(crate) fn run_digest(args: &[String], json: bool) {
         None => llm_digest(),
     };
     emit_digest(&digest, json);
+}
+
+/// `jet inspect output <file.jet> [<address>]` — report one sema-selected
+/// Output and its checked callable facts.
+pub(crate) fn run_output(args: &[String], json: bool) {
+    let positionals = args
+        .iter()
+        .filter(|arg| !arg.starts_with('-'))
+        .collect::<Vec<_>>();
+    let Some(file) = positionals.first() else {
+        crate::cli_error!(
+            @fix "E2104",
+            "`jet inspect output` needs an entry file",
+            "run `jet inspect output examples/features/tooling/output_callable.jet`"
+        );
+        exit(jet::ExitCodes::USAGE);
+    };
+    let requested = positionals.get(1).map(|value| value.as_str());
+    let path = Path::new(file.as_str());
+    let projection = match requested {
+        Some(address) => {
+            check_projection_for_output_effects(path, address, "dev", &BTreeMap::new())
+        }
+        None => check_projection_for_run(path, "dev", &BTreeMap::new()),
+    }
+    .unwrap_or_else(|diagnostics| render_check_failure(path, &diagnostics, json, false));
+
+    let selected = projection
+        .bundle
+        .modules
+        .iter()
+        .flat_map(|module| module.items.iter())
+        .find_map(|item| {
+            let jet::AST::Item::Const(value) = item else {
+                return None;
+            };
+            let output = value.resolved_output.as_ref()?;
+            output.selected.then_some((value.name.as_str(), output))
+        });
+    let Some((binding, output)) = selected else {
+        crate::cli_error!(
+            @fix "E2104",
+            "the checked source has no selected Output",
+            "declare one Executable Output or select one by address"
+        );
+        exit(jet::ExitCodes::USER_ERROR);
+    };
+    let module = &projection.bundle.modules[output.module];
+    let callable_identity = format!("{}::{}", module.alias, output.semantic_name);
+    let mut effects = output.effects.clone();
+    effects.sort();
+
+    if json {
+        let effect_values = effects
+            .iter()
+            .map(|effect| format!("\"{}\"", json_escape(effect)))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{}",
+            render_status_json(
+                "ok",
+                true,
+                "inspect.output",
+                &format!(
+                    ",\"output\":{{\"binding\":\"{}\",\"kind\":\"{}\",\"name\":\"{}\",\"entry\":\"{}\",\"source_path\":\"{}\",\"callable_identity\":\"{}\",\"effects\":[{}],\"selection_reason\":\"{}\"}}",
+                    json_escape(binding),
+                    json_escape(output.kind.as_str()),
+                    json_escape(&output.output_name),
+                    json_escape(&output.source_name),
+                    json_escape(&output.source_path),
+                    json_escape(&callable_identity),
+                    effect_values,
+                    json_escape(&output.selection_reason),
+                ),
+            )
+        );
+    } else {
+        println!(
+            "selected: {} \"{}\"",
+            output.kind.as_str(),
+            output.output_name
+        );
+        println!("entry: {}", output.source_name);
+        println!("source path: {}", output.source_path);
+        println!("callable identity: {callable_identity}");
+        println!(
+            "effects: {}",
+            if effects.is_empty() {
+                "none".to_string()
+            } else {
+                effects.join(", ")
+            }
+        );
+        println!("selection reason: {}", output.selection_reason);
+    }
 }
 
 /// `jet inspect env [<env.jet|config.jet>]` — evaluate a config surface and

@@ -121,7 +121,7 @@
     try {
       editorState = JSON.parse(localStorage.getItem(projectStateKey(doc)) || "null") || editorState;
     } catch (_) {
-      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false, tourStep: 0 };
+      editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], layout: { panels: [], views: [] }, tourDismissed: false, tourStep: 0 };
     }
     editorState.bookmarks ||= [];
     editorState.favorites ||= [];
@@ -132,6 +132,9 @@
     editorState.commentBoxes ||= [];
     editorState.stagedNodes ||= [];
     editorState.stagedWires ||= [];
+    if (!editorState.layout || typeof editorState.layout !== "object") editorState.layout = {};
+    if (!Array.isArray(editorState.layout.panels)) editorState.layout.panels = [];
+    if (!Array.isArray(editorState.layout.views)) editorState.layout.views = [];
     editorState.tourDismissed = !!editorState.tourDismissed;
     editorState.tourStep = Number.isFinite(Number(editorState.tourStep)) ? Number(editorState.tourStep) : 0;
     if (typeof renderTour === "function") renderTour();
@@ -1038,6 +1041,7 @@
   }
 
   function runCurrentGraph() {
+    if (!canvasCapability("runtime_output")) return;
     const run = actionEntries.find((item) => item.action_id === "canvas.command:run")
       || actionEntries.find((item) => item.action_id === "canvas.command:dev")
       || null;

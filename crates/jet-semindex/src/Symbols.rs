@@ -631,11 +631,11 @@ fn collect_import_symbols(
             jet_foundation::AST::ImportKind::File(_, _)
             | jet_foundation::AST::ImportKind::Module(_, _) => {
                 let alias = import.import_alias();
-                let module_idx = bundle
+                let imported_module_idx = bundle
                     .modules
                     .iter()
                     .position(|candidate| candidate.display == module.display);
-                let alias_name = module_idx
+                let alias_name = imported_module_idx
                     .and_then(|module_idx| bundle.name_ledger.effective_alias(module_idx, &alias))
                     .map(|name| name.name.clone())
                     .unwrap_or_else(|| alias.clone());

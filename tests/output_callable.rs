@@ -70,6 +70,32 @@ fn sema_resolves_sole_executable_entry_before_codegen() {
 }
 
 #[test]
+fn inspect_output_reports_selected_callable_facts() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/output_callable.jet");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "output", path.to_str().unwrap()])
+        .output()
+        .expect("jet inspect output");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in [
+        "selected: Executable \"checked-output\"",
+        "entry: launch",
+        "source path: ",
+        "callable identity: output_callable::launch",
+        "effects: IO",
+        "selection reason: sole compatible Output",
+    ] {
+        assert!(stdout.contains(expected), "missing {expected}: {stdout}");
+    }
+}
+
+#[test]
 fn aot_dev_and_jit_consume_the_resolved_entry() {
     let dir = common::unique_tmp("jet_output_callable_parity");
     std::fs::create_dir_all(&dir).unwrap();

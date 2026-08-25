@@ -4,6 +4,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+// This module is included by several test roots and each compiles it
+// separately, so a root that only runs offline phases never constructs
+// `Enabled`. jetpack_engine.rs does.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkMode {
     Enabled,

@@ -537,8 +537,8 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           </section>
         </div>
       </section>
-      <section id="status-panel" class="panel"><details open><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-views" class="project-section" aria-label="Session views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer"></div><div data-session-view="preview" data-capability="preview"></div><div data-session-view="terminal"></div><div data-session-view="debugger" data-capability="runtime_output"></div><div data-session-view="tests" data-capability="diagnostics"></div><div data-session-view="custom servers" data-capability="service"></div></div></details></section>
-      <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
+      <section id="status-panel" class="panel" data-canvas-panel="status"><details open><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-views" class="project-section" aria-label="Session views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer" hidden></div><div data-session-view="preview" data-capability="preview" hidden></div><div data-session-view="terminal" data-capability="terminal" hidden></div><div data-session-view="debugger" data-capability="runtime_output" hidden></div><div data-session-view="tests" data-capability="diagnostics" hidden></div><div data-session-view="custom servers" data-capability="service" hidden></div></div></details></section>
+      <section id="search-panel" class="panel" data-canvas-panel="search"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
     <section id="stage">
       <div id="canvas-dock" aria-label="Canvas panels"><button id="dock-graphs">Graphs</button><button id="dock-details">Inspector</button></div>
@@ -570,10 +570,10 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <div id="hud"><span id="zoom-label">100%</span><span id="graph-meta">0 nodes</span></div>
     </section>
     <aside id="right-drawer" class="side right">
-      <section id="problems-panel" class="panel"><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
-      <section id="details" class="panel"></section>
-      <section id="proof-panel" class="panel"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
-      <section id="preview-panel" class="panel" data-capability="preview"><details open><summary><span>App preview</span><span class="count">last good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
+      <section id="problems-panel" class="panel" data-canvas-panel="problems"><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
+      <section id="details" class="panel" data-canvas-panel="details"></section>
+      <section id="proof-panel" class="panel" data-canvas-panel="proof"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
+      <section id="preview-panel" class="panel" data-canvas-panel="preview" data-capability="preview" hidden><details open><summary><span>App preview</span><span class="count">last good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
     </aside>
   </main>
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="session-id">session</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
@@ -601,7 +601,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <section class="keyboard-shortcut-group" aria-labelledby="keyboard-shortcuts-actions">
       <h3 id="keyboard-shortcuts-actions">Actions</h3>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + K or P</kbd><span>Open action palette</span></div>
-      <div class="keyboard-shortcut-row"><kbd>Alt + Enter</kbd><span>Prepare Run</span></div>
+      <div class="keyboard-shortcut-row" data-capability="runtime_output" hidden><kbd>Alt + Enter</kbd><span>Prepare Run</span></div>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Z</kbd><span>Undo source edit</span></div>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Y</kbd><span>Redo source edit</span></div>
       <div class="keyboard-shortcut-row"><kbd>Ctrl/Cmd + Shift + Z</kbd><span>Redo source edit</span></div>

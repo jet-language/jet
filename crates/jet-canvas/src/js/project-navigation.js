@@ -244,10 +244,14 @@
     { title: "Read the graph", detail: "Files, functions, and variables live in the left rail. Select a node to inspect its source-backed details. The graph is a view of Jet source, not a second file.", target: "left-drawer" },
     { title: "Edit, then save", detail: "Canvas selects the example value in Inspector. Change it, then Apply; the checked, formatted result is written to Jet source immediately.", action: "Open example editor", target: "details" },
     { title: "Check and fix", detail: "Check runs Jet diagnostics. Problems stay in the panel with what, why, and fix text. Rejected edits leave the last valid source intact.", action: "Check source", target: "check-current" },
-    { title: "Run and inspect", detail: "Run opens a command card with its authority. Execute it there; the Run HUD and Details panel show the real receipt and output.", action: "Prepare run", target: "run-current" },
+    { title: "Run and inspect", detail: "Run opens a command card with its authority. Execute it there; the Run HUD and Details panel show the real receipt and output.", action: "Prepare run", target: "run-current", capability: "runtime_output" },
     { title: "Undo and keep control", detail: "Undo restores exact validated source. Reload reprojects from disk. Canvas saves source edits; local layout and tour state stay separate.", action: "Undo last edit", target: "undo-edit" }
   ];
   let tourStep = 0;
+
+  function availableTourSteps() {
+    return TOUR_STEPS.filter((step) => !step.capability || canvasCapability(step.capability));
+  }
 
   function clearTourTarget() {
     document.querySelectorAll(".canvas-tour-target").forEach((element) => {
@@ -287,9 +291,10 @@
   function renderTour() {
     const tour = document.getElementById("first-run-tour");
     if (!tour) return;
+    const steps = availableTourSteps();
     const dismissed = !!editorState.tourDismissed;
-    tourStep = Math.max(0, Math.min(TOUR_STEPS.length - 1, Number(editorState.tourStep) || 0));
-    const step = TOUR_STEPS[tourStep];
+    tourStep = Math.max(0, Math.min(steps.length - 1, Number(editorState.tourStep) || 0));
+    const step = steps[tourStep];
     clearTourTarget();
     const progress = document.getElementById("tour-progress");
     const title = document.getElementById("tour-title");
@@ -298,14 +303,14 @@
     const back = document.getElementById("tour-back");
     const next = document.getElementById("tour-next");
     if (!step || !progress || !title || !detail || !action || !back || !next) return;
-    progress.textContent = `Step ${tourStep + 1} of ${TOUR_STEPS.length}`;
+    progress.textContent = `Step ${tourStep + 1} of ${steps.length}`;
     title.textContent = step.title;
     detail.textContent = step.detail;
     action.textContent = step.action || "";
     action.style.display = step.action ? "inline-block" : "none";
     back.disabled = tourStep === 0;
-    next.textContent = tourStep === TOUR_STEPS.length - 1 ? "Done" : "Next";
-    next.disabled = tourStep === TOUR_STEPS.length - 1;
+    next.textContent = tourStep === steps.length - 1 ? "Done" : "Next";
+    next.disabled = tourStep === steps.length - 1;
     tour.dataset.tourStep = String(tourStep);
     tour.setAttribute("aria-hidden", dismissed ? "true" : "false");
     tour.classList.toggle("is-open", !dismissed);
@@ -313,7 +318,7 @@
       const target = document.getElementById(step.target);
       if (target) target.classList.add("canvas-tour-target");
     }
-    window.__jetCanvasTourState = { step: tourStep, total: TOUR_STEPS.length, title: step.title, target: step.target, dismissed };
+    window.__jetCanvasTourState = { step: tourStep, total: steps.length, title: step.title, target: step.target, dismissed };
   }
 
   function finishTour() {
@@ -331,7 +336,8 @@
   }
 
   function nextTourStep() {
-    if (tourStep >= TOUR_STEPS.length - 1) return;
+    const steps = availableTourSteps();
+    if (tourStep >= steps.length - 1) return;
     tourStep += 1;
     editorState.tourStep = tourStep;
     saveEditorState();
@@ -347,7 +353,7 @@
   }
 
   function runTourAction() {
-    const step = TOUR_STEPS[tourStep];
+    const step = availableTourSteps()[tourStep];
     if (!step) return;
     if (step.action === "Open example editor") prepareTourEdit();
     else if (step.action === "Check source") showCheckAuthority();
@@ -1453,13 +1459,17 @@
       { title: "Auto tidy", detail: "local view", group: "Execution", run: tidyGraphLayout },
       { title: "Straighten wires", detail: "Blueprint curves", group: "Execution", run: () => { wireStyle = "bezier"; showToast("Wires use Blueprint curves"); drawGraph(latestDoc); } },
       { title: "Add reroute knot", detail: "local view", group: "Execution", run: addRerouteKnot },
-      { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph },
-      { title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph }
+      { title: "Bookmark graph", detail: "local editor state", group: "navigation", run: bookmarkCurrentGraph }
     ];
+    if (canvasCapability("runtime_output")) {
+      actions.push({ title: "Run graph", detail: "debug overlay", group: "run", run: runCurrentGraph });
+    }
     actions.push(...variableActionsForGraph(graph));
     actions.push(...traitMethodActions(latestDoc));
     if (!sourceTransactionOnly) actions.push(...eventDispatcherActions(latestDoc));
     for (const item of palette.concat(actionEntries)) {
+      if (!canvasCapability("runtime_output")
+        && (item.action_id === "canvas.command:run" || item.action_id === "canvas.command:dev")) continue;
       const run = sourceTransactionOnly && item.kind === "canvas.core_catalog"
         ? () => runLibraryAction(item)
         : () => runPalette(item);
@@ -1764,7 +1774,7 @@
   }
 
   function runDebug(commands) {
-    if (!latestDoc) return;
+    if (!latestDoc || !canvasCapability("runtime_output")) return;
     loadDebugState(latestDoc);
     debugConnectionState = "connecting";
     syncDebugSessionPicker();

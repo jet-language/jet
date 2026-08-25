@@ -27,8 +27,7 @@ fn jet_dev_canvas_lifecycle_exit_reuse_and_cleanup() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&output.stdout)
-            .contains("PASS native jet dev --canvas lifecycle"),
+        String::from_utf8_lossy(&output.stdout).contains("PASS native jet dev --canvas lifecycle"),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );

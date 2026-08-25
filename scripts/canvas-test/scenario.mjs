@@ -1789,11 +1789,16 @@ export const scenarios = {
     await ctx.openCanvas();
     await ctx.waitFor(async () => await ctx.driver.evaluate("!!window.__jetCanvasSession"), "surface matrix session");
 
+    const canvasPayload = (value) => value?.canvas && typeof value.canvas === "object" ? value.canvas : value;
     const initial = await ctx.driver.evaluate(`Promise.all([
       fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()),
       fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json()),
       fetch("/canvas/graph", { cache: "no-store" }).then((r) => r.json())
-    ]).then(([session, project, graph]) => ({ session: session.session, project, graph }))`);
+    ]).then(([session, project, graph]) => ({
+      session: session.session || session.canvas?.session || session,
+      project: project.canvas || project,
+      graph: graph.canvas || graph
+    }))`);
     const session = initial.session;
     const project = initial.project;
     const outputs = project.outputs || [];
@@ -1833,7 +1838,7 @@ export const scenarios = {
       throw new Error(`session listener/custom-server boundary missing: ${JSON.stringify(session)}`);
     }
 
-    const actions = await ctx.query({ schema_version: 1, op: "actions", revision: initial.graph.revision });
+    const actions = canvasPayload(await ctx.query({ schema_version: 1, op: "actions", revision: initial.graph.revision }));
     const commands = Object.fromEntries((actions.actions || [])
       .filter((action) => action.kind === "canvas.command")
       .map((action) => [action.action_id, action]));
@@ -1853,7 +1858,7 @@ export const scenarios = {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ op: "select_output", output: ${JSON.stringify(target)}, target: ${JSON.stringify(target)}, client_id: "surface-primary" })
       }).then((r) => r.json())`);
-      const selectedSession = selected.session;
+      const selectedSession = canvasPayload(selected).session || canvasPayload(selected);
       if (!selectedSession || selectedSession.id !== session.id
         || selectedSession.source_revision !== session.source_revision
         || selectedSession.run?.output !== target) {
@@ -1862,8 +1867,9 @@ export const scenarios = {
     }
 
     const second = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json())`);
-    if (!second.session || second.session.id !== session.id || second.session.clients < 2
-      || second.session.source_revision !== session.source_revision) {
+    const secondSession = canvasPayload(second).session || canvasPayload(second);
+    if (!secondSession || secondSession.id !== session.id || secondSession.clients < 2
+      || secondSession.source_revision !== session.source_revision) {
       throw new Error(`second browser client did not share session: ${JSON.stringify(second)}`);
     }
 
@@ -1919,7 +1925,7 @@ outputs: .{
 `);
     await ctx.driver.navigate("about:blank");
     await ctx.openCanvas();
-    const reconnected = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    const reconnected = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     if (!reconnected || reconnected.id !== session.id || reconnected.source_revision !== session.source_revision) {
       throw new Error(`Canvas reconnect did not preserve resident session: ${JSON.stringify({ session, reconnected })}`);
     }
@@ -1934,7 +1940,8 @@ outputs: .{
         && panels.runtime_output === false && panels.diagnostics === false;
     })()`), "capability change after reconnect");
     const narrowedProject = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
-    if ((narrowedProject.outputs || []).length !== 2) {
+    const narrowedProjectPayload = canvasPayload(narrowedProject);
+    if ((narrowedProjectPayload.outputs || []).length !== 2) {
       throw new Error(`capability-change project did not reload: ${JSON.stringify(narrowedProject)}`);
     }
     if (await ctx.source() !== sourceBeforeReconnect) throw new Error("hostile or reconnect checks changed Jet source");
@@ -1946,19 +1953,21 @@ outputs: .{
       revision: "sha256-stale-surface-matrix",
       source: "fn broken("
     });
-    if (stale.ok || stale.json?.kind !== "conflict") {
+    const stalePayload = canvasPayload(stale.json);
+    if (stale.ok || stalePayload?.kind !== "conflict") {
       throw new Error(`stale surface edit was not refused: ${JSON.stringify(stale)}`);
     }
     const invalid = await ctx.transaction({
       schema_version: 1,
       op: "replace_source",
-      revision: (await ctx.graph()).revision,
+      revision: canvasPayload(await ctx.graph()).revision,
       source: "fn broken("
     });
-    if (invalid.ok || invalid.json?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
+    const invalidPayload = canvasPayload(invalid.json);
+    if (invalid.ok || invalidPayload?.kind !== "diagnostic" || await ctx.source() !== beforeErrorSource) {
       throw new Error(`invalid surface edit did not preserve source: ${JSON.stringify({ invalid, source: await ctx.source() })}`);
     }
-    const afterError = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    const afterError = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     const refused = (afterError.history?.receipts || []).filter((receipt) => receipt.status === "refused");
     if (afterError.id !== session.id || afterError.last_good_program !== session.last_good_program
       || refused.length < 2) {
@@ -1966,7 +1975,7 @@ outputs: .{
     }
 
     await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=surface-second", { method: "POST" })`);
-    const reconnectedClient = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    const reconnectedClient = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=surface-second", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     if (!reconnectedClient || reconnectedClient.id !== session.id || reconnectedClient.source_revision !== session.source_revision
       || reconnectedClient.history.count !== afterError.history.count || reconnectedClient.clients < 2) {
       throw new Error(`reconnect created a divergent session: ${JSON.stringify({ afterError, reconnected: reconnectedClient })}`);
@@ -1975,7 +1984,7 @@ outputs: .{
     const primaryClient = await ctx.driver.evaluate("window.__jetCanvasSessionApi.clientId()");
     await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=surface-second", { method: "POST" })`);
     await ctx.driver.evaluate(`fetch("/__jet_dev_disconnect?client=" + encodeURIComponent(${JSON.stringify(primaryClient)}), { method: "POST" })`);
-    const shutdown = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session)`);
+    const shutdown = await ctx.driver.evaluate(`fetch("/canvas/session", { cache: "no-store" }).then((r) => r.json()).then((value) => value.session || value.canvas?.session || value)`);
     if (!shutdown || shutdown.id !== session.id || shutdown.clients !== 0) {
       throw new Error(`session shutdown did not release client leases: ${JSON.stringify(shutdown)}`);
     }

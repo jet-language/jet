@@ -1,4 +1,4 @@
-
+// Canvas ability markers, initial UI setup, endpoint binding, and graph load.
 function canvasPayload(value) {
   const payload = value && value.schema === "jet.report/v1" && value.canvas && typeof value.canvas === "object"
     ? value.canvas

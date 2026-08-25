@@ -17,6 +17,8 @@ use std::process::Command;
 mod common;
 #[path = "support/no_nix_namespace.rs"]
 mod no_nix_namespace;
+#[path = "support/nix_index_cache_server.rs"]
+mod nix_index_cache_server;
 use common::{jetpack_bin, Scratch};
 
 fn jetpack() -> Command {
@@ -111,7 +113,7 @@ fn write_secret_project(dir: &std::path::Path, main_src: &str) {
 
 fn assert_cached_entries(proj: &Path, root: &Path, home: &Path) {
     let env = jetpack()
-        .args(["env", "--no-color", "--offline", "--", "fastfetch"])
+        .args(["env", "--no-color", "--", "rg", "--version"])
         .current_dir(proj)
         .env("JETPACK_ROOT", root)
         .env("HOME", home)
@@ -125,18 +127,18 @@ fn assert_cached_entries(proj: &Path, root: &Path, home: &Path) {
     );
     assert_eq!(
         String::from_utf8_lossy(&env.stdout).trim(),
-        "fastfetch stub"
+        "ripgrep 15.2.0"
     );
     assert!(!String::from_utf8_lossy(&env.stderr).contains("continue?"));
 
     let use_shell = jetpack()
         .args([
             "use",
-            "fastfetch@jetpack",
+            "ripgrep@jetpack",
             "--no-color",
-            "--offline",
             "--",
-            "fastfetch",
+            "rg",
+            "--version",
         ])
         .current_dir(proj)
         .env("JETPACK_ROOT", root)
@@ -151,7 +153,7 @@ fn assert_cached_entries(proj: &Path, root: &Path, home: &Path) {
     );
     assert_eq!(
         String::from_utf8_lossy(&use_shell.stdout).trim(),
-        "fastfetch stub"
+        "ripgrep 15.2.0"
     );
     assert!(!String::from_utf8_lossy(&use_shell.stderr).contains("continue?"));
 }
@@ -254,9 +256,9 @@ fn env_runs_no_project_function() {
 }
 
 /// A fully materialized closure needs no second confirmation. Warm the
-/// project env from an offline fixture, remove that provider metadata, then
-/// enter both shell paths with network disabled. The cached Hangar object is
-/// the only possible source.
+/// project env from a signed closure, stop its cache peer, then enter both
+/// shell paths inside a network-disabled namespace. The cached Hangar closure
+/// is the only possible source.
 #[test]
 fn cached_env_and_use_enter_offline_without_confirmation() {
     const TEST_NAME: &str = "cached_env_and_use_enter_offline_without_confirmation";
@@ -278,18 +280,21 @@ fn cached_env_and_use_enter_offline_without_confirmation() {
     let proj = Scratch::new("cached-entry");
     let root = Scratch::new("cached-entry-root");
     let home = Scratch::new("cached-entry-home");
-    let fixtures = Scratch::new("cached-entry-fixtures");
-    let fastfetch_out = Scratch::new("cached-entry-fastfetch-out");
-    write_package_project(&proj.path, "fn run() { print(\"SHOULD-NOT-RUN\"); }\n");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&proj.path);
+    server.install(&root.path);
     fs::write(
         proj.path.join("env.jet"),
-        "module env.dev { packages: [fastfetch@jetpack] }\n",
+        "module env.dev { packages: [\"ripgrep@jetpack\"] }\n",
     )
     .unwrap();
-    write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
-    fs::rename(
-        fixtures.join("nixpkgs-fastfetch.json"),
-        fixtures.join("jetpack-fastfetch.json"),
+    fs::create_dir_all(proj.path.join(".jet")).unwrap();
+    fs::write(
+        proj.path.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"jetpack\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::CHANNEL,
+            nix_index_cache_server::REVISION,
+        ),
     )
     .unwrap();
 
@@ -306,11 +311,10 @@ fn cached_env_and_use_enter_offline_without_confirmation() {
     );
 
     let prep = jetpack()
-        .args(["env", "--prep", "--yes", "--no-color", "--offline"])
+        .args(["env", "--prep", "--yes", "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
-        .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
         .unwrap();
     assert!(
@@ -318,8 +322,7 @@ fn cached_env_and_use_enter_offline_without_confirmation() {
         "env prep failed: {}",
         String::from_utf8_lossy(&prep.stderr)
     );
-    fs::remove_file(fixtures.join("jetpack-fastfetch.json")).unwrap();
-    fs::remove_file(fixtures.join("fastfetch.drv")).unwrap();
+    drop(server);
 
     std::env::set_var(PROJECT_ENV, &proj.path);
     std::env::set_var(ROOT_ENV, &root.path);

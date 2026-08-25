@@ -123,7 +123,7 @@
   let undoStack = [];
   let redoStack = [];
   let historyRequest = null;
-  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], tourDismissed: false };
+  let editorState = { bookmarks: [], favorites: [], actionUse: {}, rerouteKnots: [], nodePositions: {}, graphViews: {}, commentBoxes: [], stagedNodes: [], stagedWires: [], layout: { panels: [], views: [] }, tourDismissed: false };
   let clipboardState = null;
   let wireStyle = "bezier";
   let runState = { running: false, last: "idle" };

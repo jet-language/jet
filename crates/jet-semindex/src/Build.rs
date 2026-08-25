@@ -1057,12 +1057,16 @@ pub fn build_symbol_db(bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> S
     db
 }
 
-fn add_import_alias_definitions(
-    db: &mut SymbolDB,
-    ledger: &jet_foundation::Names::NameLedger,
-) {
+fn add_import_alias_definitions(db: &mut SymbolDB, ledger: &jet_foundation::Names::NameLedger) {
     let mut aliases = ledger.aliases().collect::<Vec<_>>();
-    aliases.sort_by_key(|alias| (alias.module, alias.span.start, alias.span.end, alias.name.clone()));
+    aliases.sort_by_key(|alias| {
+        (
+            alias.module,
+            alias.span.start,
+            alias.span.end,
+            alias.name.clone(),
+        )
+    });
     for alias in aliases {
         if alias.span.start >= alias.span.end {
             continue;

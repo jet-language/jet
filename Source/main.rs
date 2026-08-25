@@ -78,7 +78,7 @@ use CmdExec::run_exec;
 use CmdExpand::run_expand;
 use CmdFill::run_fill;
 use CmdImpact::run_impact;
-use CmdInspect::{run_digest, run_env, run_guarantees, run_provenance};
+use CmdInspect::{run_digest, run_env, run_guarantees, run_output, run_provenance};
 use CmdPkg::{run_add, run_fetch, run_remove, run_update};
 use CmdProve::run_prove;
 use CmdRemote::run_remote;
@@ -2202,6 +2202,11 @@ fn main() {
             // D-SEMINDEX1: stable semantic-index JSON smoke surface.
             let semindex_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_semindex(&semindex_args, mode.json);
+            return;
+        }
+        "output" => {
+            let output_args: Vec<String> = raw.iter().skip(1).cloned().collect();
+            run_output(&output_args, mode.json);
             return;
         }
         "find" => {

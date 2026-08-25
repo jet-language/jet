@@ -66,6 +66,13 @@ function statusUrl(canvasUrl) {
   return status;
 }
 
+function canvasSessionUrl(canvasUrl) {
+  const canvas = new URL(canvasUrl);
+  const session = new URL("/__jet_canvas/session", canvas);
+  session.searchParams.set("session", canvas.searchParams.get("session"));
+  return session;
+}
+
 function authorizedFetch(url) {
   const target = new URL(url);
   const token = target.searchParams.get("session");
@@ -109,11 +116,20 @@ async function waitForClosed(url, timeoutMs = 10_000) {
 async function waitForCanvas(driver) {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
-    const session = await driver.evaluate("window.__jetCanvasSession && window.__jetCanvasSession.id");
-    if (session) return session;
+    const page = await driver.evaluate("({ readyState: document.readyState, title: document.title })");
+    if (page && page.readyState === "complete" && page.title === "Jet Canvas") return page;
     await delay(50);
   }
-  throw new Error("Canvas page did not attach to resident session");
+  throw new Error("Canvas page did not finish loading");
+}
+
+async function readCanvasSession(url) {
+  const response = await authorizedFetch(url);
+  assert(response.ok, `Canvas session request failed: HTTP ${response.status}`);
+  const body = await response.json();
+  const session = body.session || body.canvas?.session;
+  assert(session?.id, "Canvas session response must identify the resident session");
+  return session;
 }
 
 async function closeDriver(driver) {
@@ -147,7 +163,8 @@ try {
   first = new CdpDriver({ chrome: chromium });
   await first.launch();
   await first.navigate(canvasUrl);
-  const firstSession = await waitForCanvas(first);
+  await waitForCanvas(first);
+  const firstSession = await readCanvasSession(canvasSessionUrl(canvasUrl));
   await first.close();
   first = null;
 
@@ -157,8 +174,9 @@ try {
   second = new CdpDriver({ chrome: chromium });
   await second.launch();
   await second.navigate(canvasUrl);
-  const secondSession = await waitForCanvas(second);
-  assert.equal(secondSession, firstSession, "second Canvas request must reuse resident session");
+  await waitForCanvas(second);
+  const secondSession = await readCanvasSession(canvasSessionUrl(canvasUrl));
+  assert.equal(secondSession.id, firstSession.id, "second Canvas request must reuse resident session");
   await second.close();
   second = null;
 

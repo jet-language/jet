@@ -264,6 +264,13 @@ mod tests {
 
         let mut malformed_line = &b"GET /x\r\nHost: localhost\r\n\r\n"[..];
         assert!(Request::read(&mut malformed_line).is_err());
+
+        let raw = format!(
+            "POST /x HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_REQUEST_BODY_BYTES + 1
+        );
+        let mut oversized = raw.as_bytes();
+        assert!(Request::read(&mut oversized).is_err());
     }
     #[test]
     fn traversal_is_rejected() {

@@ -7103,8 +7103,9 @@ fn use_many_packages_settles_one_row_per_package_without_output_flood() {
         .unwrap();
     assert!(
         output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "stderr: {}\nstdout: {}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
     );
     let transcript = String::from_utf8_lossy(&output.stdout);
     let settled = transcript.matches('✓').count();

@@ -797,10 +797,9 @@ impl WebHost {
             );
         }
         if terminal_controls {
-            if let Some(handle) = start_terminal_controls(
-                Arc::clone(&self.status),
-                Arc::clone(&self.shutdown),
-            ) {
+            if let Some(handle) =
+                start_terminal_controls(Arc::clone(&self.status), Arc::clone(&self.shutdown))
+            {
                 *self.terminal_thread.lock().unwrap() = Some(handle);
             }
         }
@@ -857,7 +856,12 @@ impl Drop for WebHost {
         if let Some(handle) = self.poll_thread.lock().unwrap().take() {
             let _ = handle.join();
         }
-        let handles = self.server_threads.lock().unwrap().drain(..).collect::<Vec<_>>();
+        let handles = self
+            .server_threads
+            .lock()
+            .unwrap()
+            .drain(..)
+            .collect::<Vec<_>>();
         for handle in handles {
             let _ = handle.join();
         }
@@ -1258,6 +1262,8 @@ fn canvas_request_authorized(
     if !host_header_allowed(host, bind_host, port) {
         return false;
     }
+    // Browser navigation and script loads omit Origin; only the session-bound
+    // bootstrap paths may use their session URL as the origin proof.
     let origin = request.headers.get("origin");
     if let Some(origin) = origin {
         if !origin_allowed(origin, bind_host, port) {
@@ -1271,17 +1277,20 @@ fn canvas_request_authorized(
     {
         return false;
     }
-    let session_valid = if let Some(token) = request
-        .headers
-        .get("authorization")
-        .and_then(|authorization| authorization.strip_prefix("Bearer "))
-    {
-        constant_time_equal(token, session_secret)
-    } else {
-        query_param(target, "session")
-            .is_some_and(|token| constant_time_equal(&token, session_secret))
+    let authorization = request.headers.get("authorization");
+    let query_session = query_param(target, "session");
+    let session_valid = match (authorization, query_session.as_deref()) {
+        (Some(authorization), Some(query_session)) => authorization
+            .strip_prefix("Bearer ")
+            .is_some_and(|token| constant_time_equal(token, session_secret))
+            && constant_time_equal(query_session, session_secret),
+        (Some(authorization), None) => authorization
+            .strip_prefix("Bearer ")
+            .is_some_and(|token| constant_time_equal(token, session_secret)),
+        (None, Some(query_session)) => constant_time_equal(query_session, session_secret),
+        (None, None) => false,
     };
-    session_valid && (origin.is_some() || query_param(target, "session").is_some())
+    session_valid && (origin.is_some() || canvas_bootstrap_path(path, target))
 }
 
 fn canvas_bootstrap_path(path: &str, target: &str) -> bool {
@@ -1438,7 +1447,6 @@ fn handle_connection(
     let path = target.split('?').next().unwrap_or("/");
 
     if listener_kind == ListenerKind::Canvas
-        && canvas_api_path(path, target)
         && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
     {
         return unauthorized(&mut stream);
@@ -1486,16 +1494,15 @@ fn handle_connection(
                 body.as_bytes(),
             );
         }
-        if method != "POST" {
+        if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let request = String::from_utf8_lossy(&body);
-        session.select_output(&request);
+        let body = session_response(session);
         return write_response(
             &mut stream,
             "200 OK",
             "application/json; charset=utf-8",
-            session_response(session).as_bytes(),
+            body.as_bytes(),
         );
     }
     if path == "/__jet_canvas/live" {
@@ -1507,19 +1514,35 @@ fn handle_connection(
             .ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, "missing live pid")
             })?;
+        let source_id = query_param(target, "source_id").unwrap_or_default();
         return match crate::LiveInspect::read(pid) {
-            Ok(snapshot) => write_response(
-                &mut stream,
-                "200 OK",
-                "application/json; charset=utf-8",
-                snapshot.as_bytes(),
-            ),
-            Err(message) => write_response(
-                &mut stream,
-                "404 Not Found",
-                "text/plain; charset=utf-8",
-                message.as_bytes(),
-            ),
+            Ok(snapshot) => {
+                let revision = current_revision_for_source_id(
+                    canvas_file,
+                    (!source_id.is_empty()).then_some(source_id.as_str()),
+                );
+                session.remember_last_good_view("runtime", &source_id, &revision, &snapshot);
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    snapshot.as_bytes(),
+                )
+            }
+            Err(message) => match session.last_good_view("runtime", &source_id) {
+                Some((_revision, snapshot)) => write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    snapshot.as_bytes(),
+                ),
+                None => write_response(
+                    &mut stream,
+                    "404 Not Found",
+                    "text/plain; charset=utf-8",
+                    message.as_bytes(),
+                ),
+            },
         };
     }
     if let Some(asset) = crate::canvas_asset(method, target, path) {
@@ -1538,6 +1561,12 @@ fn handle_connection(
         return match crate::Canvas::graph_json_for_file(Path::new(canvas_file)) {
             Ok(body) => {
                 session.select_project_source_from_payload(&body);
+                let source_id = source_id_from_payload(&body);
+                let revision = current_revision_for_source_id(
+                    canvas_file,
+                    (!source_id.is_empty()).then_some(source_id.as_str()),
+                );
+                session.remember_last_good_view("graph", &source_id, &revision, &body);
                 write_response(
                     &mut stream,
                     "200 OK",
@@ -1581,6 +1610,19 @@ fn handle_connection(
         return match graph {
             Ok(body) => {
                 session.select_project_source_from_payload(&body);
+                let source_id = source_id
+                    .clone()
+                    .unwrap_or_else(|| source_id_from_payload(&body));
+                let revision = current_revision_for_source_id(
+                    canvas_file,
+                    (!source_id.is_empty()).then_some(source_id.as_str()),
+                );
+                session.remember_last_good_view(
+                    "graph",
+                    &source_id,
+                    &revision,
+                    &body,
+                );
                 write_response(
                     &mut stream,
                     "200 OK",
@@ -1949,7 +1991,10 @@ fn handle_connection(
     Ok(())
 }
 
-fn inject_canvas_session(mut asset: crate::CanvasAsset, session_secret: &str) -> crate::CanvasAsset {
+fn inject_canvas_session(
+    mut asset: crate::CanvasAsset,
+    session_secret: &str,
+) -> crate::CanvasAsset {
     if asset.content_type == "text/html; charset=utf-8" {
         if let Some(index) = asset.body.find("app.js?") {
             let insert_at = index + "app.js?".len();
@@ -2003,7 +2048,7 @@ fn with_session(body: String, session: &crate::ResidentDevSession) -> String {
 }
 
 fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
-    let source_path = jet_foundation::JSON::parse_json(request)
+    let source_id = jet_foundation::JSON::parse_json(request)
         .ok()
         .and_then(|value| match value {
             jet_foundation::JSON::JSONValue::Object(object) => {
@@ -2014,8 +2059,40 @@ fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
             }
             _ => None,
         })
+        .unwrap_or_default();
+    current_revision_for_source_id(
+        canvas_file,
+        (!source_id.is_empty()).then_some(source_id.as_str()),
+    )
+}
+
+fn source_id_from_payload(payload: &str) -> String {
+    let Ok(value) = jet_foundation::JSON::parse_json(payload) else {
+        return String::new();
+    };
+
+    fn find(value: &jet_foundation::JSON::JSONValue) -> Option<String> {
+        match value {
+            jet_foundation::JSON::JSONValue::Object(object) => {
+                if let Some(jet_foundation::JSON::JSONValue::String(source_id)) =
+                    object.get("source_id")
+                {
+                    return Some(source_id.clone());
+                }
+                object.values().find_map(find)
+            }
+            jet_foundation::JSON::JSONValue::Array(values) => values.iter().find_map(find),
+            _ => None,
+        }
+    }
+
+    find(&value).unwrap_or_default()
+}
+
+fn current_revision_for_source_id(canvas_file: &str, source_id: Option<&str>) -> String {
+    let source_path = source_id
         .and_then(|source_id| {
-            crate::Canvas::project_path_for_source_id(Path::new(canvas_file), &source_id)
+            crate::Canvas::project_path_for_source_id(Path::new(canvas_file), source_id)
         })
         .unwrap_or_else(|| PathBuf::from(canvas_file));
     fs::read_to_string(source_path)
@@ -2517,8 +2594,14 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        assert!(address.ip().is_loopback(), "default Canvas address: {address}");
-        assert!(!address.ip().is_unspecified(), "default Canvas address: {address}");
+        assert!(
+            address.ip().is_loopback(),
+            "default Canvas address: {address}"
+        );
+        assert!(
+            !address.ip().is_unspecified(),
+            "default Canvas address: {address}"
+        );
     }
 
     #[test]
@@ -2578,7 +2661,10 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        assert!(address.ip().is_unspecified(), "remote Canvas address: {address}");
+        assert!(
+            address.ip().is_unspecified(),
+            "remote Canvas address: {address}"
+        );
     }
 
     #[test]
@@ -2616,6 +2702,7 @@ mod tests {
         status.set_port(port);
         let debug_sessions = crate::Canvas::DebugSessions::default();
         let session = Arc::new(crate::ResidentDevSession::new("app.jet", port, 0));
+        session.select_output_values(Some("cli-output"), Some("cli-target"));
         let secret = mint_session_secret().unwrap();
         let server = thread::spawn({
             let session = Arc::clone(&session);
@@ -2650,7 +2737,7 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"), "{response}");
         assert!(session
             .json()
-            .contains("\"run\":{\"output\":null,\"target\":null}"));
+            .contains("\"run\":{\"output\":\"cli-output\",\"target\":\"cli-target\"}"));
     }
 
     #[test]
@@ -2695,9 +2782,32 @@ mod tests {
             8123,
             &secret
         ));
+        request.target = format!("/canvas/graph?session={secret}");
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
         request.headers.insert(
             "origin".to_string(),
             "http://localhost:8123".to_string(),
+        );
+        request.headers.insert(
+            "authorization".to_string(),
+            format!("Basic {secret}"),
+        );
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.headers.insert(
+            "authorization".to_string(),
+            format!("Bearer {secret}"),
         );
         request.method = "PUT".to_string();
         assert!(!canvas_request_authorized(
@@ -2717,7 +2827,7 @@ mod tests {
             &secret
         ));
         request.target = "/canvas/graph".to_string();
-        request.body = vec![0; MAX_REQUEST_BODY_BYTES + 1];
+        request.body = vec![0; crate::MAX_REQUEST_BODY_BYTES + 1];
         assert!(!canvas_request_authorized(
             &request,
             &request.target,
@@ -2742,11 +2852,23 @@ mod tests {
     fn canvas_page_and_bootstrap_reject_missing_session() {
         let secret = "canvas-test-secret";
         let response = canvas_response("/canvas", secret);
-        assert!(response.starts_with("HTTP/1.1 401 Unauthorized"), "{response}");
+        assert!(
+            response.starts_with("HTTP/1.1 401 Unauthorized"),
+            "{response}"
+        );
+
+        let response = canvas_response("/canvas/app.js", secret);
+        assert!(
+            response.starts_with("HTTP/1.1 401 Unauthorized"),
+            "{response}"
+        );
 
         let response = canvas_response(&format!("/canvas?session={secret}"), secret);
         assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
-        assert!(response.contains(&format!("app.js?session={secret}&")), "{response}");
+        assert!(
+            response.contains(&format!("app.js?session={secret}&")),
+            "{response}"
+        );
 
         let response = canvas_response(&format!("/canvas/app.js?session={secret}"), secret);
         assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
@@ -2757,19 +2879,14 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (server, _) = listener.accept().unwrap();
-        let raw = format!(
-            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-        );
+        let raw =
+            format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
         std::io::Write::write_all(&mut client, raw.as_bytes()).unwrap();
 
         let status = DevStatus::new_with_terminal("app.jet", false, false, false);
         status.set_port(port);
-        let session = crate::ResidentDevSession::new_with_canvas_host(
-            "app.jet",
-            "127.0.0.1",
-            port,
-            0,
-        );
+        let session =
+            crate::ResidentDevSession::new_with_canvas_host("app.jet", "127.0.0.1", port, 0);
         let debug_sessions = crate::Canvas::DebugSessions::default();
         handle_connection(
             server,

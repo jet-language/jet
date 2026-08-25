@@ -5820,6 +5820,7 @@ fn canvas_details_are_descriptor_driven_and_dom_safe() {
 fn canvas_javascript_assets_are_independently_syntax_checked_and_ordered() {
     const ASSETS: &[&str] = &[
         "runtime-state.js",
+        "session-workbench.js",
         "editing-history.js",
         "diagnostics-query.js",
         "drawing-palette.js",

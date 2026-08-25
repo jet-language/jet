@@ -1,13 +1,59 @@
 // Resident session identity, output launcher, preview link, and shared view rail.
   let canvasSession = null;
 
+  function canvasCapability(name) {
+    const capabilities = window.__jetCanvasCapabilities || {};
+    return capabilities[name] === true;
+  }
+
+  function syncCanvasLayout(project) {
+    if (!project || !project.capabilities || !editorState) return;
+    const panels = Array.from(document.querySelectorAll("[data-canvas-panel]"))
+      .filter((panel) => !panel.hidden)
+      .map((panel) => panel.getAttribute("data-canvas-panel"))
+      .filter(Boolean);
+    const views = Array.from(document.querySelectorAll("[data-session-view]"))
+      .filter((view) => !view.hidden)
+      .map((view) => view.getAttribute("data-session-view"))
+      .filter(Boolean);
+    const saved = editorState.layout && typeof editorState.layout === "object"
+      ? editorState.layout
+      : {};
+    const retainSupported = (values, available) => {
+      const ordered = Array.isArray(values)
+        ? values.filter((value) => available.includes(value))
+        : [];
+      for (const value of available) {
+        if (!ordered.includes(value)) ordered.push(value);
+      }
+      return ordered;
+    };
+    const layout = {
+      panels: retainSupported(saved.panels, panels),
+      views: retainSupported(saved.views, views)
+    };
+    const changed = JSON.stringify(saved) !== JSON.stringify(layout);
+    editorState.layout = layout;
+    window.__jetCanvasLayout = layout;
+    if (changed) saveEditorState();
+  }
+
   function syncCanvasCapabilities(project) {
-    const capabilities = project && project.capabilities || {};
+    const ready = !!(project && project.capabilities && typeof project.capabilities === "object");
+    const capabilities = ready ? project.capabilities : {};
     document.querySelectorAll("[data-capability]").forEach((panel) => {
       const capability = panel.getAttribute("data-capability");
-      panel.hidden = capabilities[capability] !== true;
+      const supported = ready && capabilities[capability] === true;
+      if (!supported && panel.contains(document.activeElement) && canvas) canvas.focus();
+      panel.hidden = !supported;
+      if (supported) panel.removeAttribute("aria-hidden");
+      else panel.setAttribute("aria-hidden", "true");
     });
     window.__jetCanvasCapabilities = capabilities;
+    if (ready) {
+      syncCanvasLayout(project);
+      if (typeof renderTour === "function") renderTour();
+    }
   }
 
   function canvasClientId() {
@@ -72,6 +118,7 @@
       acceptedRevision: session.accepted_revision || null,
       lastGoodRevision: session.last_good_revision || null,
       lastGoodProgram: session.last_good_program || null,
+      lastGoodViews: session.last_good_views || {},
       projectContext,
       run: session.run || { output: null, target: null },
       debugger: session.debugger || { state: "idle" },
@@ -124,6 +171,11 @@
     const count = document.getElementById("output-count");
     if (!list) return;
     const rows = outputRows(project);
+    const outputPanel = document.getElementById("output-panel");
+    if (outputPanel) {
+      if (!rows.length && outputPanel.contains(document.activeElement) && canvas) canvas.focus();
+      outputPanel.hidden = rows.length === 0;
+    }
     list.innerHTML = "";
     if (count) count.textContent = String(rows.length);
     if (!rows.length) {
@@ -131,45 +183,33 @@
       empty.className = "tag";
       empty.textContent = "No outputs discovered yet";
       list.appendChild(empty);
+      window.__jetCanvasOutputs = [];
+      syncCanvasLayout(project);
       return;
     }
     const selected = canvasSession && canvasSession.run && canvasSession.run.output;
     for (const row of rows) {
       const name = String(row.name || row.target || row.output || row.kind || "output");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "project-card output-card" + (name === selected ? " is-active" : "");
-      button.dataset.canvasOutput = name;
-      button.setAttribute("aria-pressed", name === selected ? "true" : "false");
+      const card = document.createElement("div");
+      card.className = "project-card output-card" + (name === selected ? " is-active" : "");
+      card.dataset.canvasOutput = name;
       const title = document.createElement("b");
       title.textContent = name;
       const detail = document.createElement("small");
       detail.textContent = [row.kind, row.entry || row.path, row.provenance].filter(Boolean).join(" · ") || "valid output";
-      button.append(title, detail);
-      button.addEventListener("click", () => selectCanvasOutput(name, row.target || name));
-      list.appendChild(button);
+      card.append(title, detail);
+      list.appendChild(card);
     }
     window.__jetCanvasOutputs = rows.map((row) => ({
       name: row.name || row.target || row.output || row.kind || "output",
       kind: row.kind || "",
       entry: row.entry || row.path || ""
     }));
+    syncCanvasLayout(project);
   }
 
-  function selectCanvasOutput(output, target) {
-    const body = { op: "select_output", output, target, client_id: canvasClientId() };
-    return fetch(canvasSessionUrl(), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    }).then((response) => response.json())
-      .then((value) => {
-        const session = canvasSessionPayload(value) || canvasSessionPayloadFromReport(value);
-        if (session) syncCanvasSession(session);
-        showToast("Output selected: " + output);
-        return session;
-      })
-      .catch((error) => showToast(String(error), { isError: true }));
+  function selectCanvasOutput() {
+    return Promise.resolve(canvasSession);
   }
 
   function canvasSelectedOutput() {

@@ -1055,6 +1055,7 @@
       return;
     }
     if (ev.altKey && ev.key === "Enter") {
+      if (!canvasCapability("runtime_output")) return;
       ev.preventDefault();
       runCurrentGraph();
       return;
