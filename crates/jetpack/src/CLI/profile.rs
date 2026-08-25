@@ -5,7 +5,7 @@
 //! checked pointer to one generation.
 
 use super::parse::Parsed;
-use super::realize::{project_env_root, realize_ref_outcome, RefOutcome, RowStyle};
+use super::realize::{project_env_root, realize_ref_outcome, RealizeScope, RefOutcome, RowStyle};
 use crate::Output::Theme;
 use crate::{EnvFile, ProviderFacts, RefSpec, Store, Syntax, JSON, SHA256};
 use jet_env_model::ModuleEval;
@@ -636,6 +636,7 @@ fn build_generation(
             name_width,
             RowStyle::Ledger,
             None,
+            RealizeScope::UserProfile,
         );
         let (entry, lease) = match outcome {
             RefOutcome::Realized(entry, _state, _line, lease) => (entry, lease),

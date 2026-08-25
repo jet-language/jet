@@ -1,6 +1,7 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::{Flags, Parsed};
 use super::realize::{
+    RealizeScope,
     apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
     realize_ref_outcome, report_nix_bridge_required, RefOutcome, RowStyle, RunPlan,
 };
@@ -278,6 +279,18 @@ pub(super) fn compose_env(
     flags: &Flags,
     plan: &RunPlan,
 ) -> Result<Env, i32> {
+    compose_env_scoped(theme, roots, flags, plan, RealizeScope::Project)
+}
+
+/// A user tool is installed into the user profile, so it must not be
+/// reconciled against whatever project the shell happens to be standing in.
+pub(super) fn compose_env_scoped(
+    theme: &Theme,
+    roots: &Roots,
+    flags: &Flags,
+    plan: &RunPlan,
+    scope: RealizeScope,
+) -> Result<Env, i32> {
     enforce_required_sandbox_policy(theme, flags.json)?;
     if let Err(error) = validate_integration_facts(plan) {
         theme.error_coded(
@@ -329,6 +342,7 @@ pub(super) fn compose_env(
             name_w,
             RowStyle::Ready,
             None,
+            scope,
         ) {
             RefOutcome::Realized(entry, _state, _line, lease) => {
                 // A `library` package realizes with an empty `bin` (U10) — it
@@ -1222,6 +1236,7 @@ pub(super) fn cmd_build(theme: &Theme, parsed: &Parsed) -> i32 {
             name_w,
             style,
             live_arg,
+            RealizeScope::Project,
         ) {
             RefOutcome::Realized(entry, state, line, _lease) => {
                 if live_mode {

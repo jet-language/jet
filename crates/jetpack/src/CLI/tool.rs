@@ -9,10 +9,10 @@
 
 use super::parse::Parsed;
 use super::realize::{
-    channel_sources, classify_or_report, realize_ref_outcome, report_nix_bridge_required,
+    channel_sources, classify_or_report, realize_ref_outcome, RealizeScope, report_nix_bridge_required,
     resolve_source_channel, RefOutcome, RowStyle, RunPlan,
 };
-use super::trust_env_build::compose_env;
+use super::trust_env_build::compose_env_scoped;
 use super::workspace_sources::cwd_table;
 use super::ProfileDispatch;
 use crate::Output::Theme;
@@ -385,7 +385,7 @@ fn tool_run(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::UserProfile) {
         Ok(env) => env,
         Err(code) => return code,
     };
@@ -438,7 +438,7 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
         secrets: Vec::new(),
         environment: ModuleEval::EnvironmentFacts::default(),
     };
-    let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+    let env = match compose_env_scoped(theme, &roots, &parsed.flags, &plan, RealizeScope::UserProfile) {
         Ok(env) => env,
         Err(code) => return code,
     };
@@ -1123,6 +1123,7 @@ fn build_tool_manifest_generation(theme: &Theme, parsed: &Parsed) -> io::Result<
                 name_w,
                 RowStyle::Ledger,
                 None,
+                RealizeScope::UserProfile,
             );
             let (realized, lease) = match outcome {
                 RefOutcome::Realized(entry, _state, _line, lease) => (entry, lease),

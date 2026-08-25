@@ -70,6 +70,7 @@ pub(super) fn realize_ref(
         name_w,
         RowStyle::Ledger,
         None,
+        RealizeScope::Project,
     ) {
         RefOutcome::Realized(entry, state, _line, _lease) => Some((entry, state)),
         RefOutcome::NeedsNix(need) => {
@@ -113,6 +114,15 @@ pub(super) enum RefOutcome {
     Failed,
 }
 
+/// Whose ledger a realization belongs to. A user tool is installed into the
+/// user profile and is not a package of whatever project the shell happens to
+/// be standing in, so it must never be reconciled against that project's lock.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RealizeScope {
+    Project,
+    UserProfile,
+}
+
 pub(super) fn realize_ref_outcome(
     theme: &Theme,
     roots: &Roots,
@@ -122,6 +132,7 @@ pub(super) fn realize_ref_outcome(
     name_w: usize,
     style: RowStyle,
     mut live: Option<&mut Output::LiveRegion>,
+    scope: RealizeScope,
 ) -> RefOutcome {
     // Tier 2 (D-FE-CLI1 acceptance: "erase live regions before diagnostics").
     // The caller draws the live region's status lines (`building K/N …`) once
@@ -147,7 +158,10 @@ pub(super) fn realize_ref_outcome(
     // store dir also seeds the U9 remote probe's source-cache lookup, so it is
     // resolved before the fixtures decision below.
     let store_dir = roots.hangar_dir();
-    let project_dir = current_project_dir();
+    let project_dir = match scope {
+        RealizeScope::Project => current_project_dir(),
+        RealizeScope::UserProfile => None,
+    };
     let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
     // D-JPK-OFFLINE2=B: an offline Nix ref may reuse a Hangar copy only when
     // the committed lock identity and the complete closure both verify. A

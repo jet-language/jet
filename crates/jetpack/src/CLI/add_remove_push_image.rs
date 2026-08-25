@@ -1,5 +1,6 @@
 use super::parse::Parsed;
 use super::realize::{
+    RealizeScope,
     channel_sources, load_project_plan, offline_refusal, realize_ref_outcome,
     report_nix_bridge_required, resolve_source_channel, RefOutcome, RowStyle,
 };
@@ -111,6 +112,7 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
         spec.package.len().max(8),
         RowStyle::Ready,
         None,
+        RealizeScope::Project,
     ) {
         RefOutcome::Realized(_entry, _state, _line, lease) => lease,
         RefOutcome::NeedsNix(need) => {

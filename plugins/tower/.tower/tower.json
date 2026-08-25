@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2188,
-    "rev": 44612,
+    "nextNum": 2196,
+    "rev": 44688,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31,7 +31,7 @@
         "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-25T00:24:56.239Z"
+    "completionCursor": "2026-08-25T10:57:05.785Z"
   },
   "epochs": [
     {
@@ -2839,6 +2839,15 @@
       "criteria": [],
       "status": "open",
       "created": "2026-08-24T12:08:39.158Z"
+    },
+    {
+      "id": "e5-m10-cli-surface",
+      "epochId": "e5",
+      "title": "M10 · One package CLI surface",
+      "goal": "Jetpack owns environments and jet owns code, with one verb per action, one ref grammar, one acquisition policy, and a progress display that shows real stages. Ratified in chat 2026-08-25.",
+      "criteria": [],
+      "status": "open",
+      "created": "2026-08-25T13:15:36.718Z"
     }
   ],
   "cards": [
@@ -146283,6 +146292,11 @@
         {
           "at": "2026-08-25",
           "by": "orchestrator",
+          "text": "DOGFOOD PROVEN end to end. From a Hangar deleted immediately before the run, jetpack enter resolved three real nixpkgs attrs through a signed index for pinned revision e5bdc4a4, substituted their closures natively from cache.nixos.org, admitted them into the Hangar and projected them, and the real binaries ran: ripgrep 15.2.0, jq-1.8.2, fd 10.4.2, then DOGFOOD_OK. No nix executable was invoked at any point. Five product defects were fixed to reach this: the indexed realization never wrote its lock pin; the lock channel field carries the tier realize.rs compares while the index is keyed by the nixpkgs channel name, so no lock could satisfy both; the NAR decoder handled only the hand-built fixture shape, not real closures with directories, symlinks and executable bits; two packages sharing a transitive closure object rejected the second admission as a changed immutable descriptor; and a multi-output package like jq, whose bin is a separate store object, escaped a lease scoped to a single output. Remaining for this card: coverage for all 20 repo attrs, the cargo build probe, ordered version probes and the offline repeat."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
           "text": "Measured dogfood progress on a wiped Hangar: a scratch project declaring #auto NixOS/nixpkgs/nixpkgs-unstable@github with ripgrep, jq and fd, pointed at a locally generated signed index feed for pinned revision e5bdc4a41d4c072fe1e3787eaa0320a384741d44, now realizes ripgrep 15.2.0 and fd 10.4.2 from cache.nixos.org with no nix installed, no fixture directory and no host store path involved in substitution. jq stops on a shared-closure-object defect (E1315, closure object sha256-21baf9f5 changed immutable descriptor), which is owned by a running lane. Three product bugs were fixed to get here: the indexed realization never wrote its lock pin; the lock channel field holds the tier that realize.rs compares while the index is keyed by the nixpkgs channel name, so no lock could satisfy both and an #auto nixpkgs source could never reach the index; and the NAR decoder handled only the hand-built fixture shape, not real closures with directories, symlinks and executable bits."
         }
       ],
@@ -146347,7 +146361,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:48.104Z",
-      "updated": "2026-08-25T04:18:31.834Z",
+      "updated": "2026-08-25T05:25:15.714Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -149222,6 +149236,667 @@
       "created": "2026-08-24T22:56:58.324Z",
       "updated": "2026-08-24T23:18:16.528Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c024o546",
+      "num": 2188,
+      "title": "Boundary law: jet owns code, jetpack owns environments",
+      "body": "Owner-ratified in chat 2026-08-25. THE LAW: `jet` acts on your code; `jetpack` acts on your environment. Any verb that reads or executes `.jet` source belongs to `jet`, with no exception.\n\nThis card only establishes and documents the law and deletes the verbs that violate it. The replacement shapes are separate cards (#ENVUSE, #HANGAR) and must land first where noted.\n\nMEASURED TODAY: `jet` and `jetpack` collide on six verbs, all shipped. `jet` has 133 verbs, `jetpack` has 35.\n\n| verb | jet today | jetpack today |\n| --- | --- | --- |\n| run | run a program/project | temp shell for pkg@source OR run fn run() |\n| build | create a native executable | realize a package/env, don't enter |\n| dev | rerun a program on file change | realize env, then run fn dev() |\n| test | run tests | realize/test workspace members |\n| fmt | format Jet + configured files | delegate non-Jet files to env formatter |\n| hangar | inspect/maintain the package store | 12 archive sub-verbs |\n\nDELETIONS THIS CARD OWNS (verb removed from `JETPACK_VERBS` in `crates/jet-foundation/src/Syntax/effects_surface.rs:538` and from the dispatch in `crates/jetpack/src/CLI/parse.rs:477`):\n- `jetpack dev` (runs `fn dev()` — code)\n- `jetpack test` (runs tests — code)\n- `jetpack fmt` (formats source — code)\n- `jetpack run` (its `fn run()` behaviour is code; its temp-shell behaviour moves to `jetpack use`)\n- `jetpack build` (workspace-member build is code; the realize-without-entering half becomes `--prep`)\n- `jetpack enter` (renamed `jetpack env`)\n- `jet hangar` (the store is environment, not code — delete from the `jet` side)\n\nMIGRATION COUNTS, measured with rg over docs tests examples crates Source plugins/tower/skills:\n`jetpack dev` 18 occurrences/12 files; `jetpack test` 11/8; `jetpack fmt` 2/2; `jetpack build` 41/25; `jetpack run` 27/19; `jetpack enter` 26/16; `jet hangar` 60/19. Total 185 occurrences.\n\nWHAT ABSORBS THE DELETED BEHAVIOUR: `jet test` and `jet fmt` already exist and keep their own names; they simply require being inside the env (see the acquisition card). Do NOT add env realization to `jet`.\n\nTRAP: `jetpack fmt` today delegates non-Jet files to an env formatter. `jet fmt` must cover that. Check `crates/jetpack/src/CLI/format.rs` for what it does before deleting it, and confirm `jet fmt` reaches the same formatters when inside the env.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0h7q2i8"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2188-1): Any verb that reads or executes Jet source belongs to the jet binary. Any verb that acquires, pins, realizes or exposes what your code needs belongs to jetpack. There is no exception. Consequently jetpack dev, jetpack test, jetpack fmt, jetpack build, jetpack run and jetpack enter are deleted, and the hangar verb is removed from the jet binary."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "docs/spec names the boundary law in one sentence and every jetpack doc page obeys it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:47.253Z"
+        },
+        {
+          "n": 2,
+          "text": "JETPACK_VERBS no longer contains dev, test, fmt, build, run, or enter, and the dispatch rejects each with a diagnostic naming the replacement",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:47.625Z"
+        },
+        {
+          "n": 3,
+          "text": "jet no longer exposes a hangar verb, and its help does not mention one",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:48.548Z"
+        },
+        {
+          "n": 4,
+          "text": "all 185 measured occurrences of the deleted spellings across docs tests examples and skills are migrated or deleted, with a fresh rg proving zero remain outside historical decision text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:49.433Z"
+        },
+        {
+          "n": 5,
+          "text": "the non-Jet formatter delegation that jetpack fmt performed is reachable from jet fmt inside a realized env, proven by formatting a non-Jet file",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:49.991Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:36.352Z",
+      "updated": "2026-08-25T13:19:28.475Z",
+      "updatedBy": "owner",
+      "workOrder": 4
+    },
+    {
+      "id": "c09vy29f",
+      "num": 2189,
+      "title": "jetpack env and jetpack use: the two shell verbs",
+      "body": "Owner-ratified in chat 2026-08-25. Replaces `jetpack enter` and the temp-shell half of `jetpack run`.\n\nEXACT SHAPES:\n```\njetpack                          # interactive TUI - RESERVED, do not build here\njetpack env                      # enter ./env.jet default module\njetpack env full                 # enter env.full (POSITIONAL, not --env)\njetpack env -- cargo build       # run in project env, exit\njetpack env -p ripgrep           # project env PLUS undeclared extras\njetpack env --prep               # materialize, do not enter\njetpack use ripgrep jq           # ad-hoc shell, ONLY those packages\njetpack use ripgrep -- rg --ver  # ephemeral run, persists nothing\njetpack use ripgrep --prep       # warm one package\n```\n\nRATIFIED SEMANTICS, each chosen against alternatives:\n1. Bare `jetpack` is RESERVED for a future interactive TUI. It must NOT enter an env. Today it prints help; leave that until the TUI card exists.\n2. `jetpack env <name>` takes the module name POSITIONALLY. The `--env <name>` flag stuttered (`jetpack env --env full`). Keep `--env` working on other verbs that already accept it; only `env` gains the positional.\n3. `jetpack use` means EXACTLY the packages named, ALWAYS, whether or not you are inside a project. It is NOT context-sensitive. Layering onto the project env stays `jetpack env -p`.\n4. `--prep` on both `env` and `use` materializes without entering. This replaces `jetpack build`. Spelled `--prep`, not `--prepare`.\n5. `jetpack tool run` is DELETED. It was the arity-1 case of `jetpack use <ref> -- cmd`, which violates I8 one-mechanism. `tool` keeps only install, list, uninstall. Its ratified id `D-JPK-TOOLRUN1` is cited in code comments only and has no Tower record.\n6. `jet env` becomes a documented thin FORWARD to `jetpack env`, preserving `D-ENVHOOK1=A` and the shell auto-activation hook. One implementation, two entry points. `jetpack env` is canonical; `jet env` is the beginner path.\n\nWHERE THE CODE IS: dispatch `crates/jetpack/src/CLI/parse.rs:477`; verb list `crates/jet-foundation/src/Syntax/effects_surface.rs:538`; usage text `crates/jetpack/src/CLI/usage_tests.rs`; `tool run` at `crates/jetpack/src/CLI/tool.rs:360`; the `jet env` front door at `crates/jet-cli/src/CLI.rs:560` (ENV_ACTIONS).\n\nTRAP: `jetpack use` must not consult `./env.jet` at all. A previous session's `use`-like path picked up the project lock and failed E1315; see the acquisition card for the RealizeScope mechanism already added for exactly this reason.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2189-1): jetpack env is the canonical spelling for entering a project environment. jet env becomes a documented thin forward to it, one implementation with two entry points, so the ratified shell auto-activation hook keeps working while the boundary law holds: jet acts on code, jetpack acts on environments. Bare jetpack is reserved for a future interactive TUI and must not enter an environment. jetpack tool run is deleted as the arity-1 case of jetpack use with a trailing command."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jetpack env with no argument enters the default env module, and jetpack env <name> enters that module positionally",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:50.913Z"
+        },
+        {
+          "n": 2,
+          "text": "jetpack env -- <cmd> runs in the project env and exits with the command's status",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:52.129Z"
+        },
+        {
+          "n": 3,
+          "text": "jetpack use <pkgs> yields a shell containing exactly those packages both inside and outside a project directory, proven by a test that runs it in each",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:53.083Z"
+        },
+        {
+          "n": 4,
+          "text": "jetpack use <pkgs> -- <cmd> runs once and leaves nothing on PATH or in the tools profile afterwards",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:53.978Z"
+        },
+        {
+          "n": 5,
+          "text": "jetpack tool run is removed and its help, tests and docs no longer mention it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:55.022Z"
+        },
+        {
+          "n": 6,
+          "text": "jet env forwards to jetpack env with identical behaviour, and the D-ENVHOOK1 auto-activation hook still activates on cd",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:55.448Z"
+        },
+        {
+          "n": 7,
+          "text": "bare jetpack does not enter any environment",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:55.819Z"
+        },
+        {
+          "n": 8,
+          "text": "The --prep flag on env and on use materializes the closure and exits without entering, and a following entry performs no download",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:20.762Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:36.821Z",
+      "updated": "2026-08-25T13:19:09.883Z",
+      "updatedBy": "owner",
+      "workOrder": 1
+    },
+    {
+      "id": "c0gziu7u",
+      "num": 2190,
+      "title": "Ref grammar: package@source#version, prefix tier deleted",
+      "body": "Owner-ratified in chat 2026-08-25. AMENDS the shipped ref law.\n\nSHIPPED TODAY, per the live diagnostic from `jetpack test --help`: \"Jet refs are written `name#version@source`; `#version` is optional.\" Additionally the tier marker is accepted in TWO positions, proven by `crates/jet-pkg-model/src/RefSpec.rs:1190` (`#auto omp@nixpkgs`, prefix) and `:1195` (`omp#auto@nixpkgs`, infix).\n\nNEW LAW: `package@source#version`. One position only. The prefix form is deleted.\n\n```\nripgrep@nixpkgs               unchanged\nowner/repo@github             unchanged\nomp@releases#auto             was: #auto omp@releases\nomp@releases#v18.0.4          was: omp#v18.0.4@releases\n```\n\nThe `#` slot answers \"which version\" and accepts either a literal version or a policy tier (`auto`, `latest`), per `D-CHANNEL-AUTO1`.\n\nMEASURED MIGRATION SCOPE, rg over docs tests examples crates Source plugins/tower/skills:\n- plain `x@source` refs: 584 occurrences across 89 files — UNCHANGED by this card, do not touch them\n- prefix tier `#auto `/`#latest ` before a name: 15 occurrences, 6 files — must move\n- infix version `name#ver@source`: 39 occurrences, 16 files — must move\nSo 54 refs change, not 584. Do NOT run a blind textual sweep over `@`.\n\nALSO AFFECTED, non-source: the generated index feed and lockfiles embed refs. `~/.jet/tools/manifest.json` currently records `\"raw\":\"#auto can1357/oh-my-pi#v18.0.4@github\"` — a single string carrying BOTH the deleted prefix form and an infix version. Manifest writeback in `crates/jetpack/src/CLI/tool.rs` and the lock writer in `crates/jet-pkg-model/src/Lock.rs` must emit the new spelling, and an existing manifest in the old spelling must still parse or be migrated, not silently rejected.\n\nGREENFIELD RULE: per AGENTS.md this is greenfield. Migrate every in-repo consumer in one change and delete the old parse path. Do not keep a fallback parser.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2190-1): Every package reference is written package@source#version. The hash slot answers which version and accepts a literal version or a policy tier such as auto or latest. The prefix spelling, for example the tier written before the name, is deleted; the same meaning is written omp@releases#auto. Plain refs such as ripgrep@nixpkgs are unchanged. The old parse path is removed with no fallback parser retained."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "RefSpec parses package@source#version and rejects the prefix tier form with a diagnostic that shows the new spelling",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:56.161Z"
+        },
+        {
+          "n": 2,
+          "text": "all 15 prefix-tier and 39 infix-version occurrences are migrated, proven by a fresh rg showing zero of either form outside historical decision text",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:56.533Z"
+        },
+        {
+          "n": 3,
+          "text": "the 584 plain package@source refs are untouched, proven by an unchanged count",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:56.881Z"
+        },
+        {
+          "n": 4,
+          "text": "tool manifest writeback and the project lock writer emit the new spelling, and a manifest written in the old spelling is migrated rather than rejected",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:57.247Z"
+        },
+        {
+          "n": 5,
+          "text": "the old parse path is deleted with no fallback parser retained",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:57.598Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:37.250Z",
+      "updated": "2026-08-25T13:19:10.242Z",
+      "updatedBy": "owner",
+      "workOrder": 2
+    },
+    {
+      "id": "c0o7ipzb",
+      "num": 2191,
+      "title": "Acquisition policy: jet never acquires, jetpack confirms downloads",
+      "body": "Owner-ratified in chat 2026-08-25.\n\nTHREE RULES:\n1. `jet` verbs NEVER acquire anything. Run a jet verb that needs the project env while outside it and you get a coded diagnostic naming the env and the exact fix. jet does NOT auto-enter, does NOT auto-realize, and does NOT depend on jetpack at runtime for its own verbs. This keeps the boundary law absolute.\n2. `jetpack env` and `jetpack use` enter SILENTLY when the closure is already fully materialized, and CONFIRM ONCE when anything must be downloaded, showing package count and total bytes. `-y`/`--yes` skips the prompt.\n3. NON-INTERACTIVE (no TTY) with a download needed and no `-y` FAILS with a diagnostic naming `-y`. It must never download unprompted in CI.\n\nEXACT SHAPES:\n```\n$ jetpack env            # fully cached -> enters silently\n$ jetpack env            # fresh clone\n  jet  env.dev needs 26 packages, 1.4 GB - continue? [Y/n]\n$ jetpack env -y         # no prompt\n$ jetpack env            # in CI, download needed, no -y\nError [Exxxx]: env.dev needs 26 packages (1.4 GB) and cannot prompt here\n Fix: pass -y to accept, or pre-warm with `jetpack env --prep -y`\n$ jet test               # outside the env\nError [Exxxx]: this project declares env.dev; you are not inside it\n Fix: jetpack env -- jet test\n```\n\nEXISTING MACHINERY, use it rather than inventing: `-y`/`--yes` already exists and is documented as \"apply a mutation plan without prompting\". Trust prompting already exists with `--trust`. Byte totals are only known AFTER narinfo fetch, so the plan must be assembled from resolved closure metadata before the prompt.\n\nRELATED FIX ALREADY LANDED, do not redo: `RealizeScope::{Project,UserProfile}` in `crates/jetpack/src/CLI/realize.rs` and `compose_env_scoped` in `crates/jetpack/src/CLI/trust_env_build.rs` exist because a user-tool install was wrongly reconciled against the cwd project lock and failed E1315. Reuse that scope; do not add a second mechanism.\n\nTRAP: a size prompt that resolves the whole closure before asking makes the cached path slower. The cached path must not pay for the plan.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c09vy29f"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2191-1): A jet verb that needs the project environment while outside it fails with a coded diagnostic and acquires nothing. jetpack env and jetpack use enter silently when the closure is already materialized and confirm once, showing package count and total bytes, when anything must be downloaded. The yes flag skips that prompt. A non-interactive run that would need a download and has no yes flag fails naming the flag, and downloads nothing."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "a jet verb needing the project env, run from outside it, fails with a registered coded diagnostic naming the env and the exact fix, and acquires nothing",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:58.820Z"
+        },
+        {
+          "n": 2,
+          "text": "jetpack env and jetpack use enter with no prompt when the closure is fully materialized, proven by a run with no network access",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:17:59.910Z"
+        },
+        {
+          "n": 3,
+          "text": "jetpack env and jetpack use print package count and total bytes and confirm once when a download is required, and -y skips that prompt",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:00.588Z"
+        },
+        {
+          "n": 4,
+          "text": "with no TTY and no -y and a download required, the command exits non-zero with a diagnostic naming -y and downloads nothing",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:00.960Z"
+        },
+        {
+          "n": 5,
+          "text": "the fully-cached entry path performs no closure-wide resolution work that the prompt would need, measured against the pre-change entry time",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:01.346Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:37.687Z",
+      "updated": "2026-08-25T13:19:29.185Z",
+      "updatedBy": "owner",
+      "workOrder": 5
+    },
+    {
+      "id": "c0vprzqp",
+      "num": 2192,
+      "title": "jetpack update: cwd-scoped, one command, plan then confirm",
+      "body": "Owner-ratified in chat 2026-08-25. Owner note: this becomes a critical point once jetos is in scope, so keep the scoping mechanism explicit rather than implicit.\n\nLAW: `jetpack update` works on the CURRENT DIRECTORY context. Inside a jetpack project it updates that project. Narrowing flags select a subset; the default is everything in scope.\n\n```\njetpack update            # everything in scope for cwd; plan, confirm once\njetpack update --deps     # project dependency pins only\njetpack update --tools    # user tools only\njetpack update <source>   # one named source (existing behaviour, keep)\njetpack update -y         # skip the prompt\n```\n\nThe plan shows, per scope, what moves and to what, with package count and download size, then asks once. `-y` skips. Non-interactive without `-y` fails, consistent with the acquisition card.\n\nEXAMPLE:\n```\n$ jetpack update\n  jet  deps   nixpkgs-unstable  e5bdc4a4 -> 9f1c22b7   26 packages, 1.4 GB\n  jet  tools  omp  18.0.4 -> 18.1.0                     676 MB\n       apply? [Y/n]\n```\n\nSHIPPED TODAY: `jetpack update [<source>|tools]` refreshes project or user-tools channel pins (`crates/jetpack/src/CLI/update_search_info.rs:14`), and `jetpack outdated` lists movable refs (`:103`). Lock movement uses `Lock::locked_source_channel` (`:120`). `jetpack outdated` SURVIVES as its own verb; do not fold it into a flag.\n\nTRAP: the tier decides whether a source may move at all. Per `D-CHANNEL-AUTO1`, a bare pin never moves, `#latest` moves on update, `#auto` moves on realization. A pinned source must report that it is pinned rather than silently doing nothing — E1352 already does this, keep it.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0gziu7u"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2192-1): jetpack update determines its scope from the current directory: inside a jetpack project it updates that project. Narrowing flags select dependencies only or tools only, and the default covers everything in scope. It prints one plan naming every moving source with its before and after identity, package count and download size, then applies after a single confirmation. The outdated verb survives separately."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jetpack update with no arguments determines its scope from the current directory and reports which scopes it will touch",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:01.744Z"
+        },
+        {
+          "n": 2,
+          "text": "the plan names every moving source with its before and after identity, package count and total download size, and applies only after one confirmation",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:02.151Z"
+        },
+        {
+          "n": 3,
+          "text": "-y applies without prompting, and a non-interactive run without -y exits non-zero without downloading",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:02.509Z"
+        },
+        {
+          "n": 4,
+          "text": "a pinned source reports that it is pinned rather than silently not moving, and jetpack outdated still exists as its own verb",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:02.882Z"
+        },
+        {
+          "n": 5,
+          "text": "The --deps and --tools flags each narrow to that scope alone, and the default covers both when both are in scope",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:21.136Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:38.141Z",
+      "updated": "2026-08-25T13:19:29.543Z",
+      "updatedBy": "owner",
+      "workOrder": 6
+    },
+    {
+      "id": "c02wcldf",
+      "num": 2193,
+      "title": "Installed tools become shims so self-update reaches the declarative pin",
+      "body": "Owner-ratified in chat 2026-08-25. This is the owner's original ask: an imperative update through a tool's own CLI must be able to update the declarative setup.\n\nMEASURED TODAY: `~/.jet/bin/omp` is a HARDLINK into a read-only Hangar object (verified: nlink=3, and deleting a hangar object gives Permission denied). Consequences: jetpack has NO interception point, and a tool that self-updates in place hits a confusing permission error rather than a real diagnostic.\n\nNEW LAW: every tool installed by `jetpack tool install` is projected as a jetpack SHIM, not a hardlink. The shim execs the real binary for normal use. When it detects the tool attempting to update itself, it refuses the in-place write cleanly and offers to update the declarative pin instead.\n\nDESIRED SHAPE:\n```\n$ omp update\n  jet  omp is managed by jetpack (#auto)\n       update the declarative pin instead? [Y/n]\n  jet  omp 18.0.4 -> 18.1.0, manifest updated\n```\n\nACCEPTED COSTS, owner informed: every tool invocation goes through jetpack, so a shim bug breaks every installed tool at once; and `which omp` reports the shim rather than the real path.\n\nOPEN SUB-DECISIONS the owner has NOT ruled on — ASK, do not choose:\n- whether the shim is per-tool or one shared dispatcher\n- what `which omp` should report\n- whether detection is a prompt inline or a deferred marker read by the next jetpack command\n\nWHERE THE CODE IS: projection and linking in `crates/jetpack/src/CLI/tool.rs` around `project_install`; the tools manifest and generations under `~/.jet/tools/`; `profile_install_receipt` on the cache lease.\n\nTRAPS: (1) shim startup cost is paid on every invocation, so it must be small and must not resolve the closure. (2) The hardlink today means the installed file and the hangar object share an inode; a shim breaks that sharing, so measure the disk delta — one omp install already costs about 1 GB. (3) Do not break `jetpack tool uninstall` or generation rollback.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c0gziu7u"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2193-1): Every tool installed by jetpack is projected as a jetpack shim rather than a hardlink into a read-only store object. The shim execs the real binary for normal use, and when the tool attempts to update itself the shim refuses the in-place write cleanly and offers to move the declarative pin instead. The accepted costs are that jetpack sits in the execution path of every installed tool, and that which reports the shim path."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "a tool installed by jetpack tool install is a shim, and running it produces byte-identical output and exit status to the underlying binary for a normal invocation",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:03.260Z"
+        },
+        {
+          "n": 2,
+          "text": "a self-update attempt is detected, refused without a permission error, and answered with a registered diagnostic that names the declarative alternative",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:03.644Z"
+        },
+        {
+          "n": 3,
+          "text": "accepting the offer moves the pin in the tools manifest and the tool reports the new version afterwards",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:04.025Z"
+        },
+        {
+          "n": 4,
+          "text": "shim overhead on a normal invocation is measured and reported, and the shim performs no closure resolution",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:04.392Z"
+        },
+        {
+          "n": 5,
+          "text": "tool uninstall and profile rollback still work with shims in place, and the disk cost per installed tool is measured against the hardlink baseline",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:04.792Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:38.575Z",
+      "updated": "2026-08-25T13:19:29.911Z",
+      "updatedBy": "owner",
+      "workOrder": 8
+    },
+    {
+      "id": "c0a3h9ta",
+      "num": 2194,
+      "title": "Progress display: aggregate phase line plus per-package rows",
+      "body": "Owner-ratified in chat 2026-08-25. Owner's complaint, verbatim in substance: the UI showed one stage during an install and then failed; it should show multiple states like the `nh` nix helper.\n\nMEASURED TODAY: `jetpack use` prints `resolving <pkg> …` then `✓ <pkg> <version>`. Two states, no byte progress. A real omp install took 193 seconds and a 3-package nixpkgs realization took 91 seconds, so a long silence looks like a hang.\n\nTHE REAL PIPELINE PER PACKAGE, which the display must reflect: resolve (signed index fetch + verify) -> substitute (narinfo, NAR download, signature verify, NAR decode) -> admit (write to hangar, hash check) -> project (lease + link) -> enter. Plus a closure fan-out: ripgrep alone is 3 objects.\n\nREQUIRED SHAPE: one live aggregate line showing the current phase with counts and bytes across the whole run, plus a settled per-package row as each finishes.\n```\n  jet  resolving      26/26  ✓\n  jet  downloading     12/48 objects   340 MB / 1.2 GB   18 MB/s\n       ✓ ripgrep   15.2.0\n       ✓ jq        1.8.2\n  jet  admitting      31/48 objects\n```\n\nEXISTING MACHINERY, use it rather than inventing: `Output::LiveRegion`, `theme.progress_chain(phase, done, total, node, edge)` at `crates/jetpack/src/Output.rs:229` which already renders `realize 2/5 ripgrep nixpkgs`, and `RowStyle::{Ledger,Ready,Silent}`. Governed by `D-FE-CLI1`, whose acceptance term requires erasing live regions before diagnostics.\n\nTRAPS: (1) total bytes are unknown until narinfo is fetched, so the denominator grows during the run — show it honestly, do not fake a total. (2) Must degrade cleanly with no TTY, under `NO_COLOR`, and when piped; the existing plain fallback is already tested at `Output.rs:770`. (3) 26 packages must not flood the terminal, which is why per-package rows settle rather than animate.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [
+        "c09vy29f"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2194-1): Realization displays one live aggregate line carrying the current phase with counts, transferred bytes and total bytes, plus one settled row per package as it completes. Byte totals grow honestly as the closure is discovered rather than being fabricated. Output degrades to deterministic plain lines with no terminal, under NO_COLOR, and when piped, and live regions are erased before any diagnostic."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "a multi-package realization shows a live aggregate phase line with counts, transferred bytes and total bytes, updating through resolve substitute and admit",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:05.150Z"
+        },
+        {
+          "n": 2,
+          "text": "each package prints one settled completion row as it finishes, and a 26-package run does not exceed one screen of settled output",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:05.543Z"
+        },
+        {
+          "n": 3,
+          "text": "byte totals grow honestly as the closure is discovered, and no fabricated total is displayed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:05.916Z"
+        },
+        {
+          "n": 4,
+          "text": "output degrades to deterministic plain lines with no TTY, under NO_COLOR, and when piped, covered by a test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:06.304Z"
+        },
+        {
+          "n": 5,
+          "text": "live regions are erased before any diagnostic is printed, per the D-FE-CLI1 acceptance term",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:06.663Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:39.010Z",
+      "updated": "2026-08-25T13:19:30.267Z",
+      "updatedBy": "owner",
+      "workOrder": 7
+    },
+    {
+      "id": "c0h7q2i8",
+      "num": 2195,
+      "title": "Group store plumbing under the hangar verb",
+      "body": "Owner-ratified in chat 2026-08-25. Reduces the non-jetos jetpack surface from 29 verbs to 24.\n\nLAW: `hangar` is the grouping verb for everything that manipulates the store rather than your project. It absorbs today's top-level `cache`, `shared-store`, `vendor`, `clean` and `list`.\n\n```\njetpack hangar du                          (unchanged)\njetpack hangar verify|export|import|dump|restore|copy|sign|repair|recover  (unchanged)\njetpack hangar path                        (unchanged)\njetpack hangar list                        was: jetpack list\njetpack hangar clean                       was: jetpack clean\njetpack hangar vendor [<dir>]              was: jetpack vendor\njetpack hangar cache bind|list|publish|verify|substitute    was: jetpack cache …\njetpack hangar shared install|enroll|status                 was: jetpack shared-store …\n```\n\nThe word `hangar` was chosen over `store` deliberately: it is the existing ratified user-facing name for the object store, so nothing new is coined. `shared-store` becomes `hangar shared`.\n\nWHERE THE CODE IS: verb list `crates/jet-foundation/src/Syntax/effects_surface.rs:538`; dispatch `crates/jetpack/src/CLI/parse.rs:477` (`cmd_hangar`, `cmd_cache`, `cmd_shared_store`, `cmd_vendor`, `cmd_clean`, `cmd_list`); usage text `crates/jetpack/src/CLI/usage_tests.rs`, which asserts specific help strings and will fail until updated.\n\nMEASURED: `jet hangar` is mentioned 60 times across 19 files and is deleted entirely by the boundary card; do not confuse the two changes.\n\nTRAP: `jetpack doctor` reports on hangar, cache and signing. It stays TOP-LEVEL and is not grouped — it is the first thing a stuck user runs.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-2195-1): The hangar verb groups everything that manipulates the store rather than the project. It absorbs the former top-level cache, shared-store, vendor, clean and list verbs. The name hangar is kept because it is the existing user-facing name for the object store, so no new word is coined. The doctor verb stays top-level because it is what a stuck user runs first."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cache shared-store vendor clean and list are no longer top-level verbs and each is reachable under hangar with identical behaviour",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:07.060Z"
+        },
+        {
+          "n": 2,
+          "text": "JETPACK_VERBS contains 24 non-jetos verbs and the count is asserted by a test so it cannot drift silently",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:07.427Z"
+        },
+        {
+          "n": 3,
+          "text": "help output groups the hangar sub-verbs and every retired top-level spelling produces a diagnostic naming its new location",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:07.827Z"
+        },
+        {
+          "n": 4,
+          "text": "doctor remains top-level",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:08.189Z"
+        },
+        {
+          "n": 5,
+          "text": "docs tests and skills referencing the retired top-level spellings are migrated, proven by a fresh rg",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T13:18:08.563Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T13:17:39.441Z",
+      "updated": "2026-08-25T13:19:28.846Z",
+      "updatedBy": "owner",
+      "workOrder": 3
     }
   ],
   "decisions": [
@@ -205669,6 +206344,222 @@
       "draft": true,
       "status": "open",
       "created": "2026-08-25T01:20:57.863Z"
+    },
+    {
+      "id": "D-VERDICT-2189-1",
+      "cardId": "c09vy29f",
+      "group": "verdict",
+      "title": "jet env forwards to jetpack env rather than owning it",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "jetpack env is the canonical spelling for entering a project environment. jet env becomes a documented thin forward to it, one implementation with two entry points, so the ratified shell auto-activation hook keeps working while the boundary law holds: jet acts on code, jetpack acts on environments. Bare jetpack is reserved for a future interactive TUI and must not enter an environment. jetpack tool run is deleted as the arity-1 case of jetpack use with a trailing command.",
+      "comment": "jetpack env is the canonical spelling for entering a project environment. jet env becomes a documented thin forward to it, one implementation with two entry points, so the ratified shell auto-activation hook keeps working while the boundary law holds: jet acts on code, jetpack acts on environments. Bare jetpack is reserved for a future interactive TUI and must not enter an environment. jetpack tool run is deleted as the arity-1 case of jetpack use with a trailing command.",
+      "supersededBy": "D-ENVHOOK1",
+      "created": "2026-08-25T13:19:09.883Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2190-1",
+      "cardId": "c0gziu7u",
+      "group": "verdict",
+      "title": "Refs are spelled package@source#version and the prefix tier form is deleted",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Every package reference is written package@source#version. The hash slot answers which version and accepts a literal version or a policy tier such as auto or latest. The prefix spelling, for example the tier written before the name, is deleted; the same meaning is written omp@releases#auto. Plain refs such as ripgrep@nixpkgs are unchanged. The old parse path is removed with no fallback parser retained.",
+      "comment": "Every package reference is written package@source#version. The hash slot answers which version and accepts a literal version or a policy tier such as auto or latest. The prefix spelling, for example the tier written before the name, is deleted; the same meaning is written omp@releases#auto. Plain refs such as ripgrep@nixpkgs are unchanged. The old parse path is removed with no fallback parser retained.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T13:19:10.241Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2188-1",
+      "cardId": "c024o546",
+      "group": "verdict",
+      "title": "Boundary law: jet acts on code, jetpack acts on environments",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Any verb that reads or executes Jet source belongs to the jet binary. Any verb that acquires, pins, realizes or exposes what your code needs belongs to jetpack. There is no exception. Consequently jetpack dev, jetpack test, jetpack fmt, jetpack build, jetpack run and jetpack enter are deleted, and the hangar verb is removed from the jet binary.",
+      "comment": "Any verb that reads or executes Jet source belongs to the jet binary. Any verb that acquires, pins, realizes or exposes what your code needs belongs to jetpack. There is no exception. Consequently jetpack dev, jetpack test, jetpack fmt, jetpack build, jetpack run and jetpack enter are deleted, and the hangar verb is removed from the jet binary.",
+      "supersededBy": "D-ENVHOOK1",
+      "created": "2026-08-25T13:19:28.474Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2195-1",
+      "cardId": "c0h7q2i8",
+      "group": "verdict",
+      "title": "Store plumbing is grouped under the hangar verb",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "The hangar verb groups everything that manipulates the store rather than the project. It absorbs the former top-level cache, shared-store, vendor, clean and list verbs. The name hangar is kept because it is the existing user-facing name for the object store, so no new word is coined. The doctor verb stays top-level because it is what a stuck user runs first.",
+      "comment": "The hangar verb groups everything that manipulates the store rather than the project. It absorbs the former top-level cache, shared-store, vendor, clean and list verbs. The name hangar is kept because it is the existing user-facing name for the object store, so no new word is coined. The doctor verb stays top-level because it is what a stuck user runs first.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T13:19:28.846Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2191-1",
+      "cardId": "c0o7ipzb",
+      "group": "verdict",
+      "title": "Jet never acquires; jetpack confirms every download",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "A jet verb that needs the project environment while outside it fails with a coded diagnostic and acquires nothing. jetpack env and jetpack use enter silently when the closure is already materialized and confirm once, showing package count and total bytes, when anything must be downloaded. The yes flag skips that prompt. A non-interactive run that would need a download and has no yes flag fails naming the flag, and downloads nothing.",
+      "comment": "A jet verb that needs the project environment while outside it fails with a coded diagnostic and acquires nothing. jetpack env and jetpack use enter silently when the closure is already materialized and confirm once, showing package count and total bytes, when anything must be downloaded. The yes flag skips that prompt. A non-interactive run that would need a download and has no yes flag fails naming the flag, and downloads nothing.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T13:19:29.185Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2192-1",
+      "cardId": "c0vprzqp",
+      "group": "verdict",
+      "title": "jetpack update is scoped by the current directory",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "jetpack update determines its scope from the current directory: inside a jetpack project it updates that project. Narrowing flags select dependencies only or tools only, and the default covers everything in scope. It prints one plan naming every moving source with its before and after identity, package count and download size, then applies after a single confirmation. The outdated verb survives separately.",
+      "comment": "jetpack update determines its scope from the current directory: inside a jetpack project it updates that project. Narrowing flags select dependencies only or tools only, and the default covers everything in scope. It prints one plan naming every moving source with its before and after identity, package count and download size, then applies after a single confirmation. The outdated verb survives separately.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T13:19:29.543Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2193-1",
+      "cardId": "c02wcldf",
+      "group": "verdict",
+      "title": "Installed tools are projected as shims",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Every tool installed by jetpack is projected as a jetpack shim rather than a hardlink into a read-only store object. The shim execs the real binary for normal use, and when the tool attempts to update itself the shim refuses the in-place write cleanly and offers to move the declarative pin instead. The accepted costs are that jetpack sits in the execution path of every installed tool, and that which reports the shim path.",
+      "comment": "Every tool installed by jetpack is projected as a jetpack shim rather than a hardlink into a read-only store object. The shim execs the real binary for normal use, and when the tool attempts to update itself the shim refuses the in-place write cleanly and offers to move the declarative pin instead. The accepted costs are that jetpack sits in the execution path of every installed tool, and that which reports the shim path.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T13:19:29.911Z",
+      "ratifiedAt": "2026-08-25"
+    },
+    {
+      "id": "D-VERDICT-2194-1",
+      "cardId": "c0a3h9ta",
+      "group": "verdict",
+      "title": "Progress shows an aggregate phase line and per-package rows",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "Realization displays one live aggregate line carrying the current phase with counts, transferred bytes and total bytes, plus one settled row per package as it completes. Byte totals grow honestly as the closure is discovered rather than being fabricated. Output degrades to deterministic plain lines with no terminal, under NO_COLOR, and when piped, and live regions are erased before any diagnostic.",
+      "comment": "Realization displays one live aggregate line carrying the current phase with counts, transferred bytes and total bytes, plus one settled row per package as it completes. Byte totals grow honestly as the closure is discovered rather than being fabricated. Output degrades to deterministic plain lines with no terminal, under NO_COLOR, and when piped, and live regions are erased before any diagnostic.",
+      "supersededBy": "D-CHANNEL-AUTO1",
+      "created": "2026-08-25T13:19:30.267Z",
+      "ratifiedAt": "2026-08-25"
     }
   ],
   "questions": [
@@ -207687,6 +208578,538 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T13:19:30.267Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2194-1",
+      "note": "Realization displays one live aggregate line carrying the current phase with counts, transferred bytes and total bytes, plus one settled row per package as it completes. Byte totals grow honestly as the closure is discovered rather than being fabricated. Output degrades to deterministic plain lines with no terminal, under NO_COLOR, and when piped, and live regions are erased before any diagnostic."
+    },
+    {
+      "at": "2026-08-25T13:19:29.911Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2193-1",
+      "note": "Every tool installed by jetpack is projected as a jetpack shim rather than a hardlink into a read-only store object. The shim execs the real binary for normal use, and when the tool attempts to update itself the shim refuses the in-place write cleanly and offers to move the declarative pin instead. The accepted costs are that jetpack sits in the execution path of every installed tool, and that which reports the shim path."
+    },
+    {
+      "at": "2026-08-25T13:19:29.544Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2192-1",
+      "note": "jetpack update determines its scope from the current directory: inside a jetpack project it updates that project. Narrowing flags select dependencies only or tools only, and the default covers everything in scope. It prints one plan naming every moving source with its before and after identity, package count and download size, then applies after a single confirmation. The outdated verb survives separately."
+    },
+    {
+      "at": "2026-08-25T13:19:29.185Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2191-1",
+      "note": "A jet verb that needs the project environment while outside it fails with a coded diagnostic and acquires nothing. jetpack env and jetpack use enter silently when the closure is already materialized and confirm once, showing package count and total bytes, when anything must be downloaded. The yes flag skips that prompt. A non-interactive run that would need a download and has no yes flag fails naming the flag, and downloads nothing."
+    },
+    {
+      "at": "2026-08-25T13:19:28.846Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2195-1",
+      "note": "The hangar verb groups everything that manipulates the store rather than the project. It absorbs the former top-level cache, shared-store, vendor, clean and list verbs. The name hangar is kept because it is the existing user-facing name for the object store, so no new word is coined. The doctor verb stays top-level because it is what a stuck user runs first."
+    },
+    {
+      "at": "2026-08-25T13:19:28.475Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2188-1",
+      "note": "Any verb that reads or executes Jet source belongs to the jet binary. Any verb that acquires, pins, realizes or exposes what your code needs belongs to jetpack. There is no exception. Consequently jetpack dev, jetpack test, jetpack fmt, jetpack build, jetpack run and jetpack enter are deleted, and the hangar verb is removed from the jet binary."
+    },
+    {
+      "at": "2026-08-25T13:19:10.242Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2190-1",
+      "note": "Every package reference is written package@source#version. The hash slot answers which version and accepts a literal version or a policy tier such as auto or latest. The prefix spelling, for example the tier written before the name, is deleted; the same meaning is written omp@releases#auto. Plain refs such as ripgrep@nixpkgs are unchanged. The old parse path is removed with no fallback parser retained."
+    },
+    {
+      "at": "2026-08-25T13:19:09.883Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-2189-1",
+      "note": "jetpack env is the canonical spelling for entering a project environment. jet env becomes a documented thin forward to it, one implementation with two entry points, so the ratified shell auto-activation hook keeps working while the boundary law holds: jet acts on code, jetpack acts on environments. Bare jetpack is reserved for a future interactive TUI and must not enter an environment. jetpack tool run is deleted as the arity-1 case of jetpack use with a trailing command."
+    },
+    {
+      "at": "2026-08-25T13:18:42.814Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02wcldf",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:41.505Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0a3h9ta",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:41.020Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0vprzqp",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:40.531Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0o7ipzb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:39.179Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c024o546",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:37.933Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0h7q2i8",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:37.434Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0gziu7u",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:36.922Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c09vy29f",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-08-25T13:18:36.405Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0o7ipzb",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T13:18:35.882Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0a3h9ta",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T13:18:35.365Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c02wcldf",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T13:18:34.841Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0vprzqp",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T13:18:34.328Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c024o546",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T13:18:33.795Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c024o546",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-25T13:18:21.137Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vprzqp",
+      "note": "#5 The --deps and --tools flags each narrow to that scope alone"
+    },
+    {
+      "at": "2026-08-25T13:18:20.763Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#8 The --prep flag on env and on use materializes the closure a"
+    },
+    {
+      "at": "2026-08-25T13:18:08.563Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0h7q2i8",
+      "note": "#5 docs tests and skills referencing the retired top-level spel"
+    },
+    {
+      "at": "2026-08-25T13:18:08.190Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0h7q2i8",
+      "note": "#4 doctor remains top-level"
+    },
+    {
+      "at": "2026-08-25T13:18:07.828Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0h7q2i8",
+      "note": "#3 help output groups the hangar sub-verbs and every retired to"
+    },
+    {
+      "at": "2026-08-25T13:18:07.427Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0h7q2i8",
+      "note": "#2 JETPACK_VERBS contains 24 non-jetos verbs and the count is a"
+    },
+    {
+      "at": "2026-08-25T13:18:07.060Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0h7q2i8",
+      "note": "#1 cache shared-store vendor clean and list are no longer top-l"
+    },
+    {
+      "at": "2026-08-25T13:18:06.663Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0a3h9ta",
+      "note": "#5 live regions are erased before any diagnostic is printed, pe"
+    },
+    {
+      "at": "2026-08-25T13:18:06.304Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0a3h9ta",
+      "note": "#4 output degrades to deterministic plain lines with no TTY, un"
+    },
+    {
+      "at": "2026-08-25T13:18:05.916Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0a3h9ta",
+      "note": "#3 byte totals grow honestly as the closure is discovered, and "
+    },
+    {
+      "at": "2026-08-25T13:18:05.543Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0a3h9ta",
+      "note": "#2 each package prints one settled completion row as it finishe"
+    },
+    {
+      "at": "2026-08-25T13:18:05.150Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0a3h9ta",
+      "note": "#1 a multi-package realization shows a live aggregate phase lin"
+    },
+    {
+      "at": "2026-08-25T13:18:04.793Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#5 tool uninstall and profile rollback still work with shims in"
+    },
+    {
+      "at": "2026-08-25T13:18:04.392Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#4 shim overhead on a normal invocation is measured and reporte"
+    },
+    {
+      "at": "2026-08-25T13:18:04.025Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#3 accepting the offer moves the pin in the tools manifest and "
+    },
+    {
+      "at": "2026-08-25T13:18:03.644Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#2 a self-update attempt is detected, refused without a permiss"
+    },
+    {
+      "at": "2026-08-25T13:18:03.261Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c02wcldf",
+      "note": "#1 a tool installed by jetpack tool install is a shim, and runn"
+    },
+    {
+      "at": "2026-08-25T13:18:02.883Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vprzqp",
+      "note": "#4 a pinned source reports that it is pinned rather than silent"
+    },
+    {
+      "at": "2026-08-25T13:18:02.509Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vprzqp",
+      "note": "#3 -y applies without prompting, and a non-interactive run with"
+    },
+    {
+      "at": "2026-08-25T13:18:02.151Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vprzqp",
+      "note": "#2 the plan names every moving source with its before and after"
+    },
+    {
+      "at": "2026-08-25T13:18:01.745Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0vprzqp",
+      "note": "#1 jetpack update with no arguments determines its scope from t"
+    },
+    {
+      "at": "2026-08-25T13:18:01.346Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o7ipzb",
+      "note": "#5 the fully-cached entry path performs no closure-wide resolut"
+    },
+    {
+      "at": "2026-08-25T13:18:00.961Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o7ipzb",
+      "note": "#4 with no TTY and no -y and a download required, the command e"
+    },
+    {
+      "at": "2026-08-25T13:18:00.588Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o7ipzb",
+      "note": "#3 jetpack env and jetpack use print package count and total by"
+    },
+    {
+      "at": "2026-08-25T13:17:59.910Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o7ipzb",
+      "note": "#2 jetpack env and jetpack use enter with no prompt when the cl"
+    },
+    {
+      "at": "2026-08-25T13:17:58.820Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0o7ipzb",
+      "note": "#1 a jet verb needing the project env, run from outside it, fai"
+    },
+    {
+      "at": "2026-08-25T13:17:57.598Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gziu7u",
+      "note": "#5 the old parse path is deleted with no fallback parser retain"
+    },
+    {
+      "at": "2026-08-25T13:17:57.247Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gziu7u",
+      "note": "#4 tool manifest writeback and the project lock writer emit the"
+    },
+    {
+      "at": "2026-08-25T13:17:56.881Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gziu7u",
+      "note": "#3 the 584 plain package@source refs are untouched, proven by a"
+    },
+    {
+      "at": "2026-08-25T13:17:56.533Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gziu7u",
+      "note": "#2 all 15 prefix-tier and 39 infix-version occurrences are migr"
+    },
+    {
+      "at": "2026-08-25T13:17:56.161Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0gziu7u",
+      "note": "#1 RefSpec parses package@source#version and rejects the prefix"
+    },
+    {
+      "at": "2026-08-25T13:17:55.819Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#7 bare jetpack does not enter any environment"
+    },
+    {
+      "at": "2026-08-25T13:17:55.448Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#6 jet env forwards to jetpack env with identical behaviour, an"
+    },
+    {
+      "at": "2026-08-25T13:17:55.022Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#5 jetpack tool run is removed and its help, tests and docs no "
+    },
+    {
+      "at": "2026-08-25T13:17:53.978Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#4 jetpack use <pkgs> -- <cmd> runs once and leaves nothing on "
+    },
+    {
+      "at": "2026-08-25T13:17:53.083Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#3 jetpack use <pkgs> yields a shell containing exactly those p"
+    },
+    {
+      "at": "2026-08-25T13:17:52.130Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#2 jetpack env -- <cmd> runs in the project env and exits with "
+    },
+    {
+      "at": "2026-08-25T13:17:50.913Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c09vy29f",
+      "note": "#1 jetpack env with no argument enters the default env module, "
+    },
+    {
+      "at": "2026-08-25T13:17:49.991Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c024o546",
+      "note": "#5 the non-Jet formatter delegation that jetpack fmt performed "
+    },
+    {
+      "at": "2026-08-25T13:17:49.433Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c024o546",
+      "note": "#4 all 185 measured occurrences of the deleted spellings across"
+    },
+    {
+      "at": "2026-08-25T13:17:48.548Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c024o546",
+      "note": "#3 jet no longer exposes a hangar verb, and its help does not m"
+    },
+    {
+      "at": "2026-08-25T13:17:47.625Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c024o546",
+      "note": "#2 JETPACK_VERBS no longer contains dev, test, fmt, build, run,"
+    },
+    {
+      "at": "2026-08-25T13:17:47.254Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c024o546",
+      "note": "#1 docs/spec names the boundary law in one sentence and every j"
+    },
+    {
+      "at": "2026-08-25T13:17:39.441Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0h7q2i8",
+      "note": "Group store plumbing under the hangar verb"
+    },
+    {
+      "at": "2026-08-25T13:17:39.010Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0a3h9ta",
+      "note": "Progress display: aggregate phase line plus per-package rows"
+    },
+    {
+      "at": "2026-08-25T13:17:38.575Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c02wcldf",
+      "note": "Installed tools become shims so self-update reaches the declarative pin"
+    },
+    {
+      "at": "2026-08-25T13:17:38.141Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0vprzqp",
+      "note": "jetpack update: cwd-scoped, one command, plan then confirm"
+    },
+    {
+      "at": "2026-08-25T13:17:37.687Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0o7ipzb",
+      "note": "Acquisition policy: jet never acquires, jetpack confirms downloads"
+    },
+    {
+      "at": "2026-08-25T13:17:37.250Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0gziu7u",
+      "note": "Ref grammar: package@source#version, prefix tier deleted"
+    },
+    {
+      "at": "2026-08-25T13:17:36.821Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c09vy29f",
+      "note": "jetpack env and jetpack use: the two shell verbs"
+    },
+    {
+      "at": "2026-08-25T13:17:36.352Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c024o546",
+      "note": "Boundary law: jet owns code, jetpack owns environments"
+    },
+    {
+      "at": "2026-08-25T13:15:36.719Z",
+      "by": "orchestrator",
+      "action": "milestone.add",
+      "ref": "e5-m10-cli-surface",
+      "note": "M10 · One package CLI surface"
+    },
+    {
+      "at": "2026-08-25T10:57:05.785Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-25T10:57:05.785Z"
+    },
+    {
+      "at": "2026-08-25T05:25:15.715Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0yfdicc",
+      "note": "logEntry"
+    },
     {
       "at": "2026-08-25T04:18:31.834Z",
       "by": "orchestrator",
@@ -210654,538 +212077,6 @@
       "action": "card.update",
       "ref": "c11y6itr6",
       "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:18.699Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c10086k5d",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:18.148Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cz2ys9cb",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:17.602Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cyxijw5j",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:17.081Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cxf6x7ap",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:16.524Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cwf44fqc",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:15.785Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cv62zydw",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:14.956Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cup3p8gb",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:14.374Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "ctrvtgzf",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:13.844Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cs2bko2y",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:13.304Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cr8bdkzb",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:12.786Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cq5blslq",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:12.104Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cp3zupnt",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:11.366Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "co323ahi",
-      "note": "title,kind,tags,refs,body,plan,criteria,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:10.551Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cnnczx0n",
-      "note": "title,kind,tags,refs,needsAcceptance,body,plan,criteria,checkSteps,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:10.023Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cmtyww5f",
-      "note": "title,kind,tags,refs,body,plan,criteria,checkSteps,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T23:10:09.054Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "cldqlgbu",
-      "note": "title,kind,tags,refs,body,plan,criteria,checkSteps,phase,priority,track,logEntry"
-    },
-    {
-      "at": "2026-08-24T22:56:58.324Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c14vk3sif",
-      "note": "We’re retiring the word capabilities but the Caps marker is probably in tact.  C"
-    },
-    {
-      "at": "2026-08-24T22:56:55.233Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c13gfyz5l",
-      "note": "Should typestate be defined IN a type? there seems like there should be a namesp"
-    },
-    {
-      "at": "2026-08-24T22:56:51.717Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c12uacgqe",
-      "note": "Also for examples/features/tooling/declared_text_head.jet -> this seems like a t"
-    },
-    {
-      "at": "2026-08-24T22:56:47.598Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c11y6itr6",
-      "note": "Should dead end typestates be allowed? I would think so... Why"
-    },
-    {
-      "at": "2026-08-24T22:56:43.369Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "c10086k5d",
-      "note": "examples/features/tooling/declared_text_head.jet -> ```marker Pattern on [.Text]"
-    },
-    {
-      "at": "2026-08-24T22:56:39.181Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cz2ys9cb",
-      "note": "Why would ! be acceptable bare in a function declaration? The point is to allow"
-    },
-    {
-      "at": "2026-08-24T22:56:30.144Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cyxijw5j",
-      "note": "False unused import warning in examples/features/tooling/solve_puzzle.jet"
-    },
-    {
-      "at": "2026-08-24T22:56:22.506Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cxf6x7ap",
-      "note": "examples/features/tooling/service_runtime.jet -> Need to have some kind of lint"
-    },
-    {
-      "at": "2026-08-24T22:56:15.971Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cwf44fqc",
-      "note": "examples/features/tooling/service_authority.jet -> Where do these come from, wha"
-    },
-    {
-      "at": "2026-08-24T22:56:11.071Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cv62zydw",
-      "note": "examples/features/tooling/provenance_track.jet -> Shouldnt compiler/metadata be"
-    },
-    {
-      "at": "2026-08-24T22:56:05.692Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cup3p8gb",
-      "note": "examples/features/tooling/output_callable.jet -> app declaration shape should no"
-    },
-    {
-      "at": "2026-08-24T22:56:01.505Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "ctrvtgzf",
-      "note": "for warnings, consider the \"red arrows\" that show exactly where an error is, mak"
-    },
-    {
-      "at": "2026-08-24T22:55:55.606Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cs2bko2y",
-      "note": "examples/features/tooling/compiler_api.jet -> Why is buildplan an error type? Th"
-    },
-    {
-      "at": "2026-08-24T22:55:51.615Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cr8bdkzb",
-      "note": "Adding newline inside {} should support auto formatting/organizing like with oth"
-    },
-    {
-      "at": "2026-08-24T22:55:47.080Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cq5blslq",
-      "note": "Double check what improved syntax for result deconstruction is -> instead of 4 l"
-    },
-    {
-      "at": "2026-08-24T22:55:42.647Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cp3zupnt",
-      "note": "examples/features/patterns/refutable_test_bind.jet -> confusing name, single spa"
-    },
-    {
-      "at": "2026-08-24T22:55:31.706Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "co323ahi",
-      "note": "Relook examples/features/ports/murmur3_x86_64 -> Jet is uglier than plain c. Nee"
-    },
-    {
-      "at": "2026-08-24T22:55:24.227Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cnnczx0n",
-      "note": "Consider cases where someone wants to use (and customize) dev but to use it as a"
-    },
-    {
-      "at": "2026-08-24T22:55:18.096Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cmtyww5f",
-      "note": "Canvas shouldnt require a web target or port specification -> port should have d"
-    },
-    {
-      "at": "2026-08-24T22:55:04.054Z",
-      "by": "owner",
-      "action": "card.add",
-      "ref": "cldqlgbu",
-      "note": "Canvas -> Consider canvas subcommand or simple --canvas flag on dev."
-    },
-    {
-      "at": "2026-08-24T22:54:58.256Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "b13ud5r3",
-      "note": ""
-    },
-    {
-      "at": "2026-08-24T22:54:56.680Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "b2kt5b7k",
-      "note": ""
-    },
-    {
-      "at": "2026-08-24T22:54:54.312Z",
-      "by": "owner",
-      "action": "idea.add",
-      "ref": "bkwm57pm",
-      "note": "We’re retiring the word capabilities but the Caps marker is "
-    },
-    {
-      "at": "2026-08-24T22:24:53.493Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-24T22:24:53.493Z"
-    },
-    {
-      "at": "2026-08-24T21:50:24.078Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l1vtkt",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:50:23.311Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fj0oap",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:50:22.585Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0brzkry",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:50:20.174Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l1vtkt",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:50:19.819Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fj0oap",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T21:50:19.461Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0brzkry",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T21:50:19.004Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c064zfby",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:50:18.491Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c00s3cle",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T21:50:17.865Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0s69hxm",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-24T21:50:17.278Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0s69hxm",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-24T21:50:16.923Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c011gydx",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:50:16.562Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c011gydx",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T21:50:16.206Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c011gydx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T21:50:15.875Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c144",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:50:15.521Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c144",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:50:15.170Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c144",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T21:50:14.804Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-24T21:50:14.450Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-24T21:50:13.841Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:50:13.281Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xs3xot",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T21:50:12.668Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0yfdicc",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:10:28.215Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dapzh5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:27.454Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06dju1c",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:26.702Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qc4auj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:25.940Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wa1jwi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:25.030Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m5pd4i",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:23.808Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7iumo",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:22.785Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01b5i3v",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-24T21:10:21.797Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0dapzh5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:10:21.442Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06dju1c",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:10:21.095Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06dju1c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-24T21:10:20.732Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06dju1c",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-24T21:10:20.355Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06dju1c",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T21:10:19.994Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qc4auj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:10:19.545Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qc4auj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-24T21:10:19.178Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wa1jwi",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
