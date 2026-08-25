@@ -49,7 +49,7 @@ pub(crate) fn check_projection_with_options(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CheckProjection, Vec<Diagnostic>> {
-    check_projection_with_options_and_preflight(path, gates, profile, setting_overrides, true)
+    check_projection_with_options_and_preflight(path, gates, profile, setting_overrides, true, None)
 }
 
 pub(crate) fn check_projection_for_effects(
@@ -63,6 +63,23 @@ pub(crate) fn check_projection_for_effects(
         profile,
         setting_overrides,
         false,
+        None,
+    )
+}
+
+pub(crate) fn check_projection_for_output_effects(
+    path: &Path,
+    output: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<CheckProjection, Vec<Diagnostic>> {
+    check_projection_with_options_and_preflight(
+        path,
+        jet::Policy::GateSet::default(),
+        profile,
+        setting_overrides,
+        false,
+        Some(output),
     )
 }
 
@@ -72,6 +89,7 @@ fn check_projection_with_options_and_preflight(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     run_preflight: bool,
+    output: Option<&str>,
 ) -> Result<CheckProjection, Vec<Diagnostic>> {
     let entry = path.display().to_string();
     let programmable_build = if run_preflight {
@@ -83,7 +101,20 @@ fn check_projection_with_options_and_preflight(
     } else {
         "not-selected"
     };
-    let (diagnostics, bundle, facts, front_end) = if setting_overrides.is_empty() {
+    let (diagnostics, bundle, facts, front_end) = if let Some(output) = output {
+        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
+            &entry,
+            output,
+            profile,
+            setting_overrides,
+        );
+        (
+            diagnostics,
+            bundle,
+            facts,
+            "Driver::check_file_with_effect_facts_for_output",
+        )
+    } else if setting_overrides.is_empty() {
         let (diagnostics, bundle, facts) =
             jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, profile);
         (

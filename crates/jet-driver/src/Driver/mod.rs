@@ -3397,7 +3397,6 @@ fn compile_build_from_front_end(
                 lints,
                 ffi: None,
                 clinks: Vec::new(),
-                abilities: crate::Abilities::default(),
                 comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
                 web: None,
                 web_partition_report: None,
@@ -3476,17 +3475,11 @@ fn compile_build_from_front_end(
         timer.metric("rust_bytes", rust.len() as u128);
         timer.write_to(&bundle.project_root);
     }
-    let abilities = crate::Abilities::from_sema(
-        &bundle.used_core,
-        crate::bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
     let compile = crate::CompileOutput {
         rust,
         lints,
         ffi,
         clinks: Vec::new(),
-        abilities,
         comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
         web,
         web_partition_report: bundle.web_partition_report.clone(),
@@ -5170,13 +5163,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
         timer.metric("rust_bytes", rust.len() as u128);
         timer.write_to(&bundle.project_root);
     }
-    // c110: capabilities are derived from semantic facts (resolved Core calls,
-    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
-    let abilities = crate::Abilities::from_sema(
-        &bundle.used_core,
-        crate::bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let resolver = match AuthorityResolver::open(&bundle.project_root) {
         Ok(resolver) => Some(resolver),
@@ -5214,7 +5200,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
         // codegen / front-end checks never depend on system link discovery);
         // see `resolve_c_links`.
         clinks: Vec::new(),
-        abilities,
         comptime_inputs,
         web,
         web_partition_report: bundle.web_partition_report.clone(),
@@ -5388,20 +5373,12 @@ fn compile_src_on_compiler_stack(
     } else {
         None
     };
-    // c110: capabilities are derived from semantic facts (resolved Core calls,
-    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
-    let abilities = crate::Abilities::from_sema(
-        &bundle.used_core,
-        crate::bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     Ok(crate::CompileOutput {
         rust,
         lints,
         ffi,
         clinks: Vec::new(),
-        abilities,
         comptime_inputs,
         web,
         web_partition_report: bundle.web_partition_report.clone(),
@@ -5460,6 +5437,7 @@ pub fn check_file_with_effect_facts_and_settings(
         None,
         "dev",
         setting_overrides,
+        None,
     );
     (diagnostics, bundle, facts)
 }
@@ -5485,9 +5463,33 @@ pub fn check_file_with_effect_facts_profile(
         None,
         profile,
         &BTreeMap::new(),
+        None,
     );
     (diagnostics, bundle, facts)
 }
+pub fn check_file_with_effect_facts_for_output(
+    file: &str,
+    output: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
+        file,
+        &[],
+        false,
+        None,
+        None,
+        profile,
+        setting_overrides,
+        Some(output),
+    );
+    (diagnostics, bundle, facts)
+}
+
 
 pub fn check_file_with_effect_facts_incremental(
     file: &str,
@@ -5508,6 +5510,7 @@ pub fn check_file_with_effect_facts_incremental(
         None,
         "dev",
         &BTreeMap::new(),
+        None,
     );
     (diagnostics, bundle, facts)
 }
@@ -5531,6 +5534,7 @@ pub fn check_file_with_effect_facts_incremental_overlays(
         None,
         "dev",
         &BTreeMap::new(),
+        None,
     )
 }
 
@@ -5554,6 +5558,7 @@ pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
         Some(prepared_frontend),
         "dev",
         &BTreeMap::new(),
+        None,
     )
 }
 
@@ -5565,6 +5570,7 @@ fn check_file_with_effect_facts_impl(
     prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    explicit_output: Option<&str>,
 ) -> (
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
@@ -5580,6 +5586,7 @@ fn check_file_with_effect_facts_impl(
             prepared_frontend,
             profile,
             setting_overrides,
+            explicit_output,
         )
     })
 }
@@ -5592,6 +5599,7 @@ fn check_file_on_compiler_stack(
     prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
+    explicit_output: Option<&str>,
 ) -> (
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
@@ -5625,16 +5633,26 @@ fn check_file_on_compiler_stack(
                     dependencies,
                 );
             }
-            let (check_diags, facts) = match incremental {
-                Some(cache) => crate::Sema::check_bundle_with_effect_facts_incremental(
+            let (check_diags, facts) = if let Some(output) = explicit_output {
+                crate::Sema::check_bundle_for_output_opts_with_effect_facts(
                     &mut bundle,
-                    crate::Sema::CompileMode::Check,
-                    cache,
-                ),
-                None => crate::Sema::check_bundle_with_effect_facts(
-                    &mut bundle,
-                    crate::Sema::CompileMode::Check,
-                ),
+                    crate::Sema::CompileMode::Run,
+                    output,
+                    false,
+                    crate::Policy::GateSet::default(),
+                )
+            } else {
+                match incremental {
+                    Some(cache) => crate::Sema::check_bundle_with_effect_facts_incremental(
+                        &mut bundle,
+                        crate::Sema::CompileMode::Check,
+                        cache,
+                    ),
+                    None => crate::Sema::check_bundle_with_effect_facts(
+                        &mut bundle,
+                        crate::Sema::CompileMode::Check,
+                    ),
+                }
             };
             diags.extend(check_diags);
             if let Some(crate::AST::Item::Func(build)) = bundle.modules[bundle.entry]
@@ -5689,6 +5707,7 @@ pub fn check_file_with_overlays(
         None,
         "dev",
         &BTreeMap::new(),
+        None,
     );
     (diagnostics, bundle, facts)
 }
@@ -5978,18 +5997,12 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
         false,
         crate::Syntax::OSTarget::host(),
     );
-    let abilities = crate::Abilities::from_sema(
-        &bundle.used_core,
-        crate::bundle_uses_unsafe(&bundle),
-        ffi.is_some() || bundle.cffi.links_c(),
-    );
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     Ok(crate::CompileOutput {
         rust,
         lints,
         ffi,
         clinks: Vec::new(),
-        abilities,
         comptime_inputs,
         web: None,
         web_partition_report: bundle.web_partition_report.clone(),

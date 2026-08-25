@@ -150,7 +150,7 @@ Restore an earlier package-store generation
 List package-store generations
 .TP
 .B hangar du
-Show disk use for each stored object
+Show Hangar disk use per root or across the machine
 .TP
 .B project
 Inspect project files and modules
@@ -191,6 +191,9 @@ Compare two Jet programs by meaning
 .B merge
 Merge Jet programs without losing code structure
 .TP
+.B review
+Review meaning, authority, and proof changes
+.TP
 .B run
 Run a program or project
 .TP
@@ -200,17 +203,26 @@ List project #Job functions (<file.jet> -- <job>)
 .B check
 Check code without creating a binary
 .TP
+.B fill
+Propose checked code for typed goals
+.TP
 .B test
 Run tests
 .TP
 .B prove
 Create a proof report for code and tests
 .TP
+.B status
+Show what the project has proved
+.TP
 .B build
 Create a native executable
 .TP
 .B dev
 Rerun a program whenever files change
+.TP
+.B try
+Speculatively apply a plan and re-check its claims
 .TP
 .B debug
 Debug a program from Jet source
@@ -387,11 +399,23 @@ with inspect live: print one snapshot and exit
 .B --observe
 with run: expose bounded live runtime facts for attachment
 .TP
+.B --raw-frames
+with debug: show generated Rust frames and scopes (expert)
+.TP
+.B --dap
+with debug: speak the Debug Adapter Protocol over stdio
+.TP
 .B --gc-trace
 with run/dev: record bounded automatic GC-promotion evidence
 .TP
 .B --structural
 with diff/merge: compare checked definitions by semantic identity
+.TP
+.B --base-receipt
+with review: proof receipt for the base change-set side
+.TP
+.B --receipt
+with review: proof receipt for the reviewed change-set side
 .TP
 .B --out
 with structural merge: write the checked result to this path
@@ -537,6 +561,9 @@ with doctor: apply auto-fixable problems
 .B --dry-run
 with rewrite commands: preview changes without writing
 .TP
+.B --keep
+with try: keep a clean speculative edit
+.TP
 .B --edition
 with fix: apply edition migration rewrites --edition=<year>
 .TP
@@ -597,9 +624,6 @@ with env/run/dev/test: select one declared environment preset
 .B --explain-partition
 with build --target=web: show which code becomes JavaScript or WebAssembly
 .TP
-.B --abilities-json
-with build: write used abilities as JSON
-.TP
 .B --update-snapshots
 with test: replace expected snapshot output
 .TP
@@ -649,7 +673,7 @@ with test: run tests in random (or --shuffle=<seed>) order
 with test: run tests one at a time instead of the parallel default
 .TP
 .B --show-default
-with test: ignore fn test and use the stock harness
+with run/build/dev/test: use and report the stock default
 .TP
 .B --measure
 with test: measure `.measure` claims

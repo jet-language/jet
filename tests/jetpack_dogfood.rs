@@ -159,7 +159,7 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
     let lock_before = fs::read(&lock_path).expect("read checked-in Jet lock");
     let jetpack = common::jetpack_bin();
     let test_binary = env::current_exe().expect("current test binary");
-    let scratch = DogfoodScratch::new();
+    let scratch = DogfoodScratch::new(&repo);
 
     assert!(!scratch.root.join("hangar/objects").exists());
     assert!(!scratch.root.join("fixtures").exists());
@@ -859,7 +859,7 @@ struct DogfoodScratch {
 }
 
 impl DogfoodScratch {
-    fn new() -> Self {
+    fn new(repo: &Path) -> Self {
         let base =
             PathBuf::from(env::var_os("HOME").expect("HOME")).join(".cache/jet-test-scratch");
         common::assert_test_path_on_disk(&base, "dogfood scratch root");
@@ -876,6 +876,7 @@ impl DogfoodScratch {
         for directory in [&root, &home, &tmp, &target] {
             fs::create_dir_all(directory).expect("create dogfood scratch directory");
         }
+        install_signed_index_config(repo, &root);
         Self {
             root,
             home,
@@ -898,6 +899,26 @@ impl DogfoodScratch {
 
     fn phase_pid_path(&self, mode: &str) -> PathBuf {
         self.root.join(format!("dogfood-{mode}.phase.pid"))
+    }
+}
+
+fn install_signed_index_config(repo: &Path, root: &Path) {
+    let feed = repo.join("target-nixfeed/feed");
+    let endpoint = feed.join("config/nix-index-v1.endpoint");
+    let trust = feed.join("trust/nix-index-v1.ed25519.pub");
+    match (endpoint.is_file(), trust.is_file()) {
+        (false, false) => return,
+        (true, true) => {}
+        _ => panic!("generated nix index feed has an incomplete config/trust pair"),
+    }
+    for relative in [
+        "config/nix-index-v1.endpoint",
+        "trust/nix-index-v1.ed25519.pub",
+    ] {
+        let destination = root.join(relative);
+        fs::create_dir_all(destination.parent().expect("index config parent"))
+            .expect("create index config directory");
+        fs::copy(feed.join(relative), destination).expect("copy signed index configuration");
     }
 }
 

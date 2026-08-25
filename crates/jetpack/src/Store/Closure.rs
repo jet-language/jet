@@ -1153,6 +1153,19 @@ pub(super) fn lifecycle_closure_graph_unlocked(roots: &Roots) -> std::io::Result
     Ok(graph)
 }
 
+/// GC plan variant: skip package projections already identified as malformed.
+/// The plan must inspect valid legacy records without letting one bad projection
+/// block the whole store, but it must not repair the bad projection before the
+/// plan can name it for quarantine.
+pub(super) fn lifecycle_closure_graph_unlocked_ignoring(
+    roots: &Roots,
+    ignored: &BTreeSet<String>,
+) -> std::io::Result<ClosureGraph> {
+    let (_, graph) = migrate_closure_graph_unlocked_ignoring(roots, ignored)?;
+    validate_graph_store_proofs(roots, &graph, false).map_err(std::io::Error::other)?;
+    Ok(graph)
+}
+
 pub(super) fn entry_closure_store_proof(
     roots: &Roots,
     graph: &ClosureGraph,
@@ -1322,9 +1335,34 @@ pub fn migrate_closure_graph(roots: &Roots) -> std::io::Result<usize> {
 pub(super) fn migrate_closure_graph_unlocked(
     roots: &Roots,
 ) -> std::io::Result<(usize, ClosureGraph)> {
-    let (_, mut graph) = recover_closure_journal_graph_unlocked(roots)?;
+    let (_, graph) = recover_closure_journal_graph_unlocked(roots)?;
     let mut entries = list_unlocked(roots)?;
     entries.sort_by(|left, right| left.id.cmp(&right.id));
+    migrate_closure_graph_from_entries(roots, graph, entries)
+}
+
+fn migrate_closure_graph_unlocked_ignoring(
+    roots: &Roots,
+    ignored: &BTreeSet<String>,
+) -> std::io::Result<(usize, ClosureGraph)> {
+    let mut graph = closure_graph_structure_read_only(roots)?;
+    for id in ignored {
+        graph.records.remove(id);
+        graph.deleted_records.insert(id.clone());
+    }
+    let mut entries = super::list_read_only(roots)
+        .into_iter()
+        .filter(|entry| !ignored.contains(&entry.id))
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
+    migrate_closure_graph_from_entries(roots, graph, entries)
+}
+
+fn migrate_closure_graph_from_entries(
+    roots: &Roots,
+    mut graph: ClosureGraph,
+    entries: Vec<StoreEntry>,
+) -> std::io::Result<(usize, ClosureGraph)> {
     let mut seen_records = BTreeSet::new();
     let mut objects = BTreeMap::new();
     let mut records = Vec::new();

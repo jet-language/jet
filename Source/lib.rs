@@ -15,11 +15,8 @@
 // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
 pub use jet_driver::{
     boot_tir_eval,
-    // Top-level re-exports from Compile module:
-    bundle_uses_unsafe,
     development_receipt,
     program_allocator,
-    Abilities,
     AdaBind,
     Authority,
     CBind,

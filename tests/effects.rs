@@ -13,6 +13,53 @@ fn codes(src: &str) -> Vec<String> {
         Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
 }
+#[test]
+fn callbacks_entry_effects_are_only_io() {
+    let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/basics/callbacks.jet");
+    let (diagnostics, bundle, facts) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    assert_eq!(
+        jet::EffectBudget::summary_line_for_program(
+            &bundle.expect("callbacks bundle"),
+            &facts.summaries,
+            jet::Codegen::ENTRY_FN,
+        ),
+        "effects: IO"
+    );
+}
+
+#[test]
+fn selected_output_effects_follow_the_selected_callable() {
+    let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/tooling/output_callable.jet");
+    let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
+        entry.to_str().unwrap(),
+        "app",
+        "dev",
+        &std::collections::BTreeMap::new(),
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    assert_eq!(
+        jet::EffectBudget::summary_line_for_program(
+            &bundle.expect("selected output bundle"),
+            &facts.summaries,
+            jet::Codegen::ENTRY_FN,
+        ),
+        "effects: IO"
+    );
+}
 
 #[test]
 fn sqlite_style_fail_nth_effect_loop_is_deterministic() {

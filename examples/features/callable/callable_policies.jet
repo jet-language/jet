@@ -8,9 +8,7 @@ pub policy audit(topic: String, prefix: String{"audit"}) {
 
 #Policy(audit("users.load")) fn audited_load() String -> "ok"
 
-#Policy(trace("users.load")) fn load_user(id: Int, label: String{"user"}) String -> {
-    return "{label}:{id}"
-}
+#Policy(trace("users.load")) fn load_user(id: Int, label: String{"user"}) String -> "{label}:{id}"
 
 fn run() {
     audited :: apply(audit("users.load"), audited_load)

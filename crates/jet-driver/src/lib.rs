@@ -80,4 +80,4 @@ pub use jet_pkg_model::{
     PascalBind, PerlBind, PhpBind, Policy, PowerShellBind, PythonBind, RBind, RubyBind, ScriptDeps,
     Store, TclBind, CFFI, FFI,
 };
-pub use Compile::{bundle_uses_unsafe, Abilities, CompileOutput};
+pub use Compile::CompileOutput;

@@ -2463,7 +2463,8 @@ pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
     build_entry_signature_is_valid, bundle_has_comptime_evaluation, check_bundle,
-    check_bundle_for_output, check_bundle_for_output_opts, check_bundle_freestanding,
+    check_bundle_for_output, check_bundle_for_output_opts,
+    check_bundle_for_output_opts_with_effect_facts, check_bundle_freestanding,
     check_bundle_freestanding_with_gates, check_bundle_gates, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
     is_build_entry, specialize_function_types, strip_build_only_entries, IncrementalSemaCache,

@@ -258,6 +258,101 @@ pub fn summary_line(entries: &[PackageEffects]) -> String {
         )
     }
 }
+fn entry_effects(summaries: &HashMap<String, EffectSummary>, entry: &str) -> EffectSet {
+    let mut effects = EffectSet::new();
+    let mut seen = HashSet::new();
+    let mut pending = vec![entry.to_string()];
+    while let Some(key) = pending.pop() {
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        let Some(summary) = summaries.get(&key) else {
+            continue;
+        };
+        effects.extend(summary.direct.iter().cloned());
+        pending.extend(summary.edges.iter().cloned());
+    }
+    effects
+}
+fn program_effects(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+) -> EffectSet {
+    bundle
+        .modules
+        .iter()
+        .flat_map(|module| &module.items)
+        .find_map(|item| match item {
+            Item::Const(constant) => constant
+                .resolved_output
+                .as_ref()
+                .filter(|output| output.selected)
+                .map(|output| output.effects.iter().cloned().collect()),
+            _ => None,
+        })
+        .unwrap_or_else(|| entry_effects(summaries, default_entry))
+}
+
+pub fn summary_line_for_program(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+) -> String {
+    render_effect_line(&program_effects(bundle, summaries, default_entry))
+}
+
+pub fn summary_json_for_program(
+    bundle: &ProgramBundle,
+    summaries: &HashMap<String, EffectSummary>,
+    default_entry: &str,
+) -> String {
+    render_effect_json(&program_effects(bundle, summaries, default_entry))
+}
+
+fn render_effect_line(effects: &EffectSet) -> String {
+    if effects.is_empty() {
+        "effects: none".to_string()
+    } else {
+        format!(
+            "effects: {}",
+            effects
+                .iter()
+                .map(|effect| effect.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
+fn render_effect_json(effects: &EffectSet) -> String {
+    let effects = effects
+        .iter()
+        .map(|effect| format!("\"{}\"", effect.as_str()))
+        .collect::<Vec<_>>()
+        .join(",");
+    jet_foundation::Report::render_status_json(
+        "ok",
+        true,
+        "build.effects",
+        &format!(",\"effects\":[{effects}]"),
+    )
+}
+
+
+/// Human build status reports effects reachable through statically known
+/// calls from the selected entry. Open function values remain conservative in
+/// policy enforcement, but they do not invent every ambient effect in status.
+pub fn summary_line_for_entry(summaries: &HashMap<String, EffectSummary>, entry: &str) -> String {
+    render_effect_line(&entry_effects(summaries, entry))
+}
+
+pub fn summary_json_for_entry(
+    summaries: &HashMap<String, EffectSummary>,
+    entry: &str,
+) -> String {
+    render_effect_json(&entry_effects(summaries, entry))
+}
 
 /// Per-package effect names, sorted, for lockfile provenance (`LockedPackage.effects`).
 pub fn provenance_for(entries: &[PackageEffects], name: &str) -> Vec<String> {
@@ -435,5 +530,31 @@ mod tests {
 
         manifest.authority.grants = vec![("dep".to_string(), vec!["Net".to_string()])];
         assert!(enforce(&entries, &manifest).is_empty());
+    }
+
+    #[test]
+    fn entry_summary_ignores_open_callback_possibilities() {
+        let mut summaries = HashMap::new();
+        summaries.insert(
+            "run".to_string(),
+            EffectSummary {
+                direct: EffectSet::from(["IO".to_string()]),
+                edges: BTreeSet::from(["callbacks::apply_twice".to_string()]),
+                maximal: true,
+                ..EffectSummary::default()
+            },
+        );
+        summaries.insert(
+            "callbacks::apply_twice".to_string(),
+            EffectSummary {
+                maximal: true,
+                ..EffectSummary::default()
+            },
+        );
+        assert_eq!(summary_line_for_entry(&summaries, "run"), "effects: IO");
+        assert!(
+            summary_json_for_entry(&summaries, "run")
+                .contains("\"action\":\"build.effects\"")
+        );
     }
 }

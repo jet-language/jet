@@ -116,9 +116,9 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             expected_stream: MachineStream::Stdout,
         },
         MachineDoor {
-            label: "abilities-json",
-            args: &["build", "run.jet", "--abilities-json"],
-            action: Some("build.abilities"),
+            label: "build-effects",
+            args: &["build", "run.jet", "--json"],
+            action: Some("build.effects"),
             expected_status: ExitCodes::OK,
             expected_stream: MachineStream::Stdout,
         },

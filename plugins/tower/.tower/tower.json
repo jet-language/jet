@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2198,
-    "rev": 44787,
+    "rev": 44810,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -30,7 +30,7 @@
         "radar:e12"
       ]
     },
-    "completionCursor": "2026-08-25T15:28:55.118Z"
+    "completionCursor": "2026-08-25T17:00:59.210Z"
   },
   "epochs": [
     {
@@ -139747,6 +139747,11 @@
         {
           "at": "2026-08-25",
           "by": "Main",
+          "text": "The branches ICE was a Core closure omission: Scheduler always needs jet_deadline_exceeded and FakeData always needs jet_seeded_rng_int, but both definitions were gated on needs_math. They now ride every emitted Core block and branches builds successfully. RuntimeCache still reports inline fallback for Core-bearing builds, so reopened cache criteria remain open."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "Main",
           "text": "Reopened from owner-reported jet build latency on 2026-08-25. Current Core-bearing builds generate about 4.2 MB Rust, RuntimeCache rejects the split because the runtime rlib calls Core-owned jet_deadline_exceeded and jet_seeded_rng_int before those symbols exist, then recompiles the inline monolith. Measured fizzbuzz cold build 14.8s versus 2.5s immediate repeat; the original criterion 1/4 evidence is contradicted for this closure."
         },
         {
@@ -139832,7 +139837,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-19T12:30:00.157Z",
-      "updated": "2026-08-25T15:36:23.916Z",
+      "updated": "2026-08-25T16:47:00.516Z",
       "updatedBy": "Main"
     },
     {
@@ -146320,6 +146325,11 @@
         {
           "at": "2026-08-25",
           "by": "orchestrator",
+          "text": "Lane finding, concrete and matching the owner-reported failure: the repository .jet/lock carries 1 of 20 declared packages and no source-channel pin, so locked_nix_index_key_for_project cannot build an IndexKey and realize.rs answers E1272. This is why jetpack env fails in the repo even though the index-backed path works against a generated feed."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
           "text": "DOGFOOD PROVEN end to end. From a Hangar deleted immediately before the run, jetpack enter resolved three real nixpkgs attrs through a signed index for pinned revision e5bdc4a4, substituted their closures natively from cache.nixos.org, admitted them into the Hangar and projected them, and the real binaries ran: ripgrep 15.2.0, jq-1.8.2, fd 10.4.2, then DOGFOOD_OK. No nix executable was invoked at any point. Five product defects were fixed to reach this: the indexed realization never wrote its lock pin; the lock channel field carries the tier realize.rs compares while the index is keyed by the nixpkgs channel name, so no lock could satisfy both; the NAR decoder handled only the hand-built fixture shape, not real closures with directories, symlinks and executable bits; two packages sharing a transitive closure object rejected the second admission as a changed immutable descriptor; and a multi-output package like jq, whose bin is a separate store object, escaped a lease scoped to a single output. Remaining for this card: coverage for all 20 repo attrs, the cargo build probe, ordered version probes and the offline repeat."
         },
         {
@@ -146389,7 +146399,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:48.104Z",
-      "updated": "2026-08-25T05:25:15.714Z",
+      "updated": "2026-08-25T15:55:20.665Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -146407,7 +146417,13 @@
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Lane finding: the manifest parity gate expects 28 packages and gets 20. env.jet:14-17 disagrees with the Nix oracle in flake.nix; tzdata and vulkan-loader are among the omissions."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -146460,7 +146476,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:50.747Z",
-      "updated": "2026-08-24T23:23:28.825Z",
+      "updated": "2026-08-25T15:55:29.297Z",
       "updatedBy": "orchestrator"
     },
     {
@@ -150353,6 +150369,16 @@
         {
           "at": "2026-08-25",
           "by": "Main",
+          "text": "Owner-found corrections complete. Exact callbacks build now reports effects: IO, no abilities line, and completes in 829ms on the verified warm path. build --json emits jet.report/v1 action build.effects; --abilities-json is removed and returns E2102. Exact branches build exits 0 after unconditional Core deadline/seed helper closure. Targeted Core closure, effect summary, machine-output, and CLI registry tests passed."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Owner verification found two more output defects: callbacks reported the maximal open-callback authority set instead of statically reachable effects, and default builds still printed the retired abilities projection. Also found branches generated Rust missing unconditional Core helper dependencies."
+        },
+        {
+          "at": "2026-08-25",
+          "by": "Main",
           "text": "Final source-matched target/debug/jet published after owner correction. Exact fizzbuzz command: 15.2s first build under the new compiler identity, 3.3s total immediate repeat with 788ms inside jet build; both show all major stages. Exact labeled_loops command also completed with the staged UI. Residual cold inline-runtime fallback is tracked by reopened #2074."
         },
         {
@@ -150416,6 +150442,42 @@
           "verifiedBy": null,
           "evidence": "Reported command now emitted the new Reading/Checking/Generating/Building/Verifying/Built surface, proving jet-env selected target/debug/jet; Nix-store binary previously emitted only built:/abilities/effects.",
           "at": "2026-08-25T15:33:46.557Z"
+        },
+        {
+          "n": 6,
+          "text": "callbacks build reports only the statically reachable IO effect",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Exact callbacks command printed effects: IO; regression test callbacks_entry_effects_are_only_io passed in isolated checkout.",
+          "at": "2026-08-25T16:20:44.462Z"
+        },
+        {
+          "n": 7,
+          "text": "default build output contains no obsolete abilities summary",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Exact callbacks and branches commands completed with no abilities line.",
+          "at": "2026-08-25T16:20:45.791Z"
+        },
+        {
+          "n": 8,
+          "text": "branches build completes without generated-Rust rejection",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Exact branches command exited 0 and built build/branches; Core closure unit test passed.",
+          "at": "2026-08-25T16:20:47.275Z"
+        },
+        {
+          "n": 9,
+          "text": "build machine output uses build.effects and the abilities-json flag is absent",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Exact callbacks --json command returned jet.report/v1 action build.effects with effects:[IO]; CLI registry and generated completions/man no longer expose --abilities-json; targeted machine-output and jet-cli tests passed.",
+          "at": "2026-08-25T16:36:29.828Z"
         }
       ],
       "refs": [],
@@ -150423,9 +150485,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T14:52:17.843Z",
-      "updated": "2026-08-25T15:51:58.216Z",
+      "updated": "2026-08-25T16:47:10.732Z",
       "updatedBy": "Main",
-      "completedAt": "2026-08-25T15:34:37.738Z"
+      "completedAt": "2026-08-25T16:47:10.732Z"
     },
     {
       "id": "c0n82vb8",
@@ -150451,34 +150513,34 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T15:22:05.836Z"
+          "at": "2026-08-25T17:32:04.493Z"
         },
         {
           "n": 2,
           "text": "A malformed or metadata-less object is quarantined and named, and garbage collection still completes for every other object in the same store",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T15:22:08.400Z"
+          "evidence": "`Store.rs:4098`, `Store/Closure.rs:1160`, passing `clean_quarantines_malformed_object_and_collects_other_objects`; scratch removed.",
+          "at": "2026-08-25T16:23:05.244Z"
         },
         {
           "n": 3,
           "text": "An enforced maximum store footprint with a documented eviction order prevents unattended agent work from exhausting free space, proven by driving a store past the ceiling",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T15:22:08.792Z"
+          "evidence": "`Store/Quota.rs:27`, `jetpack-epoch5.md:336`, passing test `hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling`",
+          "at": "2026-08-25T16:23:06.285Z"
         },
         {
           "n": 4,
           "text": "Hangar usage can be reported across every root on the machine in one command, and the total matches the measured on-disk footprint",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T15:22:09.918Z"
+          "evidence": "`hangar_du_all_reports_every_root_and_exact_physical_total`; `crates/jetpack/src/Store/Closure.rs:246`; `crates/jetpack/src/CLI/package_hangar_vendor.rs:394`",
+          "at": "2026-08-25T16:23:06.665Z"
         },
         {
           "n": 5,
@@ -150492,11 +150554,11 @@
         {
           "n": 6,
           "text": "Isolation remains available for tests that need it, and choosing it is explicit rather than the accidental default",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "orchestrator",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-25T15:22:11.756Z"
+          "evidence": "Explicit isolation is preserved and is no longer the accidental default: crates/jet-pkg-model/src/Store.rs:604 with a passing isolation test. Reported by lane c2197k6.",
+          "at": "2026-08-25T15:55:19.457Z"
         }
       ],
       "refs": [],
@@ -150504,7 +150566,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-25T15:22:03.991Z",
-      "updated": "2026-08-25T15:22:19.769Z",
+      "updated": "2026-08-25T17:32:04.495Z",
       "updatedBy": "orchestrator",
       "workOrder": 0
     }
@@ -209069,9 +209131,197 @@
       "status": "tagged",
       "created": "2026-08-24T22:54:54.311Z",
       "cardId": "c14vk3sif"
+    },
+    {
+      "id": "b0kzwuya",
+      "text": "Cleanup/fix issues in pattern_matching.jet -> return statement in classify and describe_conn not working unless on every arm. Should only be required in these cases at the head of the if statement, but honestly per rules shouldnt even be required at all in these examples. This is definitely a bug",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-25T16:34:54.835Z"
+    },
+    {
+      "id": "b12kil4t",
+      "text": "printable.jet -> examples has warnings. Ensure printable is intended format",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-25T16:38:18.338Z"
+    },
+    {
+      "id": "b29lh7mv",
+      "text": "wtf is going on with callable_policies.jet ? I have no idea what this is trying to do",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-25T16:44:20.109Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-25T17:32:04.495Z",
+      "by": "orchestrator",
+      "action": "card.criteria-reopen",
+      "ref": "c0n82vb8",
+      "note": "#1: False green: the lane proved two roots share one CAS object but the change breaks real admission. Measured on a wiped Hangar against the repository env.jet with 28 packages: 0 of 28 realize, where the same path previously realized ripgrep, jq and fd. Error E1350: cannot register output hangar/objects/sha256-8d0067db...: hardlink etc/rpc has 3 links, but only 1 are inside the output. CAS pooling hardlinks identical files across objects while the atomic admission integrity check rejects links pointing outside the output being registered. The two mechanisms are in direct conflict and must be reconciled before this criterion can be claimed."
+    },
+    {
+      "at": "2026-08-25T17:00:59.210Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-25T17:00:59.210Z"
+    },
+    {
+      "at": "2026-08-25T16:47:10.732Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03kulod",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T16:47:00.516Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09otnjg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-25T16:44:20.110Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b29lh7mv",
+      "note": "wtf is going on with callable_policies.jet ? I have no idea "
+    },
+    {
+      "at": "2026-08-25T16:38:18.338Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b12kil4t",
+      "note": "printable.jet -> examples has warnings. Ensure printable is "
+    },
+    {
+      "at": "2026-08-25T16:36:29.828Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03kulod",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-25T16:36:15.757Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03kulod",
+      "note": "#9 build machine output uses build.effects and the abilities-js"
+    },
+    {
+      "at": "2026-08-25T16:34:54.835Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b0kzwuya",
+      "note": "Cleanup/fix issues in pattern_matching.jet -> return stateme"
+    },
+    {
+      "at": "2026-08-25T16:23:06.666Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-25T16:23:06.286Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-25T16:23:05.244Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-25T16:23:03.971Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-25T16:20:47.276Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03kulod",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-25T16:20:45.791Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03kulod",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-25T16:20:44.463Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c03kulod",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-25T16:20:34.585Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03kulod",
+      "note": "#8 branches build completes without generated-Rust rejection"
+    },
+    {
+      "at": "2026-08-25T16:20:33.341Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03kulod",
+      "note": "#7 default build output contains no obsolete abilities summary"
+    },
+    {
+      "at": "2026-08-25T16:20:32.086Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03kulod",
+      "note": "#6 callbacks build reports only the statically reachable IO eff"
+    },
+    {
+      "at": "2026-08-25T16:20:22.253Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03kulod",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-25T15:55:29.297Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c064zfby",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-25T15:55:20.666Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0yfdicc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-25T15:55:19.463Z",
+      "by": "orchestrator",
+      "action": "card.criteria-meet",
+      "ref": "c0n82vb8",
+      "note": "#6"
+    },
     {
       "at": "2026-08-25T15:51:58.216Z",
       "by": "Main",
@@ -212410,167 +212660,6 @@
       "action": "card.update",
       "ref": "c0zbbsy1",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:49.511Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ttmmhd",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos S"
-    },
-    {
-      "at": "2026-08-24T23:25:49.144Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ttmmhd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:48.797Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0i0ho3h",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos u"
-    },
-    {
-      "at": "2026-08-24T23:25:48.449Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0i0ho3h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:48.104Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0m3ug2h",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos f"
-    },
-    {
-      "at": "2026-08-24T23:25:47.763Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0m3ug2h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:47.422Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0qqwe62",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos a"
-    },
-    {
-      "at": "2026-08-24T23:25:47.070Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0qqwe62",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:46.713Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0pfsrnc",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos n"
-    },
-    {
-      "at": "2026-08-24T23:25:46.362Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0pfsrnc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:46.026Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0yry94n",
-      "note": "#8 Slice-specific: the behavior this card alone owns — “jetos V"
-    },
-    {
-      "at": "2026-08-24T23:25:45.675Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0yry94n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:45.317Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0by6tvm",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos o"
-    },
-    {
-      "at": "2026-08-24T23:25:44.979Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0by6tvm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:44.614Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c03asgps",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos u"
-    },
-    {
-      "at": "2026-08-24T23:25:44.244Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c03asgps",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:43.870Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0gtqigv",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos b"
-    },
-    {
-      "at": "2026-08-24T23:25:43.496Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0gtqigv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:43.131Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fp9sb3",
-      "note": "#7 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:25:42.767Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0fp9sb3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:42.416Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0eli2fh",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos g"
-    },
-    {
-      "at": "2026-08-24T23:25:42.049Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0eli2fh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:25:41.687Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0cc6n6t",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos b"
     }
   ],
   "nextNum": 368,

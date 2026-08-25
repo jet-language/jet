@@ -10,13 +10,13 @@ fn classify(code: Int) String -> {
     // Bare-value arms (inferred `code == …`), a range arm, braceless and block
     // bodies, and an `else` catch-all — mixed freely.
     if code == {
-        200 -> { return "ok" }
+        200 -> "ok"
         404 -> {
             note :: "not found"
-            return note
+            note
         }
-        500..599 -> { return "server error" }
-        else -> { return "other" }
+        500..599 -> "server error"
+        else -> "other"
     }
 }
 
@@ -29,15 +29,15 @@ fn run() {
     // form is an ordered arm table (L0507 / D-BRANCH-LINT1).
     n :: 7
     if {
-        n > 5 -> { print("big") }
-        else -> { print("small") }
+        n > 5 -> print("big")
+        else -> print("small")
     }
     // A subject is optional. Arbitrary Boolean heads run in order, first true wins.
     // Effect-only single-arm form uses one adjacent statement after `->`.
     if n > 10 -> print("too big")
     if {
-        n < 0 -> { print("negative") }
-        n < 10 -> { print("single digit") }
+        n < 0 -> print("negative")
+        n < 10 -> print("single digit")
     }
     // A value table is total: its final else is required.
     size :: if {

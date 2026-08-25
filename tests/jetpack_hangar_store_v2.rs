@@ -338,14 +338,16 @@ fn distinct_hangar_roots_share_one_cas_object_and_file_bytes() {
         .filter(|entry| entry.file_type().unwrap().is_file())
         .map(|entry| entry.path())
         .collect::<Vec<_>>();
-    assert_eq!(shared_objects.len(), 1, "shared CAS object count");
+    assert_eq!(shared_objects.len(), 2, "shared CAS object count");
 
-    let expected = physical_files(&[shared_objects[0].as_path()]);
-    let actual = physical_files(&[
-        Path::new(&left_entry.out),
-        Path::new(&right_entry.out),
-        shared_objects[0].as_path(),
-    ]);
+    let shared_paths = shared_objects
+        .iter()
+        .map(|path| path.as_path())
+        .collect::<Vec<_>>();
+    let expected = physical_files(&shared_paths);
+    let mut all_paths = vec![Path::new(&left_entry.out), Path::new(&right_entry.out)];
+    all_paths.extend(shared_paths);
+    let actual = physical_files(&all_paths);
     assert_eq!(actual, expected, "shared CAS physical file count and bytes");
 }
 

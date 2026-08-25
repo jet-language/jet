@@ -1,8 +1,8 @@
 //! Content-addressed native runtime rlib cache.
 //!
 //! Codegen keeps emitting one complete Rust program for inspection and I1/I2
-//! audits. Native builders split its marked Prelude/runtime and Core blocks,
-//! compile those dependencies once, then compile and link the user program.
+//! audits. Native builders extract its marked Prelude/runtime and Core blocks,
+//! compile that mutually dependent closure once, then link the user program.
 
 use crate::SHA256::sha256_hex;
 use std::collections::HashMap;
@@ -15,16 +15,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-// v5: the canonical Prelude/runtime and the used Core/CoreLib closure are
-// separate rlibs. `export_runtime_source` no longer mis-promotes multi-line
-// item headers. Every v4 entry used the combined block, so nothing shares its
-// namespace.
-const CACHE_SCHEMA: &[u8] = b"jet-runtime-rlib-v5";
+// v6: the canonical Prelude/runtime and selected Core closure compile as one
+// crate. Their generated Rust is one mutually dependent namespace; splitting
+// it into two crates creates orphan-rule and cross-closure failures.
+const CACHE_SCHEMA: &[u8] = b"jet-runtime-core-rlib-v6";
 const RUNTIME_CRATE_NAME: &str = "jet_runtime";
-const CORE_CRATE_NAME: &str = "jet_runtime_core";
 const RUNTIME_CRATE_PREFIX: &str = "#![allow(warnings)]\n";
-const CORE_CRATE_PREFIX: &str =
-    "#![allow(warnings)]\nextern crate jet_runtime;\npub use jet_runtime::*;\n";
 const BEGIN: &str = crate::Codegen::CACHED_RUNTIME_BEGIN;
 const END: &str = crate::Codegen::CACHED_RUNTIME_END;
 const CORE_BEGIN: &str = crate::Codegen::CACHED_CORE_BEGIN;
@@ -54,10 +50,8 @@ impl std::fmt::Display for Error {
 pub struct PreparedRuntime {
     rust: String,
     runtime_rlib: Option<PathBuf>,
-    core_rlib: Option<PathBuf>,
     cache_hit: bool,
     _runtime_lock: Option<BuildLock>,
-    _core_lock: Option<BuildLock>,
 }
 
 impl PreparedRuntime {
@@ -65,10 +59,8 @@ impl PreparedRuntime {
         Self {
             rust: rust.to_string(),
             runtime_rlib: None,
-            core_rlib: None,
             cache_hit: false,
             _runtime_lock: None,
-            _core_lock: None,
         }
     }
 
@@ -92,11 +84,6 @@ impl PreparedRuntime {
             command
                 .arg("--extern")
                 .arg(format!("{RUNTIME_CRATE_NAME}={}", rlib.display()));
-        }
-        if let Some(rlib) = &self.core_rlib {
-            command
-                .arg("--extern")
-                .arg(format!("{CORE_CRATE_NAME}={}", rlib.display()));
         }
     }
 }
@@ -202,10 +189,14 @@ fn prepare_at_uncounted(
     };
     let rustc_version = rustc_identity(rustc, rustc_env)?;
     let compile_flags = runtime_compile_flags(rustc_flags);
-    let exported = export_runtime_source(&split.runtime);
-    let runtime_key = cache_key(
+    let mut closure = split.runtime;
+    if let Some(core) = split.core {
+        closure.push_str(&core);
+    }
+    let exported = export_runtime_source(&closure);
+    let key = cache_key(
         RUNTIME_CRATE_NAME,
-        &split.runtime,
+        &closure,
         &exported,
         RUNTIME_CRATE_PREFIX,
         None,
@@ -216,7 +207,7 @@ fn prepare_at_uncounted(
     );
     let Some(runtime) = compile_artifact(
         root,
-        &runtime_key,
+        &key,
         RUNTIME_CRATE_NAME,
         &exported,
         RUNTIME_CRATE_PREFIX,
@@ -228,60 +219,16 @@ fn prepare_at_uncounted(
     else {
         return Ok(PreparedRuntime::inline(generated));
     };
-
-    let core = if let Some(core) = split.core.as_deref() {
-        let exported = export_runtime_source(core);
-        let key = cache_key(
-            CORE_CRATE_NAME,
-            core,
-            &exported,
-            CORE_CRATE_PREFIX,
-            Some(&runtime_key),
-            rustc,
-            &rustc_version,
-            &compile_flags,
-            rustc_env,
-        );
-        compile_artifact(
-            root,
-            &key,
-            CORE_CRATE_NAME,
-            &exported,
-            CORE_CRATE_PREFIX,
-            Some((RUNTIME_CRATE_NAME, runtime.path.as_path())),
-            rustc,
-            &compile_flags,
-            rustc_env,
-        )?
-    } else {
-        None
-    };
-    if split.core.is_none() {
-        return Ok(PreparedRuntime {
-            rust: split.program,
-            runtime_rlib: Some(runtime.path),
-            core_rlib: None,
-            cache_hit: runtime.cache_hit,
-            _runtime_lock: Some(runtime.lock),
-            _core_lock: None,
-        });
-    }
-    let Some(core) = core else {
-        return Ok(PreparedRuntime::inline(generated));
-    };
     Ok(PreparedRuntime {
         rust: split.program,
         runtime_rlib: Some(runtime.path),
-        core_rlib: Some(core.path),
-        cache_hit: runtime.cache_hit && core.cache_hit,
+        cache_hit: runtime.cache_hit,
         _runtime_lock: Some(runtime.lock),
-        _core_lock: Some(core.lock),
     })
 }
 
 /// Linker selection and link arguments affect the final user crate, not the
-/// reusable runtime/Core rlibs. Keep them on the final rustc invocation while
-/// keeping unrelated rlib work reusable.
+/// reusable runtime/Core closure. Keep them on the final rustc invocation.
 fn runtime_compile_flags(flags: &[OsString]) -> Vec<OsString> {
     let mut compile_flags = Vec::with_capacity(flags.len());
     let mut index = 0;
@@ -395,6 +342,11 @@ fn compile_artifact(
     })?;
     let _ = fs::remove_file(&source);
     if !output.status.success() {
+        #[cfg(test)]
+        eprintln!(
+            "cached {crate_name} rejection:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let _ = fs::remove_dir_all(&staging);
         // A cache-only rustc rejection must never replace a valid inline build.
         return Ok(None);
@@ -479,7 +431,6 @@ fn split_generated(generated: &str) -> Result<Option<SplitGenerated>, Error> {
         Some((_, core_after)) => {
             let core_begin = core_begin.expect("core marker present");
             program.push_str(&generated[after_runtime..core_begin]);
-            program.push_str("extern crate jet_runtime_core;\nuse jet_runtime_core::*;\n");
             program.push_str(&generated[*core_after..]);
         }
         None => program.push_str(&generated[after_runtime..]),
@@ -738,16 +689,12 @@ fn is_cache_entry(path: &Path) -> bool {
 /// successful publish, so cache hits do not reorder victims or make pruning
 /// depend on directory-lock churn.
 fn entry_age(path: &Path) -> SystemTime {
-    [
-        "artifact.sha256",
-        "libjet_runtime.rlib",
-        "libjet_runtime_core.rlib",
-    ]
-    .iter()
-    .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
-    .filter_map(|metadata| metadata.modified().ok())
-    .min()
-    .unwrap_or(UNIX_EPOCH)
+    ["artifact.sha256", "libjet_runtime.rlib"]
+        .iter()
+        .filter_map(|name| fs::symlink_metadata(path.join(name)).ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .min()
+        .unwrap_or(UNIX_EPOCH)
 }
 
 fn prune_cache(root: &Path) -> Result<(), Error> {
@@ -1494,13 +1441,13 @@ mod tests {
             "linker-only inputs must not invalidate runtime work"
         );
 
-        let core = cache_key_with_schema(
+        let combined = cache_key_with_schema(
             CACHE_SCHEMA,
-            CORE_CRATE_NAME,
-            "fn core() {}",
-            "pub fn core() {}",
-            CORE_CRATE_PREFIX,
-            Some(&base),
+            RUNTIME_CRATE_NAME,
+            "fn runtime() {}fn core() {}",
+            "pub fn runtime() {}pub fn core() {}",
+            RUNTIME_CRATE_PREFIX,
+            None,
             OsStr::new("rustc"),
             "rustc 1",
             &[],
@@ -1508,32 +1455,19 @@ mod tests {
         );
         let changed_core = cache_key_with_schema(
             CACHE_SCHEMA,
-            CORE_CRATE_NAME,
-            "fn core_changed() {}",
-            "pub fn core_changed() {}",
-            CORE_CRATE_PREFIX,
-            Some(&base),
-            OsStr::new("rustc"),
-            "rustc 1",
-            &[],
-            &[],
-        );
-        assert_ne!(core, changed_core, "Core artifact must invalidate Core work");
-        let changed_dependency = cache_key_with_schema(
-            CACHE_SCHEMA,
-            CORE_CRATE_NAME,
-            "fn core() {}",
-            "pub fn core() {}",
-            CORE_CRATE_PREFIX,
-            Some("runtime-key-changed"),
+            RUNTIME_CRATE_NAME,
+            "fn runtime() {}fn core_changed() {}",
+            "pub fn runtime() {}pub fn core_changed() {}",
+            RUNTIME_CRATE_PREFIX,
+            None,
             OsStr::new("rustc"),
             "rustc 1",
             &[],
             &[],
         );
         assert_ne!(
-            core, changed_dependency,
-            "Core dependency artifact must invalidate Core work"
+            combined, changed_core,
+            "Core changes must invalidate the combined closure"
         );
     }
 
@@ -1551,7 +1485,7 @@ mod tests {
     }
 
     #[test]
-    fn split_extracts_core_and_links_both_crates() {
+    fn split_extracts_core_into_one_runtime_closure() {
         let generated = format!(
             "#![allow(warnings)]\n{BEGIN}fn runtime() {{}}\n{END}{CORE_BEGIN}fn core() {{}}\n{CORE_END}fn main() {{ core(); }}\n"
         );
@@ -1559,15 +1493,10 @@ mod tests {
         assert_eq!(split.runtime, "fn runtime() {}\n");
         assert_eq!(split.core.as_deref(), Some("fn core() {}\n"));
         assert!(split.program.contains("extern crate jet_runtime;"));
-        assert!(split.program.contains("extern crate jet_runtime_core;"));
+        assert!(!split.program.contains("jet_runtime_core"));
         assert!(split.program.contains("fn main() { core(); }"));
         assert!(!split.program.contains("fn runtime()"));
         assert!(!split.program.contains("fn core()"));
-    }
-
-    #[test]
-    fn core_runtime_reexports_runtime_namespace() {
-        assert!(CORE_CRATE_PREFIX.contains("pub use jet_runtime::*;"));
     }
 
     #[test]
@@ -1761,7 +1690,7 @@ use std::fmt::Debug;
 
     #[cfg(unix)]
     #[test]
-    fn hostile_cache_invalidation_matrix_linker_inputs_reuse_unaffected_runtime_and_core_artifacts() {
+    fn hostile_cache_invalidation_matrix_reuses_unaffected_combined_closure() {
         use std::os::unix::fs::PermissionsExt;
 
         let root = std::env::temp_dir().join(format!(
@@ -1797,7 +1726,7 @@ use std::fmt::Debug;
         .unwrap();
         assert!(!first.cache_hit());
         drop(first);
-        assert_eq!(fs::read(&count).unwrap().len(), 2, "runtime + Core cold build");
+        assert_eq!(fs::read(&count).unwrap().len(), 1, "one combined cold build");
 
         let linker_changed = prepare_at(
             &root.join("cache"),
@@ -1814,12 +1743,12 @@ use std::fmt::Debug;
         .unwrap();
         assert!(
             linker_changed.cache_hit(),
-            "linker-only changes must not rebuild runtime/Core artifacts"
+            "linker-only changes must not rebuild the runtime/Core closure"
         );
         drop(linker_changed);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            2,
+            1,
             "linker-only change must affect final link work only"
         );
 
@@ -1834,10 +1763,10 @@ use std::fmt::Debug;
         .unwrap();
         assert!(
             program_hit.cache_hit(),
-            "program/generated-code changes must reuse runtime/Core artifacts"
+            "program/generated-code changes must reuse the runtime/Core closure"
         );
         drop(program_hit);
-        assert_eq!(fs::read(&count).unwrap().len(), 2);
+        assert_eq!(fs::read(&count).unwrap().len(), 1);
 
         let core_changed = generated.replace("fn core() {}", "fn core_changed() {}");
         let core_miss = prepare_at(
@@ -1852,8 +1781,8 @@ use std::fmt::Debug;
         drop(core_miss);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            3,
-            "Core-only change must rebuild Core, not runtime"
+            2,
+            "Core-only change must rebuild the combined closure"
         );
 
         let runtime_changed = generated.replace("fn runtime() {}", "fn runtime_changed() {}");
@@ -1869,8 +1798,8 @@ use std::fmt::Debug;
         drop(runtime_miss);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            5,
-            "runtime change must rebuild runtime and dependent Core"
+            3,
+            "runtime change must rebuild the combined closure"
         );
 
         let compile_changed = prepare_at(
@@ -1885,8 +1814,8 @@ use std::fmt::Debug;
         drop(compile_changed);
         assert_eq!(
             fs::read(&count).unwrap().len(),
-            7,
-            "compile flag change must rebuild runtime and Core artifacts"
+            4,
+            "compile flag change must rebuild the combined closure"
         );
         let _ = fs::remove_dir_all(root);
     }
@@ -2004,6 +1933,55 @@ use std::fmt::Debug;
             prepare_at(&root.join("cache"), rustc.as_os_str(), &generated, &[], &[]).unwrap();
         assert_eq!(prepared.rust(), generated);
         assert!(!prepared.cache_hit());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn branches_core_closure_compiles_as_split_rlibs() {
+        if Command::new("rustc").arg("-vV").output().is_err() {
+            return;
+        }
+        let entry = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/features/basics/branches.jet");
+        let generated = crate::compile_with_path("", entry.to_str().unwrap())
+            .expect("branches should reach codegen")
+            .rust;
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-branches-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let prepared =
+            prepare_at(&root.join("cache"), OsStr::new("rustc"), &generated, &[], &[])
+                .expect("runtime preparation");
+        assert!(prepared.is_split(), "Core-bearing builds must use cached rlibs");
+        let source = root.join("main.rs");
+        let binary = root.join("main");
+        fs::write(&source, prepared.rust()).unwrap();
+        let mut rustc = Command::new("rustc");
+        rustc
+            .args(["--edition", "2021"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&binary);
+        prepared.add_rustc_args(&mut rustc);
+        let output = rustc.output().unwrap();
+        assert!(
+            output.status.success(),
+            "thin branches crate must compile:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        drop(prepared);
+        let warm = prepare_at(
+            &root.join("cache"),
+            OsStr::new("rustc"),
+            &generated,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(warm.cache_hit(), "second preparation must reuse the closure rlib");
+        drop(warm);
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -1454,10 +1454,11 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
-    if needs_math {
-        out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
-        out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
-    }
+    // Scheduler waits always call the deadline raiser, and FakeData below
+    // always uses the seeded stream. They are kernel dependencies, not
+    // conditional math surface.
+    out.push_str(include_str!("../Prelude/Core/SeededRandom.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 
     if needs_email {
@@ -3131,6 +3132,8 @@ mod tests {
         push_core_runtime(&mut emitted, &bundle, false);
         assert!(emitted.contains(scheduler_prelude_for_emit(true)));
         assert!(emitted.contains(UI_PRELUDE));
+        assert!(body.contains("fn jet_deadline_exceeded"));
+        assert!(body.contains("fn jet_seeded_rng_int"));
         assert!(emitted.contains(body.as_str()));
         assert_eq!(
             corelib_emission_fingerprint(&bundle, false),

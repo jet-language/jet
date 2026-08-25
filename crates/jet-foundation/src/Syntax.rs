@@ -227,9 +227,8 @@
 // supported binders). `Panic` and `Mem` are deny-only rows, not roots.
 // D-AUTHORITY-WORD2=E (ratified 2026-08-17, card #1572) amends the retired
 // wording: the fact menu is `Ability`, the carried rights value is `Abilities`,
-// and the block marker is `#Abilities`. Browser `.abilities()` and
-// `--abilities-json` use the same word; WebDriver wire `capabilities` remains
-// a protocol field. Old spellings have no aliases.
+// and the block marker is `#Abilities`. Browser `.abilities()` remains a
+// protocol value; build tooling reports the FX graph instead.
 // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
 // SIGIL_FENCE_CLOSE. D-FENCE-GLYPH1=A (card #1516) respells them
 // `@[ a, b ]@` and opens expression-position fences to expression entries:

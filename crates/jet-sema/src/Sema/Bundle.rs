@@ -1954,6 +1954,23 @@ pub fn check_bundle_for_output_opts(
 ) -> Vec<Diagnostic> {
     pipeline_check_bundle_opts_for_output(bundle, mode, freestanding, gates, Some(output), None).0
 }
+pub fn check_bundle_for_output_opts_with_effect_facts(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    output: &str,
+    freestanding: bool,
+    gates: crate::Policy::GateSet,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        freestanding,
+        gates,
+        Some(output),
+        None,
+    )
+}
+
 
 /// Like `check_bundle` but also returns effect facts for D-SEMINDEX1.
 pub fn check_bundle_with_effect_facts(

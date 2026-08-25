@@ -8,15 +8,14 @@ struct Rect {
     width: Float
     height: Float
 
-    fn new(width: Float, height: Float) Rect -> { return Rect{width: width, height: height} }
+    fn new(width: Float, height: Float) Rect -> {width: width, height: height}
 
-    fn area(self) Float -> (self.width * self.height)
+    fn area(self) Float -> self.width * self.height
 
     fn scale(self, factor: Float, clamp: Bool{false}) Rect -> {
-        scaled_w :: (self.width * factor)
-        scaled_h :: (self.height * factor)
-        if clamp -> return Rect{width: 100.0, height: 100.0}
-        return Rect{width: scaled_w, height: scaled_h}
+        scaled_w :: self.width * factor
+        scaled_h :: self.height * factor
+        if clamp -> {width: 100.0, height: 100.0} else -> {width: scaled_w, height: scaled_h}
     }
 }
 
@@ -24,26 +23,26 @@ struct Rect {
 // `tls` are label-only, so every call says which policy it is setting.
 // `timeout seconds` splits the public label from the local name.
 fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) String -> {
-    return "{host} t={seconds} tls={tls}"
+    "{host} t={seconds} tls={tls}"
 }
 
 // Prints its tag, then hands back its value — so the output shows the order
 // the supplied expressions actually ran in.
 fn note(label: String, value: Float) Float -> {
     print("eval {label}")
-    return value
+    value
 }
 
 // The owned call exercises a concrete defaulted slot and a variadic rest;
 // the tap calls make source-order and exactly-once evaluation visible.
 fn tap<T>(label: String, value: ^T) T -> {
     print("tap {label}")
-    return value
+    value
 }
 
 fn collect(first: ^Int, second: ^Int{first}, rest: ...Int) Int -> {
     print("rest {rest.len()}")
-    return second
+    second
 }
 
 // A known API stays cheap to call positionally. The editor renders this as
@@ -51,7 +50,7 @@ fn collect(first: ^Int, second: ^Int{first}, rest: ...Int) Int -> {
 fn clamp(value: Int, low: Int, high: Int) Int -> {
     if value < low -> return low
     if value > high -> return high
-    return value
+    value
 }
 
 // D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
@@ -60,7 +59,7 @@ fn apply(action: fn(*, force: Bool) Int) Int -> action(force: true)
 
 fn saver(force: Bool) Int -> {
     print("saver {force}")
-    return 7
+    7
 }
 
 fn run() {

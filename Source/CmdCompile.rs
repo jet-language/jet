@@ -436,7 +436,6 @@ pub(crate) fn run_compile_cmd(
     cross_target: Option<&str>,
     explain_partition: bool,
     verbose: bool,
-    abilities_json: bool,
     sbom: bool,
     named_profile: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
@@ -632,7 +631,6 @@ pub(crate) fn run_compile_cmd(
             || small
             || freestanding
             || !build_grants.is_empty()
-            || abilities_json
             || sbom;
         if incompatible {
             let diagnostic = jet::Diagnostics::Diagnostic::error(
@@ -709,7 +707,6 @@ pub(crate) fn run_compile_cmd(
         && !small
         && !freestanding
         && build_grants.is_empty()
-        && !abilities_json
         && !sbom
         && !is_web
         && !is_plugin
@@ -935,6 +932,16 @@ pub(crate) fn run_compile_cmd(
         Some((
             jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
             facts.fact_registry.clone(),
+            jet::EffectBudget::summary_line_for_program(
+                program,
+                &facts.summaries,
+                jet::Codegen::ENTRY_FN,
+            ),
+            jet::EffectBudget::summary_json_for_program(
+                program,
+                &facts.summaries,
+                jet::Codegen::ENTRY_FN,
+            ),
         ))
     });
     // S59: same story for the C link flags — resolve them from the one loaded
@@ -1030,7 +1037,6 @@ pub(crate) fn run_compile_cmd(
         rust_code,
         ffi_link,
         clinks,
-        abilities,
         web_out,
         web_partition_report,
         plugin_out,
@@ -1082,7 +1088,6 @@ pub(crate) fn run_compile_cmd(
                 library_rust.unwrap_or(out.rust),
                 out.ffi,
                 clinks,
-                out.abilities,
                 out.web,
                 out.web_partition_report,
                 out.plugin,
@@ -1105,6 +1110,7 @@ pub(crate) fn run_compile_cmd(
     // whole-graph enforcement when `package.jet` declares `authority.holds`.
     // summary is the whole-program effect fixpoint (`Sema::solve`) that
     // ordinary compilation doesn't need to return.
+    let mut build_effect_json = None;
     if cmd == "build" || cmd == "run" {
         // #2083: reuse the fixpoint the build front end already solved. Only
         // the paths that never ran it — a plain `jet run`, a library or named
@@ -1112,24 +1118,43 @@ pub(crate) fn run_compile_cmd(
         let effect_view = match reused_package_effects {
             Some(view) => Some(view),
             None => {
-                match crate::CmdInspect::check_projection_for_effects(
-                    Path::new(file),
-                    profile.budget_name(),
-                    setting_overrides,
-                ) {
+                let projection = match output_name {
+                    Some(output) => crate::CmdInspect::check_projection_for_output_effects(
+                        Path::new(file),
+                        output,
+                        profile.budget_name(),
+                        setting_overrides,
+                    ),
+                    None => crate::CmdInspect::check_projection_for_effects(
+                        Path::new(file),
+                        profile.budget_name(),
+                        setting_overrides,
+                    ),
+                };
+                match projection {
                     Ok(checked) => Some((
                         jet::EffectBudget::compute_package_effects(
                             &checked.bundle,
                             &checked.facts.solved,
                             &checked.facts.summaries,
                         ),
-                        checked.facts.fact_registry,
+                        checked.facts.fact_registry.clone(),
+                        jet::EffectBudget::summary_line_for_program(
+                            &checked.bundle,
+                            &checked.facts.summaries,
+                            jet::Codegen::ENTRY_FN,
+                        ),
+                        jet::EffectBudget::summary_json_for_program(
+                            &checked.bundle,
+                            &checked.facts.summaries,
+                            jet::Codegen::ENTRY_FN,
+                        ),
                     )),
                     Err(_) => None,
                 }
             }
         };
-        if let Some((entries, fact_registry)) = effect_view {
+        if let Some((entries, fact_registry, effect_summary, effect_json)) = effect_view {
             // D-PLUGIN1=B (c81): a plugin is deny-by-default — the wasmtime
             // host registers zero host imports, so any host effect used by the
             // plugin's own code would fail to instantiate at load time. Guest
@@ -1149,8 +1174,12 @@ pub(crate) fn run_compile_cmd(
             }
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
             // effect summary is build-time tool output, not runtime stderr.
-            if cmd == "build" && !mode.json {
-                eprintln!("{}", jet::EffectBudget::summary_line(&entries));
+            if cmd == "build" {
+                if mode.json {
+                    build_effect_json = Some(effect_json);
+                } else {
+                    eprintln!("{effect_summary}");
+                }
             }
             if let Some((root, manifest)) = package_manifest.as_ref() {
                 let configured_names = manifest
@@ -1255,10 +1284,13 @@ pub(crate) fn run_compile_cmd(
                     }
                 }
                 progress.finish("library artifacts");
-                if mode.json || abilities_json {
-                    println!("{}", abilities.to_json());
-                } else {
-                    eprintln!("{}", abilities.summary());
+                if mode.json {
+                    println!(
+                        "{}",
+                        build_effect_json
+                            .as_deref()
+                            .unwrap_or("{\"effects\":[]}")
+                    );
                 }
                 return;
             }
@@ -1328,11 +1360,13 @@ pub(crate) fn run_compile_cmd(
             if sbom {
                 write_sbom_for_build(file, &bin_path(file), mode);
             }
-            // D-TOOL5 (E2-M11): print ability summary after a successful build.
-            if mode.json || abilities_json {
-                println!("{}", abilities.to_json());
-            } else {
-                eprintln!("{}", abilities.summary());
+            if mode.json {
+                println!(
+                    "{}",
+                    build_effect_json
+                        .as_deref()
+                        .unwrap_or("{\"effects\":[]}")
+                );
             }
         }
         "run" => {

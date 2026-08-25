@@ -3559,13 +3559,23 @@ pub(crate) fn commit_external_consumer_root(
 
 fn live_roots_unlocked(roots: &Roots) -> std::io::Result<LiveRoots> {
     let cwd = std::env::current_dir()?;
-    live_roots_from(roots, &cwd)
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    live_roots_from_graph(roots, &cwd, &graph)
 }
 
+#[cfg(test)]
 fn live_roots_from(roots: &Roots, start: &Path) -> std::io::Result<LiveRoots> {
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    live_roots_from_graph(roots, start, &graph)
+}
+
+fn live_roots_from_graph(
+    roots: &Roots,
+    start: &Path,
+    graph: &Closure::ClosureGraph,
+) -> std::io::Result<LiveRoots> {
     let mut live = lock_roots_from(start)?;
     let lifecycle = Lifecycle::protected_targets_unlocked(roots)?;
-    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
     let mut targets = live.output_hashes.clone();
     for (receipt, package) in &live.receipt_packages {
         let mut matching = Vec::new();
@@ -3862,6 +3872,15 @@ fn collect_orphaned_canonical_objects(
     retired: &BTreeSet<String>,
 ) -> std::io::Result<Vec<OrphanedCanonicalObject>> {
     let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    collect_orphaned_canonical_objects_with_graph(roots, live, retired, &graph)
+}
+
+fn collect_orphaned_canonical_objects_with_graph(
+    roots: &Roots,
+    live: &LiveRoots,
+    retired: &BTreeSet<String>,
+    graph: &Closure::ClosureGraph,
+) -> std::io::Result<Vec<OrphanedCanonicalObject>> {
     let mut protected = live.output_hashes.clone();
     for (id, record) in &graph.records {
         if !retired.contains(id) {
@@ -4013,15 +4032,22 @@ pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
 
 fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
-    let live = live_roots_unlocked(roots)?;
     let malformed = malformed_objects(&store)?;
-    let mut report = sweep_build_scratch_plan(&store)?;
-    report.quarantined_objects = malformed.len();
-    let now = now_secs();
-    let mut retired = malformed
+    let malformed_ids = malformed
         .iter()
         .map(|object| object.id.clone())
         .collect::<BTreeSet<_>>();
+    let graph = if malformed_ids.is_empty() {
+        Closure::lifecycle_closure_graph_unlocked(roots)?
+    } else {
+        Closure::lifecycle_closure_graph_unlocked_ignoring(roots, &malformed_ids)?
+    };
+    let cwd = std::env::current_dir()?;
+    let live = live_roots_from_graph(roots, &cwd, &graph)?;
+    let mut report = sweep_build_scratch_plan(&store)?;
+    report.quarantined_objects = malformed.len();
+    let now = now_secs();
+    let mut retired = malformed_ids;
 
     for ent in object_dirs(&store)? {
         let path = ent.path();
@@ -4044,7 +4070,7 @@ fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
         report.removed_bytes += dir_size(&path);
     }
 
-    let orphaned = collect_orphaned_canonical_objects(roots, &live, &retired)?;
+    let orphaned = collect_orphaned_canonical_objects_with_graph(roots, &live, &retired, &graph)?;
     report.removed_objects += orphaned.len();
     report.removed_bytes += orphaned.iter().map(|node| node.bytes).sum::<u64>();
 
@@ -4069,9 +4095,11 @@ pub fn clean(roots: &Roots) -> std::io::Result<CleanReport> {
 fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
     Ingest::ensure_real_directory(&store, "Hangar root")?;
-    let live = live_roots_unlocked(roots)?;
     let malformed = malformed_objects(&store)?;
     let quarantined_objects = quarantine_malformed_objects(roots, &malformed)?;
+    let graph = Closure::lifecycle_closure_graph_unlocked(roots)?;
+    let cwd = std::env::current_dir()?;
+    let live = live_roots_from_graph(roots, &cwd, &graph)?;
     let mut report = sweep_build_scratch(&store)?;
     report.quarantined_objects = quarantined_objects;
     let now = now_secs();
@@ -4098,7 +4126,7 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
         report.removed_bytes += bytes;
     }
 
-    let orphaned = collect_orphaned_canonical_objects(roots, &live, &retired)?;
+    let orphaned = collect_orphaned_canonical_objects_with_graph(roots, &live, &retired, &graph)?;
     for node in &orphaned {
         remove_hangar_node(&node.path)?;
         report.removed_objects += 1;

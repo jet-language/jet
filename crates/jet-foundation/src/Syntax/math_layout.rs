@@ -870,7 +870,6 @@ pub const JOB_RESERVED_CLI: &[&str] = &[
     "target",
     "preset",
     "explain_partition",
-    "abilities_json",
     "update_snapshots",
     "coverage",
     "rust",
