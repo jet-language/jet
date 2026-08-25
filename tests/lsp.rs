@@ -1803,7 +1803,7 @@ fn lsp_on_type_formatting_returns_brace_edits() {
                 },
                 TranscriptStep::Send {
                     msg: format!(
-                        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/onTypeFormatting","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}},"ch":{},"options":{{"tabSize":4,"insertSpaces":true}}}}}}}"#,
+                        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/onTypeFormatting","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}},"ch":{},"options":{{"tabSize":4,"insertSpaces":true}}}}}}"#,
                         uri, line, character, trigger
                     ),
                     expect_contains: Some(expected.into_iter().map(str::to_string).collect()),

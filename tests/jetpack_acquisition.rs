@@ -52,5 +52,5 @@ fn non_tty_download_without_yes_fails_before_realization() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("-y"), "stderr: {stderr}");
     assert!(output.stdout.is_empty());
-    assert!(jetpack::Store::list(&jetpack::Store::Roots::at(root.path)).is_empty());
+    assert!(jetpack::Store::list(&jetpack::Store::Roots::at(root.path.clone())).is_empty());
 }

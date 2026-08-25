@@ -1090,7 +1090,14 @@ fn url_host(host: &str) -> String {
 }
 
 fn canvas_api_path(path: &str, target: &str) -> bool {
-    (path == "/__jet_canvas/live"
+    (matches!(
+        path,
+        "/__jet_dev_version"
+            | "/__jet_dev_status"
+            | "/__jet_dev_disconnect"
+            | "/__jet_perf_browser"
+            | "/__jet_canvas/live"
+    )
         || (path.starts_with("/__jet_canvas/") && !path.ends_with("/app.js"))
         || (path.starts_with("/canvas/") && !path.ends_with("/app.js"))
         || (path.starts_with("/panel/") && !path.ends_with("/app.js")))
@@ -1252,7 +1259,6 @@ fn handle_connection(
 
     let path = target.split('?').next().unwrap_or("/");
     if listener_kind == ListenerKind::Canvas
-        && canvas_only
         && canvas_api_path(path, target)
         && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
     {
@@ -2336,14 +2342,23 @@ mod tests {
         headers.insert("host".to_string(), "localhost:8123".to_string());
         headers.insert("origin".to_string(), "http://localhost:8123".to_string());
         headers.insert("authorization".to_string(), format!("Bearer {secret}"));
-        let request = Request {
+        let mut request = Request {
             method: "GET".to_string(),
             target: "/canvas/graph".to_string(),
             headers,
             body: Vec::new(),
         };
         assert!(canvas_api_path("/canvas/graph", "/canvas/graph"));
+        assert!(canvas_api_path("/__jet_dev_status", "/__jet_dev_status"));
         assert!(canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        request.headers.remove("authorization");
+        assert!(!canvas_request_authorized(
             &request,
             &request.target,
             "127.0.0.1",

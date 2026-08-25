@@ -163,8 +163,7 @@ button.project-card { width: 100%; text-align: left; cursor: pointer; color: inh
 #canvas-dock button.is-active { border-color: #35c2ff; color: #e7fbff; background: #102437; }
 #graph-strip { position: absolute; left: 12px; right: 12px; top: 10px; z-index: 13; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; padding: 6px; border: 1px solid rgba(53,194,255,.45); background: linear-gradient(180deg, rgba(9,19,32,.94), rgba(5,11,19,.82)); box-shadow: 0 16px 44px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); border-radius: 6px; max-width: min(860px, calc(100% - 24px)); }
 body:not(.is-dev-mode) #graph-strip { display: none; }
-#wire-status { display: none; }
-body.is-dev-mode #wire-status { display: grid; }
+body:not(.is-dev-mode) #wire-status { display: none; }
 .graph-tab { position: relative; flex: 0 0 auto; min-width: 116px; min-height: 36px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; border-color: #2e4966; background: linear-gradient(180deg, rgba(18,31,46,.96), rgba(8,17,29,.96)); font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; box-shadow: inset 0 -1px 0 rgba(255,255,255,.04); }
 .graph-tab::before { content: ""; width: 8px; height: 18px; border-radius: 2px; background: #46617d; box-shadow: 0 0 14px rgba(70,97,125,.32); }
 .graph-tab.is-active { border-color: #35c2ff; background: linear-gradient(180deg, #12324a, #0b1d2d); color: #eaf8ff; box-shadow: inset 0 -3px 0 #35c2ff, 0 0 28px rgba(53,194,255,.24); }
