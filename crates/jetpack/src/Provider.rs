@@ -1246,8 +1246,14 @@ pub(crate) fn host_nix_system() -> Option<&'static str> {
     }
 }
 
+/// The lock's `channel` field holds the *tier* a source tracks (`latest`,
+/// `auto`), which `realize.rs` compares against the manifest. The signed index
+/// is keyed by the nixpkgs channel name instead, and that lives in the declared
+/// upstream (`NixOS/nixpkgs/nixos-unstable@github`). Read each from its own
+/// source; they are different facts that happen to share a word.
 fn locked_nix_index_key_for_project(
     spec: &RefSpec,
+    table: &SourceTable,
     project_dir: Option<&Path>,
     host_system: &str,
 ) -> Result<IndexKey, ProviderError> {
@@ -1287,13 +1293,24 @@ fn locked_nix_index_key_for_project(
             "Nix source `{source_name}` has malformed exact revision `{revision}`"
         )));
     }
-    if !matches!(
-        locked.channel.as_str(),
-        "nixpkgs-unstable" | "nixos-unstable"
-    ) {
+    // `#auto NixOS/nixpkgs/nixos-unstable@github` -> `nixos-unstable`. Read the
+    // original spelling, not the live upstream: applying the lock rewrites the
+    // upstream to `github:NixOS/nixpkgs#<revision>`, which no longer names the
+    // channel the index is keyed by.
+    let declared = table.source_ref(source_name).ok_or_else(|| {
+        ProviderError::Channel(format!("Nix source `{source_name}` is not declared"))
+    })?;
+    let channel = declared
+        .split('@')
+        .next()
+        .unwrap_or_default()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if !matches!(channel.as_str(), "nixpkgs-unstable" | "nixos-unstable") {
         return Err(ProviderError::Unsupported(format!(
-            "Nix channel `{}` is not covered by the signed nixpkgs index",
-            locked.channel
+            "Nix channel `{channel}` is not covered by the signed nixpkgs index"
         )));
     }
     if host_system.is_empty() {
@@ -1302,7 +1319,7 @@ fn locked_nix_index_key_for_project(
         ));
     }
     Ok(IndexKey {
-        channel: locked.channel,
+        channel,
         revision: revision.to_string(),
         system: host_system.to_string(),
         attrpath: vec![nix_package_name(&spec.package).to_string()],
@@ -1311,20 +1328,21 @@ fn locked_nix_index_key_for_project(
 
 pub(crate) fn locked_nix_index_key(
     spec: &RefSpec,
-    _table: &SourceTable,
+    table: &SourceTable,
     ctx: &Ctx,
     host_system: &str,
 ) -> Result<IndexKey, ProviderError> {
-    locked_nix_index_key_for_project(spec, ctx.project_dir, host_system)
+    locked_nix_index_key_for_project(spec, table, ctx.project_dir, host_system)
 }
 
 fn has_locked_nix_index_key(
     spec: &RefSpec,
+    table: &SourceTable,
     project_dir: Option<&Path>,
     host_system: Option<&str>,
 ) -> bool {
     host_system
-        .and_then(|system| locked_nix_index_key_for_project(spec, project_dir, system).ok())
+        .and_then(|system| locked_nix_index_key_for_project(spec, table, project_dir, system).ok())
         .is_some()
 }
 
@@ -2429,7 +2447,7 @@ pub fn needs_nix_bridge(
     project_dir: Option<&Path>,
 ) -> Option<NixBridgeNeed> {
     if uses_nix_provider(spec, table, offline, cache_dir)
-        && !has_locked_nix_index_key(spec, project_dir, host_nix_system())
+        && !has_locked_nix_index_key(spec, table, project_dir, host_nix_system())
     {
         Some(NixBridgeNeed {
             reference: spec.raw.clone(),

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 2188,
-    "rev": 44608,
+    "rev": 44611,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2357,8 +2357,13 @@
       "title": "M05 · One truthful project ledger",
       "goal": "Tower and the specification form one navigable, linted project ledger: audit findings cannot close without a disposition, references resolve, spec-only decision IDs have provenance and supersession links, split-family cards carry slice-specific proof and named law, and criteria/evidence conflicts are adjudicated. Someone can run the hygiene checks and get a complete actionable burn-down with no phantom cards, stale decision authority, or unowned audit finding.",
       "criteria": [],
-      "status": "review-ready",
-      "created": "2026-08-23T01:02:24.070Z"
+      "status": "met",
+      "created": "2026-08-23T01:02:24.070Z",
+      "verification": {
+        "by": "orchestrator",
+        "evidence": "Composed targeted sweep on the integrated tree: cargo check --workspace --all-targets 0 errors 0 warnings; cargo test --test debug 39 passed 0 failed; cargo test --test machine_output 10 passed 0 failed; tower node --test 292 passed 0 failed. Ledger evidence: tower lint --docs is clean at exit 0 after importing the two spec-cited decisions D-JPK-NIXINDEX1 and D-JPK-NIXCACHE1; the split-family census returns 0 cards lacking a named-decision log line and 0 lacking a slice-specific criterion, across 159 open cards. Fresh-context review of the integrated milestone diff found six issues. Four were real and are fixed: mintVerdict bypassed the verdict supersession rule (plugins/tower/app/store.mjs:1554, now validated through verdictSupersededBy with a --supersedes flag and two new gate tests); setBreakpoints overwrote pending specs before a replacement could fail (crates/jet-debug/src/Dap.rs:1407); five debug tests were red, the last because a generated argument-temporary Let inherited the call site line span and consumed a step so the debugger never entered the callee; and the machine-door helper accepted a report on either stream and ignored exit status (tests/machine_output.rs:28, now every door declares status, stream and action). One finding was rejected after probing the real binary: jet inspect semindex --json does emit the jet.report/v1 envelope, so CmdSemIndex.rs was not a regression. The deleteDecision dangling-supersession hole is logged and carried forward.",
+        "at": "2026-08-25T03:32:38.156Z"
+      }
     },
     {
       "id": "e10-m06-adoption-reference-learning",
@@ -2384,8 +2389,13 @@
       "title": "M07 · Receipt-driven development loop",
       "goal": "Jet development becomes one receipt-backed loop: every act produces a content-addressed witnessed receipt, unchanged work is reused, tests/goldens/budgets/API snapshots/status/production crashes share one schema, machine output has one versioned envelope and door, review and debugging query semantic and authority history, refactors preserve semantic ops, #Todo/fill and find are checked discovery tools, and try/fix apply reversible overlays. Someone can ask what is true, why a value changed, or what a proposed edit affects, then keep or roll back it with proofs that remain valid across tiers.",
       "criteria": [],
-      "status": "review-ready",
-      "created": "2026-08-23T01:02:32.859Z"
+      "status": "met",
+      "created": "2026-08-23T01:02:32.859Z",
+      "verification": {
+        "by": "orchestrator",
+        "evidence": "Composed targeted sweep on the integrated tree: cargo check --workspace --all-targets 0 errors 0 warnings; cargo test --test debug 39 passed 0 failed; cargo test --test machine_output 10 passed 0 failed; tower node --test 292 passed 0 failed. Machine-surface evidence: cargo test --test machine_output 10 passed 0 failed with all 43 doors declaring an expected status, stream and action; build --abilities-json emits the real ability set. Fresh-context review of the integrated milestone diff found six issues. Four were real and are fixed: mintVerdict bypassed the verdict supersession rule (plugins/tower/app/store.mjs:1554, now validated through verdictSupersededBy with a --supersedes flag and two new gate tests); setBreakpoints overwrote pending specs before a replacement could fail (crates/jet-debug/src/Dap.rs:1407); five debug tests were red, the last because a generated argument-temporary Let inherited the call site line span and consumed a step so the debugger never entered the callee; and the machine-door helper accepted a report on either stream and ignored exit status (tests/machine_output.rs:28, now every door declares status, stream and action). One finding was rejected after probing the real binary: jet inspect semindex --json does emit the jet.report/v1 envelope, so CmdSemIndex.rs was not a regression. The deleteDecision dangling-supersession hole is logged and carried forward.",
+        "at": "2026-08-25T03:32:38.506Z"
+      }
     },
     {
       "id": "e12-m02-identity-secrets",
@@ -2551,8 +2561,13 @@
       "title": "M03 · Native debugging across the host matrix",
       "goal": "The native debugger offers a real DAP state machine and complete Jet-level lifecycle: launch, breakpoints, attach and disconnect, threads, stacks, scopes, values, restart, safe object references, explicit raw frames, and verified VS Code, Zed, and lldb behavior. Someone can debug a representative native program locally and through each supported editor, observe correct Jet source and diagnostics, and disconnect or hit failure without leaked processes or stale references.",
       "criteria": [],
-      "status": "review-ready",
-      "created": "2026-08-23T01:03:43.480Z"
+      "status": "met",
+      "created": "2026-08-23T01:03:43.480Z",
+      "verification": {
+        "by": "orchestrator",
+        "evidence": "Composed targeted sweep on the integrated tree: cargo check --workspace --all-targets 0 errors 0 warnings; cargo test --test debug 39 passed 0 failed; cargo test --test machine_output 10 passed 0 failed; tower node --test 292 passed 0 failed. Debugger evidence: cargo test --test debug 39 passed 0 failed, including step_into_call_and_backtrace, break_then_continue_stops_at_breakpoint, locals_and_print_show_jet_values, loop_next_edges_are_step_visible_and_line_mapped and step_stops_at_first_line_with_caret_and_locals. Fresh-context review of the integrated milestone diff found six issues. Four were real and are fixed: mintVerdict bypassed the verdict supersession rule (plugins/tower/app/store.mjs:1554, now validated through verdictSupersededBy with a --supersedes flag and two new gate tests); setBreakpoints overwrote pending specs before a replacement could fail (crates/jet-debug/src/Dap.rs:1407); five debug tests were red, the last because a generated argument-temporary Let inherited the call site line span and consumed a step so the debugger never entered the callee; and the machine-door helper accepted a report on either stream and ignored exit status (tests/machine_output.rs:28, now every door declares status, stream and action). One finding was rejected after probing the real binary: jet inspect semindex --json does emit the jet.report/v1 envelope, so CmdSemIndex.rs was not a regression. The deleteDecision dangling-supersession hole is logged and carried forward.",
+        "at": "2026-08-25T03:32:37.775Z"
+      }
     },
     {
       "id": "e12-m06-command-supply-chain",
@@ -207667,6 +207682,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-25T03:32:38.506Z",
+      "by": "orchestrator",
+      "action": "milestone.verify",
+      "ref": "e10-m07-receipt-development-loop",
+      "note": "Composed targeted sweep on the integrated tree: cargo check --workspace --all-targets 0 errors 0 warnings; cargo test --test debug 39 passed 0 failed; cargo test --test machine_output 10 passed 0 failed; tower node --test 292 passed 0 failed. Machine-surface evidence: cargo test --test machine_output 10 passed 0 failed with all 43 doors declaring an expected status, stream and action; build --abilities-json emits the real ability set. Fresh-context review of the integrated milestone diff found six issues. Four were real and are fixed: mintVerdict bypassed the verdict supersession rule (plugins/tower/app/store.mjs:1554, now validated through verdictSupersededBy with a --supersedes flag and two new gate tests); setBreakpoints overwrote pending specs before a replacement could fail (crates/jet-debug/src/Dap.rs:1407); five debug tests were red, the last because a generated argument-temporary Let inherited the call site line span and consumed a step so the debugger never entered the callee; and the machine-door helper accepted a report on either stream and ignored exit status (tests/machine_output.rs:28, now every door declares status, stream and action). One finding was rejected after probing the real binary: jet inspect semindex --json does emit the jet.report/v1 envelope, so CmdSemIndex.rs was not a regression. The deleteDecision dangling-supersession hole is logged and carried forward."
+    },
+    {
+      "at": "2026-08-25T03:32:38.156Z",
+      "by": "orchestrator",
+      "action": "milestone.verify",
+      "ref": "e10-m05-project-ledger",
+      "note": "Composed targeted sweep on the integrated tree: cargo check --workspace --all-targets 0 errors 0 warnings; cargo test --test debug 39 passed 0 failed; cargo test --test machine_output 10 passed 0 failed; tower node --test 292 passed 0 failed. Ledger evidence: tower lint --docs is clean at exit 0 after importing the two spec-cited decisions D-JPK-NIXINDEX1 and D-JPK-NIXCACHE1; the split-family census returns 0 cards lacking a named-decision log line and 0 lacking a slice-specific criterion, across 159 open cards. Fresh-context review of the integrated milestone diff found six issues. Four were real and are fixed: mintVerdict bypassed the verdict supersession rule (plugins/tower/app/store.mjs:1554, now validated through verdictSupersededBy with a --supersedes flag and two new gate tests); setBreakpoints overwrote pending specs before a replacement could fail (crates/jet-debug/src/Dap.rs:1407); five debug tests were red, the last because a generated argument-temporary Let inherited the call site line span and consumed a step so the debugger never entered the callee; and the machine-door helper accepted a report on either stream and ignored exit status (tests/machine_output.rs:28, now every door declares status, stream and action). One finding was rejected after probing the real binary: jet inspect semindex --json does emit the jet.report/v1 envelope, so CmdSemIndex.rs was not a regression. The deleteDecision dangling-supersession hole is logged and carried forward."
+    },
+    {
+      "at": "2026-08-25T03:32:37.775Z",
+      "by": "orchestrator",
+      "action": "milestone.verify",
+      "ref": "e10-m03-native-debugging",
+      "note": "Composed targeted sweep on the integrated tree: cargo check --workspace --all-targets 0 errors 0 warnings; cargo test --test debug 39 passed 0 failed; cargo test --test machine_output 10 passed 0 failed; tower node --test 292 passed 0 failed. Debugger evidence: cargo test --test debug 39 passed 0 failed, including step_into_call_and_backtrace, break_then_continue_stops_at_breakpoint, locals_and_print_show_jet_values, loop_next_edges_are_step_visible_and_line_mapped and step_stops_at_first_line_with_caret_and_locals. Fresh-context review of the integrated milestone diff found six issues. Four were real and are fixed: mintVerdict bypassed the verdict supersession rule (plugins/tower/app/store.mjs:1554, now validated through verdictSupersededBy with a --supersedes flag and two new gate tests); setBreakpoints overwrote pending specs before a replacement could fail (crates/jet-debug/src/Dap.rs:1407); five debug tests were red, the last because a generated argument-temporary Let inherited the call site line span and consumed a step so the debugger never entered the callee; and the machine-door helper accepted a report on either stream and ignored exit status (tests/machine_output.rs:28, now every door declares status, stream and action). One finding was rejected after probing the real binary: jet inspect semindex --json does emit the jet.report/v1 envelope, so CmdSemIndex.rs was not a regression. The deleteDecision dangling-supersession hole is logged and carried forward."
+    },
+    {
       "at": "2026-08-25T02:56:13.482Z",
       "by": "orchestrator",
       "action": "card.update",
@@ -211144,27 +211180,6 @@
       "action": "card.criteria-meet",
       "ref": "c0m5pd4i",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-24T21:10:18.456Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0brzkry",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-24T21:10:18.102Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0brzkry",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-24T21:10:17.736Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0brzkry",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
