@@ -1801,11 +1801,17 @@ fn descriptor_for_entry(
     }
     let mut outputs = entry.named_outputs.clone();
     outputs.insert("out".to_string(), primary.clone());
+    let producer = ProducerRecord::decode(&entry.producer_record).ok();
     let mut objects = Vec::new();
     for (name, digest) in &outputs {
-        let path = if name == "out" {
+        let path = if producer
+            .as_ref()
+            .is_some_and(|producer| producer.provider == "nix")
+        {
+            object_root.join(digest)
+        } else if name == "out" {
             PathBuf::from(&entry.out)
-        } else if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+        } else if let Some(producer) = producer.as_ref() {
             producer
                 .facts
                 .get(&format!("nix.output.{name}"))

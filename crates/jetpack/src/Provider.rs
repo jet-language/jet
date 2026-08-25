@@ -1297,17 +1297,23 @@ fn locked_nix_index_key_for_project(
     // original spelling, not the live upstream: applying the lock rewrites the
     // upstream to `github:NixOS/nixpkgs#<revision>`, which no longer names the
     // channel the index is keyed by.
-    let declared = table.source_ref(source_name).ok_or_else(|| {
-        ProviderError::Channel(format!("Nix source `{source_name}` is not declared"))
-    })?;
-    let channel = declared
-        .split('@')
-        .next()
-        .unwrap_or_default()
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_string();
+    //
+    // The implicit `@nixpkgs` source has no declaration to read, so it keeps
+    // naming its channel in the lock entry.
+    let channel = table
+        .source_ref(source_name)
+        .map(|declared| {
+            declared
+                .split('@')
+                .next()
+                .unwrap_or_default()
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .filter(|channel| !channel.is_empty())
+        .unwrap_or_else(|| locked.channel.clone());
     if !matches!(channel.as_str(), "nixpkgs-unstable" | "nixos-unstable") {
         return Err(ProviderError::Unsupported(format!(
             "Nix channel `{channel}` is not covered by the signed nixpkgs index"

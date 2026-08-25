@@ -4170,7 +4170,12 @@ fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     if !child {
         fs::write(
             project_dir.join("env.jet"),
-            "module dev {\n    sources: { default: NixOS/nixpkgs/nixos-unstable@github }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n",
+            format!(
+                // The manifest names the channel the signed index is keyed by,
+                // so it has to agree with the fixture server's own channel.
+                "module dev {{\n    sources: {{ default: NixOS/nixpkgs/{}@github }}\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n",
+                nix_index_cache_server::CHANNEL,
+            ),
         )
         .unwrap();
         fs::create_dir_all(project_dir.join(".jet")).unwrap();

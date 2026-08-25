@@ -235,6 +235,156 @@ fn native_nix_cache_recurses_and_admits_closure_atomically() {
     remove_dir(&root);
 }
 
+#[test]
+fn native_nix_cache_shared_transitive_object_admits_twice_and_stores_once() {
+    let root = unique_dir("shared-closure");
+    let source_root = root.join("source");
+    for name in ["first", "second", "shared"] {
+        fs::create_dir_all(source_root.join(name)).unwrap();
+    }
+    fs::write(source_root.join("first/payload"), b"first").unwrap();
+    fs::write(source_root.join("second/payload"), b"second").unwrap();
+    fs::write(source_root.join("shared/payload"), b"shared").unwrap();
+    let (first_nar, _) = super::super::write_nar(&source_root.join("first")).unwrap();
+    let (second_nar, _) = super::super::write_nar(&source_root.join("second")).unwrap();
+    let (shared_nar, _) = super::super::write_nar(&source_root.join("shared")).unwrap();
+    let first_path = "/nix/store/00000000000000000000000000000000-first";
+    let second_path = "/nix/store/11111111111111111111111111111111-second";
+    let shared_path = "/nix/store/22222222222222222222222222222222-shared";
+    let signing_key = SigningKey::from_bytes(&[8; 32]);
+    let key_id = "shared-cache-1";
+    let routes = BTreeMap::from([
+        (
+            "/nix-cache-info".to_string(),
+            b"StoreDir: /nix/store\nWantMassQuery: 1\n".to_vec(),
+        ),
+        (
+            "/00000000000000000000000000000000.narinfo".to_string(),
+            signed_narinfo(
+                first_path,
+                "first.nar",
+                &first_nar,
+                &[shared_path],
+                key_id,
+                &signing_key,
+            ),
+        ),
+        (
+            "/11111111111111111111111111111111.narinfo".to_string(),
+            signed_narinfo(
+                second_path,
+                "second.nar",
+                &second_nar,
+                &[shared_path],
+                key_id,
+                &signing_key,
+            ),
+        ),
+        (
+            "/22222222222222222222222222222222.narinfo".to_string(),
+            signed_narinfo(
+                shared_path,
+                "shared.nar",
+                &shared_nar,
+                &[],
+                key_id,
+                &signing_key,
+            ),
+        ),
+        ("/nar/first.nar".to_string(), first_nar),
+        ("/nar/second.nar".to_string(), second_nar),
+        ("/nar/shared.nar".to_string(), shared_nar),
+    ]);
+    let server = TestCacheServer::start(routes);
+    let jet_root = root.join("jetpack");
+    fs::create_dir_all(jet_root.join("config")).unwrap();
+    fs::create_dir_all(jet_root.join("trust")).unwrap();
+    fs::write(
+        jet_root.join("config/nix-cache-v1.endpoint"),
+        &server.endpoint,
+    )
+    .unwrap();
+    fs::write(
+        jet_root.join("trust/nix-cache-v1.ed25519.pub"),
+        format!(
+            "{key_id}:{}\n",
+            base64_encode(&signing_key.verifying_key().to_bytes())
+        ),
+    )
+    .unwrap();
+    let roots = Roots::at(jet_root);
+
+    let first = admit_nix_closure(
+        &roots,
+        &[NixOutputRequest {
+            name: "first".into(),
+            store_path: first_path.into(),
+        }],
+        false,
+    )
+    .unwrap();
+    let shared_digest = first.objects[shared_path].hangar_digest.clone();
+    let second = admit_nix_closure(
+        &roots,
+        &[NixOutputRequest {
+            name: "second".into(),
+            store_path: second_path.into(),
+        }],
+        false,
+    )
+    .unwrap();
+    assert_eq!(first.objects.len(), 2);
+    assert_eq!(second.objects.len(), 2);
+    assert_eq!(second.objects[shared_path].hangar_digest, shared_digest);
+
+    let mut second_entry = crate::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| {
+            ProducerRecord::decode(&entry.producer_record)
+                .ok()
+                .and_then(|producer| producer.facts.get("nix.store-path").cloned())
+                .as_deref()
+                == Some(second_path)
+        })
+        .unwrap();
+    let mut producer = ProducerRecord::decode(&second_entry.producer_record).unwrap();
+    producer
+        .facts
+        .insert("nix.output.bin".into(), shared_path.into());
+    second_entry.producer_record = producer.encode();
+    second_entry
+        .named_outputs
+        .insert("bin".into(), shared_digest.clone());
+    second_entry.id.push_str("-bin");
+    second_entry.receipt.clear();
+    RuntimePolicy::with_lock(&roots.root, "hangar", || {
+        crate::Store::register_entry_unlocked(&roots, &second_entry)
+    })
+    .unwrap();
+
+    let graph = crate::Store::closure_graph(&roots).unwrap();
+    assert_eq!(graph.records.len(), 4);
+    assert_eq!(graph.objects.len(), 3);
+    assert_eq!(
+        graph.objects[&shared_digest].path,
+        roots
+            .hangar_dir()
+            .join("objects")
+            .join(&shared_digest)
+            .to_string_lossy()
+    );
+    assert_eq!(
+        fs::read_dir(roots.hangar_dir().join("objects"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy() == shared_digest)
+            .count(),
+        1
+    );
+    remove_dir(&root);
+}
+
 fn nar_with_directory_entries(names: &[&[u8]]) -> Vec<u8> {
     fn put(output: &mut Vec<u8>, value: &[u8]) {
         output.extend_from_slice(&(value.len() as u64).to_le_bytes());
