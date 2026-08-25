@@ -1109,14 +1109,12 @@ fn binary_cache_nar_codec_rejects_noncanonical_and_malicious_input() {
     let mut nar = Vec::new();
     string(&mut nar, b"nix-archive-1");
     string(&mut nar, b"(");
-    string(&mut nar, b"(");
     string(&mut nar, b"type");
     string(&mut nar, b"regular");
     string(&mut nar, b"contents");
     string(&mut nar, b"payload");
     string(&mut nar, b"executable");
     string(&mut nar, b"");
-    string(&mut nar, b")");
     string(&mut nar, b")");
 
     assert!(jetpack::Store::validate_nar(&nar).is_err());
@@ -1143,19 +1141,16 @@ fn binary_cache_nar_codec_rejects_noncanonical_and_malicious_input() {
     let mut unordered_nar = Vec::new();
     string(&mut unordered_nar, b"nix-archive-1");
     string(&mut unordered_nar, b"(");
-    string(&mut unordered_nar, b"(");
     string(&mut unordered_nar, b"type");
     string(&mut unordered_nar, b"directory");
     regular_entry(&mut unordered_nar, b"z");
     regular_entry(&mut unordered_nar, b"a");
-    string(&mut unordered_nar, b")");
     string(&mut unordered_nar, b")");
     assert!(jetpack::Store::validate_nar(&unordered_nar).is_err());
 
     let mut escape_nar = Vec::new();
     for value in [
         b"nix-archive-1".as_slice(),
-        b"(".as_slice(),
         b"(".as_slice(),
         b"type".as_slice(),
         b"directory".as_slice(),
@@ -1169,7 +1164,6 @@ fn binary_cache_nar_codec_rejects_noncanonical_and_malicious_input() {
         b"symlink".as_slice(),
         b"target".as_slice(),
         b"../outside".as_slice(),
-        b")".as_slice(),
         b")".as_slice(),
         b")".as_slice(),
         b")".as_slice(),

@@ -21,7 +21,7 @@ use crate::SHA256;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Path-law failure (E1299). Stable codes so CLI + tests can match without
 /// scraping free-form text alone.
@@ -663,6 +663,7 @@ fn try_output_hash_of_with_hook(
         &mut archive,
         &mut hardlinks,
         allow_semantic_xattrs,
+        hangar_root.is_some(),
         hook,
     )?;
     for (key, link) in &hardlinks {
@@ -729,6 +730,7 @@ fn encode_node(
     archive: &mut Vec<u8>,
     hardlinks: &mut BTreeMap<(u64, u64), HardlinkState>,
     allow_semantic_xattrs: bool,
+    allow_nix_store_symlinks: bool,
     hook: &mut dyn FnMut(&Path, &'static str),
 ) -> Result<(), String> {
     if let Err(err) = validate_rel_path(rel) {
@@ -779,6 +781,7 @@ fn encode_node(
                 archive,
                 hardlinks,
                 allow_semantic_xattrs,
+                allow_nix_store_symlinks,
                 hook,
             )?;
         }
@@ -795,12 +798,17 @@ fn encode_node(
         let target = fs::read_link(path)
             .map_err(|e| format!("cannot read symlink `{}`: {e}", path.display()))?;
         if target.is_absolute() {
-            return Err(format!("symlink `{}` escapes output root", path.display()));
-        }
-        let resolved = fs::canonicalize(path)
-            .map_err(|e| format!("symlink `{}` is dangling or cyclic: {e}", path.display()))?;
-        if !resolved.starts_with(root) {
-            return Err(format!("symlink `{}` escapes output root", path.display()));
+            if !allow_nix_store_symlinks {
+                return Err(format!("symlink `{}` escapes output root", path.display()));
+            }
+            validate_nix_store_symlink_target(&target)?;
+        } else {
+            let resolved = fs::canonicalize(path).map_err(|e| {
+                format!("symlink `{}` is dangling or cyclic: {e}", path.display())
+            })?;
+            if !resolved.starts_with(root) {
+                return Err(format!("symlink `{}` escapes output root", path.display()));
+            }
         }
         record_header(archive, b'L', &rel_bytes, mode_of(&meta));
         push_bytes(archive, &path_bytes(&target));
@@ -832,6 +840,45 @@ fn encode_node(
             "unsupported special file in output: `{}`",
             path.display()
         ));
+    }
+    Ok(())
+}
+
+fn validate_nix_store_symlink_target(target: &Path) -> Result<(), String> {
+    let bytes = path_bytes(target);
+    if bytes.is_empty()
+        || bytes.windows(2).any(|window| window == b"//")
+        || bytes.contains(&b'\\')
+        || bytes.iter().any(|byte| byte.is_ascii_control())
+    {
+        return Err("Nix symlink target is not a canonical absolute store path".into());
+    }
+    let mut components = target.components();
+    if !matches!(components.next(), Some(Component::RootDir))
+        || !matches!(components.next(), Some(Component::Normal(value)) if path_component_bytes(value) == b"nix")
+        || !matches!(components.next(), Some(Component::Normal(value)) if path_component_bytes(value) == b"store")
+    {
+        return Err("Nix symlink target is not under /nix/store".into());
+    }
+    let Some(Component::Normal(store_name)) = components.next() else {
+        return Err("Nix symlink target has no store object".into());
+    };
+    validate_path_component(&path_component_bytes(store_name)).map_err(|error| {
+        format!(
+            "Nix symlink target has an unsafe store object: {}",
+            error.detail
+        )
+    })?;
+    for component in components {
+        let Component::Normal(value) = component else {
+            return Err("Nix symlink target contains a traversal component".into());
+        };
+        validate_path_component(&path_component_bytes(value)).map_err(|error| {
+            format!(
+                "Nix symlink target has an unsafe component: {}",
+                error.detail
+            )
+        })?;
     }
     Ok(())
 }

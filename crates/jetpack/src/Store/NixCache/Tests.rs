@@ -127,6 +127,24 @@ fn native_nix_cache_streams_without_process_tools() {
 }
 
 #[test]
+fn debug_real_ripgrep_staged_hash() {
+    let nar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target-nixfeed/ripgrep-15.2.0.nar");
+    let destination = unique_dir("real-ripgrep-debug");
+    remove_dir(&destination);
+    super::super::read_nar_stream(
+        fs::File::open(nar).unwrap(),
+        &destination,
+        7_088_584,
+    )
+    .unwrap();
+    super::super::seal_node(&destination).unwrap();
+    let result = crate::Envelope::try_output_hash_of(&destination.to_string_lossy());
+    remove_dir(&destination);
+    panic!("real ripgrep staged hash: {result:?}");
+}
+
+#[test]
 fn native_nix_cache_recurses_and_admits_closure_atomically() {
     let root = unique_dir("closure");
     let source_root = root.join("source");
@@ -228,7 +246,6 @@ fn nar_with_directory_entries(names: &[&[u8]]) -> Vec<u8> {
     let mut output = Vec::new();
     put(&mut output, b"nix-archive-1");
     put(&mut output, b"(");
-    put(&mut output, b"(");
     put(&mut output, b"type");
     put(&mut output, b"directory");
     for name in names {
@@ -246,8 +263,111 @@ fn nar_with_directory_entries(names: &[&[u8]]) -> Vec<u8> {
         put(&mut output, b")");
     }
     put(&mut output, b")");
-    put(&mut output, b")");
     output
+}
+
+#[cfg(unix)]
+#[test]
+fn native_nix_cache_reads_canonical_directories_symlinks_and_executables() {
+    fn put(output: &mut Vec<u8>, value: &[u8]) {
+        output.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        output.extend_from_slice(value);
+        let padding = (8 - value.len() % 8) % 8;
+        output.resize(output.len() + padding, 0);
+    }
+
+    fn regular(output: &mut Vec<u8>, contents: &[u8], executable: bool) {
+        put(output, b"(");
+        put(output, b"type");
+        put(output, b"regular");
+        if executable {
+            put(output, b"executable");
+            put(output, b"");
+        }
+        put(output, b"contents");
+        put(output, contents);
+        put(output, b")");
+    }
+
+    fn entry(output: &mut Vec<u8>, name: &[u8], node: impl FnOnce(&mut Vec<u8>)) {
+        put(output, b"entry");
+        put(output, b"(");
+        put(output, b"name");
+        put(output, name);
+        put(output, b"node");
+        node(output);
+        put(output, b")");
+    }
+
+    let mut nar = Vec::new();
+    put(&mut nar, b"nix-archive-1");
+    put(&mut nar, b"(");
+    put(&mut nar, b"type");
+    put(&mut nar, b"directory");
+    entry(&mut nar, b"bin", |output| regular(output, b"tool", true));
+    entry(&mut nar, b"lib", |output| {
+        put(output, b"(");
+        put(output, b"type");
+        put(output, b"directory");
+        entry(output, b"target", |output| regular(output, b"target", false));
+        put(output, b")");
+    });
+    entry(&mut nar, b"link", |output| {
+        put(output, b"(");
+        put(output, b"type");
+        put(output, b"symlink");
+        put(output, b"target");
+        put(output, b"lib/target");
+        put(output, b")");
+    });
+    entry(&mut nar, b"nix-link", |output| {
+        put(output, b"(");
+        put(output, b"type");
+        put(output, b"symlink");
+        put(output, b"target");
+        put(
+            output,
+            b"/nix/store/11111111111111111111111111111111-target/bin/tool",
+        );
+        put(output, b")");
+    });
+    put(&mut nar, b")");
+
+    let destination = unique_dir("canonical-nar");
+    remove_dir(&destination);
+    let stats = super::super::read_nar_stream(
+        Cursor::new(&nar),
+        &destination,
+        nar.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(stats.nodes, 6);
+    assert_eq!(fs::read(destination.join("bin")).unwrap(), b"tool");
+    assert_eq!(fs::read(destination.join("lib/target")).unwrap(), b"target");
+    assert_eq!(
+        fs::read_link(destination.join("link")).unwrap(),
+        PathBuf::from("lib/target")
+    );
+    assert_eq!(
+        fs::read_link(destination.join("nix-link")).unwrap(),
+        PathBuf::from("/nix/store/11111111111111111111111111111111-target/bin/tool")
+    );
+    crate::Envelope::try_output_hash_of_in_hangar(
+        &destination.to_string_lossy(),
+        &destination,
+        false,
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    assert_ne!(
+        fs::metadata(destination.join("bin"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+    remove_dir(&destination);
 }
 
 fn assert_single_nix_cache_failure(

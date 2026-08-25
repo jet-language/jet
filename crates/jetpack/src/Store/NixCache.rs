@@ -460,13 +460,20 @@ impl<'a> AdmissionTransaction<'a> {
             ));
         }
         super::seal_node(&tree).map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
-        let hangar_digest =
-            Envelope::try_output_hash_of(&tree.to_string_lossy()).map_err(|_| {
-                NixCacheError::new(
-                    NixCacheErrorKind::NarCorruption,
-                    "Nix staged object could not be hashed",
-                )
-            })?;
+        let hangar_digest = Envelope::try_output_hash_of_in_hangar(
+            &tree.to_string_lossy(),
+            &self.roots.hangar_dir(),
+            false,
+        )
+        .map_err(|error| {
+            NixCacheError::new(
+                NixCacheErrorKind::NarCorruption,
+                format!(
+                    "Nix staged object {} could not be hashed: {error}",
+                    info.info.store_path
+                ),
+            )
+        })?;
         let mut references = info
             .info
             .references

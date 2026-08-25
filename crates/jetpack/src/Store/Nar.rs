@@ -300,10 +300,8 @@ pub fn write_nar(root: &Path) -> io::Result<(Vec<u8>, NarStats)> {
         .map_err(|error| invalid(&format!("cannot resolve NAR source: {error}")))?;
     let mut output = Vec::new();
     put_string(&mut output, NAR_MAGIC)?;
-    put_string(&mut output, "(")?;
     let mut state = EncodeState::default();
     encode_node(&root, &root, &mut output, &mut state, 0)?;
-    put_string(&mut output, ")")?;
     let stats = NarStats {
         digest: digest_for(&output),
         bytes: output.len() as u64,
@@ -342,13 +340,10 @@ fn decode_nar(bytes: &[u8]) -> io::Result<(NarNode, NarStats)> {
     if reader.string()? != NAR_MAGIC {
         return Err(invalid("NAR has an unknown magic"));
     }
-    if reader.string()? != "(" {
-        return Err(invalid("NAR root is not a node"));
-    }
     let mut state = DecodeState::default();
     let node = decode_node(&mut reader, &mut state, 0, 0)?;
-    if reader.string()? != ")" || reader.remaining() != 0 {
-        return Err(invalid("NAR has trailing or unbalanced data"));
+    if reader.remaining() != 0 {
+        return Err(invalid("NAR has trailing data"));
     }
     let stats = NarStats {
         digest: digest_for(bytes),
@@ -386,14 +381,11 @@ pub fn read_nar_stream<R: Read>(
 
     let result = (|| {
         let mut reader = StreamNarReader::new(reader, expected_nar_size)?;
-        if reader.string()? != NAR_MAGIC || reader.string()? != "(" {
-            return Err(invalid("NAR stream has an invalid header"));
+        if reader.string()? != NAR_MAGIC {
+            return Err(invalid("NAR stream has an invalid magic"));
         }
         let mut state = StreamDecodeState::default();
         reader.node(destination, destination, &mut state, 0, 0)?;
-        if reader.string()? != ")" {
-            return Err(invalid("NAR stream has an invalid root terminator"));
-        }
         let mut trailing = [0u8; 1];
         if reader.read(&mut trailing)? != 0 || reader.bytes != expected_nar_size {
             return Err(invalid("NAR stream has trailing or truncated data"));
