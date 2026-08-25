@@ -336,6 +336,15 @@ export function normalize(s, historyCards = null) {
     }
   }
   for (const d of s.decisions) d.draft = !!d.draft;
+  // D-ONCE-LEDGER1=A: preserve the first imported supersession edge even
+  // when an older board snapshot predates the decision-link field.
+  // ponytail: explicit legacy map; add only ratified pre-field edges.
+  const legacySupersededBy = { 'D-VERDICT-1254-1': 'D-ONCE-TIER1' };
+  const decisionIds = new Set(s.decisions.map(d => d.id));
+  for (const d of s.decisions) {
+    const replacement = legacySupersededBy[d.id];
+    if (replacement && !d.supersededBy && decisionIds.has(replacement)) d.supersededBy = replacement;
+  }
   syncMilestones(s, undefined, historyCards == null ? [] : historyCards);
   return s;
 }
@@ -1392,6 +1401,16 @@ export function ballotGaps(p) {
   return missing;
 }
 
+function verdictSupersededBy(s, p) {
+  if (p.group !== 'verdict') return null;
+  const id = typeof p.supersededBy === 'string' ? p.supersededBy.trim() : '';
+  if (!id) fail('E_INVALID', 'verdict needs a supersession link (`supersededBy`)');
+  if (id === p.id) fail('E_INVALID', 'verdict cannot supersede itself');
+  if (!s.decisions.some(d => d.id === id))
+    fail('E_NOT_FOUND', `verdict supersession link points to unknown decision ${id}`);
+  return id;
+}
+
 export function addDecision(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'decision needs a title');
@@ -1404,6 +1423,7 @@ export function addDecision(s, p) {
     const gaps = ballotGaps(p);
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
   }
+  const supersededBy = verdictSupersededBy(s, p);
   const ballotMode = p.group === 'acceptance' ? null : (p.ballotMode || 'full');
   const d = { id: p.id || newId('D-'), cardId: card.id, group: p.group || 'other',
     title: String(p.title).trim(), gist: p.gist || '', lesson: p.lesson || '', explainer: p.explainer || '', story: p.story || '',
@@ -1411,7 +1431,8 @@ export function addDecision(s, p) {
     rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null,
     ballotMode, shortAuthorizedBy: ballotMode === 'short' ? p.shortAuthorizedBy : null,
     reviewPasses: ballotMode === 'full' && p.reviewPasses ? orderedReviewPasses(p.reviewPasses) : null,
-    checkInstructions: p.checkInstructions || null, draft, status: 'open', created: now() };
+    checkInstructions: p.checkInstructions || null, ...(supersededBy ? { supersededBy } : {}),
+    draft, status: 'open', created: now() };
   s.decisions.push(d);
   touchCard(card, p.by);
   logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
@@ -1503,8 +1524,10 @@ export function updateDecision(s, id, patch, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
   if (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-') || patch.group === 'acceptance')
     fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses'])
+  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy'])
     if (k in patch) d[k] = patch[k];
+  const supersededBy = verdictSupersededBy(s, d);
+  if (supersededBy) d.supersededBy = supersededBy;
   // Every edit to an open ready ballot re-runs the gate. --ready does the
   // same while promoting a draft. Ratified records remain historical law.
   if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {

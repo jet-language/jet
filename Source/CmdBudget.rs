@@ -3228,7 +3228,10 @@ fn emit_json(
         ("results".into(), CanonicalJson::Array(results)),
     ])
     .unwrap();
-    let budget = String::from_utf8(value.bytes()).unwrap();
+    let budget = String::from_utf8(value.bytes())
+        .unwrap()
+        .trim_end_matches('\n')
+        .to_owned();
     print!(
         "{}",
         ReportEnvelope::status_record("tool", status, exit == 0, options.command)

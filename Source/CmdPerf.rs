@@ -1991,7 +1991,10 @@ fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
 }
 
 fn render_perf_json(action: &str, value: CanonicalJson) -> String {
-    let payload = String::from_utf8(value.bytes()).expect("canonical JSON is UTF-8");
+    let payload = String::from_utf8(value.bytes())
+        .expect("canonical JSON is UTF-8")
+        .trim_end_matches('\n')
+        .to_owned();
     ReportEnvelope::status_record("tool", "ok", true, action)
         .with_json_field("perf", &payload)
         .json()

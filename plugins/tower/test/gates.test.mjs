@@ -66,6 +66,26 @@ test('addDecision accepts a full ballot', () => {
   assert.deepEqual(Object.keys(result.reviewPasses), ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial']);
 });
 
+test('verdicts require an existing supersession link', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-OLD', title: 'Old law', ...ballot() }));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-V', group: 'verdict', title: 'New law', ...ballot() })),
+    (e) => e.code === 'E_INVALID' && /supersession link.*supersededBy/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, {
+    cardId: '#1', id: 'D-V', group: 'verdict', title: 'New law', supersededBy: 'D-OLD', ...ballot(),
+  }));
+  assert.equal(result.supersededBy, 'D-OLD');
+});
+
+test('normalize restores the imported tier-verdict supersession link', () => {
+  const s = db.normalize({ ...empty('Test'), decisions: [
+    { id: 'D-VERDICT-1254-1' }, { id: 'D-ONCE-TIER1' },
+  ] });
+  assert.equal(s.decisions[0].supersededBy, 'D-ONCE-TIER1');
+});
+
 test('full ballot requires every ordered review summary', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));

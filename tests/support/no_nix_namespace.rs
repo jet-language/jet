@@ -184,7 +184,11 @@ if [ -n "$bootstrap_shell" ]; then
     "$ln" -s "$bootstrap_shell" "$runtime_stage/usr/bin/sh"
 fi
 if [ -n "$bootstrap_unshare$bootstrap_mount$bootstrap_shell" ]; then
+    # Nix hosts often make /bin/sh a symlink into /nix/store. The projected
+    # package can use that absolute interpreter after /nix/store is hidden.
+    # Keep both canonical system-bin paths on the staged helper set.
     "$mount_real" --bind "$runtime_stage/usr/bin" /usr/bin
+    "$mount_real" --bind "$runtime_stage/usr/bin" /bin
 fi
 
 mount="$(stage_path "$mount_real")"
