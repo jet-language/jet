@@ -126,23 +126,6 @@ fn native_nix_cache_streams_without_process_tools() {
     remove_dir(&destination);
 }
 
-#[test]
-fn debug_real_ripgrep_staged_hash() {
-    let nar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target-nixfeed/ripgrep-15.2.0.nar");
-    let destination = unique_dir("real-ripgrep-debug");
-    remove_dir(&destination);
-    super::super::read_nar_stream(
-        fs::File::open(nar).unwrap(),
-        &destination,
-        7_088_584,
-    )
-    .unwrap();
-    super::super::seal_node(&destination).unwrap();
-    let result = crate::Envelope::try_output_hash_of(&destination.to_string_lossy());
-    remove_dir(&destination);
-    panic!("real ripgrep staged hash: {result:?}");
-}
 
 #[test]
 fn native_nix_cache_recurses_and_admits_closure_atomically() {
