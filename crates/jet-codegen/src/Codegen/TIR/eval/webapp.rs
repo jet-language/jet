@@ -46,7 +46,7 @@ fn step_value(step: &EvalAppStep) -> CtValue {
     }
 }
 
-impl EvalCtx<'_> {
+impl EvalCtx<'_, '_> {
     pub(super) fn eval_web_core_call(
         &mut self,
         method: &str,

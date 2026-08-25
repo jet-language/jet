@@ -286,7 +286,7 @@ fn emit_progress_finish(
     }
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     pub(super) fn eval_closure_method(
         &mut self,
         recv: &'a TExpr,

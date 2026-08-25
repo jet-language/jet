@@ -4,7 +4,7 @@ use crate::Diagnostics::Diagnostic;
 
 use super::{unsupported, EvalCtx};
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     pub(super) fn eval_regex_replace_all_with(
         &mut self,
         recv: &CtValue,

@@ -4,7 +4,7 @@ use crate::Diagnostics::Diagnostic;
 
 use super::{unsupported, EvalCtx};
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     pub(super) fn eval_event_method(
         &mut self,
         method: &str,
@@ -15,7 +15,7 @@ impl<'a> EvalCtx<'a> {
         // Split the &mut self borrow across EventLite + call_callable: EventLite
         // only calls `invoke` while not holding EvalCtx state, and we do not
         // touch `self` except through that callback.
-        let this = self as *mut EvalCtx<'a>;
+        let this = self as *mut EvalCtx<'a, 'debug>;
         let mut invoke = |handler: CtValue, argv: Vec<CtValue>| -> Result<CtValue, Diagnostic> {
             // SAFETY: uniquely borrowed `self` for the EventLite call; invoke is
             // the only re-entry into EvalCtx, and EventLite holds no &self.

@@ -54,7 +54,7 @@ fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
     }
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     /// Evaluate `core.data.*` without pre-evaluating lambda arguments.
     pub(super) fn eval_core_data_call(
         &mut self,

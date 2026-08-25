@@ -494,6 +494,19 @@ test('mintVerdict refuses a supersession link to an unknown decision', () => {
     (e) => e.code === 'E_NOT_FOUND');
 });
 
+test('deleteDecision refuses a decision named by a verdict supersession link', () => {
+  const st = cardWithPriorDecision();
+  const { result: verdict } = st.mutate((s) =>
+    db.mintVerdict(s, '#1', 'ship it', null, 'owner', 'D-PRIOR1'));
+  assert.throws(
+    () => st.mutate((s) => db.deleteDecision(s, 'D-PRIOR1', 'owner')),
+    (e) => e.code === 'E_REFERENCED'
+      && e.message.includes('D-PRIOR1')
+      && e.message.includes(verdict.id));
+  const decisions = st.load().decisions.map(d => d.id);
+  assert.deepEqual(decisions, ['D-PRIOR1', verdict.id]);
+});
+
 // ---- 9. ratify hook: syntax-group auto-chores -------------------------------
 
 test('ratifying a syntax-group decision appends the standard chores to criteria', () => {

@@ -848,7 +848,7 @@ fn view_owner_replacement(
     }
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     /// The value a `__JetViewMut` handle windows into.
     ///
     /// D-TASKBORROW1=A: a loaned handle resolves to its shared runtime slot,
@@ -1047,7 +1047,7 @@ const DEV_FUEL: u64 = 1_000_000_000;
 #[allow(dead_code)]
 const CT_FUEL: u64 = 10_000_000;
 
-pub(super) struct EvalCtx<'a> {
+pub(super) struct EvalCtx<'a, 'debug> {
     pub(super) funcs: HashMap<String, &'a TFunc>,
     #[allow(dead_code)]
     pub(super) base_dir: PathBuf,
@@ -1093,6 +1093,7 @@ pub(super) struct EvalCtx<'a> {
     pub(super) source_nesting: usize,
     pub(super) current_span: Span,
     pub(super) current_fn: String,
+    pub(super) debugger: Option<&'debug mut dyn crate::Comptime::DebugHook>,
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
@@ -1523,7 +1524,7 @@ struct YieldConsumer<'a> {
     consumer_shield_depth: usize,
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     /// D-DEADLINE1 / I2: a `#Context(deadline: …)` budget blown at a wait point
     /// the JOINING PARENT owns is a program-side stop, not a compiler boundary.
     /// AOT (`SchedulerHost.rs::jet_deadline_exceeded`) and the resident JIT
@@ -1829,6 +1830,7 @@ impl<'a> EvalCtx<'a> {
             source_nesting: 0,
             current_span: Span::new(0, 0),
             current_fn: String::new(),
+            debugger: None,
             embed_inputs: None,
             struct_fields: config.struct_fields,
             memo_dependencies: config.memo_dependencies,
@@ -3969,7 +3971,7 @@ fn program_funcs(program: &JitProgram) -> HashMap<String, &TFunc> {
     program.funcs.iter().map(|f| (f.name.clone(), f)).collect()
 }
 
-fn serve_entry_value(ctx: &mut EvalCtx<'_>, value: CtValue) -> Result<CtValue, Diagnostic> {
+fn serve_entry_value(ctx: &mut EvalCtx<'_, '_>, value: CtValue) -> Result<CtValue, Diagnostic> {
     match value {
         CtValue::Failed(report) => Ok(CtValue::Failed(report)),
         CtValue::Present(app) => ctx.eval_app_method(&app, "serve", Vec::new()),
@@ -4441,6 +4443,7 @@ fn run_program_with_structs_on_stack(
         source_nesting: 0,
         current_span: entry.source_span,
         current_fn: entry.name.clone(),
+        debugger: None,
         embed_inputs: None,
         struct_fields,
         memo_dependencies: program.memo_dependencies.clone(),
@@ -4582,6 +4585,7 @@ fn run_named_func_on_program_edition(
         source_nesting: 0,
         current_span: func.source_span,
         current_fn: func.name.clone(),
+        debugger: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
         memo_dependencies: program.memo_dependencies.clone(),
@@ -4863,6 +4867,7 @@ fn eval_expr_hook(
         source_nesting: 0,
         current_span: source_span,
         current_fn: String::new(),
+        debugger: None,
         embed_inputs,
         struct_fields: HashMap::new(),
         memo_dependencies: HashMap::new(),
@@ -4911,7 +4916,7 @@ fn eval_expr_hook(
 }
 
 fn eval_block_hook(
-    req: &mut Comptime::TirBridge::BlockEvalRequest<'_>,
+    req: &mut Comptime::TirBridge::BlockEvalRequest<'_, '_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let fragment_funcs = merge_fragment_funcs(req.funcs, req.methods);
     let (tir, mut spawn_lambdas) = lower_stmts_for_eval(
@@ -4966,6 +4971,7 @@ fn eval_block_hook(
     let repl_mode = req.repl_mode;
     let repl_grants = req.repl_grants.to_vec();
     let repl_authorizer = reborrow_repl_authorizer(&mut req.repl_authorizer);
+    let debugger_enabled = req.debugger.is_some();
     let source_span = req
         .stmts
         .first()
@@ -4990,7 +4996,7 @@ fn eval_block_hook(
         gates,
         impure_depth,
         runtime_execution: false,
-        prefer_tir_calls: false,
+        prefer_tir_calls: debugger_enabled,
         repl_mode,
         repl_grants,
         repl_authorizer,
@@ -4999,10 +5005,11 @@ fn eval_block_hook(
         deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
-        call_depth: 0,
+        call_depth: req.debug_depth,
         source_nesting: 0,
         current_span: source_span,
-        current_fn: String::new(),
+        current_fn: req.debug_function.to_string(),
+        debugger: req.debugger.take(),
         embed_inputs,
         struct_fields: HashMap::new(),
         memo_dependencies: HashMap::new(),
@@ -5036,7 +5043,9 @@ fn eval_block_hook(
         ctx.exec_stmts(&tir, &mut scope)
     } else {
         ctx.with_task_dispatcher(|ctx| ctx.exec_stmts(&tir, &mut scope))
-    }?;
+    };
+    req.debugger = ctx.debugger.take();
+    let outcome = outcome?;
     let outcome = match outcome {
         Flow::Normal => Ok(Comptime::TirBridge::StmtOutcome::Done(scope)),
         Flow::Return(value) => Ok(Comptime::TirBridge::StmtOutcome::Returned { value, scope }),

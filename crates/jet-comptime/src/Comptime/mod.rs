@@ -1136,20 +1136,16 @@ pub fn run_main_debug(
         list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
-    // TirBridge `exec_block` evaluates a whole block without per-statement
-    // `DebugHook` callbacks. Drive top-level body statements through
-    // `exec_stmt` so `jet debug` / Canvas debug sessions can stop, step, and
-    // hit breakpoints (D-DBG3). Nested blocks inside a single statement still
-    // use TirBridge today; call/loop body stepping is a follow-on.
-    for stmt in &main.body {
-        match interp.exec_stmt(stmt, &mut scope)? {
-            Interpreter::Flow::Normal => {}
-            Interpreter::Flow::Return(_) => return Ok(()),
-            Interpreter::Flow::Break
-            | Interpreter::Flow::Continue
-            | Interpreter::Flow::BreakLabel(_)
-            | Interpreter::Flow::ContinueLabel(_) => {}
-        }
+    // Keep the whole function in one canonical TIR evaluation. The evaluator
+    // now owns every source-statement boundary, including nested calls and
+    // loop edges, so splitting the block would change program state.
+    match interp.exec_block(&main.body, &mut scope)? {
+        Interpreter::Flow::Return(_) => return Ok(()),
+        Interpreter::Flow::Normal
+        | Interpreter::Flow::Break
+        | Interpreter::Flow::Continue
+        | Interpreter::Flow::BreakLabel(_)
+        | Interpreter::Flow::ContinueLabel(_) => {}
     }
     Ok(())
 }
@@ -1499,6 +1495,9 @@ pub fn run_block_with_imports(
         repl_authorizer: None,
         gates: jet_foundation::Policy::GateSet::default(),
         impure_depth: 0,
+        debugger: None,
+        debug_function: String::new(),
+        debug_depth: 0,
         embed_inputs: None,
     })? {
         TirBridge::StmtOutcome::Done(scope) => Ok(scope),

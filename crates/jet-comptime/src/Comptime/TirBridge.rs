@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::Comptime::{CtValue, DevSink, PurityStage, ReplAuthorizer};
+use crate::Comptime::{CtValue, DebugHook, DevSink, PurityStage, ReplAuthorizer};
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{ComptimeInput, Expr, Func, ProgramBundle, Stmt, StructDef, Type};
 
@@ -43,7 +43,7 @@ pub struct ExprEvalRequest<'a> {
     pub mutated: Option<&'a mut HashMap<String, CtValue>>,
 }
 
-pub struct BlockEvalRequest<'a> {
+pub struct BlockEvalRequest<'a, 'debug> {
     pub stmts: &'a [Stmt],
     pub funcs: &'a HashMap<String, &'a Func>,
     pub methods: &'a HashMap<(String, String), &'a Func>,
@@ -63,6 +63,12 @@ pub struct BlockEvalRequest<'a> {
     pub gates: jet_foundation::Policy::GateSet,
     pub impure_depth: usize,
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
+    /// Optional source debugger carried through the canonical TIR evaluator.
+    /// The evaluator owns statement order; the interpreter only supplies the
+    /// observation hook.
+    pub debugger: Option<&'debug mut dyn DebugHook>,
+    pub debug_function: String,
+    pub debug_depth: usize,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
 }
@@ -94,7 +100,8 @@ pub struct Hooks {
         PurityStage,
     ) -> Result<CtValue, Diagnostic>,
     pub eval_expr: fn(&mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic>,
-    pub eval_block: fn(&mut BlockEvalRequest<'_>) -> Result<StmtOutcome, Diagnostic>,
+    pub eval_block:
+        for<'a, 'debug> fn(&mut BlockEvalRequest<'a, 'debug>) -> Result<StmtOutcome, Diagnostic>,
 }
 
 static HOOKS: OnceLock<Hooks> = OnceLock::new();
@@ -133,6 +140,8 @@ pub fn eval_expr(req: &mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic> {
     (hooks().eval_expr)(req)
 }
 
-pub fn eval_block(req: &mut BlockEvalRequest<'_>) -> Result<StmtOutcome, Diagnostic> {
+pub fn eval_block<'a, 'debug>(
+    req: &mut BlockEvalRequest<'a, 'debug>,
+) -> Result<StmtOutcome, Diagnostic> {
     (hooks().eval_block)(req)
 }

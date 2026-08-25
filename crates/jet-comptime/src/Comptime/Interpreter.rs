@@ -402,8 +402,13 @@ impl<'a> Interp<'a> {
             gates,
             impure_depth,
             embed_inputs,
+            debugger: self.debugger.take(),
+            debug_function: self.cur_func.clone(),
+            debug_depth: self.depth,
         };
-        match super::TirBridge::eval_block(&mut req)? {
+        let result = super::TirBridge::eval_block(&mut req);
+        self.debugger = req.debugger;
+        match result? {
             super::TirBridge::StmtOutcome::Done(new_scope) => {
                 *scope = new_scope;
                 Ok(Flow::Normal)

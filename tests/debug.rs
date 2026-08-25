@@ -19,8 +19,9 @@
 
 mod common;
 
+use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -619,13 +620,37 @@ fn native_fixture(tag: &str, src: &str) -> String {
     p.to_string_lossy().into_owned()
 }
 
+fn native_binary(tag: &str, rust: &str) -> (PathBuf, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("jet_debug_native_map_{tag}_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rust_file = dir.join("prog.rs");
+    let binary = dir.join("prog");
+    std::fs::write(&rust_file, rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            "-C",
+            "debuginfo=2",
+            rust_file.to_str().unwrap(),
+            "-o",
+            binary.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected the {tag} debug fixture:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    (dir, binary)
+}
+
 fn dap_frame(body: &str) -> String {
     format!("Content-Length: {}\r\n\r\n{}", body.as_bytes().len(), body)
 }
 
 fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String> {
-    let marker = format!("\"request_seq\":{request_seq},\"success\":");
-    let command = format!("\"command\":\"{command}\"");
     let bytes = output.as_bytes();
     let mut cursor = 0;
     while let Some(relative_start) = output[cursor..].find("Content-Length: ") {
@@ -639,7 +664,22 @@ fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String>
         let body_start = start + header_end + 4;
         let body_end = body_start.checked_add(length)?;
         let body = std::str::from_utf8(bytes.get(body_start..body_end)?).ok()?;
-        if body.contains(&marker) && body.contains(&command) {
+        let Ok(value) = parse_json(body) else {
+            cursor = body_end;
+            continue;
+        };
+        let type_name = json_get(&value, "type").and_then(json_str);
+        let actual_request_seq = match json_get(&value, "request_seq") {
+            Some(JSONValue::Number(value)) => Some(*value),
+            _ => None,
+        };
+        let success = json_get(&value, "success");
+        let actual_command = json_get(&value, "command").and_then(json_str);
+        if type_name == Some("response")
+            && actual_request_seq == Some(i64::from(request_seq))
+            && matches!(success, Some(JSONValue::Bool(_)))
+            && actual_command == Some(command)
+        {
             return Some(body.to_string());
         }
         cursor = body_end;
@@ -1542,24 +1582,69 @@ fn debug_build_carries_line_markers_a_normal_build_does_not() {
         "a normal build must stay byte-identical to today's output — no markers leak in \
          when debug_linemap is off (JIT tier + golden tests depend on this)"
     );
+
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let jet_src = std::fs::read_to_string(&file).unwrap();
+    let (debug_dir, debug_bin) = native_binary("markers_debug", &debug_out.rust);
+    let debug_transcript = jet::Debug::run_native_scripted(
+        &debug_bin,
+        "prog.rs",
+        &debug_out.rust,
+        &file,
+        &jet_src,
+        false,
+        &["next"],
+    );
+    assert!(
+        debug_transcript.contains("2 |     n := 3")
+            && debug_transcript.contains("3 |     total := 0"),
+        "debug source map did not step through mapped statements:\n{debug_transcript}"
+    );
+
+    let (normal_dir, normal_bin) = native_binary("markers_normal", &normal_out.rust);
+    let normal_transcript = jet::Debug::run_native_scripted(
+        &normal_bin,
+        "prog.rs",
+        &normal_out.rust,
+        &file,
+        &jet_src,
+        false,
+        &[],
+    );
+    assert!(
+        normal_transcript.contains("source-mapped entry statement"),
+        "normal build unexpectedly supplied a debugger source map:\n{normal_transcript}"
+    );
+    let _ = std::fs::remove_dir_all(debug_dir);
+    let _ = std::fs::remove_dir_all(normal_dir);
 }
 
 #[test]
 fn line_markers_resolve_every_statement_to_its_source_line() {
     let file = native_fixture("markers_line3", LOOPS);
     let out = jet::compile_for_debug(&file).expect("compiles for debug");
-    // `n := 3` is Jet line 2; the marker for it must appear before codegen
-    // for that statement.
-    assert!(
-        out.rust.contains("// jet:line 2\n"),
-        "expected a marker for line 2 (`n := 3`):\n{}",
-        out.rust
+    if !have("rustc") || !have("lldb") {
+        return;
+    }
+    let jet_src = std::fs::read_to_string(&file).unwrap();
+    let (dir, binary) = native_binary("markers_line3", &out.rust);
+    let transcript = jet::Debug::run_native_scripted(
+        &binary,
+        "prog.rs",
+        &out.rust,
+        &file,
+        &jet_src,
+        false,
+        &["next", "next"],
     );
     assert!(
-        out.rust.contains("// jet:line 4\n"),
-        "expected a marker for line 4 (the `loop` statement):\n{}",
-        out.rust
+        transcript.contains("2 |     n := 3")
+            && transcript.contains("4 |     loop i in 1..n {"),
+        "debugger did not resolve mapped statements to Jet source lines:\n{transcript}"
     );
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -1639,7 +1724,7 @@ fn native_session_steps_and_shows_locals() {
         transcript
     );
     assert!(
-        transcript.contains("total = 0") || transcript.contains("total ="),
+        transcript.contains("total = 0"),
         "expected `print total` to show the local:\n{}",
         transcript
     );

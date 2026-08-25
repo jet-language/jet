@@ -191,7 +191,41 @@ fn owner_list_place(
     }
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
+    fn debug_at_stmt(
+        &mut self,
+        span: Span,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let Some(debugger) = self.debugger.take() else {
+            return Ok(());
+        };
+        let result = debugger.at_stmt(&self.current_fn, self.call_depth, span, scope);
+        self.debugger = Some(debugger);
+        result
+    }
+
+    fn debug_after_stmt(
+        &mut self,
+        span: Span,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        let Some(debugger) = self.debugger.take() else {
+            return Ok(());
+        };
+        let result = debugger.after_stmt(&self.current_fn, self.call_depth, span, scope);
+        self.debugger = Some(debugger);
+        result
+    }
+
+    fn debug_loop_edge(
+        &mut self,
+        span: Span,
+        scope: &HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        self.debug_at_stmt(span, scope)
+    }
+
     pub(super) fn exec_loop_value(
         &mut self,
         label: Option<&str>,
@@ -446,6 +480,11 @@ impl<'a> EvalCtx<'a> {
         stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
+        let source_stmt = !matches!(stmt, TStmt::LineMarker(_) | TStmt::SourceSpan(_));
+        let source_span = self.current_span;
+        if source_stmt {
+            self.debug_at_stmt(source_span, scope)?;
+        }
         self.enter_source_nesting()?;
         let result = match self.exec_stmt_inner(stmt, scope) {
             Err(_) if self.pending_flow.is_some() => Ok(self
@@ -455,6 +494,9 @@ impl<'a> EvalCtx<'a> {
             result => result,
         };
         self.leave_source_nesting();
+        if source_stmt && result.is_ok() {
+            self.debug_after_stmt(source_span, scope)?;
+        }
         result
     }
 
@@ -895,12 +937,19 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Loop { body, label } => self.exec_infinite(label.as_deref(), body, scope),
             TStmt::While { cond, body, label } => {
+                let loop_span = self.current_span;
+                let mut first_iteration = true;
                 loop {
                     self.dispatch_pending_interrupts(scope)?;
                     self.burn()?;
                     std::thread::yield_now();
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
                         break;
+                    }
+                    if first_iteration {
+                        first_iteration = false;
+                    } else {
+                        self.debug_loop_edge(loop_span, scope)?;
                     }
                     match self.exec_stmts(body, scope)? {
                         Flow::Normal | Flow::Continue => {}
@@ -922,16 +971,23 @@ impl<'a> EvalCtx<'a> {
                 body,
                 label,
             } => {
+                let loop_span = self.current_span;
                 match self.exec_stmt(init, scope)? {
                     Flow::Normal => {}
                     other => return Ok(other),
                 }
+                let mut first_iteration = true;
                 loop {
                     self.dispatch_pending_interrupts(scope)?;
                     self.burn()?;
                     std::thread::yield_now();
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
                         break;
+                    }
+                    if first_iteration {
+                        first_iteration = false;
+                    } else {
+                        self.debug_loop_edge(loop_span, scope)?;
                     }
                     match self.exec_stmts(body, scope)? {
                         Flow::Normal | Flow::Continue => {}
@@ -962,6 +1018,7 @@ impl<'a> EvalCtx<'a> {
                 body,
                 label,
             } => {
+                let loop_span = self.current_span;
                 let (mut i, end_v, exclusive_v) = if let Some(source) = source {
                     let value = self.eval_expr(source, scope)?;
                     let CtValue::Struct { type_name, fields } = value else {
@@ -991,6 +1048,7 @@ impl<'a> EvalCtx<'a> {
                         *exclusive,
                     )
                 };
+                let mut first_iteration = true;
                 let step_v = match step {
                     Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
                     None => 1,
@@ -1016,6 +1074,11 @@ impl<'a> EvalCtx<'a> {
                     self.dispatch_pending_interrupts(scope)?;
                     self.burn()?;
                     scope.insert(var.clone(), CtValue::Int(i));
+                    if first_iteration {
+                        first_iteration = false;
+                    } else {
+                        self.debug_loop_edge(loop_span, scope)?;
+                    }
                     match self.exec_stmts(body, scope)? {
                         Flow::Normal | Flow::Continue => {}
                         Flow::Break => break,
@@ -2363,9 +2426,16 @@ impl<'a> EvalCtx<'a> {
         body: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
+        let loop_span = self.current_span;
+        let mut first_iteration = true;
         loop {
             self.dispatch_pending_interrupts(scope)?;
             self.burn()?;
+            if first_iteration {
+                first_iteration = false;
+            } else {
+                self.debug_loop_edge(loop_span, scope)?;
+            }
             match self.exec_stmts(body, scope)? {
                 Flow::Normal | Flow::Continue => {}
                 Flow::Break => break,

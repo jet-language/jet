@@ -1577,6 +1577,9 @@ export function mintVerdict(s, ref, outcome, title, by, supersedes) {
 
 export function deleteDecision(s, id, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
+  const dependents = s.decisions.filter(x => x.supersededBy === id);
+  if (dependents.length)
+    fail('E_REFERENCED', `cannot delete decision ${id}; supersession link used by ${dependents.map(x => x.id).join(', ')}`);
   s.decisions = s.decisions.filter(x => x.id !== id);
   const card = s.cards.find(c => c.id === d.cardId);
   if (card) touchCard(card, by);

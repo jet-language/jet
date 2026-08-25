@@ -141,7 +141,7 @@ fn curried_gradient_value(
     tuple_value(gradient_ty, values, span)
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     fn make_compute_handle(
         &mut self,
         method: &str,
@@ -180,7 +180,7 @@ impl<'a> EvalCtx<'a> {
             }
             _ => Vec::new(),
         };
-        let base_ptr = self as *mut EvalCtx<'a> as *mut ();
+        let base_ptr = self as *mut EvalCtx<'a, 'debug> as *mut ();
         let base_value = base.clone();
         let base_span = span;
         let plan_base = crate::Comptime::ComputeLite::JetComputeBase::new(
@@ -192,7 +192,7 @@ impl<'a> EvalCtx<'a> {
                     .collect::<Vec<_>>();
                 // SAFETY: the handle is stored only in this evaluator's runtime
                 // and is called while that EvalCtx owns the runtime lock.
-                let ctx = unsafe { &mut *(base_ptr as *mut EvalCtx<'a>) };
+                let ctx = unsafe { &mut *(base_ptr as *mut EvalCtx<'a, 'debug>) };
                 let output = ctx
                     .call_callable(&base_value, input_values)
                     .map_err(|error| {

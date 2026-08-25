@@ -28,7 +28,7 @@ fn workflow_wait(nanos: i64) -> crate::Comptime::ServicesLite::JetServiceWorkflo
     }
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     pub(super) fn eval_core_services_call(
         &mut self,
         module: &str,

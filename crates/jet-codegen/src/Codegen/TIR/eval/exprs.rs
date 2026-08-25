@@ -1906,7 +1906,7 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
     }
 }
 
-impl<'a> EvalCtx<'a> {
+impl<'a, 'debug> EvalCtx<'a, 'debug> {
     pub(super) fn allocator_view_parts(value: &CtValue) -> Option<(usize, u32, usize)> {
         let CtValue::Struct { type_name, fields } = value else {
             return None;
@@ -2459,7 +2459,7 @@ impl<'a> EvalCtx<'a> {
     }
 
     pub(super) fn clone_contains_compute_tensor(&self, ty: &Type) -> bool {
-        fn visit(ctx: &EvalCtx<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+        fn visit(ctx: &EvalCtx<'_, '_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
             if ty.is_compute_tensor_family() {
                 return true;
             }
