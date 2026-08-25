@@ -260,7 +260,19 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
-        self.exec_stmts_core(stmts, scope, None)
+        self.exec_stmts_core(stmts, scope, None, true)
+    }
+
+    /// Execute lowering scaffolding inside an expression without exposing each
+    /// generated statement as another source-level stop. Calls evaluated by a
+    /// scaffold still enter their user-function body through the ordinary
+    /// `exec_stmts` path, so step-into remains visible at the callee boundary.
+    pub(super) fn exec_stmts_synthetic(
+        &mut self,
+        stmts: &'a [TStmt],
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Flow, Diagnostic> {
+        self.exec_stmts_core(stmts, scope, None, false)
     }
 
     fn exec_stmts_with_names(
@@ -269,7 +281,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         scope: &mut HashMap<String, CtValue>,
         scope_names: &HashSet<String>,
     ) -> Result<Flow, Diagnostic> {
-        self.exec_stmts_core_with_names(stmts, scope, None, scope_names)
+        self.exec_stmts_core_with_names(stmts, scope, None, scope_names, true)
     }
 
     fn exec_stmts_core(
@@ -277,9 +289,10 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
         tail: Option<&'a TExpr>,
+        debug_stmts: bool,
     ) -> Result<Flow, Diagnostic> {
         let scope_names = scope.keys().cloned().collect::<HashSet<_>>();
-        self.exec_stmts_core_with_names(stmts, scope, tail, &scope_names)
+        self.exec_stmts_core_with_names(stmts, scope, tail, &scope_names, debug_stmts)
     }
 
     pub(super) fn exec_stmts_value_with_names(
@@ -289,7 +302,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         scope: &mut HashMap<String, CtValue>,
         scope_names: &HashSet<String>,
     ) -> Result<Flow, Diagnostic> {
-        self.exec_stmts_core_with_names(stmts, scope, Some(value), scope_names)
+        self.exec_stmts_core_with_names(stmts, scope, Some(value), scope_names, true)
     }
 
     fn exec_stmts_core_with_names(
@@ -298,6 +311,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         scope: &mut HashMap<String, CtValue>,
         tail: Option<&'a TExpr>,
         scope_names: &HashSet<String>,
+        debug_stmts: bool,
     ) -> Result<Flow, Diagnostic> {
         let defer_mark = self.deferred_closes.len();
         let guard_mark = self.shared_guards.len();
@@ -313,7 +327,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                 );
                 return Err(error);
             }
-            let flow = match self.exec_stmt(stmt, scope) {
+            let flow = match self.exec_stmt_with_debug(stmt, scope, debug_stmts) {
                 Ok(flow) => flow,
                 Err(error) => {
                     let _ = self.finish_eval_scope_with_resources(
@@ -480,7 +494,17 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
         stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
-        let source_stmt = !matches!(stmt, TStmt::LineMarker(_) | TStmt::SourceSpan(_));
+        self.exec_stmt_with_debug(stmt, scope, true)
+    }
+
+    fn exec_stmt_with_debug(
+        &mut self,
+        stmt: &'a TStmt,
+        scope: &mut HashMap<String, CtValue>,
+        debug_stmt: bool,
+    ) -> Result<Flow, Diagnostic> {
+        let source_stmt =
+            debug_stmt && !matches!(stmt, TStmt::LineMarker(_) | TStmt::SourceSpan(_));
         let source_span = self.current_span;
         if source_stmt {
             self.debug_at_stmt(source_span, scope)?;

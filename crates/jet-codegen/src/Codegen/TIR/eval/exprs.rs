@@ -5827,7 +5827,7 @@ impl<'a, 'debug> EvalCtx<'a, 'debug> {
                     }
                 };
                 let result = (|| {
-                    match self.exec_stmts(prefix, scope)? {
+                    match self.exec_stmts_synthetic(prefix, scope)? {
                         Flow::Normal => {}
                         Flow::Return(value) => {
                             self.pending_return = Some(value);
