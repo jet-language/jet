@@ -125,7 +125,7 @@ const COMMAND_FLAGS = {
     archive: ['path'],
     delete: ['path'],
   }},
-  verdict: { flags: by('outcome', 'title') },
+  verdict: { flags: by('outcome', 'title', 'supersedes') },
   archive: { verbs: {
     status: [],
     show: [],
@@ -959,13 +959,13 @@ function renderBrief(p, t) {
   return L.join('\n');
 }
 
-// tower verdict '#N' --outcome "..." [--title "…"] --by owner — mints an
+// tower verdict '#N' --outcome "..." --supersedes D-ID [--title "…"] --by owner — mints an
 // ALREADY-ratified decision recording an owner verdict, so it can never be
 // mis-filed as a mere log note (D-TWRGUARD1=C #458). Owner-only, no --quote
 // escape: this command IS the owner speaking.
 function cmdVerdict(store, { pos, flags }) {
   const [ref] = pos;
-  const { result } = store.mutate((s) => db.mintVerdict(s, ref, flags.outcome, flags.title, flags.by));
+  const { result } = store.mutate((s) => db.mintVerdict(s, ref, flags.outcome, flags.title, flags.by, flags.supersedes));
   return out(flags, `verdict ${result.id} recorded on card #${result.cardNum} → ${result.outcome}`, result);
 }
 

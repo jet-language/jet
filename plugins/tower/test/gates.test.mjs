@@ -450,12 +450,21 @@ test('mintVerdict is owner-only (E_OWNER_ONLY), no quote escape', () => {
     (e) => e.code === 'E_OWNER_ONLY');
 });
 
-test('mintVerdict mints an already-ratified decision and logs it on the card', () => {
+// A verdict names the decision it replaces. `mintVerdict` is the canonical CLI
+// add path, so the rule enforced on `addDecision` has to hold here too.
+function cardWithPriorDecision() {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const { result } = st.mutate((s) => db.mintVerdict(s, '#1', 'ship it', 'Ship review', 'owner'));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PRIOR1', title: 'prior law', group: 'syntax', ...ballot() }));
+  return st;
+}
+
+test('mintVerdict mints an already-ratified decision and logs it on the card', () => {
+  const st = cardWithPriorDecision();
+  const { result } = st.mutate((s) => db.mintVerdict(s, '#1', 'ship it', 'Ship review', 'owner', 'D-PRIOR1'));
   assert.equal(result.status, 'ratified');
   assert.equal(result.comment, 'ship it');
+  assert.equal(result.supersededBy, 'D-PRIOR1');
   assert.match(result.id, /^D-VERDICT-1-\d+$/);
   const s2 = st.load();
   const d = s2.decisions.find(x => x.id === result.id);
@@ -465,11 +474,24 @@ test('mintVerdict mints an already-ratified decision and logs it on the card', (
 });
 
 test('mintVerdict allocates a fresh <num>-<k> id on a repeat verdict for the same card', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const { result: v1 } = st.mutate((s) => db.mintVerdict(s, '#1', 'first', null, 'owner'));
-  const { result: v2 } = st.mutate((s) => db.mintVerdict(s, '#1', 'second', null, 'owner'));
+  const st = cardWithPriorDecision();
+  const { result: v1 } = st.mutate((s) => db.mintVerdict(s, '#1', 'first', null, 'owner', 'D-PRIOR1'));
+  const { result: v2 } = st.mutate((s) => db.mintVerdict(s, '#1', 'second', null, 'owner', 'D-PRIOR1'));
   assert.notEqual(v1.id, v2.id);
+});
+
+test('mintVerdict refuses a verdict with no supersession link', () => {
+  const st = cardWithPriorDecision();
+  assert.throws(
+    () => st.mutate((s) => db.mintVerdict(s, '#1', 'ship it', null, 'owner')),
+    (e) => e.code === 'E_INVALID');
+});
+
+test('mintVerdict refuses a supersession link to an unknown decision', () => {
+  const st = cardWithPriorDecision();
+  assert.throws(
+    () => st.mutate((s) => db.mintVerdict(s, '#1', 'ship it', null, 'owner', 'D-NOPE1')),
+    (e) => e.code === 'E_NOT_FOUND');
 });
 
 // ---- 9. ratify hook: syntax-group auto-chores -------------------------------

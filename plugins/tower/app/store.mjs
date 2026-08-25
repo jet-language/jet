@@ -1551,18 +1551,22 @@ export function updateDecision(s, id, patch, by) {
 // D-TWRGUARD1=C (#458): tower verdict — an owner ruling recorded as an
 // already-ratified decision (never a log note) so it's durable + auditable.
 // Owner-only, no quote exception (this IS the owner speaking).
-export function mintVerdict(s, ref, outcome, title, by) {
+export function mintVerdict(s, ref, outcome, title, by, supersedes) {
   const c = mustCard(s, ref);
   if (by !== 'owner') fail('E_OWNER_ONLY', 'tower verdict is owner-only');
   if (!outcome || !String(outcome).trim()) fail('E_INVALID', 'verdict needs an outcome');
   let k = 1;
   while (s.decisions.find(x => x.id === `D-VERDICT-${c.num}-${k}`)) k++;
   const id = `D-VERDICT-${c.num}-${k}`;
+  // The canonical CLI verdict path validates its supersession link through the
+  // same helper `addDecision` uses, so a verdict minted here cannot skip the
+  // rule that a verdict names the decision it replaces.
+  const supersededBy = verdictSupersededBy(s, { group: 'verdict', id, supersededBy: supersedes });
   const d = { id, cardId: c.id, group: 'verdict',
     title: title || `Verdict on #${c.num} — ${c.title}`,
     gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', options: [], comparisons: [],
     rec: null, recommendation: null, hybrid: null, ballotMode: null, shortAuthorizedBy: null, reviewPasses: null,
-    draft: false, status: 'ratified', outcome, comment: outcome,
+    draft: false, status: 'ratified', outcome, comment: outcome, supersededBy,
     created: now(), ratifiedAt: today() };
   s.decisions.push(d);
   c.log.unshift({ at: today(), by, text: `Verdict recorded (${id}): ${outcome}` });
