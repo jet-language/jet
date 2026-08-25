@@ -8,7 +8,8 @@
 //! Determinism for tests: when a fixtures dir is supplied (the `--offline`
 //! path, or `JETPACK_FIXTURES`), we read a pinned compatibility result.
 //! Production locked nixpkgs refs resolve through the signed index and native
-//! cache admission. The package provider has no installed-Nix process fallback.
+//! cache admission. A true local catalog miss may use the one-shot interactive
+//! Nix compatibility fallback; the resulting realization remains Jetpack-owned.
 
 use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
@@ -17,6 +18,7 @@ use super::JSON;
 use crate::NixIndex::{IndexKey, NixIndexClient, NixIndexError};
 use crate::Store::{admit_nix_closure, AdmittedNixClosure, NixOutputRequest, Roots, StoreError};
 use crate::SHA256;
+use crate::Syntax;
 use crate::{ProviderFactValue, ProviderFacts};
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -671,13 +673,18 @@ pub(crate) fn nix_identity_parts(
     table: &SourceTable,
 ) -> (String, String, String, String) {
     let source = match &spec.source {
+        Source::Jetpack | Source::Nixpkgs => Syntax::REF_SOURCE_JETPACK,
         Source::Named(name) => table.upstream(name).unwrap_or(name),
+        _ => spec.source.label(),
+    };
+    let alias = match &spec.source {
+        Source::Jetpack | Source::Nixpkgs => Syntax::REF_SOURCE_JETPACK,
         _ => spec.source.label(),
     };
     (
         normalize_nix_identity(source),
         normalize_nix_identity(&flake_ref(spec, table)),
-        normalize_nix_identity(spec.source.label()),
+        normalize_nix_identity(alias),
         normalize_nix_identity(&spec.package),
     )
 }
@@ -1204,7 +1211,9 @@ pub(crate) const NIX_RECIPE_ID: &str = "nix-compat-v1";
 /// `<upstream>#<package>`.
 pub fn flake_ref(spec: &RefSpec, table: &SourceTable) -> String {
     match &spec.source {
-        Source::Nixpkgs => format!("nixpkgs#{}", nix_package_name(&spec.package)),
+        Source::Jetpack | Source::Nixpkgs => {
+            format!("nixpkgs#{}", nix_package_name(&spec.package))
+        }
         Source::Github => format!("github:{}", spec.package),
         Source::Path => format!("path:{}", spec.package),
         Source::Cran => format!("cran:{}", spec.package),
@@ -1259,7 +1268,7 @@ fn locked_nix_index_key_for_project(
 ) -> Result<IndexKey, ProviderError> {
     let source_name = match &spec.source {
         Source::Named(name) => name.as_str(),
-        Source::Nixpkgs => "nixpkgs",
+        Source::Jetpack | Source::Nixpkgs => Syntax::REF_SOURCE_JETPACK,
         _ => {
             return Err(ProviderError::Unsupported(format!(
                 "Nix index lookup does not support `{}` as a Nix source",
@@ -1272,7 +1281,10 @@ fn locked_nix_index_key_for_project(
             "Nix source `{source_name}` has no project lock containing an exact channel pin"
         ))
     })?;
-    let locked = super::Lock::locked_source_channel(project, source_name).ok_or_else(|| {
+    let locked = [source_name, Syntax::REF_SOURCE_NIXPKGS]
+        .into_iter()
+        .find_map(|name| super::Lock::locked_source_channel(project, name))
+        .ok_or_else(|| {
         ProviderError::Channel(format!(
             "Nix source `{source_name}` has no exact lock entry; run `jetpack update` first"
         ))
@@ -1386,8 +1398,9 @@ pub(crate) trait Provider {
 }
 
 /// The Nix compatibility provider for package references that are not yet
-/// representable by the native provider. The no-installed-Nix gate admits an
-/// explicit pinned result, signed-index/cache substitution, or Hangar reuse.
+/// representable by the native provider. The normal path admits an explicit
+/// pinned result or signed-index/cache substitution; a true signed-catalog miss
+/// may use one interactive local Nix evaluation before Jetpack takes ownership.
 pub(crate) struct NixProvider;
 
 struct UnsupportedProvider(&'static str);
@@ -1448,7 +1461,15 @@ impl Provider for NixProvider {
             )
         })?;
         let key = locked_nix_index_key(spec, table, ctx, host_system)?;
-        let verified = index.resolve(&key).map_err(ProviderError::NixIndex)?;
+        let verified = match index.resolve(&key) {
+            Ok(verified) => verified,
+            Err(NixIndexError::NotIndexed { .. })
+                if crate::NixFallbackPolicy::allowed_from_environment(ctx.offline) =>
+            {
+                return realize_from_local_nix(spec, table, ctx, &key);
+            }
+            Err(error) => return Err(ProviderError::NixIndex(error)),
+        };
         let roots = ctx.nix_roots.ok_or_else(|| {
             ProviderError::BadOutput(
                 "index-backed Nix realization has no Hangar roots for closure admission".into(),
@@ -1468,6 +1489,49 @@ impl Provider for NixProvider {
         let realized = realization_from_index(spec, &key, verified, admitted)?;
         finalize_nix_realization(spec, table, ctx, realized)
     }
+}
+
+fn realize_from_local_nix(
+    spec: &RefSpec,
+    table: &SourceTable,
+    ctx: &Ctx,
+    key: &IndexKey,
+) -> Result<Realized, ProviderError> {
+    let project = ctx.project_dir.ok_or_else(|| {
+        ProviderError::Unsupported(
+            "local Nix fallback requires a project with an exact source lock".into(),
+        )
+    })?;
+    let source_name = match &spec.source {
+        Source::Named(name) => name.as_str(),
+        Source::Jetpack | Source::Nixpkgs => crate::Syntax::REF_SOURCE_JETPACK,
+        _ => {
+            return Err(ProviderError::Unsupported(
+                "local Nix fallback requires a Jetpack-backed Nix source".into(),
+            ))
+        }
+    };
+    let invocation = crate::NixFallbackPolicy::run(
+        project,
+        source_name,
+        &key.revision,
+        &key.system,
+        &key.attrpath,
+        ctx.offline,
+    )
+    .map_err(|error| ProviderError::BuildFailed(format!("local Nix fallback failed: {error}")))?;
+    let native_document = invocation.stdout.clone();
+    let mut realized = parse_realization(spec, &invocation.stdout)?;
+    realized
+        .producer
+        .facts
+        .insert(NIX_NATIVE_FORMAT.to_string(), "jet-local-nix-v1".to_string());
+    realized
+        .producer
+        .facts
+        .insert(NIX_NATIVE_DOCUMENT.to_string(), native_document);
+    realized.producer.facts.extend(invocation.facts);
+    finalize_nix_realization(spec, table, ctx, realized)
 }
 
 fn nix_cache_error(roots: &Roots, error: StoreError) -> ProviderError {
@@ -2735,8 +2799,8 @@ fn stage_adapter_source(
             let remote = parse_remote_source(&format!("github:{}", source.target))?;
             fetch_remote_repo(&remote, ctx)
         }
-        Source::Nixpkgs => Err(ProviderError::Adapter(
-            "`...@nixpkgs` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter.".to_string(),
+        Source::Jetpack | Source::Nixpkgs => Err(ProviderError::Adapter(
+            "`...@jetpack` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter.".to_string(),
         )),
         Source::Cran => Err(ProviderError::Adapter(
             "CRAN packages must be realized before they can be adapter source bytes.".to_string(),
@@ -2906,6 +2970,8 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
     let first = arr
         .first()
         .ok_or_else(|| bad_output("provider produced no build results".into()))?;
+    let fallback = crate::NixFallback::import_record(first)
+        .map_err(|error| bad_output(format!("could not import fallback state: {error}")))?;
     let outputs = first.get("outputs").map_err(&bad_output)?;
     let outputs = outputs.as_object().map_err(&bad_output)?;
     let drv_path = first
@@ -2962,6 +3028,12 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
     for (name, path) in &named_outputs {
         replay_facts.insert(format!("nix.output.{name}"), path.clone());
         facts.insert(format!("nix.output.{name}"), path.clone());
+    }
+    if let Some(fallback) = fallback {
+        for (key, value) in fallback.facts() {
+            replay_facts.insert(key.clone(), value.clone());
+            facts.insert(key.clone(), value.clone());
+        }
     }
     // The `.drv` path is Nix's canonical input/action identity. Realized
     // outputs are consequences and must never enter the derivation digest.
@@ -3382,6 +3454,38 @@ mod tests {
     }
 
     #[test]
+    fn jetpack_refs_share_nix_cache_identity() {
+        let table = SourceTable::empty();
+        let bare = classify(&super::super::RefSpec::with_default_source("ripgrep")).unwrap();
+        let explicit = classify("ripgrep@jetpack").unwrap();
+        let legacy = RefSpec {
+            source: Source::Nixpkgs,
+            package: "ripgrep".into(),
+            raw: "ripgrep@nixpkgs".into(),
+        };
+        let store = PathBuf::from(".");
+        let ctx = Ctx {
+            fixtures: None,
+            store_dir: &store,
+            offline: true,
+            project_dir: None,
+            nix_index: None,
+            nix_roots: None,
+        };
+
+        assert_eq!(nix_identity_parts(&bare, &table), nix_identity_parts(&explicit, &table));
+        assert_eq!(nix_identity_parts(&explicit, &table), nix_identity_parts(&legacy, &table));
+        assert_eq!(
+            nix_cache_identity("sha256:output", "linux-x86_64", &bare, &table, &ctx),
+            nix_cache_identity("sha256:output", "linux-x86_64", &explicit, &table, &ctx)
+        );
+        assert_eq!(
+            nix_cache_identity("sha256:output", "linux-x86_64", &explicit, &table, &ctx),
+            nix_cache_identity("sha256:output", "linux-x86_64", &legacy, &table, &ctx)
+        );
+    }
+
+    #[test]
     fn fixture_name_sanitizes_slashes() {
         let s = classify("halcyonomega/cfg@github").unwrap();
         assert_eq!(fixture_name(&s), "github-halcyonomega_cfg.json");
@@ -3409,6 +3513,34 @@ mod tests {
                 .map(String::as_str),
             Some("/nix/store/abc-fastfetch-2.0")
         );
+    }
+
+    #[test]
+    fn fallback_imports_closed_graph_and_all_projections() {
+        let spec = classify("fastfetch@nixpkgs").unwrap();
+        let stdout = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0","dev":"/nix/store/abc-fastfetch-2.0-dev"},"closedGraph":{"root":{"dependencies":["dep"]},"nodes":["dep"]},"dependencies":{"build":["dep"]},"sources":[{"path":"/nix/store/source","sha256":"source-hash"}],"hashes":{"out":"out-hash","dev":"dev-hash"},"losses":["shellHook"],"proof":{"evaluator":"nix-2.34","signature":"proof-signature"},"recipe":{"steps":[]},"lock":{"system":"x86_64-linux"}}]"#;
+        let realized = parse_realization(&spec, stdout).unwrap();
+        let facts = realized.producer.facts;
+        for key in [
+            "nix.fallback.graph",
+            "nix.fallback.selected_outputs",
+            "nix.fallback.dependencies",
+            "nix.fallback.sources",
+            "nix.fallback.hashes",
+            "nix.fallback.losses",
+            "nix.fallback.proof",
+            "nix.fallback.recipe",
+            "nix.fallback.lock",
+            "nix.fallback.document",
+            "nix.fallback.document.sha256",
+            "nix.fallback.proof.sha256",
+        ] {
+            assert!(facts.get(key).is_some_and(|value| !value.is_empty()), "{key}");
+        }
+        assert!(facts["nix.fallback.graph"].contains("\"nodes\":[\"dep\"]"));
+        assert!(facts["nix.fallback.losses"].contains("shellHook"));
+        assert!(facts["nix.fallback.proof"].contains("proof-signature"));
+        assert_eq!(facts["nix.fallback.selected_outputs"], facts["nix.fallback.outputs"]);
     }
 
     #[test]

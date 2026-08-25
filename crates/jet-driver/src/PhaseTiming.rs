@@ -51,6 +51,13 @@ impl PhaseTimer {
         self.last = now;
     }
 
+    /// Record a phase measured by a nested producer that owns its boundary.
+    /// The shared stopwatch remains at its current boundary; this keeps nested
+    /// compiler seams from double-counting their wall interval.
+    pub fn record_us(&mut self, phase: &str, us: u128) {
+        self.phases.push((phase.to_string(), us));
+    }
+
     /// Record a non-time scalar metric (e.g. generated-Rust byte count) so it
     /// rides along in the same report. Stored verbatim, not as a duration.
     pub fn metric(&mut self, name: &str, value: u128) {

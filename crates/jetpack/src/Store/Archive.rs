@@ -778,6 +778,21 @@ fn import_archive_unlocked(roots: &Roots, archive: Archive) -> io::Result<usize>
 
         validate_import_destinations(roots, &package_records, &seen_digests)?;
 
+        let mut incoming_bytes = 0u64;
+        for digest in &seen_digests {
+            if !objects_dir.join(digest).is_dir() {
+                incoming_bytes = incoming_bytes
+                    .checked_add(super::admission_size(&stage_objects)?)
+                    .ok_or_else(|| io::Error::other("archive admission size overflowed"))?;
+                break;
+            }
+        }
+        super::ensure_hangar_capacity(
+            roots,
+            super::admission_reservation(incoming_bytes),
+            Some(&stage),
+        )?;
+
         for digest in &seen_digests {
             let staged = stage_objects.join(digest);
             let destination = objects_dir.join(digest);

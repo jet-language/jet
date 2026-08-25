@@ -3600,6 +3600,21 @@ fn provider_first_ref_is_coded_and_snapshot_pinned() {
 }
 
 #[test]
+fn retired_nixpkgs_source_is_coded_and_snapshot_pinned() {
+    let root = Scratch::new("ref-nixpkgs-source-retired");
+    let out = jetpack()
+        .args(["run", "ripgrep@nixpkgs", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert_jetos_stderr_snapshot_trimmed(
+        "ref_nixpkgs_source_retired",
+        &String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+#[test]
 fn declared_source_package_named_like_provider_resolves_as_package() {
     let src = r#"
 module env.dev {

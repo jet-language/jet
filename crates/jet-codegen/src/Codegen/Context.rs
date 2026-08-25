@@ -9,6 +9,8 @@ use crate::AST::{
     StructDef, Type, VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+use std::time::Instant;
 
 #[derive(Clone)]
 pub(crate) struct UnitFact {
@@ -92,6 +94,37 @@ pub(crate) struct CoverageBranch {
 pub(crate) struct ExternFn {
     pub(crate) wrapper: String,
     pub(crate) c_abi: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CodegenPhaseTiming {
+    pub tir_us: u128,
+    pub emission_us: u128,
+}
+
+#[derive(Default)]
+pub(crate) struct PhaseTimes {
+    tir_us: std::cell::Cell<u128>,
+    emission_us: std::cell::Cell<u128>,
+}
+
+impl PhaseTimes {
+    fn add_tir(&self, us: u128) {
+        self.tir_us
+            .set(self.tir_us.get().saturating_add(us));
+    }
+
+    fn add_emission(&self, us: u128) {
+        self.emission_us
+            .set(self.emission_us.get().saturating_add(us));
+    }
+
+    pub(crate) fn snapshot(&self) -> CodegenPhaseTiming {
+        CodegenPhaseTiming {
+            tir_us: self.tir_us.get(),
+            emission_us: self.emission_us.get(),
+        }
+    }
 }
 
 pub(crate) struct Cx {
@@ -400,6 +433,7 @@ pub(crate) struct Cx {
     /// Shared plane and so needs the `jet_stm::begin()/commit()` scaffold emitted.
     /// Save/restored per block so each `#Transact` reports its own use.
     pub(crate) stm_touched: std::cell::Cell<bool>,
+    pub(crate) phase_timing: Option<Rc<PhaseTimes>>,
 }
 
 pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, JetPow, JetPowFloat, JetFloorDiv, JetFloorDivFloat, JetMod, JetTruncRem, JetMap, JetRemoveBy, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_map_keys, jet_map_values, jet_list_remove_value, jet_list_remove_slot, jet_priority_queue_remove_value, jet_priority_queue_remove_slot, jet_list_count, jet_list_concat, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_map_copy, jet_map_equal, jet_map_first_key, jet_map_to_list, jet_map_any, jet_map_all, jet_map_filter, jet_map_map_values, jet_map_fold, jet_map_flat_map, jet_map_max_value, jet_map_min_value, jet_map_intersection, jet_map_slice_keys, jet_map_from_keys, jet_map_contains_value, jet_map_pop_first, jet_list_replace, jet_list_slice, jet_list_binary_search, jet_list_binary_search_by, jet_list_union, jet_list_intersection, jet_list_difference, jet_list_random, jet_list_min_max, jet_list_min_max_by, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_empty, jet_iter_some, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip, jet_iter_zip_strict, jet_iter_zip_pad};\nuse super::__jet_Ordering;\n\n";
@@ -809,6 +843,26 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
 }
 
 impl Cx {
+    pub(crate) fn time_tir<R>(&self, work: impl FnOnce() -> R) -> R {
+        let Some(timing) = self.phase_timing.as_ref() else {
+            return work();
+        };
+        let started = Instant::now();
+        let result = work();
+        timing.add_tir(started.elapsed().as_micros());
+        result
+    }
+
+    pub(crate) fn time_emission<R>(&self, work: impl FnOnce() -> R) -> R {
+        let Some(timing) = self.phase_timing.as_ref() else {
+            return work();
+        };
+        let started = Instant::now();
+        let result = work();
+        timing.add_emission(started.elapsed().as_micros());
+        result
+    }
+
     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
         self.persist_types.get(name).map(|_| {
             crate::Codegen::TIR::TLocal::persistent(
@@ -4263,6 +4317,7 @@ pub(crate) fn build_cx_items(
         package_edition: "2027".to_string(),
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
+        phase_timing: None,
     };
 
     let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());

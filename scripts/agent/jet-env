@@ -13,6 +13,13 @@ if [ "$#" -eq 0 ]; then
   echo "usage: scripts/agent/jet-env [full] <command> [args...]" >&2
   exit 64
 fi
+# The development command means this checkout's compiler, not the prebuilt Jet
+# package that the Nix shell also puts on PATH. Keep the package as bootstrap
+# fallback for a clean tree with no local binary yet.
+if [ "$1" = "jet" ] && [ -x "$repo/target/debug/jet" ]; then
+  shift
+  set -- "$repo/target/debug/jet" "$@"
+fi
 
 # Check after every environment boundary. direnv and nix can add a shared
 # target dir after the outer process starts, so checking only the caller's

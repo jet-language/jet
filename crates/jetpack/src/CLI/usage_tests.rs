@@ -49,7 +49,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
   {bin} test  [-p <member>…]           (workspace) realize/test selected members
   {bin} hangar list                    show realized packages
-  {bin} hangar du                      honest per-object hangar disk usage
+  {bin} hangar du [--all]              honest hangar disk usage; --all spans machine roots
   {bin} hangar path                    print the resolved user Hangar path
   {bin} hangar verify [<entry-or-archive>] verify Hangar bytes and signatures
   {bin} hangar export <entry> --to <archive.hangar>

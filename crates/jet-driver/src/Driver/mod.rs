@@ -2719,7 +2719,7 @@ fn prepare_build_front_end_on_compiler_stack(
     }
     if timing {
         // lex + parse + module resolution, including the package build entry
-        timer.lap("load");
+        timer.lap("parse");
     }
 
     // Build code is compiler-host code. Target restrictions apply only after
@@ -3433,7 +3433,19 @@ fn compile_build_from_front_end(
             )).collect());
         }
     }
-    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false, active_os);
+    let rust = if timing {
+        let (rust, phases) = crate::Codegen::emit_bundle_dbg_timed(
+            &bundle,
+            ffi.as_ref(),
+            false,
+            active_os,
+        );
+        timer.record_us("tir", phases.tir_us);
+        timer.record_us("emission", phases.emission_us);
+        rust
+    } else {
+        crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false, active_os)
+    };
     let web = if options.web_target {
         Some(
             crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()).map_err(|miss| {
@@ -3461,7 +3473,6 @@ fn compile_build_from_front_end(
         None
     };
     if timing {
-        timer.lap("codegen");
         timer.metric("rust_bytes", rust.len() as u128);
         timer.write_to(&bundle.project_root);
     }
@@ -5016,7 +5027,7 @@ fn compile_bundle_path_opts_on_compiler_stack(
         bundle.web_partition_enforced = true;
     }
     if timing {
-        timer.lap("load"); // lex + parse + module resolution
+        timer.lap("parse"); // lex + parse + module resolution
     }
     let (diags, effect_facts) = if let Some(output) = explicit_output {
         (
@@ -5086,7 +5097,19 @@ fn compile_bundle_path_opts_on_compiler_stack(
             return Err(web_tir_errors);
         }
     }
-    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
+    let rust = if timing {
+        let (rust, phases) = crate::Codegen::emit_bundle_dbg_timed(
+            &bundle,
+            ffi.as_ref(),
+            debug_linemap,
+            active_os,
+        );
+        timer.record_us("tir", phases.tir_us);
+        timer.record_us("emission", phases.emission_us);
+        rust
+    } else {
+        crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os)
+    };
     let web = if web_target {
         Some(
             crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
@@ -5144,7 +5167,6 @@ fn compile_bundle_path_opts_on_compiler_stack(
         .as_ref()
         .map(|config| crate::Codegen::emit_library(&bundle, &rust, &config.name, &config.bindings));
     if timing {
-        timer.lap("codegen");
         timer.metric("rust_bytes", rust.len() as u128);
         timer.write_to(&bundle.project_root);
     }

@@ -347,6 +347,9 @@ fn ref_error(name: &str, error: &RefSpec::RefError) -> PackageParseError {
         RefSpec::RefError::ProviderFirst { raw, replacement } => err(format!(
             "dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`"
         )),
+        RefSpec::RefError::RetiredNixpkgs { raw, replacement } => err(format!(
+            "dependency `{name}` uses the retired `nixpkgs` source spelling `{raw}`; write `{replacement}`"
+        )),
         RefSpec::RefError::PathProviderRetired { raw, path } => err(format!(
             "dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`"
         )),

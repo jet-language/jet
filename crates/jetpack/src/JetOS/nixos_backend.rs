@@ -162,7 +162,7 @@ fn nixpkgs_pin(table: &RefSpec::SourceTable) -> Option<(String, String, String)>
 
 fn is_nixpkgs_source(source: &RefSpec::Source, table: &RefSpec::SourceTable) -> bool {
     match source {
-        RefSpec::Source::Nixpkgs => true,
+        RefSpec::Source::Jetpack | RefSpec::Source::Nixpkgs => true,
         RefSpec::Source::Named(name) => table
             .upstream(name)
             .and_then(nixpkgs_owner_repo_rev)

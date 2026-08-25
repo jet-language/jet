@@ -250,6 +250,105 @@ fn hangar_ingest_verify_and_dedupe_roundtrip() {
     let _ = Path::new("."); // keep Path import used on all cfgs
 }
 
+#[cfg(unix)]
+#[test]
+fn distinct_hangar_roots_share_one_cas_object_and_file_bytes() {
+    use std::collections::BTreeMap;
+    use std::os::unix::fs::MetadataExt;
+
+    fn physical_files(paths: &[&Path]) -> (usize, u64) {
+        fn walk(path: &Path, files: &mut BTreeMap<(u64, u64), u64>) {
+            let metadata = fs::symlink_metadata(path).unwrap();
+            if metadata.file_type().is_symlink() {
+                return;
+            }
+            if metadata.is_file() {
+                files.insert(
+                    (metadata.dev(), metadata.ino()),
+                    metadata.blocks().saturating_mul(512),
+                );
+                return;
+            }
+            for entry in fs::read_dir(path).unwrap() {
+                walk(&entry.unwrap().path(), files);
+            }
+        }
+
+        let mut files = BTreeMap::new();
+        for path in paths {
+            walk(path, &mut files);
+        }
+        (files.len(), files.values().sum())
+    }
+
+    let shared = Scratch::new("hangar-shared-cas");
+    let left_root = Scratch::new("hangar-shared-left");
+    let right_root = Scratch::new("hangar-shared-right");
+    let project = Scratch::new("hangar-shared-project");
+    let source = Scratch::new("hangar-shared-source");
+    fs::create_dir_all(source.join("bin")).unwrap();
+    fs::write(source.join("bin/tool"), "shared package bytes\n").unwrap();
+    fs::create_dir_all(source.join("share")).unwrap();
+    fs::write(source.join("share/data"), "second shared object\n").unwrap();
+
+    let ingest = |root: &Scratch| {
+        jetpack()
+            .args([
+                "hangar",
+                "ingest",
+                source.path.to_str().unwrap(),
+                "--name",
+                "shared-tool",
+                "--version",
+                "1.0.0",
+                "--ref",
+                "shared-tool@fixture#1.0.0",
+                "--no-color",
+            ])
+            .current_dir(&project.path)
+            .env("JETPACK_ROOT", &root.path)
+            .env("JETPACK_SHARED_CAS", &shared.path)
+            .output()
+            .unwrap()
+    };
+
+    for root in [&left_root, &right_root] {
+        let output = ingest(root);
+        assert!(
+            output.status.success(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let left = jetpack::Store::Roots::at(left_root.path.clone());
+    let right = jetpack::Store::Roots::at(right_root.path.clone());
+    let left_entry = jetpack::Store::find_by_reference(&left, "shared-tool@fixture#1.0.0").unwrap();
+    let right_entry =
+        jetpack::Store::find_by_reference(&right, "shared-tool@fixture#1.0.0").unwrap();
+    assert_eq!(
+        left_entry.envelope.output_hash,
+        right_entry.envelope.output_hash
+    );
+    assert_ne!(left_entry.out, right_entry.out);
+
+    let shared_objects = fs::read_dir(&shared.path)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().unwrap().is_file())
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    assert_eq!(shared_objects.len(), 1, "shared CAS object count");
+
+    let expected = physical_files(&[shared_objects[0].as_path()]);
+    let actual = physical_files(&[
+        Path::new(&left_entry.out),
+        Path::new(&right_entry.out),
+        shared_objects[0].as_path(),
+    ]);
+    assert_eq!(actual, expected, "shared CAS physical file count and bytes");
+}
+
 #[test]
 fn hangar_sign_and_verify_production_path_rejects_tamper() {
     let root = Scratch::new("hangar-sign-verify-root");
@@ -1603,4 +1702,75 @@ fn explain_json_uses_the_report_schema_for_registered_queries() {
         assert_eq!(json_string(&report, "action"), "explain");
         assert_eq!(json_string(&report, "status"), "ok");
     }
+}
+
+#[test]
+fn hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling() {
+    fn logical_bytes(path: &Path) -> u64 {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        if metadata.is_dir() {
+            fs::read_dir(path)
+                .unwrap()
+                .map(|entry| logical_bytes(&entry.unwrap().path()))
+                .sum()
+        } else {
+            metadata.len()
+        }
+    }
+
+    fn quota_fixture(
+        roots: &jetpack::Store::Roots,
+        name: &str,
+        fill: u8,
+        bytes: usize,
+    ) -> jetpack::Store::StoreEntry {
+        let source = roots.root.join(format!("quota-source-{name}"));
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("payload"), vec![fill; bytes]).unwrap();
+        let entry = jetpack::Store::ingest_tree(
+            roots,
+            &jetpack::Store::IngestRequest {
+                name: format!("quota-{name}"),
+                version: "1".into(),
+                reference: format!("quota@fixture#{name}"),
+                cache_identity: jetpack::Store::CacheIdentity::default(),
+                references: Vec::new(),
+                outputs: std::collections::BTreeMap::from([("out".into(), source.clone())]),
+                signature: String::new(),
+                provenance: "quota-test".into(),
+                platform_artifact_kind: String::new(),
+            },
+        )
+        .unwrap()
+        .entry;
+        fs::remove_dir_all(source).unwrap();
+        entry
+    }
+
+    let root = Scratch::new("hangar-quota-root");
+    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let oldest = quota_fixture(&roots, "oldest", b'a', 4 * 1024 * 1024);
+    let newer = quota_fixture(&roots, "newer", b'b', 4 * 1024 * 1024);
+    jetpack::Store::test_backdate_last_used_at(&roots, &oldest.id, 1).unwrap();
+    jetpack::Store::test_backdate_last_used_at(&roots, &newer.id, 2).unwrap();
+
+    let before = logical_bytes(&roots.hangar_dir());
+    let limit = before - 2 * 1024 * 1024;
+    fs::create_dir_all(root.path.join("config")).unwrap();
+    fs::write(
+        root.path.join("config/hangar-max-bytes"),
+        format!("{limit}\n"),
+    )
+    .unwrap();
+    assert!(before > limit);
+
+    let admitted = quota_fixture(&roots, "admitted", b'c', 64 * 1024);
+    let after = logical_bytes(&roots.hangar_dir());
+    assert!(
+        after <= limit,
+        "quota admitted {after} logical bytes above ceiling {limit}"
+    );
+    assert!(!root.path.join("hangar").join(&oldest.id).exists());
+    assert!(root.path.join("hangar").join(&newer.id).exists());
+    assert!(root.path.join("hangar").join(&admitted.id).exists());
 }

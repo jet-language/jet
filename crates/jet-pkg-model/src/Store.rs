@@ -23,6 +23,7 @@ const HANGAR_SUBDIR: &str = "Hangar";
 #[cfg(not(any(target_os = "macos", windows)))]
 const HANGAR_SUBDIR: &str = "hangar";
 const LEGACY_HANGAR_SUBDIR: &str = "hangar";
+const SHARED_CAS_ENV: &str = "JETPACK_SHARED_CAS";
 const MAX_STORE_OBJECTS: usize = 1_000_000;
 const MAX_STORE_META_BYTES: u64 = 1 << 20;
 
@@ -54,6 +55,103 @@ impl Roots {
             LEGACY_HANGAR_SUBDIR
         })
     }
+
+    /// The immutable payload pool shared by independent Jetpack roots.
+    /// `JETPACK_ROOT` remains caller-owned state; realized file bytes use this
+    /// common pool so concurrent agents do not each retain a full copy.
+    pub fn shared_cas_dir(&self) -> PathBuf {
+        shared_cas_dir()
+    }
+
+    /// Discover user and custom Hangar roots visible from this machine.
+    ///
+    /// Custom roots are commonly sibling directories under an agent cache or
+    /// an XDG data directory. Discovery stays bounded to those known parents;
+    /// it never walks an arbitrary filesystem tree.
+    pub fn machine_roots() -> Vec<Self> {
+        let resolved = resolve();
+        let default = Self {
+            root: user_data_root(),
+            dev_mode: true,
+        };
+        let legacy = Self::at(legacy_user_root());
+        let mut roots = Vec::new();
+        let mut parents = Vec::new();
+
+        for candidate in [resolved, default, legacy] {
+            add_machine_root(&mut roots, candidate);
+        }
+        for root in &roots {
+            if let Some(parent) = root.root.parent() {
+                parents.push(parent.to_path_buf());
+            }
+        }
+        for parent in [
+            environment_path("XDG_DATA_HOME"),
+            environment_path("XDG_STATE_HOME"),
+            environment_path("LOCALAPPDATA"),
+            Some(environment_path("XDG_CACHE_HOME").unwrap_or_else(|| home_dir().join(".cache"))),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            parents.push(parent);
+        }
+
+        parents.sort();
+        parents.dedup();
+        for parent in parents {
+            let Ok(entries) = fs::read_dir(parent) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Ok(metadata) = fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    continue;
+                }
+                let native_hangar = path.join(HANGAR_SUBDIR);
+                let legacy_hangar = path.join(LEGACY_HANGAR_SUBDIR);
+                if real_directory(&native_hangar) {
+                    add_machine_root(
+                        &mut roots,
+                        Self {
+                            root: path,
+                            dev_mode: true,
+                        },
+                    );
+                } else if real_directory(&legacy_hangar) {
+                    add_machine_root(&mut roots, Self::at(path));
+                }
+            }
+        }
+        roots
+    }
+}
+
+/// Resolve the machine/user shared immutable payload pool.
+pub fn shared_cas_dir() -> PathBuf {
+    if let Some(path) = environment_path(SHARED_CAS_ENV) {
+        return path;
+    }
+    user_data_root().join(HANGAR_SUBDIR).join("cas")
+}
+
+fn add_machine_root(roots: &mut Vec<Roots>, candidate: Roots) {
+    if !roots
+        .iter()
+        .any(|root| root.root == candidate.root && root.hangar_dir() == candidate.hangar_dir())
+    {
+        roots.push(candidate);
+    }
+}
+
+fn real_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())
+        .unwrap_or(false)
 }
 
 /// The project-local `.jet/` managed folder for `project` (lockfile, caches,
@@ -519,5 +617,16 @@ mod tests {
             dev_mode: false,
         };
         assert_eq!(roots.hangar_dir(), PathBuf::from("/tmp/jet-root/hangar"));
+    }
+
+    #[test]
+    fn isolated_root_requires_explicit_construction() {
+        let roots = Roots::at(PathBuf::from("/explicit/jet-test-root"));
+        assert_eq!(roots.root, PathBuf::from("/explicit/jet-test-root"));
+        assert!(!roots.dev_mode);
+        assert_eq!(
+            roots.hangar_dir(),
+            PathBuf::from("/explicit/jet-test-root/hangar")
+        );
     }
 }

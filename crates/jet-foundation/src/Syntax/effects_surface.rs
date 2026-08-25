@@ -485,7 +485,11 @@ pub const REF_CHANNEL_LATEST: &str = "latest";
 pub const REF_CHANNEL_MAIN: &str = "main";
 pub const REF_CHANNEL_AUTO: &str = "auto";
 
-/// D-JPK7/15: recognized ref source prefixes.
+/// D-JPK-SNIXREUSE1=A: Jetpack is the canonical package source. `nixpkgs`
+/// remains an internal migration alias until its public retirement diagnostic
+/// lands; both names resolve through the same locked package identity.
+pub const REF_SOURCE_JETPACK: &str = "jetpack";
+/// D-JPK7/15: legacy nixpkgs source token, retained for migration/provenance.
 pub const REF_SOURCE_NIXPKGS: &str = "nixpkgs";
 pub const REF_SOURCE_GITHUB: &str = "github";
 pub const REF_SOURCE_PATH: &str = "path";
@@ -519,6 +523,7 @@ pub const REF_SOURCE_RELEASES: &str = "releases";
 /// `Syntax/retirements.rs`'s `package-ref-order` ratchet both read this list
 /// instead of hand-copying it, so they can never drift apart.
 pub const REF_SOURCE_PROVIDERS: &[&str] = &[
+    REF_SOURCE_JETPACK,
     REF_SOURCE_NIXPKGS,
     REF_SOURCE_GITHUB,
     REF_SOURCE_PATH,

@@ -523,8 +523,8 @@ const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
     },
     NestedCommandSpec {
         name: "du",
-        usage: "du [--json]",
-        summary: "Show disk use for each stored object",
+        usage: "du [--all] [--json]",
+        summary: "Show Hangar disk use per root or across the machine",
         handler: HandlerKey::Hangar,
         also_canonical_top_level: false,
     },

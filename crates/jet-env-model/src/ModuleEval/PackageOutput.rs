@@ -347,7 +347,7 @@ fn project_packages(
         } else {
             // Package outputs have no second source table. Bare names use the
             // canonical built-in provider so the same plan is buildable.
-            Merge::Pkg::new(crate::Syntax::REF_SOURCE_NIXPKGS, raw)
+            Merge::Pkg::new(crate::Syntax::REF_SOURCE_JETPACK, raw)
         };
         if !packages.contains(&package) {
             packages.push(package);
@@ -579,7 +579,7 @@ outputs: .{
         assert_eq!(first, second);
         assert_eq!(
             first.systems[0].packages[0],
-            Merge::Pkg::new("nixpkgs", "ripgrep")
+            Merge::Pkg::new("jetpack", "ripgrep")
         );
         assert_eq!(first.systems[0].options[0].key, "network.hostName");
         assert_eq!(first.fleets[0].hosts[0].system, "workstation");

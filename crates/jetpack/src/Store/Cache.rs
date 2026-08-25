@@ -97,7 +97,6 @@ enum CacheEndpoint {
     Http(String),
     Ssh { target: String, root: String },
     S3(String),
-    Nix(String),
     Hangar,
 }
 
@@ -155,19 +154,6 @@ impl CacheEndpoint {
                 credential: true,
                 credential_required: false,
             },
-            // Nix transfers use the dedicated path-info/verify/copy adapter
-            // below. They do not use cache-object PUT/GET or remote
-            // execution, and Jetpack credentials are not implicitly attached
-            // to the host's Nix configuration.
-            Self::Nix(_) => EndpointCapabilities {
-                read: true,
-                write: true,
-                promote: false,
-                remote_execute: false,
-                trust: true,
-                credential: false,
-                credential_required: false,
-            },
         }
     }
 
@@ -177,7 +163,6 @@ impl CacheEndpoint {
             Self::Http(_) => "http",
             Self::Ssh { .. } => "ssh",
             Self::S3(_) => "s3",
-            Self::Nix(_) => "nix-store",
             Self::Hangar => "hangar",
         }
     }
@@ -204,8 +189,6 @@ pub struct CacheTransferReport {
     pub output_hash: String,
     /// Jetpack's digest of the canonical NAR bytes.
     pub nar_hash: String,
-    /// The Nix spelling recorded at a Nix store boundary, when applicable.
-    pub nix_nar_hash: Option<String>,
     /// Public signature identity, never secret credential material.
     pub signed_fingerprint: String,
     /// Provenance identities carried in the signed cache admission decision.
@@ -531,7 +514,6 @@ pub fn publish_cache_entry(
                     entry: entry.id.clone(),
                     output_hash: entry.envelope.output_hash.clone(),
                     nar_hash: stats.digest,
-                    nix_nar_hash: proof.nix_nar_hash,
                     signed_fingerprint: proof.signed_fingerprint,
                     builder: cache_builder_for_report(&entry),
                     provenance: cache_provenance_for_report(&entry),
@@ -588,7 +570,6 @@ pub fn verify_cache_transfer(
                     entry: expected.id.clone(),
                     output_hash: expected.envelope.output_hash.clone(),
                     nar_hash: super::nar_digest(&bytes),
-                    nix_nar_hash: None,
                     signed_fingerprint: fingerprint_for_key(&key),
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
@@ -597,28 +578,6 @@ pub fn verify_cache_transfer(
                     receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: bytes.len() as u64,
-                });
-            }
-            Ok(None) => {}
-            Err(error) => failures.push(format!("{mirror}: {error}")),
-        }
-        match verify_nix_endpoint(&endpoint, &expected, &key) {
-            Ok(Some(transfer)) => {
-                return Ok(CacheTransferReport {
-                    role: binding.role.clone(),
-                    mirror: mirror.clone(),
-                    entry: expected.id.clone(),
-                    output_hash: expected.envelope.output_hash.clone(),
-                    nar_hash: transfer.nar_hash,
-                    nix_nar_hash: Some(transfer.nix_nar_hash),
-                    signed_fingerprint: transfer.signed_fingerprint,
-                    builder: cache_builder_for_report(&expected),
-                    provenance: cache_provenance_for_report(&expected),
-                    witness: None,
-                    receipt_version: None,
-                    receipt_expires_unix: None,
-                    credential_provider: binding.credential_provider.clone(),
-                    bytes: transfer.nar.len() as u64,
                 });
             }
             Ok(None) => {}
@@ -708,7 +667,6 @@ pub fn substitute_cache_entry(
                     entry: expected.id.clone(),
                     output_hash: expected.envelope.output_hash.clone(),
                     nar_hash: super::nar_digest(&bytes),
-                    nix_nar_hash: None,
                     signed_fingerprint: fingerprint_for_key(&key),
                     builder: cache_builder_for_report(&expected),
                     provenance: cache_provenance_for_report(&expected),
@@ -717,28 +675,6 @@ pub fn substitute_cache_entry(
                     receipt_expires_unix: None,
                     credential_provider: binding.credential_provider.clone(),
                     bytes: bytes.len() as u64,
-                });
-            }
-            Ok(None) => {}
-            Err(error) => failures.push(format!("{mirror}: {error}")),
-        }
-        match substitute_nix_endpoint(&endpoint, &expected, destination, &key) {
-            Ok(Some(transfer)) => {
-                return Ok(CacheTransferReport {
-                    role: binding.role.clone(),
-                    mirror: mirror.clone(),
-                    entry: expected.id.clone(),
-                    output_hash: expected.envelope.output_hash.clone(),
-                    nar_hash: transfer.nar_hash,
-                    nix_nar_hash: Some(transfer.nix_nar_hash),
-                    signed_fingerprint: transfer.signed_fingerprint,
-                    builder: cache_builder_for_report(&expected),
-                    provenance: cache_provenance_for_report(&expected),
-                    witness: None,
-                    receipt_version: None,
-                    receipt_expires_unix: None,
-                    credential_provider: binding.credential_provider.clone(),
-                    bytes: transfer.nar.len() as u64,
                 });
             }
             Ok(None) => {}
@@ -773,7 +709,6 @@ pub fn substitute_cache_entry(
                             entry: expected.id.clone(),
                             output_hash: expected.envelope.output_hash.clone(),
                             nar_hash: stats.digest,
-                            nix_nar_hash: None,
                             signed_fingerprint: fingerprint_for_info(&artifact.info),
                             builder: cache_builder_for_report(&expected),
                             provenance: cache_provenance_for_report(&expected),
@@ -849,18 +784,13 @@ pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> Strin
         true,
         operation,
         &format!(
-            ",\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"nix_nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"witness\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}",
+            ",\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"witness\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}",
             crate::JSON::quote(operation),
             crate::JSON::quote(&report.role),
             crate::JSON::quote(&report.mirror),
             crate::JSON::quote(&report.entry),
             crate::JSON::quote(&report.output_hash),
             crate::JSON::quote(&report.nar_hash),
-            report
-                .nix_nar_hash
-                .as_deref()
-                .map(crate::JSON::quote)
-                .unwrap_or_else(|| "null".to_string()),
             crate::JSON::quote(&report.signed_fingerprint),
             crate::JSON::quote(&report.builder),
             crate::JSON::quote(&report.provenance),
@@ -989,7 +919,7 @@ fn find_artifact(
 ) -> io::Result<Option<CacheArtifact>> {
     match endpoint {
         CacheEndpoint::Local(mirror) => find_local_artifact(mirror, expected, key),
-        CacheEndpoint::Hangar | CacheEndpoint::Nix(_) => Ok(None),
+        CacheEndpoint::Hangar => Ok(None),
         CacheEndpoint::Http(_) | CacheEndpoint::Ssh { .. } | CacheEndpoint::S3(_) => {
             let Some(expected) = expected else {
                 return Ok(None);
@@ -1119,7 +1049,6 @@ fn report_for(
             .map(|entry| entry.envelope.output_hash.clone())
             .unwrap_or_default(),
         nar_hash: info.nar_hash.clone(),
-        nix_nar_hash: None,
         signed_fingerprint: fingerprint_for_info(&info),
         builder: expected.map(cache_builder_for_report).unwrap_or_default(),
         provenance: expected
@@ -1531,7 +1460,7 @@ fn cache_receipt_for_publication(
                 .map(|bytes| decode_cache_receipt(&bytes))
                 .transpose()?
         }
-        CacheEndpoint::Nix(_) | CacheEndpoint::Hangar => None,
+        CacheEndpoint::Hangar => None,
     };
     if let Some(existing) = existing {
         let current_witness = current_receipt_witness().map_err(io::Error::other)?;
@@ -1814,12 +1743,9 @@ fn parse_endpoint(endpoint: &str) -> io::Result<CacheEndpoint> {
         ));
     }
     if endpoint.starts_with("daemon://") || endpoint.starts_with("nix://") {
-        if endpoint.contains('?') || endpoint.contains('#') {
-            return Err(invalid(
-                "Nix store endpoint cannot contain a query or fragment",
-            ));
-        }
-        return Ok(CacheEndpoint::Nix(endpoint.to_string()));
+        return Err(invalid(
+            "Nix store endpoints are retired; use Jetpack's native cache protocol",
+        ));
     }
     let path = absolute_endpoint_path(endpoint, "cache mirror")?;
     Ok(CacheEndpoint::Local(path))
@@ -1953,7 +1879,7 @@ fn endpoint_key(endpoint: &CacheEndpoint, key: &str) -> io::Result<String> {
             validate_path_components(&path)?;
             Ok(path.to_string_lossy().into_owned())
         }
-        CacheEndpoint::Nix(_) | CacheEndpoint::Hangar => {
+        CacheEndpoint::Hangar => {
             Err(invalid("this endpoint does not expose cache object keys"))
         }
     }
@@ -1972,7 +1898,7 @@ fn endpoint_get(endpoint: &CacheEndpoint, key: &str, limit: u64) -> io::Result<O
         CacheEndpoint::Http(_) => http_get(endpoint_key(endpoint, key)?, limit),
         CacheEndpoint::Ssh { target, .. } => ssh_get(target, &endpoint_key(endpoint, key)?, limit),
         CacheEndpoint::S3(_) => s3_get(endpoint_key(endpoint, key)?, limit),
-        CacheEndpoint::Nix(_) | CacheEndpoint::Hangar => {
+        CacheEndpoint::Hangar => {
             Err(invalid("this endpoint has no cache object read operation"))
         }
     }
@@ -1994,7 +1920,7 @@ fn endpoint_put(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result
             ssh_put(target, &remote, bytes)
         }
         CacheEndpoint::S3(_) => s3_put(remote, bytes),
-        CacheEndpoint::Nix(_) | CacheEndpoint::Hangar => {
+        CacheEndpoint::Hangar => {
             Err(invalid("this endpoint has no cache object write operation"))
         }
     }
@@ -2002,19 +1928,10 @@ fn endpoint_put(endpoint: &CacheEndpoint, key: &str, bytes: &[u8]) -> io::Result
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TransferProof {
-    nix_nar_hash: Option<String>,
     signed_fingerprint: String,
     witness: Option<String>,
     receipt_version: Option<u64>,
     receipt_expires_unix: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct NixTransfer {
-    nar: Vec<u8>,
-    nar_hash: String,
-    nix_nar_hash: String,
-    signed_fingerprint: String,
 }
 
 fn publish_endpoint(
@@ -2038,7 +1955,6 @@ fn publish_endpoint(
             let receipt = cache_receipt_for_publication(endpoint, role, entry, key)?;
             publish_local_resumable(root, info, nar, key, &receipt)?;
             Ok(TransferProof {
-                nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_key(key),
                 witness: Some(receipt.witness.clone()),
                 receipt_version: Some(receipt.version),
@@ -2048,12 +1964,6 @@ fn publish_endpoint(
         CacheEndpoint::Hangar => Err(invalid(
             "Hangar is the local source store and cannot publish cache objects",
         )),
-        CacheEndpoint::Nix(uri) => {
-            let stats = super::validate_nar(nar)?;
-            require_nix_store_path(&entry.out)?;
-            nix_copy(uri, "--to", &entry.out)?;
-            prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes, key)
-        }
         CacheEndpoint::Http(_) | CacheEndpoint::Ssh { .. } | CacheEndpoint::S3(_) => {
             let signed = info.clone().signed(key)?;
             let signed_text = signed.to_text()?;
@@ -2079,7 +1989,6 @@ fn publish_endpoint(
                 ],
             )?;
             Ok(TransferProof {
-                nix_nar_hash: None,
                 signed_fingerprint: fingerprint_for_info(&signed),
                 witness: Some(receipt.witness.clone()),
                 receipt_version: Some(receipt.version),
@@ -2173,34 +2082,6 @@ fn promote_remote(
     }
 }
 
-fn verify_nix_endpoint(
-    endpoint: &CacheEndpoint,
-    entry: &StoreEntry,
-    key: &TrustKey,
-) -> io::Result<Option<NixTransfer>> {
-    let CacheEndpoint::Nix(uri) = endpoint else {
-        return Ok(None);
-    };
-    require_nix_store_path(&entry.out)?;
-    nix_copy(uri, "--from", &entry.out)?;
-    let actual = crate::Envelope::try_output_hash_of(&entry.out).map_err(io::Error::other)?;
-    if actual != entry.envelope.output_hash {
-        return Err(invalid(
-            "Nix store output hash disagrees with the Hangar identity",
-        ));
-    }
-    let (nar, stats) = super::write_nar(Path::new(&entry.out))?;
-    let proof = prove_nix_transfer(uri, &entry.out, &stats.digest, stats.bytes, key)?;
-    Ok(Some(NixTransfer {
-        nar,
-        nar_hash: stats.digest,
-        nix_nar_hash: proof
-            .nix_nar_hash
-            .ok_or_else(|| invalid("Nix transfer did not return its NarHash"))?,
-        signed_fingerprint: proof.signed_fingerprint,
-    }))
-}
-
 fn verify_hangar_endpoint(
     endpoint: &CacheEndpoint,
     entry: &StoreEntry,
@@ -2251,275 +2132,6 @@ fn substitute_hangar_endpoint(
             let _ = remove_tree(destination);
             Err(error)
         }
-    }
-}
-
-fn substitute_nix_endpoint(
-    endpoint: &CacheEndpoint,
-    entry: &StoreEntry,
-    destination: &Path,
-    key: &TrustKey,
-) -> io::Result<Option<NixTransfer>> {
-    if !matches!(endpoint, CacheEndpoint::Nix(_)) {
-        return Ok(None);
-    }
-    let result = (|| {
-        let transfer = verify_nix_endpoint(endpoint, entry, key)?
-            .ok_or_else(|| invalid("Nix substitution was called for a non-Nix endpoint"))?;
-        super::read_nar(&transfer.nar, destination)?;
-        super::seal_node(destination)?;
-        let actual = crate::Envelope::try_output_hash_of(&destination.to_string_lossy())
-            .map_err(io::Error::other)?;
-        if actual != entry.envelope.output_hash {
-            return Err(invalid(
-                "Nix store output hash disagrees with the Hangar identity",
-            ));
-        }
-        let (_, stats) = super::write_nar(destination)?;
-        if stats.digest != transfer.nar_hash {
-            return Err(invalid("Nix substitution changed the verified NAR bytes"));
-        }
-        Ok(transfer)
-    })();
-    match result {
-        Ok(transfer) => Ok(Some(transfer)),
-        Err(error) => {
-            let _ = remove_tree(destination);
-            Err(error)
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct NixPathInfo {
-    nar_hash: String,
-    nar_size: Option<u64>,
-    signed_fingerprint: String,
-}
-
-fn prove_nix_transfer(
-    uri: &str,
-    path: &str,
-    expected_nar_hash: &str,
-    expected_bytes: u64,
-    key: &TrustKey,
-) -> io::Result<TransferProof> {
-    require_nix_store_path(path)?;
-    let info = nix_path_info(uri, path)?;
-    nix_verify_path(uri, path)?;
-    let normalized = nix_nar_hash_to_jet(&info.nar_hash)?;
-    if normalized != expected_nar_hash {
-        return Err(invalid(&format!(
-            "Nix NarHash {} disagrees with Jetpack digest {expected_nar_hash}",
-            info.nar_hash
-        )));
-    }
-    if info.nar_size.is_some_and(|size| size != expected_bytes) {
-        return Err(invalid("Nix NarSize disagrees with the canonical NAR size"));
-    }
-    Ok(TransferProof {
-        nix_nar_hash: Some(info.nar_hash.clone()),
-        signed_fingerprint: nix_admission_fingerprint(uri, path, &info, key),
-        witness: None,
-        receipt_version: None,
-        receipt_expires_unix: None,
-    })
-}
-
-/// Jetpack and Nix use different trust domains. Nix verifies its own signed
-/// path against the host's configured trusted keys; this HMAC binds that
-/// verified Nix fact to the cache binding that admitted it. The HMAC tag is
-/// an admission proof, not a replacement for Nix's signature check.
-fn nix_admission_fingerprint(uri: &str, path: &str, info: &NixPathInfo, key: &TrustKey) -> String {
-    let message = format!(
-        "jetpack-nix-transfer-v1\n{uri}\n{path}\n{}\n{}",
-        info.nar_hash, info.signed_fingerprint
-    );
-    let signature = key.sign(message.as_bytes());
-    format!(
-        "{};jetpack:{}:{}",
-        info.signed_fingerprint, signature.key_id, signature.sig_hex
-    )
-}
-
-fn nix_path_info(uri: &str, path: &str) -> io::Result<NixPathInfo> {
-    let child = Command::new("nix")
-        .args(["path-info", "--json", "--store", uri, path])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            invalid(&format!(
-                "Nix store metadata adapter could not start: {error}"
-            ))
-        })?;
-    let (status, stdout, stderr) = run_bounded_output(child, MAX_INFO_BYTES, "Nix store metadata")?;
-    if !status.success() {
-        return Err(invalid(&format!(
-            "Nix store metadata rejected path {path}: {}",
-            bounded_stderr(&stderr)
-        )));
-    }
-    let text = String::from_utf8(stdout).map_err(|_| invalid("Nix store metadata is not UTF-8"))?;
-    let parsed = crate::JSON::parse(&text).map_err(io::Error::other)?;
-    let (reported_path, object) = match &parsed {
-        crate::JSON::JSONValue::Array(rows) if rows.len() == 1 => rows[0]
-            .as_object()
-            .map(|object| {
-                let path = object
-                    .get("path")
-                    .and_then(|value| value.as_str().ok())
-                    .unwrap_or(path);
-                (path, object)
-            })
-            .map_err(io::Error::other)?,
-        crate::JSON::JSONValue::Object(object) if object.contains_key("path") => (
-            object
-                .get("path")
-                .ok_or_else(|| invalid("Nix store metadata has no path"))?
-                .as_str()
-                .map_err(io::Error::other)?,
-            object,
-        ),
-        crate::JSON::JSONValue::Object(object) if object.len() == 1 => {
-            let (path, value) = object.iter().next().expect("one-entry Nix metadata object");
-            (path.as_str(), value.as_object().map_err(io::Error::other)?)
-        }
-        crate::JSON::JSONValue::Array(_) => {
-            return Err(invalid("Nix store metadata returned more than one path"));
-        }
-        _ => return Err(invalid("Nix store metadata is not an object")),
-    };
-    if reported_path != path {
-        return Err(invalid(
-            "Nix store metadata path disagrees with the requested path",
-        ));
-    }
-    let nar_hash = object
-        .get("narHash")
-        .ok_or_else(|| invalid("Nix store metadata has no NarHash"))?
-        .as_str()
-        .map_err(io::Error::other)?
-        .to_string();
-    let nar_size = object
-        .get("narSize")
-        .map(|value| {
-            let size = match value {
-                crate::JSON::JSONValue::Number(size) if *size >= 0 => *size as u64,
-                crate::JSON::JSONValue::Flt(size)
-                    if size.is_finite() && *size >= 0.0 && size.fract() == 0.0 =>
-                {
-                    *size as u64
-                }
-                _ => return Err(invalid("Nix store metadata NarSize is not an integer")),
-            };
-            Ok(size)
-        })
-        .transpose()?;
-    let signatures = match object.get("signatures") {
-        Some(value) => value
-            .as_array()
-            .map_err(io::Error::other)?
-            .iter()
-            .map(|value| {
-                let signature = value.as_str().map_err(io::Error::other)?;
-                if signature.is_empty()
-                    || signature.len() > 4096
-                    || signature
-                        .bytes()
-                        .any(|byte| byte == 0 || byte.is_ascii_control())
-                {
-                    return Err(invalid(
-                        "Nix store metadata has an invalid signature fingerprint",
-                    ));
-                }
-                Ok(signature.to_string())
-            })
-            .collect::<io::Result<Vec<_>>>()?,
-        None => Vec::new(),
-    };
-    if signatures.is_empty() {
-        return Err(invalid("Nix store metadata has no signed fingerprint"));
-    }
-    let signed_fingerprint = signatures.join(",");
-    Ok(NixPathInfo {
-        nar_hash,
-        nar_size,
-        signed_fingerprint,
-    })
-}
-
-fn nix_nar_hash_to_jet(value: &str) -> io::Result<String> {
-    super::normalize_nar_hash(value)
-}
-
-fn require_nix_store_path(path: &str) -> io::Result<()> {
-    let path = Path::new(path);
-    if !path.starts_with("/nix/store")
-        || path == Path::new("/nix/store")
-        || path.components().any(|component| {
-            matches!(
-                component,
-                Component::CurDir | Component::ParentDir | Component::Prefix(_)
-            )
-        })
-    {
-        return Err(invalid(
-            "Nix cache transfer requires an existing canonical /nix/store path; Hangar outputs cannot be relocated into Nix",
-        ));
-    }
-    Ok(())
-}
-
-fn nix_verify_path(uri: &str, path: &str) -> io::Result<()> {
-    require_nix_store_path(path)?;
-    let child = Command::new("nix")
-        .args([
-            "store",
-            "verify",
-            "--store",
-            uri,
-            "--sigs-needed",
-            "1",
-            path,
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| invalid(&format!("Nix trust verifier could not start: {error}")))?;
-    let (status, _, stderr) = run_bounded_output(child, 4096, "Nix trust verifier response")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(invalid(&format!(
-            "Nix trust verifier rejected path {path}: {}",
-            bounded_stderr(&stderr)
-        )))
-    }
-}
-
-fn nix_copy(uri: &str, direction: &str, path: &str) -> io::Result<()> {
-    require_nix_store_path(path)?;
-    if path.is_empty() || path.starts_with('-') {
-        return Err(invalid("Nix store transfer has no path"));
-    }
-    if !matches!(direction, "--to" | "--from") {
-        return Err(invalid("Nix store transfer has an invalid direction"));
-    }
-    let child = Command::new("nix")
-        .args(["copy", direction, uri, path])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| invalid(&format!("Nix store adapter could not start: {error}")))?;
-    let (status, _, stderr) = run_bounded_output(child, 4096, "Nix store response")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(invalid(&format!(
-            "Nix store adapter rejected path {path}: {}",
-            bounded_stderr(&stderr)
-        )))
     }
 }
 
@@ -3240,14 +2852,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nix_sri_hash_is_normalized_to_the_jetpack_digest() {
-        assert_eq!(
-            nix_nar_hash_to_jet("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").unwrap(),
-            format!("sha256:{}", "00".repeat(32))
-        );
-    }
-
-    #[test]
     fn cache_credentials_cannot_be_attached_to_a_non_credential_endpoint() {
         let binding = CacheBinding {
             role: "public".to_string(),
@@ -3279,45 +2883,22 @@ mod tests {
             parse_endpoint("https://cache.example/jet").unwrap(),
             parse_endpoint("ssh://builder.example/var/cache/jet").unwrap(),
             parse_endpoint("s3://cache.example/jet").unwrap(),
-            parse_endpoint("daemon://").unwrap(),
         ] {
             assert!(!endpoint.capabilities().remote_execute);
         }
     }
 
     #[test]
-    fn nix_cache_rejects_hangar_path_relocation() {
-        assert!(require_nix_store_path("/nix/store/abcd-package").is_ok());
-        assert!(require_nix_store_path("/tmp/jet-hangar/abcd-package").is_err());
-        assert!(require_nix_store_path("/nix/store/../tmp/abcd-package").is_err());
-    }
-
-    #[test]
-    fn nix_store_transfer_uses_typed_capabilities_and_rejects_ambient_credentials() {
-        let nix = parse_endpoint("daemon://").unwrap();
-        let capabilities = nix.capabilities();
-        assert!(capabilities.read);
-        assert!(capabilities.write);
-        assert!(capabilities.trust);
-        assert!(!capabilities.promote);
-        assert!(!capabilities.remote_execute);
-        let host_bound = CacheBinding {
-            role: "remote".to_string(),
-            mirrors: vec!["daemon://".to_string()],
-            trust_key: PathBuf::from("/tmp/cache.key"),
-            credential_provider: None,
-            allow_write: false,
-        };
-        assert!(host_bound.validate().is_ok());
-        let binding = CacheBinding {
-            role: "remote".to_string(),
-            mirrors: vec!["daemon://".to_string()],
-            trust_key: PathBuf::from("/tmp/cache.key"),
-            credential_provider: Some("host-keychain".to_string()),
-            allow_write: false,
-        };
-        let error = binding.validate().unwrap_err();
-        assert!(error.to_string().contains("typed credential"), "{error}");
+    fn nix_store_cache_endpoints_are_rejected_before_any_host_process() {
+        for endpoint in ["daemon://", "nix://local"] {
+            let error = parse_endpoint(endpoint).unwrap_err();
+            assert!(error.to_string().contains("retired"), "{error}");
+        }
+        let source = include_str!("Cache.rs");
+        for executable in ["nix", "nix-store"] {
+            let forbidden = format!("Command::new(\"{executable}\")");
+            assert!(!source.contains(&forbidden), "{forbidden}");
+        }
     }
 
     #[test]

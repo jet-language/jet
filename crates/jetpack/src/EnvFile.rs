@@ -62,11 +62,12 @@ impl EnvFile {
             .unwrap_or_else(|| Syntax::JETPACK_PROMPT_LABEL.to_string())
     }
 
-    /// The default source label, defaulting to `nixpkgs`.
+    /// The default source label, defaulting to canonical `jetpack`.
     pub fn source_label(&self) -> String {
-        self.default_source
-            .clone()
-            .unwrap_or_else(|| Syntax::REF_SOURCE_NIXPKGS.to_string())
+        self.default_source.clone().map_or_else(
+            || Syntax::REF_SOURCE_JETPACK.to_string(),
+            |source| published_source(&source).to_string(),
+        )
     }
 
     /// The named-source resolution table for this env (D-JPK17).
@@ -93,8 +94,9 @@ impl EnvFile {
     /// Resolve one package entry to a full `package@source` ref: entries
     /// that already carry a source pass through; bare entries take the default.
     fn entry_ref(&self, entry: &str) -> String {
-        if entry.contains(Syntax::REF_PROVIDER_AT) || super::RefSpec::is_bare_path(entry) {
-            entry.to_string()
+        let entry = super::RefSpec::migrate_public_ref(entry).canonical;
+        if entry.contains(Syntax::REF_PROVIDER_AT) || super::RefSpec::is_bare_path(&entry) {
+            entry
         } else {
             format!(
                 "{}{}{}",
@@ -127,7 +129,10 @@ impl EnvFile {
             }
         }
         if let Some(default) = &self.default_source {
-            lines.push(format!("        pkg.source(\"{default}\");"));
+            lines.push(format!(
+                "        pkg.source(\"{}\");",
+                published_source(default)
+            ));
         }
         let pkgs = self
             .packages
@@ -172,7 +177,7 @@ pub fn parse(text: &str) -> EnvFile {
     for call in all_call_args(text, Syntax::PACK_DIRECTIVE_SOURCE) {
         let args = quoted_strings(&call);
         match args.as_slice() {
-            [name] => default_source = Some(name.clone()),
+            [name] => default_source = Some(published_source(name).to_string()),
             [name, upstream] => named.push(NamedSource {
                 name: name.clone(),
                 upstream: upstream.clone(),
@@ -189,18 +194,29 @@ pub fn parse(text: &str) -> EnvFile {
     EnvFile {
         default_source,
         named,
-        packages: list_arg(text, Syntax::PACK_DIRECTIVE_PACKAGES),
+        packages: list_arg(text, Syntax::PACK_DIRECTIVE_PACKAGES)
+            .into_iter()
+            .map(|package| super::RefSpec::migrate_public_ref(&package).canonical)
+            .collect(),
         prompt: string_arg(text, Syntax::PACK_DIRECTIVE_PROMPT),
+    }
+}
+
+fn published_source(source: &str) -> &str {
+    if source == Syntax::REF_SOURCE_NIXPKGS {
+        Syntax::REF_SOURCE_JETPACK
+    } else {
+        source
     }
 }
 
 /// How a ref should be stored as a package entry: bare when it matches the
 /// default source, otherwise `package@source` so the source survives.
 fn entry_for(ef: &EnvFile, spec: &RefSpec) -> String {
-    let source = spec.source.label();
+    let source = published_source(spec.source.label());
     let is_default = match &spec.source {
         Source::Named(_) => false,
-        builtin => builtin.label() == ef.source_label(),
+        builtin => published_source(builtin.label()) == ef.source_label(),
     };
     if is_default {
         spec.package.clone()
@@ -215,7 +231,7 @@ pub fn add(dir: &Path, spec: &RefSpec) -> std::io::Result<EnvFile> {
     let mut ef = load(dir).unwrap_or_default();
     // A built-in ref with no default yet becomes the default source.
     if ef.default_source.is_none() && Source::is_builtin(spec.source.label()) {
-        ef.default_source = Some(spec.source.label().to_string());
+        ef.default_source = Some(published_source(spec.source.label()).to_string());
     }
     let entry = entry_for(&ef, spec);
     if !ef.packages.contains(&entry) {
@@ -368,13 +384,13 @@ pub fn shell() => [JSON] {
     #[test]
     fn parses_directives() {
         let ef = parse(SAMPLE);
-        assert_eq!(ef.default_source.as_deref(), Some("nixpkgs"));
+        assert_eq!(ef.default_source.as_deref(), Some("jetpack"));
         assert!(ef.named.is_empty());
         assert_eq!(ef.packages, vec!["ripgrep", "fd", "claude-code"]);
         assert_eq!(ef.prompt.as_deref(), Some("jetpack"));
         assert_eq!(
             ef.refs(),
-            vec!["ripgrep@nixpkgs", "fd@nixpkgs", "claude-code@nixpkgs"]
+            vec!["ripgrep@jetpack", "fd@jetpack", "claude-code@jetpack"]
         );
     }
 
@@ -454,18 +470,31 @@ pub fn shell() => [JSON] {
     fn defaults_when_empty() {
         let ef = EnvFile::default();
         assert_eq!(ef.prompt_label(), "jetpack");
-        assert_eq!(ef.source_label(), "nixpkgs");
+        assert_eq!(ef.source_label(), "jetpack");
+    }
+
+    #[test]
+    fn bare_and_explicit_jetpack_refs_are_identical() {
+        let bare = EnvFile {
+            packages: vec!["ripgrep".to_string()],
+            ..Default::default()
+        };
+        let explicit = EnvFile {
+            packages: vec!["ripgrep@jetpack".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(bare.refs(), explicit.refs());
     }
 
     #[test]
     fn add_creates_and_dedupes() {
         let dir = scratch();
-        let ef = add(&dir, &classify("ripgrep@nixpkgs").unwrap()).unwrap();
+        let ef = add(&dir, &classify("ripgrep@jetpack").unwrap()).unwrap();
         assert_eq!(ef.packages, vec!["ripgrep"]);
         // adding again is a no-op
-        let ef = add(&dir, &classify("ripgrep@nixpkgs").unwrap()).unwrap();
+        let ef = add(&dir, &classify("ripgrep@jetpack").unwrap()).unwrap();
         assert_eq!(ef.packages, vec!["ripgrep"]);
-        let ef = add(&dir, &classify("fd@nixpkgs").unwrap()).unwrap();
+        let ef = add(&dir, &classify("fd@jetpack").unwrap()).unwrap();
         assert_eq!(ef.packages, vec!["fd", "ripgrep"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -473,12 +502,12 @@ pub fn shell() => [JSON] {
     #[test]
     fn remove_edits_file() {
         let dir = scratch();
-        add(&dir, &classify("ripgrep@nixpkgs").unwrap()).unwrap();
-        add(&dir, &classify("fd@nixpkgs").unwrap()).unwrap();
-        let (ef, removed) = remove(&dir, &classify("fd@nixpkgs").unwrap()).unwrap();
+        add(&dir, &classify("ripgrep@jetpack").unwrap()).unwrap();
+        add(&dir, &classify("fd@jetpack").unwrap()).unwrap();
+        let (ef, removed) = remove(&dir, &classify("fd@jetpack").unwrap()).unwrap();
         assert!(removed);
         assert_eq!(ef.packages, vec!["ripgrep"]);
-        let (_ef, removed) = remove(&dir, &classify("nope@nixpkgs").unwrap()).unwrap();
+        let (_ef, removed) = remove(&dir, &classify("nope@jetpack").unwrap()).unwrap();
         assert!(!removed);
         let _ = std::fs::remove_dir_all(&dir);
     }

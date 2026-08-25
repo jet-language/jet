@@ -246,19 +246,26 @@ pub fn merge_refs(
 
 pub fn merge_store_entries(index: &mut Index, store_entries: &[StoreEntry]) {
     for entry in store_entries {
-        let (source, name) =
-            if let Some((name, source)) = entry.reference.rsplit_once(Syntax::REF_PROVIDER_AT) {
-                (source, name)
-            } else if let Some((source, name)) = entry.reference.split_once(Syntax::REF_SEPARATOR) {
-                // Read pre-D-JPK-REF1 hangar metadata without rewriting it.
-                (source, name)
-            } else {
-                continue;
-            };
+        let canonical = crate::RefSpec::canonical_locked_ref(&entry.reference);
+        let (source, name, reference) = if let Some((name, source_with_selector)) =
+            canonical.rsplit_once(Syntax::REF_PROVIDER_AT)
+        {
+            let source = source_with_selector
+                .split_once(Syntax::REF_CHANNEL_MARKER)
+                .map_or(source_with_selector, |(source, _)| source);
+            (published_source(source), name, canonical.clone())
+        } else if let Some((source, name)) = entry.reference.split_once(Syntax::REF_SEPARATOR) {
+            // Read pre-D-JPK-REF1 hangar metadata and publish its canonical
+            // Jetpack source spelling.
+            let source = published_source(source);
+            (source, name, format!("{name}@{source}"))
+        } else {
+            continue;
+        };
         index.add_package(PackageRecord {
             source: source.to_string(),
             name: name.to_string(),
-            reference: entry.reference.clone(),
+            reference,
             version: entry.version.clone(),
             platforms: platform_strings(),
             docs: format!("{} from hangar metadata", entry.reference),
@@ -339,17 +346,26 @@ pub fn info_json(record: &PackageRecord) -> String {
 }
 
 fn record_for_ref(spec: &RefSpec, version: String, provenance: String) -> PackageRecord {
+    let reference = crate::RefSpec::canonical_locked_ref(&spec.raw);
     PackageRecord {
-        source: spec.source.label().to_string(),
+        source: published_source(spec.source.label()).to_string(),
         name: spec.package.clone(),
-        reference: spec.raw.clone(),
+        reference: reference.clone(),
         version,
         platforms: platform_strings(),
-        docs: format!("{} from local Jetpack metadata", spec.raw),
+        docs: format!("{} from local Jetpack metadata", reference),
         provenance,
         tier: "not-registry".to_string(),
         gate_status: "not-applicable".to_string(),
         options: service_option_fields(),
+    }
+}
+
+fn published_source(source: &str) -> &str {
+    if source == Syntax::REF_SOURCE_NIXPKGS {
+        Syntax::REF_SOURCE_JETPACK
+    } else {
+        source
     }
 }
 
@@ -617,6 +633,49 @@ mod tests {
         assert_eq!(parsed.gate_status, "not-applicable");
         assert_eq!(index.search("rip")[0].display_ref(), "default.ripgrep");
         assert_eq!(index.info("default.ripgrep").unwrap().version, "14.1.0");
+    }
+
+    #[test]
+    fn published_catalog_records_use_jetpack_for_bare_and_explicit_refs() {
+        let bare = RefSpec::classify("ripgrep").unwrap();
+        let explicit = RefSpec::classify("ripgrep@jetpack").unwrap();
+        assert_eq!(bare, explicit);
+
+        let mut index = Index::default();
+        merge_refs(&mut index, &[bare, explicit], None, &[]);
+
+        assert_eq!(index.packages.len(), 1);
+        let record = index.info("ripgrep").unwrap();
+        assert_eq!(record.source, "jetpack");
+        assert_eq!(record.reference, "ripgrep@jetpack");
+        assert_eq!(index.info("ripgrep@jetpack"), Some(record));
+    }
+
+    #[test]
+    fn published_hangar_records_rewrite_nixpkgs_source() {
+        let entry = StoreEntry {
+            id: "ripgrep-15.2.0-test".to_string(),
+            name: "ripgrep".to_string(),
+            version: "15.2.0".to_string(),
+            reference: "ripgrep@nixpkgs".to_string(),
+            out: String::new(),
+            bin: String::new(),
+            rlib: String::new(),
+            envelope: Default::default(),
+            cache_identity: Default::default(),
+            references: Vec::new(),
+            named_outputs: std::collections::BTreeMap::new(),
+            platform_artifact_kind: String::new(),
+            producer_record: String::new(),
+            receipt: String::new(),
+            realized_at: 0,
+            last_used_at: 0,
+        };
+        let mut index = Index::default();
+        merge_store_entries(&mut index, &[entry]);
+        let record = index.info("ripgrep@jetpack").unwrap();
+        assert_eq!(record.source, "jetpack");
+        assert_eq!(record.reference, "ripgrep@jetpack");
     }
 
     #[test]

@@ -51,7 +51,17 @@ pub mod JetOS;
 pub mod JetPin;
 pub mod MemberSelect;
 pub mod MigrationImport;
+pub mod MigrationCoverage;
 pub(crate) mod NixIndex;
+#[allow(dead_code)]
+pub(crate) mod NixIdentity;
+// Card #2162 owns the import-on-miss fallback. These modules are the producer;
+// the entry point that calls them has not shipped, so nothing references them
+// yet. Card #2162 removes this allow when the consumer lands.
+#[allow(dead_code)]
+pub(crate) mod NixFallback;
+#[allow(dead_code)]
+pub(crate) mod NixFallbackPolicy;
 #[cfg(feature = "test-seam")]
 pub mod test_nix_index {
     use ed25519_dalek::{Signer, SigningKey};

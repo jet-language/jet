@@ -194,7 +194,7 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
                     return 2;
                 }
             },
-            RefSpec::Source::Nixpkgs => {
+            RefSpec::Source::Jetpack | RefSpec::Source::Nixpkgs => {
                 theme.error_coded(
                     "E1270",
                     "adapter draft needs source bytes",

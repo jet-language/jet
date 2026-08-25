@@ -1,7 +1,211 @@
 use super::*;
+use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static QUARANTINE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static SHARED_CAS_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Replace regular files in one immutable Hangar object with hardlinks into
+/// the shared payload pool. Directory entries and metadata stay root-local;
+/// file bytes have one physical copy across independent agent roots.
+pub(crate) fn share_tree_files(
+    roots: &Roots,
+    root: &Path,
+    allow_semantic_xattrs: bool,
+) -> std::io::Result<()> {
+    if allow_semantic_xattrs {
+        return Ok(());
+    }
+    let hangar = roots.hangar_dir();
+    let canonical_hangar = fs::canonicalize(&hangar).unwrap_or(hangar);
+    let canonical_root = fs::canonicalize(root)?;
+    if !canonical_root.starts_with(&canonical_hangar) {
+        return Ok(());
+    }
+    let shared = roots.shared_cas_dir();
+    if shared == canonical_root || shared.starts_with(&canonical_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "shared CAS must not be inside a Hangar output",
+        ));
+    }
+    ensure_real_directory(&shared, "shared CAS pool")?;
+    super::super::RuntimePolicy::with_lock(&shared, "shared-cas", || {
+        make_tree_writable_for_removal(&canonical_root)?;
+        let mut used = BTreeSet::new();
+        share_node(&canonical_root, &shared, &mut used)?;
+        seal_node(&canonical_root)?;
+        fsync_tree(&canonical_root)
+    })
+}
+
+fn share_node(path: &Path, shared: &Path, used: &mut BTreeSet<String>) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if metadata.is_dir() {
+        let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            share_node(&entry.path(), shared, used)?;
+        }
+        return Ok(());
+    }
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    // Preserve an existing hardlink topology. New ingest files are unlinked;
+    // this guard protects objects already optimized by the local CAS pass.
+    if file_link_count(&metadata) > 1 {
+        return Ok(());
+    }
+    let bytes = fs::read(path)?;
+    let mode = permission_identity(&metadata);
+    let key = format!("{}-{:08x}", super::super::SHA256::sha256_hex(&bytes), mode);
+    // Hardlinking two equal files within one output changes its canonical
+    // archive identity. Share only the first occurrence in each output tree.
+    if !used.insert(key.clone()) {
+        return Ok(());
+    }
+    let (shared_file, created) = ensure_shared_file(shared, &key, &bytes, &metadata)?;
+    if same_file_inode(path, &shared_file) {
+        return Ok(());
+    }
+    if replace_with_shared_link(path, &shared_file).is_ok() {
+        return Ok(());
+    }
+    if created
+        && fs::metadata(&shared_file)
+            .map(|metadata| metadata.len() == bytes.len() as u64)
+            .unwrap_or(false)
+    {
+        let _ = fs::remove_file(shared_file);
+    }
+    Ok(())
+}
+
+fn ensure_shared_file(
+    shared: &Path,
+    key: &str,
+    bytes: &[u8],
+    source: &fs::Metadata,
+) -> std::io::Result<(PathBuf, bool)> {
+    let destination = shared.join(key);
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "shared CAS entry is not a regular file: {}",
+                    destination.display()
+                ),
+            ));
+        }
+        Ok(metadata) => {
+            if metadata.len() != bytes.len() as u64
+                || permission_identity(&metadata) != permission_identity(source)
+                || fs::read(&destination)? != bytes
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("shared CAS entry is corrupt: {}", destination.display()),
+                ));
+            }
+            return Ok((destination, false));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let partial = shared.join(format!(
+        ".{key}.partial-{}-{}",
+        std::process::id(),
+        SHARED_CAS_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&partial)?;
+    use std::io::Write as _;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    fs::set_permissions(&partial, source.permissions())?;
+    if let Err(error) = fs::rename(&partial, &destination) {
+        let _ = fs::remove_file(&partial);
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            return ensure_shared_file(shared, key, bytes, source);
+        }
+        return Err(error);
+    }
+    Ok((destination, true))
+}
+
+fn replace_with_shared_link(path: &Path, shared: &Path) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("shared CAS output has no parent"))?;
+    let temporary = parent.join(format!(
+        ".{}.shared-{}-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file"),
+        std::process::id(),
+        SHARED_CAS_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::rename(path, &temporary)?;
+    match fs::hard_link(shared, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(temporary);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = fs::rename(&temporary, path);
+            Err(error)
+        }
+    }
+}
+
+fn same_file_inode(left: &Path, right: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let Ok(left) = fs::metadata(left) else {
+            return false;
+        };
+        let Ok(right) = fs::metadata(right) else {
+            return false;
+        };
+        left.dev() == right.dev() && left.ino() == right.ino()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (left, right);
+        false
+    }
+}
+
+#[cfg(unix)]
+fn file_link_count(metadata: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt as _;
+    metadata.nlink()
+}
+
+#[cfg(not(unix))]
+fn file_link_count(_metadata: &fs::Metadata) -> u64 {
+    1
+}
+
+#[cfg(unix)]
+fn permission_identity(metadata: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt as _;
+    metadata.permissions().mode() & 0o7777
+}
+
+#[cfg(not(unix))]
+fn permission_identity(metadata: &fs::Metadata) -> u32 {
+    u32::from(metadata.permissions().readonly())
+}
 
 pub(crate) fn try_entry_output_hash(roots: &Roots, entry: &StoreEntry) -> Result<String, String> {
     let hangar = roots.hangar_dir();
@@ -522,6 +726,24 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
     fs::create_dir(&stage)?;
 
     let result = (|| {
+        let mut planned_bytes = 0u64;
+        for source in req.outputs.values() {
+            source_metadata(source)?;
+            planned_bytes = planned_bytes
+                .checked_add(super::admission_size(source).map_err(|error| {
+                    IngestError::IO(format!(
+                        "cannot measure output `{}`: {error}",
+                        source.display()
+                    ))
+                })?)
+                .ok_or_else(|| IngestError::IO("Hangar admission size overflowed".into()))?;
+        }
+        super::ensure_hangar_capacity(
+            roots,
+            super::admission_reservation(planned_bytes),
+            Some(&stage),
+        )
+        .map_err(|error| IngestError::IO(format!("Hangar quota admission failed: {error}")))?;
         let mut named_digests = BTreeMap::new();
         let mut staged_outs = BTreeMap::new();
         for (name, src) in &req.outputs {
@@ -647,6 +869,29 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
         // closure record; failed-stage cleanup remains untrusted quarantine.
         super::certify_registration_unlocked(roots, &staged_entry, &[])
             .map_err(|error| IngestError::Invalid(error.to_string()))?;
+        let mut incoming_bytes = 0u64;
+        for (name, staged) in &staged_outs {
+            let digest = named_digests.get(name).ok_or_else(|| {
+                IngestError::Invalid(format!("named output `{name}` has no digest"))
+            })?;
+            if !objects.join(digest).is_dir() {
+                let staged_bytes = super::admission_size(staged).map_err(|error| {
+                    IngestError::IO(format!(
+                        "cannot measure staged output `{}`: {error}",
+                        staged.display()
+                    ))
+                })?;
+                incoming_bytes = incoming_bytes
+                    .checked_add(staged_bytes)
+                    .ok_or_else(|| IngestError::IO("Hangar admission size overflowed".into()))?;
+            }
+        }
+        super::ensure_hangar_capacity(
+            roots,
+            super::admission_reservation(incoming_bytes),
+            Some(&stage),
+        )
+        .map_err(|error| IngestError::IO(format!("Hangar quota admission failed: {error}")))?;
         for (name, staged) in &staged_outs {
             let digest = named_digests.get(name).ok_or_else(|| {
                 IngestError::Invalid(format!("named output `{name}` has no digest"))
@@ -708,14 +953,28 @@ fn ingest_tree_unlocked(roots: &Roots, req: &IngestRequest) -> Result<IngestedOb
 
     // Always scrub this stage dir (success moved trees out; failure quarantines).
     if result.is_err() {
-        let quarantine_root = hangar.join("quarantine");
-        if ensure_real_directory(&quarantine_root, "Hangar quarantine").is_ok() {
-            let quarantine = quarantine_root.join(format!("ingest-{stamp}"));
-            if fs::symlink_metadata(&stage).is_ok() && fs::rename(&stage, &quarantine).is_err() {
+        let quota_rejected = matches!(
+            &result,
+            Err(IngestError::IO(message)) if message.starts_with("Hangar quota admission failed:")
+        );
+        if quota_rejected {
+            // The rejected stage is uncommitted input. Keeping it in the
+            // quarantine would defeat the ceiling that rejected it.
+            if fs::symlink_metadata(&stage).is_ok() {
+                let _ = make_tree_writable_for_removal(&stage);
                 let _ = fs::remove_dir_all(&stage);
             }
-        } else if fs::symlink_metadata(&stage).is_ok() {
-            let _ = fs::remove_dir_all(&stage);
+        } else {
+            let quarantine_root = hangar.join("quarantine");
+            if ensure_real_directory(&quarantine_root, "Hangar quarantine").is_ok() {
+                let quarantine = quarantine_root.join(format!("ingest-{stamp}"));
+                if fs::symlink_metadata(&stage).is_ok() && fs::rename(&stage, &quarantine).is_err()
+                {
+                    let _ = fs::remove_dir_all(&stage);
+                }
+            } else if fs::symlink_metadata(&stage).is_ok() {
+                let _ = fs::remove_dir_all(&stage);
+            }
         }
     } else if fs::symlink_metadata(&stage).is_ok() {
         let _ = fs::remove_dir_all(&stage);

@@ -11,11 +11,11 @@ use crate::Syntax;
 use crate::AST::{Expr, Item, Namespace, StrPart};
 
 use super::super::Merge;
-use super::super::RefSpec::{self, ProviderKind, Source, SourceTable};
+use super::super::RefSpec::{self, ProviderKind, RefError, Source, SourceTable};
 use super::Diagnostics::{
     bad_import_directive, bad_source_ref, discovered_module_imports, find_dir_missing,
     fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
-    oci_from_non_executable,
+    oci_from_non_executable, retired_nixpkgs_source_ref,
 };
 use super::Environment::{
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
@@ -245,6 +245,7 @@ pub fn evaluate_package_profile(
 
 fn profile_provider_label(source: &Source, source_name: &str, table: &SourceTable) -> String {
     match source {
+        Source::Jetpack => "nix".to_string(),
         Source::Nixpkgs => "nix".to_string(),
         Source::Github => "github".to_string(),
         Source::Path => "core".to_string(),
@@ -328,10 +329,11 @@ fn classify_profile_ref(raw: &str, table: &SourceTable) -> Result<RefSpec::RefSp
                 || package.to_string(),
                 |selector| format!("{package}{}{selector}", Syntax::REF_CHANNEL_MARKER),
             );
+            let raw = RefSpec::with_default_source(&package);
             return Ok(RefSpec::RefSpec {
-                source: RefSpec::Source::Nixpkgs,
+                source: RefSpec::Source::Jetpack,
                 package,
-                raw: raw.to_string(),
+                raw,
             });
         }
     }
@@ -1114,7 +1116,12 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                 let ref_text = unit.src[s.ref_span.start..s.ref_span.end].trim();
                 let span = if is_root { Some(s.ref_span) } else { None };
                 let pref = RefSpec::classify_provider_ref(ref_text)
-                    .map_err(|_| bad_source_ref(ref_text, span))?;
+                    .map_err(|error| match error {
+                        RefError::RetiredNixpkgs { raw, replacement } => {
+                            retired_nixpkgs_source_ref(&raw, &replacement, span)
+                        }
+                        _ => bad_source_ref(ref_text, span),
+                    })?;
                 let upstream = pref.upstream();
                 if let Some(existing) = map.get(&s.name) {
                     if existing != &upstream {

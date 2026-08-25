@@ -333,6 +333,20 @@ retrying. Jetpack rejects a Hangar destination that is a symlink or
 non-directory, so migration cannot redirect writes outside the resolved user
 path.
 
+## Hangar capacity and eviction
+
+Every Hangar admission is bounded by a 128 GiB logical-byte ceiling by
+default. Set `JETPACK_HANGAR_MAX_BYTES` for one process, or put one positive
+byte count in `$JETPACK_ROOT/config/hangar-max-bytes`; the environment value
+takes precedence. A staged admission is rejected unless its bytes plus a
+1 MiB metadata and journal allowance fit below the ceiling.
+
+When space is needed, Jetpack evicts in this order: build and failed-build
+scratch, orphaned canonical objects and receipts, then unreferenced package
+records from oldest `last_used_at` to newest. Live lockfile and lifecycle
+roots are never candidates. A record with malformed metadata is retained and
+reported as a hard quota failure when valid eviction cannot make room.
+
 ## Hangar external roots
 
 The Hangar keeps automatic roots for packages, generations, processes, builds,

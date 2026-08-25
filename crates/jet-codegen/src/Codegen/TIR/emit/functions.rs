@@ -91,6 +91,10 @@ fn emit_owned_snapshot_params(tir: &TFunc, cx: &Cx, out: &mut String, indent: us
 /// recomputed — there is no `expr_jet_ty` / `operand_is_integer` call anywhere.
 
 pub(crate) fn emit_tir_func(tir: &TFunc, cx: &Cx, out: &mut String) {
+    cx.time_emission(|| emit_tir_func_inner(tir, cx, out));
+}
+
+fn emit_tir_func_inner(tir: &TFunc, cx: &Cx, out: &mut String) {
     match &tir.kind {
         TFuncKind::TopLevel => emit_tir_toplevel(tir, cx, out),
         TFuncKind::Method { self_conv, .. } => emit_tir_method(tir, *self_conv, cx, out),

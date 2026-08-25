@@ -38,7 +38,15 @@ baseline_target=$(json_string target)
 baseline_rustc=$(json_string rustc)
 baseline_llvm=$(json_string llvm)
 baseline_rustc_vv=$(json_string rustc_vv_sha256)
+baseline_rustc_sha=$(json_string rustc_sha256)
 baseline_compiler=$(json_string compiler_sha256)
+baseline_jet_env=$(json_string jet_env_sha256)
+baseline_libc=$(json_string libc_sha256)
+baseline_allocator=$(json_string allocator_source_sha256)
+baseline_allocator_environment=$(json_string allocator_environment_sha256)
+baseline_hardware=$(json_string hardware_sha256)
+baseline_topology=$(json_string topology_sha256)
+baseline_toolchain=$(json_string toolchain_sha256)
 baseline_kernel=$(json_string kernel)
 baseline_governor=$(json_string governor)
 baseline_cpus=$(json_number cpus)
@@ -50,8 +58,8 @@ variance_budget=$(json_number variance_pct)
 baseline_samples=$(json_number samples)
 baseline_warmups=$(json_number warmups)
 [ -n "$baseline_version" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
-[ "$baseline_version" -eq 3 ] || { echo "unsupported compiler-speed baseline version: $baseline_version" >&2; exit 1; }
-for value in "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_compiler" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
+[ "$baseline_version" -eq 4 ] || { echo "unsupported compiler-speed baseline version: $baseline_version" >&2; exit 1; }
+for value in "$baseline_corpus" "$baseline_stage" "$baseline_os" "$baseline_arch" "$baseline_target" "$baseline_rustc" "$baseline_llvm" "$baseline_rustc_vv" "$baseline_rustc_sha" "$baseline_compiler" "$baseline_jet_env" "$baseline_libc" "$baseline_allocator" "$baseline_allocator_environment" "$baseline_hardware" "$baseline_topology" "$baseline_toolchain" "$baseline_kernel" "$baseline_governor" "$baseline_cpus" "$baseline_memory" "$baseline_host" "$latency_budget" "$memory_budget" "$variance_budget" "$baseline_samples" "$baseline_warmups"; do
     [ -n "$value" ] || { echo "baseline has incomplete corpus/stage/machine/budget identity" >&2; exit 1; }
 done
 
@@ -71,7 +79,15 @@ current_target=$(printf '%s\n' "$metadata" | sed -n 's/.*target=\([^ ]*\).*/\1/p
 current_rustc=$(printf '%s\n' "$metadata" | sed -n 's/.*rustc=\([^ ]*\).*/\1/p')
 current_llvm=$(printf '%s\n' "$metadata" | sed -n 's/.*llvm=\([^ ]*\).*/\1/p')
 current_rustc_vv=$(printf '%s\n' "$metadata" | sed -n 's/.*rustc_vv_sha256=\([^ ]*\).*/\1/p')
+current_rustc_sha=$(printf '%s\n' "$metadata" | sed -n 's/.*rustc_sha256=\([^ ]*\).*/\1/p')
 current_compiler=$(printf '%s\n' "$metadata" | sed -n 's/.*compiler_sha256=\([^ ]*\).*/\1/p')
+current_jet_env=$(printf '%s\n' "$metadata" | sed -n 's/.*jet_env_sha256=\([^ ]*\).*/\1/p')
+current_libc=$(printf '%s\n' "$metadata" | sed -n 's/.*libc_sha256=\([^ ]*\).*/\1/p')
+current_allocator=$(printf '%s\n' "$metadata" | sed -n 's/.*allocator_sha256=\([^ ]*\).*/\1/p')
+current_allocator_environment=$(printf '%s\n' "$metadata" | sed -n 's/.*allocator_environment_sha256=\([^ ]*\).*/\1/p')
+current_hardware=$(printf '%s\n' "$metadata" | sed -n 's/.*hardware_sha256=\([^ ]*\).*/\1/p')
+current_topology=$(printf '%s\n' "$metadata" | sed -n 's/.*topology_sha256=\([^ ]*\).*/\1/p')
+current_toolchain=$(printf '%s\n' "$metadata" | sed -n 's/.*toolchain_sha256=\([^ ]*\).*/\1/p')
 current_kernel=$(printf '%s\n' "$metadata" | sed -n 's/.*kernel=\([^ ]*\).*/\1/p')
 current_governor=$(printf '%s\n' "$metadata" | sed -n 's/.*governor=\([^ ]*\).*/\1/p')
 current_memory=$(printf '%s\n' "$metadata" | sed -n 's/.*memory_bytes=\([^ ]*\).*/\1/p')
@@ -101,7 +117,15 @@ check_identity target "$current_target" "$baseline_target"
 check_identity rustc "$current_rustc" "$baseline_rustc"
 check_identity LLVM "$current_llvm" "$baseline_llvm"
 check_identity rustc-vV "$current_rustc_vv" "$baseline_rustc_vv"
+check_identity rustc-binary "$current_rustc_sha" "$baseline_rustc_sha"
 check_identity compiler "$current_compiler" "$baseline_compiler"
+check_identity jet-env "$current_jet_env" "$baseline_jet_env"
+check_identity libc "$current_libc" "$baseline_libc"
+check_identity allocator "$current_allocator" "$baseline_allocator"
+check_identity allocator-environment "$current_allocator_environment" "$baseline_allocator_environment"
+check_identity hardware "$current_hardware" "$baseline_hardware"
+check_identity hardware-topology "$current_topology" "$baseline_topology"
+check_identity toolchain "$current_toolchain" "$baseline_toolchain"
 check_identity kernel "$current_kernel" "$baseline_kernel"
 check_identity governor "$current_governor" "$baseline_governor"
 check_identity CPU-count "$current_cpus" "$baseline_cpus"
@@ -118,6 +142,12 @@ baseline_field() {
         | grep -F '"program":"'"$field_program"'","state":"'"$field_state"'"' \
         | sed 's/.*"'"$field_name"'"://; s/[",}].*//' \
         | head -n1
+}
+
+phase_value() {
+    phase_text=$1
+    phase_name=$2
+    printf '%s\n' "$phase_text" | sed -n "s/.*;$phase_name=\\([^;]*\\).*/\\1/p"
 }
 
 FAIL=0
@@ -140,7 +170,8 @@ while read -r row_program row_state row_stage row_latency row_memory row_varianc
     base_variance=$(baseline_field "$row_program" "$row_state" variance_pct)
     base_stdout=$(baseline_field "$row_program" "$row_state" stdout_sha256)
     base_stderr=$(baseline_field "$row_program" "$row_state" stderr_sha256)
-    for value in "$base_stage" "$base_latency" "$base_memory" "$base_variance" "$base_stdout" "$base_stderr"; do
+    base_phases=$(baseline_field "$row_program" "$row_state" phase_totals)
+    for value in "$base_stage" "$base_latency" "$base_memory" "$base_variance" "$base_stdout" "$base_stderr" "$base_phases"; do
         [ -n "$value" ] || { echo "baseline missing row: $row_program/$row_state" >&2; exit 1; }
     done
     [ "$row_stage" = "$base_stage" ] || { echo "stage changed for $row_program/$row_state" >&2; exit 1; }
@@ -169,12 +200,27 @@ while read -r row_program row_state row_stage row_latency row_memory row_varianc
     [ "$row_stdout" = "$base_stdout" ] || { echo "stdout parity changed for $row_program/$row_state" >&2; FAIL=1; }
     [ "$row_stderr" = "$base_stderr" ] || { echo "stderr parity changed for $row_program/$row_state" >&2; FAIL=1; }
     case "$row_phases" in
-        *phases=*source=*cache_hits=*cache_misses=*top_cause=*backend=*linker=*artifact_bytes=*) ;;
+        *phases=*source=*source_sha256=*source_bytes=*expected_sha256=*expected_bytes=*workload_sha256=*role=*profile=*backend=*linker=*linker_path=*linker_sha256=*linker_backend=*linker_backend_path=*linker_backend_sha256=*cache_state=*cache_policy=*cache_hits=*cache_misses=*libc_sha256=*allocator_sha256=*allocator_environment_sha256=*hardware_sha256=*topology_sha256=*toolchain_sha256=*rustc_sha256=*top_cause=*artifact_bytes=*) ;;
         *) echo "missing phase totals for $row_program/$row_state" >&2; FAIL=1 ;;
     esac
     case "$row_phases" in
         *linker=unavailable*) echo "missing linker identity for $row_program/$row_state" >&2; FAIL=1 ;;
     esac
+    case "$row_phases" in
+        *parity=verified*semantic_parity=verified*diagnostic_parity=verified*effect_parity=verified*tier_parity=verified*dev_profile=dev*aot_profile=release*) ;;
+        *) echo "missing JIT/dev/AOT semantic parity receipt for $row_program/$row_state" >&2; FAIL=1 ;;
+    esac
+    for identity_field in workload_sha256 source_sha256 source_bytes expected_sha256 expected_bytes cache_state cache_policy backend linker linker_path linker_sha256 linker_backend linker_backend_path linker_backend_sha256 libc_sha256 allocator_sha256 allocator_environment_sha256 hardware_sha256 topology_sha256 toolchain_sha256 rustc_sha256; do
+        current_identity=$(phase_value "$row_phases" "$identity_field")
+        base_identity=$(phase_value "$base_phases" "$identity_field")
+        if [ -z "$current_identity" ] || [ -z "$base_identity" ]; then
+            echo "missing workload/environment identity $identity_field for $row_program/$row_state" >&2
+            FAIL=1
+        elif [ "$current_identity" != "$base_identity" ]; then
+            echo "unmatched workload/environment identity $identity_field for $row_program/$row_state" >&2
+            FAIL=1
+        fi
+    done
 done < "$CURRENT_ROWS"
 
 expected_rows=$((4 * 6))

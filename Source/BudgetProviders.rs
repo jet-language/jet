@@ -3225,14 +3225,15 @@ mod tests {
         );
         std::fs::write(
             root.join("build/jet-timing-backend.json"),
-            "{\"phases\":[{\"name\":\"backend_link\",\"us\":2}]}\n",
+            "{\"phases\":[{\"name\":\"backend\",\"us\":1},{\"name\":\"link\",\"us\":2}]}\n",
         )
         .unwrap();
         let phases = read_compile_phases(&root, CompileBackend::AotRustc).unwrap();
         assert_eq!(
             phases,
             vec![
-                ("backend_link".into(), 2_000u128),
+                ("backend".into(), 1_000u128),
+                ("link".into(), 2_000u128),
                 ("sema".into(), 1_000u128)
             ]
         );

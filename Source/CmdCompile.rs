@@ -15,6 +15,65 @@ use jet_foundation::Report::render_status_json;
 use jet_foundation::JSON::json_escape;
 
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
+struct BuildProgress {
+    enabled: bool,
+    verbose: bool,
+    started: Instant,
+    theme: jet_foundation::Terminal::Theme,
+}
+
+impl BuildProgress {
+    fn new(cmd: &str, emit_rust: bool, verbose: bool, mode: OutputMode) -> Self {
+        Self {
+            enabled: cmd == "build" && !emit_rust && !mode.quiet && !mode.json,
+            verbose,
+            started: Instant::now(),
+            theme: jet_foundation::Terminal::Theme::new(mode.color_stderr()),
+        }
+    }
+
+    fn major(&self, label: &str, detail: &str) {
+        if self.enabled {
+            eprintln!(
+                "  {}  {} {}",
+                self.theme.accent("jet"),
+                self.theme.bold(&format!("{label:<10}")),
+                detail
+            );
+        }
+    }
+
+    fn minor(&self, label: &str, detail: &str) {
+        if self.enabled && self.verbose {
+            eprintln!(
+                "       {} {} {}",
+                self.theme.dim("▸"),
+                self.theme.dim(label),
+                detail
+            );
+        }
+    }
+
+    fn finish(&self, artifact: &str) {
+        if !self.enabled {
+            return;
+        }
+        let elapsed = self.started.elapsed();
+        let duration = if elapsed.as_secs() == 0 {
+            format!("{}ms", elapsed.as_millis())
+        } else {
+            format!("{:.1}s", elapsed.as_secs_f64())
+        };
+        eprintln!(
+            "  {}  {} {} in {} {}",
+            self.theme.accent("jet"),
+            self.theme.bold("Built"),
+            artifact,
+            duration,
+            self.theme.success("✓")
+        );
+    }
+}
 
 /// `RunOutcome` carries stdout and stderr separately. Flush the first stream
 /// before handing the second to the OS so the Prelude's write order survives
@@ -402,6 +461,9 @@ pub(crate) fn run_compile_cmd(
         BuildProfile::default_for_command(cmd)
     };
     let release_profile = matches!(&profile, BuildProfile::Release);
+    let progress = BuildProgress::new(cmd, emit_rust, verbose, mode);
+    progress.major("Reading", file);
+    progress.minor("profile", profile.budget_name());
 
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -430,6 +492,7 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    progress.minor("source", &format!("{} bytes", src.len()));
 
     let record = if cmd == "run" {
         record_name.map(|name| {
@@ -793,6 +856,7 @@ pub(crate) fn run_compile_cmd(
             None
         };
     let is_library = library_flag || library_output.is_some();
+    progress.major("Checking", "program and build plan");
 
     // #2083: one front end per build. A `jet build` used to load and
     // type-check its program three times — once inside `native_cache_key`,
@@ -801,7 +865,7 @@ pub(crate) fn run_compile_cmd(
     // stage here, exactly once: the native cache key is hashed from the bundle
     // this compile then emits, the compile resumes from that bundle instead of
     // reloading, and the effect summary is projected from its facts. The shared
-    // `PhaseTimer` starts inside it, so `jet-timing.json` accounts for the load
+    // `PhaseTimer` starts inside it, so `jet-timing.json` accounts for the parse
     // and sema a build pays for instead of hiding them.
     //
     // A failure here is deliberately dropped: the compile below runs the same
@@ -823,6 +887,14 @@ pub(crate) fn run_compile_cmd(
         } else {
             None
         };
+    progress.minor(
+        "front end",
+        if build_front_end.is_some() {
+            "checked"
+        } else {
+            "using direct compilation"
+        },
+    );
     if cmd == "build" && output_name.is_none() && !is_web && cross_target.is_none() {
         native_key = match build_front_end
             .as_ref()
@@ -879,6 +951,7 @@ pub(crate) fn run_compile_cmd(
     // `package.jet` manifest.
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
+    progress.major("Generating", "native code");
 
     let compile_result = if is_library {
         jet::compile_library_with_gates_and_settings(
@@ -1022,6 +1095,7 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    progress.minor("generated Rust", &format!("{} bytes", rust_code.len()));
 
     if emit_rust {
         print!("{}", rust_code);
@@ -1137,6 +1211,7 @@ pub(crate) fn run_compile_cmd(
 
     match cmd {
         "build" => {
+            progress.major("Building", "backend artifacts");
             if is_library {
                 let library = library_out.as_ref().unwrap_or_else(|| {
                     eprintln!(
@@ -1179,10 +1254,11 @@ pub(crate) fn run_compile_cmd(
                         println!("built: {}", binding.display());
                     }
                 }
+                progress.finish("library artifacts");
                 if mode.json || abilities_json {
                     println!("{}", abilities.to_json());
                 } else {
-                    println!("{}", abilities.summary());
+                    eprintln!("{}", abilities.summary());
                 }
                 return;
             }
@@ -1203,6 +1279,7 @@ pub(crate) fn run_compile_cmd(
                 native_key.clone(),
             );
             print_release_job_summary(&src, release_profile, mode);
+            progress.major("Verifying", "build budgets");
             // D-PERFBUDGET-INTEGRATION1: every build enforces applicable
             // deterministic Fail budgets through CmdBudget's one canonical
             // evaluator/report path. Cross backends use their semantic target
@@ -1224,12 +1301,17 @@ pub(crate) fn run_compile_cmd(
                 exit(ExitCodes::USER_ERROR);
             }
             if !mode.quiet && !mode.json {
-                if is_web {
-                    println!("built: build/app.wasm + build/app.js");
+                let artifact = if is_web {
+                    "build/app.wasm + build/app.js".to_string()
                 } else if is_plugin {
-                    println!("built: build/{}.wasm (sandbox)", stem(file));
+                    format!("build/{}.wasm (sandbox)", stem(file))
                 } else {
-                    println!("built: {}", bin_path(file).display());
+                    bin_path(file).display().to_string()
+                };
+                if progress.enabled {
+                    progress.finish(&artifact);
+                } else {
+                    println!("built: {artifact}");
                 }
             }
             if explain_partition && !mode.json {
@@ -1250,7 +1332,7 @@ pub(crate) fn run_compile_cmd(
             if mode.json || abilities_json {
                 println!("{}", abilities.to_json());
             } else {
-                println!("{}", abilities.summary());
+                eprintln!("{}", abilities.summary());
             }
         }
         "run" => {
@@ -5160,7 +5242,9 @@ pub(crate) fn build(
                 }
             }
             if let Some(timer) = compile_timer.as_mut() {
-                timer.lap("backend_link");
+                // A cache hit performs neither backend compilation nor linking.
+                timer.record_us("backend", 0);
+                timer.record_us("link", 0);
                 write_backend_timing(timer);
             }
             return;
@@ -5318,6 +5402,12 @@ pub(crate) fn build(
         }
     };
 
+    // rustc owns the backend and linker in one production invocation. Keep the
+    // receipt explicit: Jet-side backend preparation is separate from the
+    // rustc invocation that performs backend code generation and linking.
+    if let Some(timer) = compile_timer.as_mut() {
+        timer.lap("backend");
+    }
     let mut out = run_rustc(&prepared_runtime);
     // I5 fail-open: linking the cached runtime rlib is an optimization, so it may
     // cost a compile but must never cost a working build. If the thin crate is
@@ -5331,7 +5421,7 @@ pub(crate) fn build(
         out = run_rustc(&jet::RuntimeCache::PreparedRuntime::inline(rust_code));
     }
     if let Some(timer) = compile_timer.as_mut() {
-        timer.lap("backend_link");
+        timer.lap("link");
         write_backend_timing(timer);
     }
 
@@ -5740,6 +5830,66 @@ mod missing_c_lib_tests {
                 &["instance-b".into(), "instance-a".into()]
             )
         );
+    }
+
+    #[test]
+    fn hostile_cache_invalidation_matrix() {
+        let project = ScratchProject::new();
+        project.write("main.jet", "fn run() { print(1) }\n");
+        let identity = |compiler, schema, backend, flags, linker| {
+            format!(
+                "compiler={compiler};schema={schema};backend={backend};flags={flags};linker={linker}"
+            )
+        };
+        let base_identity = identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-a");
+        let key = |toolchain: &str, profile: &str| {
+            native_cache_key_with_toolchain(
+                &project.main(),
+                "dev",
+                profile,
+                "run",
+                toolchain,
+            )
+            .expect("hostile cache fixture key")
+        };
+        let base = key(&base_identity, "default");
+        let identities = [
+            ("compiler", identity("compiler-b", "schema-a", "backend-a", "flags-a", "linker-a")),
+            ("schema", identity("compiler-a", "schema-b", "backend-a", "flags-a", "linker-a")),
+            ("backend", identity("compiler-a", "schema-a", "backend-b", "flags-a", "linker-a")),
+            ("flags", identity("compiler-a", "schema-a", "backend-a", "flags-b", "linker-a")),
+            ("linker", identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-b")),
+        ];
+        for (input, changed) in identities {
+            assert_ne!(base, key(&changed, "default"), "{input} must miss final cache");
+        }
+        assert_ne!(
+            base,
+            key(&base_identity, "profile:debug;opt:none"),
+            "profile must miss final cache"
+        );
+
+        let instances = vec!["instance-a".to_string()];
+        let salt = |dependencies, runtime, core, target| {
+            native_cache_salt(
+                &base_identity,
+                dependencies,
+                runtime,
+                core,
+                "run",
+                target,
+                &instances,
+            )
+        };
+        let base_salt = salt("dependency-a", "generated-runtime-a", "core-a", "linux-x86_64");
+        for (input, changed) in [
+            ("dependency", salt("dependency-b", "generated-runtime-a", "core-a", "linux-x86_64")),
+            ("generated code", salt("dependency-a", "generated-runtime-b", "core-a", "linux-x86_64")),
+            ("Core artifact", salt("dependency-a", "generated-runtime-a", "core-b", "linux-x86_64")),
+            ("target", salt("dependency-a", "generated-runtime-a", "core-a", "wasm32")),
+        ] {
+            assert_ne!(base_salt, changed, "{input} must miss affected final work");
+        }
     }
 
     #[test]

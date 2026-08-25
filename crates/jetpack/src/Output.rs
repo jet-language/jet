@@ -613,7 +613,7 @@ pub fn human_duration(d: std::time::Duration) -> String {
 
 /// Render a ref-classification failure as a friendly diagnostic.
 pub fn ref_error(theme: &Theme, err: &RefError) {
-    let example = "fastfetch@nixpkgs";
+    let example = "fastfetch@jetpack";
     match err {
         RefError::MissingSeparator(raw) => theme.error(
             &format!("`{raw}` is missing a source"),
@@ -637,6 +637,12 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
             "D-VERDICT-2190-1 puts the version or policy after `@source`.",
             &format!("write `{replacement}`."),
         ),
+        RefError::RetiredNixpkgs { raw, replacement } => theme.error_coded(
+            "E1317",
+            &format!("`{raw}` uses the retired `@nixpkgs` source spelling"),
+            "D-JPK-SNIXREUSE1 makes Jetpack the public package source; nixpkgs remains provenance in locks and receipts.",
+            &format!("write `{replacement}`."),
+        ),
         RefError::PathProviderRetired { raw, path } => theme.error_coded(
             "E1317",
             &format!("`{raw}` uses the retired `path` provider word"),
@@ -647,12 +653,12 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
             source, declared, ..
         } => {
             let known = if declared.is_empty() {
-                "Sources are built-ins such as `nixpkgs` and `github`, or names declared \
+                "Sources are built-ins such as `jetpack` and `github`, or names declared \
                  in env.jet `sources:`."
                     .to_string()
             } else {
                 format!(
-                    "Sources are built-ins such as `nixpkgs` and `github`, or names declared \
+                    "Sources are built-ins such as `jetpack` and `github`, or names declared \
                      in env.jet. This env declares: {}.",
                     declared.join(", ")
                 )

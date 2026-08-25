@@ -1,9 +1,8 @@
 use super::package_hangar_vendor::auto_clean_after_success;
 use super::parse::{Flags, Parsed};
 use super::realize::{
-    RealizeScope,
     apply_locked_channels, classify_or_report, load_project_plan, realize_adapter, realize_ref,
-    realize_ref_outcome, report_nix_bridge_required, RefOutcome, RowStyle, RunPlan,
+    realize_ref_outcome, report_nix_bridge_required, RealizeScope, RefOutcome, RowStyle, RunPlan,
 };
 use super::services_secrets_config::find_jet_binary;
 use super::workspace_sources::{
@@ -30,6 +29,126 @@ struct NativeDevTool {
     definition: &'static str,
     command: &'static str,
     relative_binary: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeActivation {
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NixShellScratch {
+    NotCreated,
+}
+
+/// Typed host facts for the Jet-native shell projection. The final
+/// environment-variable map is only a child-process adapter; paths, markers,
+/// and the no-Nix cleanup state stay typed until that boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NativeEnvironmentProjection {
+    project_root: std::path::PathBuf,
+    native_bin_dirs: Vec<std::path::PathBuf>,
+    tzdir: Option<std::path::PathBuf>,
+    loader_paths: Vec<std::path::PathBuf>,
+    activation: NativeActivation,
+    nix_shell_scratch: NixShellScratch,
+}
+
+impl NativeEnvironmentProjection {
+    fn from_realized(
+        project_root: &std::path::Path,
+        realized: &[(String, String)],
+        inherited_loader_path: Option<&str>,
+    ) -> Self {
+        let native_bin_dirs = native_dev_tool_paths(project_root)
+            .into_iter()
+            .filter_map(|(_, binary)| binary.parent().map(|path| path.to_path_buf()))
+            .fold(Vec::new(), |mut dirs, directory| {
+                if !dirs.iter().any(|existing| existing == &directory) {
+                    dirs.push(directory);
+                }
+                dirs
+            });
+        let mut tzdir = None;
+        let mut vulkan_loader = None;
+        let mut raylib = None;
+        for (name, output) in realized {
+            let output = std::path::Path::new(output);
+            match name.as_str() {
+                "tzdata" => tzdir = Some(output.join("share").join("zoneinfo")),
+                "vulkan-loader" => vulkan_loader = Some(output.join("lib")),
+                "raylib" => raylib = Some(output.join("lib")),
+                _ => {}
+            }
+        }
+        let mut loader_paths = Vec::new();
+        if let Some(path) = vulkan_loader {
+            loader_paths.push(path);
+        }
+        if let Some(path) = raylib {
+            loader_paths.push(path);
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(inherited) = inherited_loader_path.filter(|value| !value.is_empty()) {
+            loader_paths.extend(
+                inherited
+                    .split(crate::Platform::path_separator())
+                    .filter(|path| !path.is_empty())
+                    .map(std::path::PathBuf::from),
+            );
+        }
+
+        Self {
+            project_root: project_root.to_path_buf(),
+            native_bin_dirs,
+            tzdir,
+            loader_paths,
+            activation: NativeActivation::Disabled,
+            // Jetpack never creates Nix shell scratch directories. The
+            // compatibility marker records that the old one-time cleanup
+            // boundary is already satisfied; no hook runs.
+            nix_shell_scratch: NixShellScratch::NotCreated,
+        }
+    }
+
+    fn bin_dirs(&self) -> Vec<String> {
+        self.native_bin_dirs
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn env_vars(&self) -> std::collections::BTreeMap<String, String> {
+        let mut vars = std::collections::BTreeMap::from([(
+            "JET_ROOT".to_string(),
+            self.project_root.to_string_lossy().into_owned(),
+        )]);
+        match self.activation {
+            NativeActivation::Disabled => {
+                vars.insert(Syntax::ENV_DISABLE_VAR.to_string(), "1".to_string());
+            }
+        }
+        match self.nix_shell_scratch {
+            NixShellScratch::NotCreated => {
+                vars.insert("JET_NIX_TMP_CLEANED".to_string(), "1".to_string());
+            }
+        }
+        if let Some(tzdir) = &self.tzdir {
+            vars.insert("TZDIR".to_string(), tzdir.to_string_lossy().into_owned());
+        }
+        #[cfg(target_os = "linux")]
+        if !self.loader_paths.is_empty() {
+            vars.insert(
+                "LD_LIBRARY_PATH".to_string(),
+                self.loader_paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(&crate::Platform::path_separator().to_string()),
+            );
+        }
+        vars
+    }
 }
 
 /// The two repo-local dev tools are native projections, not realized Nix
@@ -68,60 +187,8 @@ fn native_environment_projection(
     project_root: &std::path::Path,
     realized: &[(String, String)],
     inherited_loader_path: Option<&str>,
-) -> (Vec<String>, std::collections::BTreeMap<String, String>) {
-    let mut bin_dirs = Vec::new();
-    for (_, binary) in native_dev_tool_paths(project_root) {
-        if let Some(parent) = binary.parent() {
-            let directory = parent.to_string_lossy().into_owned();
-            if !bin_dirs.iter().any(|existing| existing == &directory) {
-                bin_dirs.push(directory);
-            }
-        }
-    }
-    let mut vars = std::collections::BTreeMap::from([
-        (
-            "JET_ROOT".to_string(),
-            project_root.to_string_lossy().into_owned(),
-        ),
-        ("JET_ENV_DISABLE".to_string(), "1".to_string()),
-        // Jetpack does not create Nix shell scratch trees. The marker records
-        // the one-time cleanup boundary without executing the old hook.
-        ("JET_NIX_TMP_CLEANED".to_string(), "1".to_string()),
-    ]);
-    let mut tzdir = None;
-    let mut vulkan = None;
-    let mut raylib = None;
-    for (name, output) in realized {
-        match name.as_str() {
-            "tzdata" => tzdir = Some(format!("{output}/share/zoneinfo")),
-            "vulkan-loader" => vulkan = Some(format!("{output}/lib")),
-            "raylib" => raylib = Some(format!("{output}/lib")),
-            _ => {}
-        }
-    }
-    if let Some(tzdir) = tzdir {
-        vars.insert("TZDIR".to_string(), tzdir);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let mut library_paths = Vec::new();
-        if let Some(path) = vulkan {
-            library_paths.push(path);
-        }
-        if let Some(path) = raylib {
-            library_paths.push(path);
-        }
-        if let Some(existing) = inherited_loader_path.filter(|value| !value.is_empty()) {
-            library_paths.push(existing.to_string());
-        }
-        if !library_paths.is_empty() {
-            vars.insert(
-                "LD_LIBRARY_PATH".to_string(),
-                library_paths.join(&crate::Platform::path_separator().to_string()),
-            );
-        }
-    }
-    (bin_dirs, vars)
+) -> NativeEnvironmentProjection {
+    NativeEnvironmentProjection::from_realized(project_root, realized, inherited_loader_path)
 }
 
 /// D-JPK-GRANTCMD1=A: `jet trust grant/list/explain/revoke`. Jetpack owns the
@@ -454,12 +521,12 @@ pub(super) fn compose_env_scoped(
         return Err(2);
     }
     let inherited_loader_path = std::env::var("LD_LIBRARY_PATH").ok();
-    let (native_bin_dirs, native_vars) = native_environment_projection(
+    let native_projection = native_environment_projection(
         &plan.project_root,
         &realized_outputs,
         inherited_loader_path.as_deref(),
     );
-    bin_dirs.extend(native_bin_dirs);
+    bin_dirs.extend(native_projection.bin_dirs());
     let mut composed_vars: std::collections::BTreeMap<String, String> = provider_vars
         .into_iter()
         .map(|(name, values)| {
@@ -547,7 +614,7 @@ pub(super) fn compose_env_scoped(
     }
     // Native projection is applied last so the Jet-owned root, markers, and
     // generated output paths cannot be shadowed by dotenv or preset values.
-    composed_vars.extend(native_vars);
+    composed_vars.extend(native_projection.env_vars());
     // Tier 1 (D-FE-CLI1): the per-package `✓` rows above are the whole
     // report — `jet env`/`run`/`dev` hand off straight to the shell
     // threshold rule (`Shell::enter`) instead of a redundant summary line.
@@ -1428,7 +1495,10 @@ fn enforce_required_sandbox_policy(theme: &Theme, json: bool) -> Result<(), i32>
 
 #[cfg(test)]
 mod native_projection_tests {
-    use super::{native_dev_tool_paths, native_environment_projection, NATIVE_DEV_TOOLS};
+    use super::{
+        native_dev_tool_paths, native_environment_projection, NativeActivation, NixShellScratch,
+        NATIVE_DEV_TOOLS,
+    };
     use std::path::Path;
 
     #[test]
@@ -1455,7 +1525,7 @@ mod native_projection_tests {
 
     #[test]
     fn native_projection_derives_root_timezone_and_loader_paths() {
-        let (bin_dirs, vars) = native_environment_projection(
+        let projection = native_environment_projection(
             Path::new("/workspace/jet"),
             &[
                 ("tzdata".into(), "/hangar/tzdata-1".into()),
@@ -1464,7 +1534,8 @@ mod native_projection_tests {
             ],
             Some("/host/lib"),
         );
-        assert_eq!(bin_dirs, vec!["/workspace/jet/target/debug"]);
+        assert_eq!(projection.bin_dirs(), vec!["/workspace/jet/target/debug"]);
+        let vars = projection.env_vars();
         assert_eq!(
             vars.get("JET_ROOT").map(String::as_str),
             Some("/workspace/jet")
@@ -1483,5 +1554,7 @@ mod native_projection_tests {
             vars.get("LD_LIBRARY_PATH").map(String::as_str),
             Some("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib")
         );
+        assert_eq!(projection.activation, NativeActivation::Disabled);
+        assert_eq!(projection.nix_shell_scratch, NixShellScratch::NotCreated);
     }
 }

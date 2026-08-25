@@ -17,6 +17,7 @@ use crate::Traits;
 use crate::AST::FfiLink;
 use crate::AST::{Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef, Type};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 
 pub(crate) use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
@@ -146,6 +147,7 @@ pub mod test_report {
 
 pub(crate) use CModule::*;
 pub(crate) use Context::*;
+pub use Context::CodegenPhaseTiming;
 pub use Embedding::{export_shape, export_surface, ExportFunction, ExportScalar};
 pub(crate) use Imports::*;
 pub(crate) use Items::*;
@@ -4950,6 +4952,33 @@ pub fn emit_bundle_dbg(
     debug_linemap: bool,
     active_os: Syntax::OSTarget,
 ) -> String {
+    emit_bundle_dbg_inner(bundle, link, debug_linemap, active_os, None)
+}
+
+pub fn emit_bundle_dbg_timed(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    debug_linemap: bool,
+    active_os: Syntax::OSTarget,
+) -> (String, CodegenPhaseTiming) {
+    let phase_timing = Rc::new(PhaseTimes::default());
+    let rust = emit_bundle_dbg_inner(
+        bundle,
+        link,
+        debug_linemap,
+        active_os,
+        Some(Rc::clone(&phase_timing)),
+    );
+    (rust, phase_timing.snapshot())
+}
+
+fn emit_bundle_dbg_inner(
+    bundle: &ProgramBundle,
+    link: Option<&FfiLink>,
+    debug_linemap: bool,
+    active_os: Syntax::OSTarget,
+    phase_timing: Option<Rc<PhaseTimes>>,
+) -> String {
     // D-DATAFLOW1 / D-REL3: fixed_sigs and edition-gated helpers read the TLS
     // package edition. Keep codegen on the same edition sema checked.
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
@@ -5001,6 +5030,7 @@ pub fn emit_bundle_dbg(
                 link,
                 &extern_funcs,
             );
+            cx.phase_timing = phase_timing.clone();
             populate_cx_module_facts(&mut cx, bundle, i);
             cx.foreign_undos = bundle_foreign_undos(bundle, i);
             apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
@@ -5060,6 +5090,7 @@ pub fn emit_bundle_dbg(
             link,
             &extern_funcs,
         );
+        cx.phase_timing = phase_timing.clone();
         populate_cx_module_facts(&mut cx, bundle, bundle.entry);
         cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
         apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);

@@ -1,7 +1,7 @@
 //! Nix derivation compatibility — ATerm `.drv`, path calculus, differential
 //! corpus (E4-JP8 / D-JPK-NIXENGINE1=D, D-JPK-NIXBASELINE1=D).
 //!
-//! Native engine only: no Tvix code, no product-path shell-out to installed Nix.
+//! Native compatibility primitives only; this module owns no evaluator subprocess.
 //! Algorithms follow the Nix 2.34 store-path / derivation-ATerm protocols
 //! (`protocols/store-path.md`, `protocols/nix32.md`, `protocols/derivation-aterm.md`).
 //! Compatibility types stay behind this module; product surfaces call in later

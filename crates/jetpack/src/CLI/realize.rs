@@ -22,10 +22,23 @@ use std::path::{Path, PathBuf};
 /// any workspace member so `jetpack run logging` / `jetpack run packages/logging`
 /// resolve in a monorepo (Slice B, D-MONOREF1=A). Prints the diagnostic on failure.
 pub(super) fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefError> {
-    RefSpec::classify_with_workspace(raw, &cwd_table(), &cwd_workspace_index()).map_err(|e| {
-        Output::ref_error(theme, &e);
-        e
-    })
+    let table = cwd_table();
+    let index = cwd_workspace_index();
+    match RefSpec::classify_with_workspace(raw, &table, &index) {
+        Ok(spec) => Ok(spec),
+        Err(RefError::MissingSeparator(_) | RefError::UnknownMember { .. })
+            if !raw.contains(Syntax::REF_PROVIDER_AT) && !RefSpec::is_bare_path(raw) =>
+        {
+            RefSpec::classify_in(&RefSpec::with_default_source(raw), &table).map_err(|e| {
+                Output::ref_error(theme, &e);
+                e
+            })
+        }
+        Err(e) => {
+            Output::ref_error(theme, &e);
+            Err(e)
+        }
+    }
 }
 
 fn current_project_dir() -> Option<std::path::PathBuf> {
@@ -163,12 +176,14 @@ pub(super) fn realize_ref_outcome(
         RealizeScope::UserProfile => None,
     };
     let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
-    // D-JPK-OFFLINE2=B: an offline Nix ref may reuse a Hangar copy only when
-    // the committed lock identity and the complete closure both verify. A
-    // missing transitive object must reach the indexed provider so it can
-    // report the exact missing logical path instead of becoming a vague
-    // integrity failure.
-    let offline_reuse_ok = flags.offline && uses_nix && fixtures_for(flags).is_none() && {
+    // A Nix ref may reuse a Hangar copy only when the committed lock identity
+    // and the complete closure both verify. A missing transitive object must
+    // reach the indexed provider so it can report the exact missing logical
+    // path instead of becoming a vague integrity failure.
+    // A verified imported object is a Jetpack result in every mode. Probe it
+    // before the Nix-bridge diagnostic so an online run/build can reuse the
+    // locked package without rediscovering or invoking Nix.
+    let verified_reuse_ok = uses_nix && fixtures_for(flags).is_none() && {
         let probe = Provider::Ctx {
             fixtures: None,
             store_dir: &store_dir,
@@ -207,7 +222,7 @@ pub(super) fn realize_ref_outcome(
     if flags.offline
         && uses_nix
         && fixtures_for(flags).is_none()
-        && !offline_reuse_ok
+        && !verified_reuse_ok
         && !indexed_nix
         && !locked_pin
     {
@@ -221,7 +236,7 @@ pub(super) fn realize_ref_outcome(
         );
         return RefOutcome::Failed;
     }
-    if uses_nix && !package_fixture_available(flags, spec) && !offline_reuse_ok {
+    if uses_nix && !package_fixture_available(flags, spec) && !verified_reuse_ok {
         if let Some(need) = Provider::needs_nix_bridge(
             spec,
             table,
@@ -239,7 +254,7 @@ pub(super) fn realize_ref_outcome(
     // not mistakenly asked for nix fixtures.
     let fixtures = if flags.offline && uses_nix {
         let fx = fixtures_for(flags);
-        if fx.is_none() && !offline_reuse_ok && !indexed_nix && !locked_pin {
+        if fx.is_none() && !verified_reuse_ok && !indexed_nix && !locked_pin {
             drop(spinner);
             report_provider_error(
                 theme,
@@ -259,7 +274,7 @@ pub(super) fn realize_ref_outcome(
         // opt-in); the bare env var alone is not.
         flags.fixtures.clone()
     };
-    let nix_index_client = if uses_nix && fixtures.is_none() && !offline_reuse_ok {
+    let nix_index_client = if uses_nix && fixtures.is_none() && !verified_reuse_ok {
         Some(
             NixIndexClient::from_roots_with_mode(roots, flags.offline)
                 .map_err(ProviderError::NixIndex),

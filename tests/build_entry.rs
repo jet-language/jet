@@ -401,7 +401,7 @@ fn compiler_speed_phase_timing_reports_real_release_build() {
     );
 
     let frontend = fs::read_to_string(timing.join("jet-timing.json")).unwrap();
-    for phase in ["load", "sema", "ffi", "codegen", "rust_bytes"] {
+    for phase in ["parse", "sema", "ffi", "tir", "emission", "rust_bytes"] {
         assert!(
             frontend.contains(&format!("\"name\":\"{phase}\"")),
             "frontend timing report is missing {phase}: {frontend}"
@@ -409,8 +409,9 @@ fn compiler_speed_phase_timing_reports_real_release_build() {
     }
     let backend = fs::read_to_string(timing.join("build/jet-timing-backend.json")).unwrap();
     assert!(
-        backend.contains("\"name\":\"backend_link\""),
-        "backend timing report is missing backend_link: {backend}"
+        backend.contains("\"name\":\"backend\"")
+            && backend.contains("\"name\":\"link\""),
+        "backend timing report is missing backend/link: {backend}"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

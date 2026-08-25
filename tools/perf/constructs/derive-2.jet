@@ -1,0 +1,30 @@
+derive T.FieldNames {
+    @loop field in T.@fields {
+        method :: "field_{field.@name}"
+        fn @method(self) String -> field.@name
+    }
+}
+
+marker AddMarkerFields(@sites: [.Type]) {
+    type_name :: target.@name
+    @loop field in target.@fields {
+        method :: "marked_{field.@name}"
+        impl @type_name {
+            fn @method(self) String -> field.@name
+        }
+    }
+}
+
+#[FieldNames, AddMarkerFields]
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn run() {
+    point :: Point{x: 1, y: 2}
+    print(point.field_x())
+    print(point.field_y())
+    print(point.marked_x())
+    print(point.marked_y())
+}

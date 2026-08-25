@@ -429,7 +429,7 @@ pub struct LockedBuildContribution {
 // ──────────────────────────────────────────────
 
 fn canonical_ref(reference: &str) -> String {
-    crate::RefSpec::migrate_persisted_ref(reference).canonical
+    crate::RefSpec::canonical_locked_ref(reference)
 }
 
 pub fn write(lock: &LockFile) -> String {
@@ -2054,6 +2054,7 @@ pub fn record_nix_realization(
     output: &str,
     envelope: LockEnvelope,
 ) -> Result<(), String> {
+    let reference = crate::RefSpec::canonical_locked_ref(reference);
     let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
     let mut lock = match std::fs::read_to_string(&lock_path) {
         Ok(raw) => parse(&raw).map_err(|error| {
@@ -2105,7 +2106,7 @@ pub fn record_nix_realization(
                     LockSource::Nix {
                         reference: locked_reference,
                         output: locked_output,
-                    } if locked_reference == reference && locked_output == output
+                    } if locked_reference == &reference && locked_output == output
                 )
                 && package
                     .envelope
@@ -2314,6 +2315,7 @@ fn write_lock_atomically(path: &Path, contents: &str) -> Result<(), String> {
 /// `None` when the project has no lock or no matching Nix entry with an envelope.
 pub fn nix_realization(project_root: &Path, reference: &str) -> Option<(String, LockEnvelope)> {
     let lock = load(project_root)?;
+    let reference = crate::RefSpec::canonical_locked_ref(reference);
     for pkg in lock.packages {
         if let LockSource::Nix {
             reference: r,

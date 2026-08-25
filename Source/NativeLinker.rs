@@ -54,7 +54,8 @@ impl Selection {
         }
     }
 
-    /// Flags for the user crate and the cached runtime crates.
+    /// Flags for the user crate. RuntimeCache removes final-link-only flags
+    /// before compiling reusable runtime/Core rlibs.
     ///
     /// Live in the `jet` binary (`CmdCompile`) and in this module's unit
     /// tests. The library target pulls `NativeLinker` in only for `label()`

@@ -10,9 +10,11 @@ use crate::SHA256::sha256_hex;
 use jet_devserver::WatchService::WatchGraph;
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 
 const MAGIC: &[u8] = b"jet-receipt-v1\0";
 const DIGEST_LEN: usize = 64;
@@ -466,19 +468,22 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let claim = store.claim(verb, argv, &input_paths).ok()?;
 
     let executable = std::env::current_exe().ok()?;
-    let output = std::process::Command::new(executable)
+    let mut child = std::process::Command::new(executable)
         .args(argv)
         .current_dir(&cwd)
         .env("JET_RECEIPT_BYPASS", "1")
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .ok()?;
-    let status = output.status.code().unwrap_or(1);
-    write_bytes(std::io::stdout(), &output.stdout);
-    write_bytes(std::io::stderr(), &output.stderr);
-    if store
-        .write(&claim, status, &output.stdout, &output.stderr)
-        .is_ok()
-    {
+    let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
+    let stdout_reader = std::thread::spawn(move || capture_stream(stdout, std::io::stdout()));
+    let stderr_reader = std::thread::spawn(move || capture_stream(stderr, std::io::stderr()));
+    let status = child.wait().ok()?.code().unwrap_or(1);
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if store.write(&claim, status, &stdout, &stderr).is_ok() {
         let _ = store.remember_context(verb, argv, &claim);
     }
     Some(status)
@@ -847,7 +852,7 @@ fn context_identity(verb: &str, argv: &[String]) -> Result<Vec<u8>, String> {
     frame(&mut identity, &current_dir_bytes());
     frame(&mut identity, &argv_identity(argv));
     frame(&mut identity, &environment_identity());
-    frame(&mut identity, &tool_identity());
+    frame(&mut identity, tool_identity());
     frame(&mut identity, &terminal_identity());
     Ok(identity)
 }
@@ -887,21 +892,31 @@ fn environment_identity() -> Vec<u8> {
     out
 }
 
-fn tool_identity() -> Vec<u8> {
-    let mut out = Vec::new();
-    for name in ["jet", "jetpack", "rustc", "cargo", "wasm-tools"] {
-        frame(&mut out, name.as_bytes());
-        let Some(path) = executable_on_path(name) else {
-            frame(&mut out, b"missing");
-            continue;
-        };
-        frame(&mut out, path.to_string_lossy().as_bytes());
-        let digest = fs::read(&path)
+fn tool_identity() -> &'static [u8] {
+    static IDENTITY: LazyLock<Vec<u8>> = LazyLock::new(|| {
+        let mut out = Vec::new();
+        for name in ["jet", "jetpack", "rustc", "cargo", "wasm-tools"] {
+            frame(&mut out, name.as_bytes());
+            let Some(path) = executable_on_path(name) else {
+                frame(&mut out, b"missing");
+                continue;
+            };
+            frame(&mut out, path.to_string_lossy().as_bytes());
+            let digest = tool_digest(name, &path);
+            frame(&mut out, digest.as_bytes());
+        }
+        out
+    });
+    IDENTITY.as_slice()
+}
+fn tool_digest(name: &str, path: &Path) -> String {
+    if name == "jet" {
+        env!("JET_COMPILER_BUILD_ID").to_string()
+    } else {
+        fs::read(path)
             .map(|bytes| sha256_hex(&bytes))
-            .unwrap_or_else(|_| "unreadable".into());
-        frame(&mut out, digest.as_bytes());
+            .unwrap_or_else(|_| "unreadable".into())
     }
-    out
 }
 
 fn executable_on_path(name: &str) -> Option<PathBuf> {
@@ -937,6 +952,25 @@ fn replay_receipt(command: &str, receipt: &Receipt) {
     let _ = writeln!(std::io::stderr(), "ok: {command} current (receipt {short})");
 }
 
+fn capture_stream(mut reader: impl Read, mut writer: impl Write) -> Vec<u8> {
+    let mut captured = Vec::new();
+    let mut buffer = [0; 8192];
+    loop {
+        let Ok(read) = reader.read(&mut buffer) else {
+            break;
+        };
+        if read == 0 {
+            break;
+        }
+        captured.extend_from_slice(&buffer[..read]);
+        if writer.write_all(&buffer[..read]).is_err() {
+            break;
+        }
+        let _ = writer.flush();
+    }
+    captured
+}
+
 fn write_bytes(mut writer: impl Write, bytes: &[u8]) {
     let _ = writer.write_all(bytes);
     let _ = writer.flush();
@@ -965,5 +999,22 @@ mod tests {
             ..first.clone()
         };
         assert_eq!(receipt_digest(&first), receipt_digest(&second));
+    }
+
+    #[test]
+    fn compiler_tool_identity_never_reads_the_running_binary() {
+        assert_eq!(
+            tool_digest("jet", Path::new("/definitely/missing/jet")),
+            env!("JET_COMPILER_BUILD_ID")
+        );
+    }
+
+    #[test]
+    fn captured_child_output_is_streamed_and_retained() {
+        let input = b"one\ntwo\n".as_slice();
+        let mut streamed = Vec::new();
+        let captured = capture_stream(input, &mut streamed);
+        assert_eq!(captured, input);
+        assert_eq!(streamed, input);
     }
 }

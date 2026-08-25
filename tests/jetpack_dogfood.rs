@@ -198,6 +198,15 @@ fn jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures() {
     let online = summaries.get("online").expect("online summary");
     let offline = summaries.get("offline").expect("offline summary");
     assert_ne!(
+        online.phase_pid, offline.phase_pid,
+        "offline run reused online phase process"
+    );
+    assert_ne!(
+        offline.phase_pid,
+        u64::from(std::process::id()),
+        "offline run executed in the parent test process"
+    );
+    assert_ne!(
         online.jetpack_pid, offline.jetpack_pid,
         "offline run reused online Jetpack process"
     );
@@ -344,6 +353,12 @@ fn run_phase(
     mode: &str,
 ) {
     let offline = mode == "offline";
+    assert!(
+        env::var_os(no_nix_namespace::CHILD_MARKER).is_some(),
+        "dogfood phase must run in the namespace child process"
+    );
+    fs::write(scratch.phase_pid_path(mode), std::process::id().to_string())
+        .expect("save phase process identity");
     let mut probe_command = enter_command(repo, jetpack, scratch, offline);
     probe_command
         .arg("--")
@@ -408,7 +423,7 @@ fn enter_command<'a>(
     offline: bool,
 ) -> Command {
     let mut command = clean_command(jetpack, repo, scratch, offline);
-    command.args(["enter", "--trust"]);
+    command.args(["env", "--trust"]);
     if offline {
         command.arg("--offline");
     }
@@ -687,12 +702,18 @@ fn walk_physical_nodes(
 fn read_phase_summary(scratch: &DogfoodScratch, mode: &str) -> PhaseSummary {
     let probe_text = fs::read_to_string(scratch.probe_path(mode)).expect("read probe evidence");
     let du_text = fs::read_to_string(scratch.du_path(mode)).expect("read du evidence");
+    let phase_pid = fs::read_to_string(scratch.phase_pid_path(mode))
+        .expect("read phase process identity")
+        .trim()
+        .parse()
+        .expect("phase process identity is a pid");
     let jetpack_pid = fs::read_to_string(scratch.jetpack_pid_path(mode))
         .expect("read Jetpack process identity")
         .trim()
         .parse()
         .expect("Jetpack process identity is a pid");
     PhaseSummary {
+        phase_pid,
         jetpack_pid,
         probe: jetpack::JSON::parse(probe_text.trim()).expect("parse probe evidence"),
         du: jetpack::JSON::parse(du_text.trim()).expect("parse du evidence"),
@@ -874,6 +895,10 @@ impl DogfoodScratch {
     fn jetpack_pid_path(&self, mode: &str) -> PathBuf {
         self.root.join(format!("dogfood-{mode}.pid"))
     }
+
+    fn phase_pid_path(&self, mode: &str) -> PathBuf {
+        self.root.join(format!("dogfood-{mode}.phase.pid"))
+    }
 }
 
 impl Drop for DogfoodScratch {
@@ -886,6 +911,7 @@ impl Drop for DogfoodScratch {
 
 #[derive(Debug, PartialEq)]
 struct PhaseSummary {
+    phase_pid: u64,
     jetpack_pid: u64,
     probe: JSONValue,
     du: JSONValue,

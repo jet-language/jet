@@ -39,6 +39,26 @@ pub struct DuReport {
     pub entries: Vec<DuEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineDuEntry {
+    pub root: PathBuf,
+    pub hangar: PathBuf,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineDuPool {
+    pub path: PathBuf,
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineDuReport {
+    pub shared_cas: Option<MachineDuPool>,
+    pub roots: Vec<MachineDuEntry>,
+    pub total_bytes: u64,
+}
+
 #[derive(Debug, Default)]
 struct PhysicalMeasurement {
     unique_bytes: u64,
@@ -221,6 +241,120 @@ pub fn du(roots: &Roots) -> std::io::Result<DuReport> {
     })
 }
 
+/// Report the physical Hangar footprint across every discovered machine root.
+/// One inode set spans all roots, so cross-root hardlinks are counted once.
+pub fn du_all() -> std::io::Result<MachineDuReport> {
+    let mut seen = BTreeSet::new();
+    let shared_cas_path = jet_pkg_model::Store::shared_cas_dir();
+    let shared_cas = match fs::symlink_metadata(&shared_cas_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "shared CAS pool is not a real directory: {}",
+                        shared_cas_path.display()
+                    ),
+                ));
+            }
+            Some(MachineDuPool {
+                path: shared_cas_path.clone(),
+                bytes: measure_machine_tree(&shared_cas_path, &mut seen)?,
+            })
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let mut report = MachineDuReport {
+        shared_cas,
+        roots: Vec::new(),
+        total_bytes: 0,
+    };
+    if let Some(pool) = &report.shared_cas {
+        report.total_bytes = pool.bytes;
+    }
+
+    for roots in Roots::machine_roots() {
+        let hangar = roots.hangar_dir();
+        let metadata = match fs::symlink_metadata(&hangar) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Hangar root is not a real directory: {}", hangar.display()),
+            ));
+        }
+        let bytes = measure_machine_tree(&hangar, &mut seen)?;
+        report.total_bytes = report.total_bytes.checked_add(bytes).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "machine Hangar disk usage overflowed",
+            )
+        })?;
+        report.roots.push(MachineDuEntry {
+            root: roots.root,
+            hangar,
+            bytes,
+        });
+    }
+    report
+        .roots
+        .sort_by(|left, right| left.root.cmp(&right.root));
+    Ok(report)
+}
+
+#[cfg(unix)]
+fn measure_machine_tree(path: &Path, seen: &mut BTreeSet<(u64, u64)>) -> std::io::Result<u64> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let metadata = fs::symlink_metadata(path)?;
+    if !seen.insert((metadata.dev(), metadata.ino())) {
+        return Ok(0);
+    }
+    let mut total = metadata.blocks().checked_mul(512).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("physical allocation for `{}` overflowed", path.display()),
+        )
+    })?;
+    if metadata.is_dir() {
+        for child in fs::read_dir(path)? {
+            total = total
+                .checked_add(measure_machine_tree(&child?.path(), seen)?)
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "machine Hangar disk usage overflowed",
+                    )
+                })?;
+        }
+    }
+    Ok(total)
+}
+
+#[cfg(not(unix))]
+fn measure_machine_tree(path: &Path, seen: &mut BTreeSet<()>) -> std::io::Result<u64> {
+    let metadata = fs::symlink_metadata(path)?;
+    let _ = seen;
+    let mut total = metadata.len();
+    if metadata.is_dir() {
+        for child in fs::read_dir(path)? {
+            total = total
+                .checked_add(measure_machine_tree(&child?.path(), seen)?)
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "machine Hangar disk usage overflowed",
+                    )
+                })?;
+        }
+    }
+    Ok(total)
+}
+
 #[cfg(unix)]
 fn measure_physical(
     object_paths: &BTreeMap<String, PathBuf>,
@@ -379,6 +513,7 @@ pub(crate) fn dir_size(path: &std::path::Path) -> u64 {
 pub struct CleanReport {
     pub removed_objects: usize,
     pub removed_bytes: u64,
+    pub quarantined_objects: usize,
     pub removed_receipts: usize,
     pub removed_receipt_bytes: u64,
     pub swept_tmp: usize,
@@ -391,6 +526,7 @@ impl CleanReport {
     pub fn is_empty(&self) -> bool {
         self.removed_objects == 0
             && self.removed_bytes == 0
+            && self.quarantined_objects == 0
             && self.removed_receipts == 0
             && self.removed_receipt_bytes == 0
             && self.swept_tmp == 0
@@ -1273,6 +1409,11 @@ pub(crate) fn register_entries_unlocked(
         return Ok(false);
     }
     for entry in entries {
+        Ingest::share_tree_files(
+            roots,
+            Path::new(&entry.out),
+            !entry.platform_artifact_kind.is_empty(),
+        )?;
         verify_registration_output(roots, entry)?;
     }
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
@@ -1357,6 +1498,11 @@ fn register_entry_unlocked_mode(
     after_append: Option<&mut dyn FnMut()>,
     fresh_action_key: Option<&str>,
 ) -> std::io::Result<bool> {
+    Ingest::share_tree_files(
+        roots,
+        Path::new(&entry.out),
+        !entry.platform_artifact_kind.is_empty(),
+    )?;
     verify_registration_output(roots, entry)?;
     let (_, graph) = migrate_closure_graph_unlocked(roots)?;
     if let Some(action_key) = fresh_action_key {

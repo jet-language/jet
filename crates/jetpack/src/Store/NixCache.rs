@@ -522,6 +522,27 @@ impl<'a> AdmissionTransaction<'a> {
     ) -> Result<String, NixCacheError> {
         let objects_dir = self.roots.hangar_dir().join("objects");
         ensure_dir(&objects_dir, NixCacheErrorKind::Admission)?;
+        let mut incoming_bytes = 0u64;
+        for object in fetched.values() {
+            if let Some(stage) = &object.stage {
+                if !objects_dir.join(&object.hangar_digest).is_dir() {
+                    let staged_bytes = super::admission_size(stage)
+                        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
+                    incoming_bytes = incoming_bytes.checked_add(staged_bytes).ok_or_else(|| {
+                        NixCacheError::new(
+                            NixCacheErrorKind::Admission,
+                            "Nix cache admission size overflowed",
+                        )
+                    })?;
+                }
+            }
+        }
+        super::ensure_hangar_capacity(
+            self.roots,
+            super::admission_reservation(incoming_bytes),
+            Some(&self.stage),
+        )
+        .map_err(|error| io_error(NixCacheErrorKind::Admission, error))?;
         let hangar_digests = fetched
             .iter()
             .map(|(store_path, object)| (store_path.clone(), object.hangar_digest.clone()))

@@ -16,7 +16,12 @@ use std::collections::BTreeMap;
 /// resolves to an upstream/pin via a `SourceTable`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
+    /// The canonical Jetpack package catalog (D-JPK-SNIXREUSE1).
+    Jetpack,
     /// The nixpkgs collection, realized through the Nix provider.
+    ///
+    /// Retained as an internal migration alias; its locked identity is
+    /// canonicalized to `jetpack`.
     Nixpkgs,
     /// A GitHub repo holding an `env.jet` (or a translatable `flake.nix`).
     Github,
@@ -52,6 +57,7 @@ impl Source {
     /// The source token as written after the `@` in a ref.
     pub fn label(&self) -> &str {
         match self {
+            Source::Jetpack => Syntax::REF_SOURCE_JETPACK,
             Source::Nixpkgs => Syntax::REF_SOURCE_NIXPKGS,
             Source::Github => Syntax::REF_SOURCE_GITHUB,
             Source::Path => Syntax::REF_SOURCE_PATH,
@@ -79,6 +85,7 @@ impl Source {
 
     fn builtin(name: &str) -> Option<Source> {
         match name {
+            n if n == Syntax::REF_SOURCE_JETPACK => Some(Source::Jetpack),
             n if n == Syntax::REF_SOURCE_NIXPKGS => Some(Source::Nixpkgs),
             n if n == Syntax::REF_SOURCE_GITHUB => Some(Source::Github),
             n if n == Syntax::REF_SOURCE_PATH => Some(Source::Path),
@@ -370,6 +377,8 @@ pub enum RefError {
     ProviderFirst { raw: String, replacement: String },
     /// A package ref uses one of the retired selector positions.
     NonCanonical { raw: String, replacement: String },
+    /// The public `nixpkgs` source spelling retired; use `jetpack` exactly.
+    RetiredNixpkgs { raw: String, replacement: String },
     /// The `path` provider word retired; local paths are bare.
     PathProviderRetired { raw: String, path: String },
     /// The source suffix is neither a built-in nor a declared named source.
@@ -404,6 +413,7 @@ impl RefError {
         match self {
             RefError::ProviderFirst { .. }
             | RefError::NonCanonical { .. }
+            | RefError::RetiredNixpkgs { .. }
             | RefError::PathProviderRetired { .. } => Some("E1317"),
             RefError::AmbiguousMember { .. } => Some("E1230"),
             RefError::UnknownMember { .. } => Some("E1231"),
@@ -493,6 +503,28 @@ pub fn is_bare_path(raw: &str) -> bool {
     raw.starts_with("./") || raw.starts_with("../") || raw.starts_with('/')
 }
 
+/// Attach canonical built-in package source to a bare package ref. Workspace
+/// member/path refs stay untouched and are resolved by the caller's index.
+pub fn with_default_source(raw: &str) -> String {
+    let raw = raw.trim();
+    if raw.contains(Syntax::REF_PROVIDER_AT) || is_bare_path(raw) {
+        return raw.to_string();
+    }
+    match raw.split_once(Syntax::REF_CHANNEL_MARKER) {
+        Some((package, selector)) if !package.is_empty() && !selector.is_empty() => format!(
+            "{package}{at}{source}{marker}{selector}",
+            at = Syntax::REF_PROVIDER_AT,
+            source = Syntax::REF_SOURCE_JETPACK,
+            marker = Syntax::REF_CHANNEL_MARKER,
+        ),
+        _ => format!(
+            "{raw}{at}{source}",
+            at = Syntax::REF_PROVIDER_AT,
+            source = Syntax::REF_SOURCE_JETPACK,
+        ),
+    }
+}
+
 fn provider_first(provider: &str, target: &str, raw: &str) -> RefError {
     let replacement = if provider == Syntax::REF_SOURCE_PATH {
         target.to_string()
@@ -519,11 +551,19 @@ pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
 pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
 
-    let migrated = migrate_persisted_ref(raw);
+    let persisted = migrate_persisted_ref(raw);
+    let migrated = migrate_public_ref(raw);
     if migrated.canonical != raw {
-        return Err(RefError::NonCanonical {
-            raw: raw.to_string(),
-            replacement: migrated.canonical,
+        return Err(if migrated.canonical != persisted.canonical {
+            RefError::RetiredNixpkgs {
+                raw: raw.to_string(),
+                replacement: migrated.canonical,
+            }
+        } else {
+            RefError::NonCanonical {
+                raw: raw.to_string(),
+                replacement: migrated.canonical,
+            }
         });
     }
 
@@ -589,6 +629,13 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
         }
     }
 
+    // D-JPK-SNIXREUSE1=A: a bare package is the Jetpack catalog spelling.
+    // Workspace-aware callers probe their member index before reaching this
+    // branch; a direct classifier has no workspace to consult.
+    if !raw.is_empty() && !raw.contains('/') {
+        return classify_in(&with_default_source(raw), table);
+    }
+
     Err(RefError::MissingSeparator(raw.to_string()))
 }
 
@@ -610,6 +657,17 @@ pub fn classify_with_workspace(
     table: &SourceTable,
     index: &WorkspaceIndex,
 ) -> Result<RefSpec, RefError> {
+    let raw = raw.trim();
+    if !raw.contains(Syntax::REF_PROVIDER_AT) && !is_bare_path(raw) && !index.is_empty() {
+        match resolve_in_index(raw, index) {
+            Ok(spec) => return Ok(spec),
+            Err(RefError::AmbiguousMember { .. }) => {
+                return resolve_in_index(raw, index);
+            }
+            Err(RefError::UnknownMember { .. }) => {}
+            Err(other) => return Err(other),
+        }
+    }
     match classify_in(raw, table) {
         Ok(spec) => Ok(spec),
         // No source suffix. Consult the workspace index only when a workspace
@@ -883,6 +941,76 @@ pub fn migrate_persisted_ref(raw: &str) -> MigratedRef {
     }
 }
 
+/// Migrate public package/source input without changing the persisted spelling.
+///
+/// `nixpkgs` is retained by [`migrate_persisted_ref`] so locks and receipts can
+/// show the upstream provenance. Public refs get the exact `@jetpack` spelling
+/// instead; classifiers use the difference between these two migrations to
+/// issue the teaching diagnostic.
+pub fn migrate_public_ref(raw: &str) -> MigratedRef {
+    let persisted = migrate_persisted_ref(raw);
+    let canonical = rewrite_public_nixpkgs(&persisted.canonical)
+        .unwrap_or_else(|| persisted.canonical.clone());
+    MigratedRef {
+        canonical,
+        policy: persisted.policy,
+    }
+}
+
+fn rewrite_public_nixpkgs(raw: &str) -> Option<String> {
+    let (package, source_with_selector) = raw.rsplit_once(Syntax::REF_PROVIDER_AT)?;
+    if package.is_empty() || source_with_selector.is_empty() {
+        return None;
+    }
+    let (source, selector) = source_with_selector
+        .split_once(Syntax::REF_CHANNEL_MARKER)
+        .map_or((source_with_selector, None), |(source, selector)| {
+            (source, Some(selector))
+        });
+    if source != Syntax::REF_SOURCE_NIXPKGS || selector.is_some_and(str::is_empty) {
+        return None;
+    }
+    Some(match selector {
+        Some(selector) => format!(
+            "{package}{}{jetpack}{}{selector}",
+            Syntax::REF_PROVIDER_AT,
+            Syntax::REF_CHANNEL_MARKER,
+            jetpack = Syntax::REF_SOURCE_JETPACK,
+        ),
+        None => format!(
+            "{package}{}{jetpack}",
+            Syntax::REF_PROVIDER_AT,
+            jetpack = Syntax::REF_SOURCE_JETPACK,
+        ),
+    })
+}
+
+/// Canonical ref used in lock and receipt identity. Public nixpkgs spelling
+/// remains classifiable during migration, but cannot create a second lock key.
+pub fn canonical_locked_ref(raw: &str) -> String {
+    let canonical = migrate_persisted_ref(raw).canonical;
+    let Some((package, source_with_selector)) = canonical.rsplit_once(Syntax::REF_PROVIDER_AT)
+    else {
+        return canonical;
+    };
+    let (source, selector) = source_with_selector
+        .split_once(Syntax::REF_CHANNEL_MARKER)
+        .map_or((source_with_selector, None), |(source, selector)| {
+            (source, Some(selector))
+        });
+    if source != Syntax::REF_SOURCE_NIXPKGS && source != Syntax::REF_SOURCE_JETPACK {
+        return canonical;
+    }
+    let suffix = selector
+        .map(|selector| format!("{}{}", Syntax::REF_CHANNEL_MARKER, selector))
+        .unwrap_or_default();
+    format!(
+        "{package}{at}{source}{suffix}",
+        at = Syntax::REF_PROVIDER_AT,
+        source = Syntax::REF_SOURCE_JETPACK,
+    )
+}
+
 /// Return policy encoded in a canonical user ref. Retired prefix input is not
 /// accepted here and therefore returns the pinned default.
 pub fn policy_for_ref(raw: &str) -> ChannelPolicy {
@@ -914,11 +1042,19 @@ fn policy_for_upstream(upstream: &str) -> ChannelPolicy {
 /// Classify a `target@provider[#selector]` source ref or a bare local path.
 pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
     let raw = raw.trim();
-    let migrated = migrate_persisted_ref(raw);
+    let persisted = migrate_persisted_ref(raw);
+    let migrated = migrate_public_ref(raw);
     if migrated.canonical != raw {
-        return Err(RefError::NonCanonical {
-            raw: raw.to_string(),
-            replacement: migrated.canonical,
+        return Err(if migrated.canonical != persisted.canonical {
+            RefError::RetiredNixpkgs {
+                raw: raw.to_string(),
+                replacement: migrated.canonical,
+            }
+        } else {
+            RefError::NonCanonical {
+                raw: raw.to_string(),
+                replacement: migrated.canonical,
+            }
         });
     }
     if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
@@ -998,11 +1134,63 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classifies_nixpkgs() {
-        let r = classify("fastfetch@nixpkgs").unwrap();
-        assert_eq!(r.source, Source::Nixpkgs);
-        assert_eq!(r.package, "fastfetch");
-        assert_eq!(r.short_name(), "fastfetch");
+    fn retires_nixpkgs_public_spelling_but_preserves_persisted_provenance() {
+        for (raw, replacement, persisted) in [
+            (
+                "ripgrep@nixpkgs",
+                "ripgrep@jetpack",
+                "ripgrep@nixpkgs",
+            ),
+            (
+                "ripgrep@nixpkgs#auto",
+                "ripgrep@jetpack#auto",
+                "ripgrep@nixpkgs#auto",
+            ),
+            (
+                "ripgrep#version=15.2.0@nixpkgs",
+                "ripgrep@jetpack#version=15.2.0",
+                "ripgrep@nixpkgs#version=15.2.0",
+            ),
+        ] {
+            assert_eq!(migrate_public_ref(raw).canonical, replacement);
+            assert_eq!(migrate_persisted_ref(raw).canonical, persisted);
+            assert_eq!(
+                classify(raw),
+                Err(RefError::RetiredNixpkgs {
+                    raw: raw.into(),
+                    replacement: replacement.into(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_jetpack_and_canonicalizes_bare_package_refs() {
+        let explicit = classify("ripgrep@jetpack").unwrap();
+        assert_eq!(explicit.source, Source::Jetpack);
+        assert_eq!(with_default_source("ripgrep"), "ripgrep@jetpack");
+        assert_eq!(
+            canonical_locked_ref(&with_default_source("ripgrep")),
+            canonical_locked_ref("ripgrep@jetpack")
+        );
+        assert_eq!(canonical_locked_ref("ripgrep@nixpkgs"), "ripgrep@jetpack");
+    }
+
+    #[test]
+    fn bare_and_explicit_jetpack_refs_classify_identically() {
+        assert_eq!(
+            classify("ripgrep").unwrap(),
+            classify("ripgrep@jetpack").unwrap()
+        );
+    }
+
+    #[test]
+    fn nixpkgs_public_ref_is_an_exact_jetpack_rewrite() {
+        assert!(matches!(
+            classify("ripgrep@nixpkgs"),
+            Err(RefError::RetiredNixpkgs { replacement, .. })
+                if replacement == "ripgrep@jetpack"
+        ));
     }
 
     #[test]
@@ -1216,7 +1404,11 @@ mod tests {
     #[test]
     fn builtins_resolve_without_declaration() {
         let table = SourceTable::empty();
-        assert!(classify_in("fd@nixpkgs", &table).is_ok());
+        assert!(matches!(
+            classify_in("fd@nixpkgs", &table),
+            Err(RefError::RetiredNixpkgs { replacement, .. })
+                if replacement == "fd@jetpack"
+        ));
         assert!(Source::is_builtin("nixpkgs"));
         assert!(!Source::is_builtin("stable"));
     }
@@ -1290,8 +1482,8 @@ mod tests {
         // An explicit `package@source` is never shadowed by the index.
         let table =
             SourceTable::from_decls([("nixpkgs".to_string(), "u".to_string(), ProviderKind::Nix)]);
-        let r = classify_with_workspace("logging@nixpkgs", &table, &ws_index()).unwrap();
-        assert_eq!(r.source, Source::Nixpkgs);
+        let r = classify_with_workspace("logging@jetpack", &table, &ws_index()).unwrap();
+        assert_eq!(r.source, Source::Jetpack);
         assert_eq!(r.package, "logging");
     }
 
@@ -1326,32 +1518,36 @@ mod tests {
     }
 
     #[test]
-    fn provider_ref_nixpkgs_channel() {
-        let r = classify_provider_ref("nixpkgs-unstable@nixpkgs").unwrap();
-        assert_eq!(r.provider, Source::Nixpkgs);
-        assert_eq!(r.target, "nixpkgs-unstable");
+    fn provider_ref_retires_nixpkgs_source_spelling() {
+        assert_eq!(
+            classify_provider_ref("nixpkgs-unstable@nixpkgs"),
+            Err(RefError::RetiredNixpkgs {
+                raw: "nixpkgs-unstable@nixpkgs".into(),
+                replacement: "nixpkgs-unstable@jetpack".into(),
+            })
+        );
     }
 
     #[test]
     fn channel_policies_are_checked_and_keep_channel_intent() {
-        let pinned = classify_provider_ref("rustc@nixpkgs").unwrap();
+        let pinned = classify_provider_ref("rustc@jetpack").unwrap();
         assert_eq!(pinned.policy, ChannelPolicy::Pinned);
         assert_eq!(pinned.channel, None);
 
-        let manual = classify_provider_ref("jq@nixpkgs#latest").unwrap();
+        let manual = classify_provider_ref("jq@jetpack#latest").unwrap();
         assert_eq!(manual.policy, ChannelPolicy::Manual);
         assert_eq!(manual.target, "jq");
         assert_eq!(manual.channel, Some(ChannelRef::Latest));
 
-        let automatic = classify_provider_ref("omp@nixpkgs#auto").unwrap();
+        let automatic = classify_provider_ref("omp@jetpack#auto").unwrap();
         assert_eq!(automatic.policy, ChannelPolicy::Automatic);
         assert_eq!(automatic.target, "omp");
         assert_eq!(automatic.channel, Some(ChannelRef::Latest));
 
         assert!(matches!(
-            classify_provider_ref(&format!("omp#auto{}nixpkgs", Syntax::REF_PROVIDER_AT)),
+            classify_provider_ref(&format!("omp#auto{}jetpack", Syntax::REF_PROVIDER_AT)),
             Err(RefError::NonCanonical { replacement, .. })
-                if replacement == "omp@nixpkgs#auto"
+                if replacement == "omp@jetpack#auto"
         ));
     }
 

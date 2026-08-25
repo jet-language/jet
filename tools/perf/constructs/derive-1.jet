@@ -1,0 +1,16 @@
+derive T.FieldNames {
+    @loop field in T.@fields {
+        method :: "field_{field.@name}"
+        fn @method(self) String -> field.@name
+    }
+}
+
+#FieldNames
+struct Point {
+    x: Int
+}
+
+fn run() {
+    point :: Point{x: 1}
+    print(point.field_x())
+}

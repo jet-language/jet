@@ -103,8 +103,9 @@ impl PreparedRuntime {
 
 /// Prepare the generated program for one native rustc invocation.
 ///
-/// `rustc_flags` and `rustc_env` must match the user-crate invocation. They
-/// are applied to the runtime compile and included byte-for-byte in its key.
+/// `rustc_flags` and `rustc_env` must match the user-crate invocation. Compile
+/// flags are applied to the runtime compile and included byte-for-byte in its
+/// key; final-link-only flags remain on the user-crate invocation.
 pub fn prepare(
     rustc: &OsStr,
     generated: &str,
@@ -200,6 +201,7 @@ fn prepare_at_uncounted(
         return Ok(PreparedRuntime::inline(generated));
     };
     let rustc_version = rustc_identity(rustc, rustc_env)?;
+    let compile_flags = runtime_compile_flags(rustc_flags);
     let exported = export_runtime_source(&split.runtime);
     let runtime_key = cache_key(
         RUNTIME_CRATE_NAME,
@@ -209,7 +211,7 @@ fn prepare_at_uncounted(
         None,
         rustc,
         &rustc_version,
-        rustc_flags,
+        &compile_flags,
         rustc_env,
     );
     let Some(runtime) = compile_artifact(
@@ -220,7 +222,7 @@ fn prepare_at_uncounted(
         RUNTIME_CRATE_PREFIX,
         None,
         rustc,
-        rustc_flags,
+        &compile_flags,
         rustc_env,
     )?
     else {
@@ -237,7 +239,7 @@ fn prepare_at_uncounted(
             Some(&runtime_key),
             rustc,
             &rustc_version,
-            rustc_flags,
+            &compile_flags,
             rustc_env,
         );
         compile_artifact(
@@ -248,7 +250,7 @@ fn prepare_at_uncounted(
             CORE_CRATE_PREFIX,
             Some((RUNTIME_CRATE_NAME, runtime.path.as_path())),
             rustc,
-            rustc_flags,
+            &compile_flags,
             rustc_env,
         )?
     } else {
@@ -275,6 +277,39 @@ fn prepare_at_uncounted(
         _runtime_lock: Some(runtime.lock),
         _core_lock: Some(core.lock),
     })
+}
+
+/// Linker selection and link arguments affect the final user crate, not the
+/// reusable runtime/Core rlibs. Keep them on the final rustc invocation while
+/// keeping unrelated rlib work reusable.
+fn runtime_compile_flags(flags: &[OsString]) -> Vec<OsString> {
+    let mut compile_flags = Vec::with_capacity(flags.len());
+    let mut index = 0;
+    while index < flags.len() {
+        let flag = &flags[index];
+        if flag.as_os_str() == OsStr::new("-C") {
+            if let Some(value) = flags.get(index + 1) {
+                if is_link_only_flag(value) {
+                    index += 2;
+                    continue;
+                }
+            }
+        } else if is_link_only_flag(flag) {
+            index += 1;
+            continue;
+        }
+        compile_flags.push(flag.clone());
+        index += 1;
+    }
+    compile_flags
+}
+
+fn is_link_only_flag(flag: &OsStr) -> bool {
+    let flag = flag.to_string_lossy();
+    flag.starts_with("linker=")
+        || flag.starts_with("link-arg=")
+        || flag.starts_with("-Clinker=")
+        || flag.starts_with("-Clink-arg=")
 }
 
 struct SplitGenerated {
@@ -467,8 +502,34 @@ fn cache_key(
     rustc_flags: &[OsString],
     rustc_env: &[(OsString, OsString)],
 ) -> String {
+    cache_key_with_schema(
+        CACHE_SCHEMA,
+        crate_name,
+        source,
+        exported_source,
+        crate_prefix,
+        dependency_key,
+        rustc,
+        rustc_version,
+        rustc_flags,
+        rustc_env,
+    )
+}
+
+fn cache_key_with_schema(
+    schema: &[u8],
+    crate_name: &str,
+    source: &str,
+    exported_source: &str,
+    crate_prefix: &str,
+    dependency_key: Option<&str>,
+    rustc: &OsStr,
+    rustc_version: &str,
+    rustc_flags: &[OsString],
+    rustc_env: &[(OsString, OsString)],
+) -> String {
     let mut data = Vec::new();
-    push_bytes(&mut data, CACHE_SCHEMA);
+    push_bytes(&mut data, schema);
     push_bytes(&mut data, crate_name.as_bytes());
     push_bytes(&mut data, source.as_bytes());
     push_bytes(&mut data, crate_prefix.as_bytes());
@@ -1277,6 +1338,206 @@ mod tests {
     }
 
     #[test]
+    fn hostile_cache_invalidation_matrix() {
+        let runtime = "fn x() {}";
+        let exported = export_runtime_source(runtime);
+        let base = cache_key_with_schema(
+            CACHE_SCHEMA,
+            RUNTIME_CRATE_NAME,
+            runtime,
+            &exported,
+            RUNTIME_CRATE_PREFIX,
+            None,
+            OsStr::new("rustc"),
+            "rustc 1",
+            &[],
+            &[],
+        );
+        let cases = [
+            (
+                "schema",
+                cache_key_with_schema(
+                    b"jet-runtime-rlib-v6",
+                    RUNTIME_CRATE_NAME,
+                    runtime,
+                    &exported,
+                    RUNTIME_CRATE_PREFIX,
+                    None,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[],
+                    &[],
+                ),
+            ),
+            (
+                "compiler path",
+                cache_key_with_schema(
+                    CACHE_SCHEMA,
+                    RUNTIME_CRATE_NAME,
+                    runtime,
+                    &exported,
+                    RUNTIME_CRATE_PREFIX,
+                    None,
+                    OsStr::new("other-rustc"),
+                    "rustc 1",
+                    &[],
+                    &[],
+                ),
+            ),
+            (
+                "compiler version",
+                cache_key_with_schema(
+                    CACHE_SCHEMA,
+                    RUNTIME_CRATE_NAME,
+                    runtime,
+                    &exported,
+                    RUNTIME_CRATE_PREFIX,
+                    None,
+                    OsStr::new("rustc"),
+                    "rustc 2",
+                    &[],
+                    &[],
+                ),
+            ),
+            (
+                "target",
+                test_key(
+                    runtime,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[OsString::from("--target"), OsString::from("wasm32")],
+                    &[],
+                ),
+            ),
+            (
+                "profile",
+                test_key(
+                    runtime,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[OsString::from("-C"), OsString::from("opt-level=3")],
+                    &[],
+                ),
+            ),
+            (
+                "backend",
+                test_key(
+                    runtime,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[OsString::from("-C"), OsString::from("target-cpu=native")],
+                    &[],
+                ),
+            ),
+            (
+                "flags",
+                test_key(
+                    runtime,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[OsString::from("-C"), OsString::from("panic=abort")],
+                    &[],
+                ),
+            ),
+            (
+                "environment flags",
+                test_key(
+                    runtime,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[],
+                    &[(
+                        OsString::from("RUSTFLAGS"),
+                        OsString::from("-Ctarget-cpu=native"),
+                    )],
+                ),
+            ),
+            (
+                "generated code",
+                cache_key_with_schema(
+                    CACHE_SCHEMA,
+                    RUNTIME_CRATE_NAME,
+                    runtime,
+                    "pub fn generated_code_changed() {}",
+                    RUNTIME_CRATE_PREFIX,
+                    None,
+                    OsStr::new("rustc"),
+                    "rustc 1",
+                    &[],
+                    &[],
+                ),
+            ),
+        ];
+        for (input, key) in cases {
+            assert_ne!(base, key, "{input} must invalidate runtime artifact");
+        }
+        let linker_flags = [
+            OsString::from("-C"),
+            OsString::from("linker=ld-hostile"),
+            OsString::from("-C"),
+            OsString::from("link-arg=-fuse-ld=lld"),
+        ];
+        assert_eq!(
+            base,
+            cache_key_with_schema(
+                CACHE_SCHEMA,
+                RUNTIME_CRATE_NAME,
+                runtime,
+                &exported,
+                RUNTIME_CRATE_PREFIX,
+                None,
+                OsStr::new("rustc"),
+                "rustc 1",
+                &runtime_compile_flags(&linker_flags),
+                &[],
+            ),
+            "linker-only inputs must not invalidate runtime work"
+        );
+
+        let core = cache_key_with_schema(
+            CACHE_SCHEMA,
+            CORE_CRATE_NAME,
+            "fn core() {}",
+            "pub fn core() {}",
+            CORE_CRATE_PREFIX,
+            Some(&base),
+            OsStr::new("rustc"),
+            "rustc 1",
+            &[],
+            &[],
+        );
+        let changed_core = cache_key_with_schema(
+            CACHE_SCHEMA,
+            CORE_CRATE_NAME,
+            "fn core_changed() {}",
+            "pub fn core_changed() {}",
+            CORE_CRATE_PREFIX,
+            Some(&base),
+            OsStr::new("rustc"),
+            "rustc 1",
+            &[],
+            &[],
+        );
+        assert_ne!(core, changed_core, "Core artifact must invalidate Core work");
+        let changed_dependency = cache_key_with_schema(
+            CACHE_SCHEMA,
+            CORE_CRATE_NAME,
+            "fn core() {}",
+            "pub fn core() {}",
+            CORE_CRATE_PREFIX,
+            Some("runtime-key-changed"),
+            OsStr::new("rustc"),
+            "rustc 1",
+            &[],
+            &[],
+        );
+        assert_ne!(
+            core, changed_dependency,
+            "Core dependency artifact must invalidate Core work"
+        );
+    }
+
+    #[test]
     fn split_keeps_real_user_program_compile() {
         let generated = format!(
             "#![allow(warnings)]\n{BEGIN}fn runtime() {{}}\n{END}fn main() {{ runtime(); }}\n"
@@ -1495,6 +1756,138 @@ use std::fmt::Debug;
         drop(repaired);
         prepare_at(&root.join("cache"), rustc.as_os_str(), &two, &[], &[]).unwrap();
         assert_eq!(fs::read(&count).unwrap(), b"xxx");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hostile_cache_invalidation_matrix_linker_inputs_reuse_unaffected_runtime_and_core_artifacts() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "jet-runtime-cache-linker-inputs-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let rustc = root.join("rustc-fake");
+        let count = root.join("count");
+        fs::write(
+            &rustc,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"-vV\" ]; then echo 'rustc 1.99.0 fake'; exit 0; fi\nout=''\nwhile [ \"$#\" -gt 0 ]; do if [ \"$1\" = \"-o\" ]; then shift; out=\"$1\"; fi; shift; done\nprintf artifact > \"$out\"\nprintf x >> '{}'\n",
+                count.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&rustc).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&rustc, permissions).unwrap();
+
+        let generated = format!(
+            "{BEGIN}fn runtime() {{}}\n{END}{CORE_BEGIN}fn core() {{}}\n{CORE_END}fn main() {{}}\n"
+        );
+        let first = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &generated,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!first.cache_hit());
+        drop(first);
+        assert_eq!(fs::read(&count).unwrap().len(), 2, "runtime + Core cold build");
+
+        let linker_changed = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &generated,
+            &[
+                OsString::from("-C"),
+                OsString::from("linker=other-linker"),
+                OsString::from("-C"),
+                OsString::from("link-arg=-fuse-ld=lld"),
+            ],
+            &[],
+        )
+        .unwrap();
+        assert!(
+            linker_changed.cache_hit(),
+            "linker-only changes must not rebuild runtime/Core artifacts"
+        );
+        drop(linker_changed);
+        assert_eq!(
+            fs::read(&count).unwrap().len(),
+            2,
+            "linker-only change must affect final link work only"
+        );
+
+        let program_changed = generated.replace("fn main() {}", "fn main() { println!(\"changed\"); }");
+        let program_hit = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &program_changed,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(
+            program_hit.cache_hit(),
+            "program/generated-code changes must reuse runtime/Core artifacts"
+        );
+        drop(program_hit);
+        assert_eq!(fs::read(&count).unwrap().len(), 2);
+
+        let core_changed = generated.replace("fn core() {}", "fn core_changed() {}");
+        let core_miss = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &core_changed,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!core_miss.cache_hit());
+        drop(core_miss);
+        assert_eq!(
+            fs::read(&count).unwrap().len(),
+            3,
+            "Core-only change must rebuild Core, not runtime"
+        );
+
+        let runtime_changed = generated.replace("fn runtime() {}", "fn runtime_changed() {}");
+        let runtime_miss = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &runtime_changed,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(!runtime_miss.cache_hit());
+        drop(runtime_miss);
+        assert_eq!(
+            fs::read(&count).unwrap().len(),
+            5,
+            "runtime change must rebuild runtime and dependent Core"
+        );
+
+        let compile_changed = prepare_at(
+            &root.join("cache"),
+            rustc.as_os_str(),
+            &generated,
+            &[OsString::from("-C"), OsString::from("opt-level=3")],
+            &[],
+        )
+        .unwrap();
+        assert!(!compile_changed.cache_hit());
+        drop(compile_changed);
+        assert_eq!(
+            fs::read(&count).unwrap().len(),
+            7,
+            "compile flag change must rebuild runtime and Core artifacts"
+        );
         let _ = fs::remove_dir_all(root);
     }
 

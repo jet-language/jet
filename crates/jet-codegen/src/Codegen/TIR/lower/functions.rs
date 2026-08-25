@@ -133,10 +133,14 @@ mod tests {
 }
 
 pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
-    lower_func_with_web_boundary(f, cx, false)
+    cx.time_tir(|| lower_func_with_web_boundary(f, cx, false))
 }
 
 pub(crate) fn lower_error_conv(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
+    cx.time_tir(|| lower_error_conv_inner(conversion, cx))
+}
+
+fn lower_error_conv_inner(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -> TFunc {
     let name = crate::Sema::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty);
     let from_ty = Type::Named(conversion.from_ty.clone());
     let to_ty = Type::Named(conversion.to_ty.clone());
@@ -187,11 +191,13 @@ pub(crate) fn lower_error_conv(conversion: &crate::AST::ErrorConvDef, cx: &Cx) -
 /// function and scalar fields only at the external ABI. Sema already proved the
 /// export type legal; this pass only materializes resolved names/types.
 pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
-    lower_func_with_web_boundary(
-        f,
-        cx,
-        f.web_marker == Some(crate::Syntax::WebPartitionMarker::WasmExport),
-    )
+    cx.time_tir(|| {
+        lower_func_with_web_boundary(
+            f,
+            cx,
+            f.web_marker == Some(crate::Syntax::WebPartitionMarker::WasmExport),
+        )
+    })
 }
 
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
@@ -586,8 +592,8 @@ pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, ou
         Some(Type::Named(from_ty.to_string())),
     );
     prepare_interrupt_callback_locals(body, cx, &mut env);
-    let tbody = lower_stmts(body, cx, &mut env);
-    emit_tir_stmts(&tbody, cx, out, 1);
+    let tbody = cx.time_tir(|| lower_stmts(body, cx, &mut env));
+    cx.time_emission(|| emit_tir_stmts(&tbody, cx, out, 1));
 }
 
 /// Render a Rust generic clause with `Clone` only for type parameters reached by
@@ -688,17 +694,28 @@ pub(crate) fn param_place_generic(
 /// The `self_conv` (instance) / `None` (static) and the resolved return type drive
 /// the receiver/signature in `emit_tir_func`.
 pub(crate) fn lower_method(f: &Func, type_name: &str, cx: &Cx) -> TFunc {
-    let owner_ty = match cx.struct_type_param_order.get(type_name) {
-        Some(params) if !params.is_empty() => Type::Apply {
-            name: type_name.to_string(),
-            args: params.iter().cloned().map(Type::Named).collect(),
-        },
-        _ => Type::Named(type_name.to_string()),
-    };
-    lower_method_for_owner(f, type_name, owner_ty, cx)
+    cx.time_tir(|| {
+        let owner_ty = match cx.struct_type_param_order.get(type_name) {
+            Some(params) if !params.is_empty() => Type::Apply {
+                name: type_name.to_string(),
+                args: params.iter().cloned().map(Type::Named).collect(),
+            },
+            _ => Type::Named(type_name.to_string()),
+        };
+        lower_method_for_owner_inner(f, type_name, owner_ty, cx)
+    })
 }
 
 pub(crate) fn lower_method_for_owner(f: &Func, type_name: &str, owner_ty: Type, cx: &Cx) -> TFunc {
+    cx.time_tir(|| lower_method_for_owner_inner(f, type_name, owner_ty, cx))
+}
+
+fn lower_method_for_owner_inner(
+    f: &Func,
+    type_name: &str,
+    owner_ty: Type,
+    cx: &Cx,
+) -> TFunc {
     let previous_type_params = cx.current_type_params.borrow().clone();
     let mut method_type_params = previous_type_params.clone();
     method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
@@ -836,6 +853,15 @@ pub(crate) fn lower_method_for_owner(f: &Func, type_name: &str, owner_ty: Type, 
 /// binds as an owned local (a clone the emit prepends), so its place is the bare
 /// mangled name — no receiver, no `param_place` deref.
 pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name: &str) -> TFunc {
+    cx.time_tir(|| lower_trait_method_inner(f, type_name, cx, trait_name))
+}
+
+fn lower_trait_method_inner(
+    f: &Func,
+    type_name: &str,
+    cx: &Cx,
+    trait_name: &str,
+) -> TFunc {
     let serde = match trait_name {
         crate::Generics::ENCODE => Some(SerdeCodec::Encode),
         crate::Generics::DECODE => Some(SerdeCodec::Decode),
@@ -1006,6 +1032,10 @@ pub(crate) fn tir_covers_delegation_method(_f: &Func, _field: &str, _cx: &Cx) ->
 /// no body — the method only forwards to the delegated field with the BARE trait method
 /// name (no `__jet_` mangle, as the trait owns it in Rust).
 pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
+    cx.time_tir(|| lower_delegation_method_inner(f, field, cx))
+}
+
+fn lower_delegation_method_inner(f: &Func, field: &str, cx: &Cx) -> TFunc {
     let ret = f
         .return_type
         .as_ref()

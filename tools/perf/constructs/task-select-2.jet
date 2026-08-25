@@ -1,0 +1,17 @@
+fn send_generic(tx: Sender<String>) { tx.send("generic") }
+
+fn receive_generic(rx: Receiver<String>) Receiver<String> -> { return rx }
+fn one() Int -> 1
+fn two() Int -> 2
+
+fn run() {
+    (sender, receiver) :: channel<String>()
+    send_generic(sender)
+    if {
+        value, receive_generic(receiver) -> { print(value) }
+    }
+    task.group group {
+        results :: task.all {one(), two()} ?? panic("task.all failed")
+        print(results[0])
+    }
+}

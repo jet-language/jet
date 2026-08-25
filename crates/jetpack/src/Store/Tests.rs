@@ -329,6 +329,40 @@ mod tests {
     }
 
     #[test]
+    fn clean_quarantines_malformed_objects_and_continues() {
+        let (roots, _g) = temp_roots();
+        let mut stale = ingest_fixture(&roots, "gc-stale", &[("out", "stale")], Vec::new()).entry;
+        let fresh = ingest_fixture(&roots, "gc-fresh", &[("out", "fresh")], Vec::new()).entry;
+        stale.last_used_at = 1;
+        crate::RuntimePolicy::with_lock(&roots.root, "hangar", || {
+            register_entry_unlocked(&roots, &stale)
+        })
+        .unwrap();
+
+        let malformed = roots.hangar_dir().join("malformed-object");
+        fs::create_dir_all(&malformed).unwrap();
+        fs::write(malformed.join("payload"), "bad metadata").unwrap();
+        fs::write(malformed.join("meta.json"), "not json").unwrap();
+        let metadata_less = roots.hangar_dir().join("metadata-less-object");
+        fs::create_dir_all(&metadata_less).unwrap();
+        fs::write(metadata_less.join("payload"), "no metadata").unwrap();
+
+        assert_eq!(clean_plan(&roots).unwrap().quarantined_objects, 2);
+        let report = clean(&roots).unwrap();
+        assert_eq!(report.quarantined_objects, 2);
+        assert!(!roots.hangar_dir().join(&stale.id).exists());
+        assert!(roots.hangar_dir().join(&fresh.id).is_dir());
+        let names = fs::read_dir(roots.hangar_dir().join("quarantine"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name.contains("malformed-object")));
+        assert!(names
+            .iter()
+            .any(|name| name.contains("metadata-less-object")));
+    }
+
+    #[test]
     fn lock_receipt_root_keeps_entry_reachable_without_other_root_facts() {
         let (roots, _g) = temp_roots();
         let out = roots.root.join("receipt-root-output");

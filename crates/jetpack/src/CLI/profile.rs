@@ -738,7 +738,7 @@ fn realization_spec(
         target
     } else {
         let source = if package.source == Syntax::DEFAULT_SOURCE {
-            Syntax::REF_SOURCE_NIXPKGS
+            Syntax::REF_SOURCE_JETPACK
         } else {
             &package.source
         };
@@ -755,7 +755,7 @@ fn realization_spec(
             format!(
                 "{target}{}{}",
                 Syntax::REF_PROVIDER_AT,
-                Syntax::REF_SOURCE_NIXPKGS
+                Syntax::REF_SOURCE_JETPACK
             )
         });
     if raw != package.provider_facts.reference && default_alias.as_deref() != Some(raw.as_str()) {

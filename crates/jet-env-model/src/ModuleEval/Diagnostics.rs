@@ -18,6 +18,20 @@ pub(super) fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
     )
 }
 
+pub(super) fn retired_nixpkgs_source_ref(
+    ref_text: &str,
+    replacement: &str,
+    span: Option<Span>,
+) -> Diagnostic {
+    Diagnostic::error(
+        "E1317",
+        format!("`{ref_text}` uses the retired `@nixpkgs` source spelling"),
+        "D-JPK-SNIXREUSE1 makes Jetpack the public package source; nixpkgs remains provenance in locks and receipts.".to_string(),
+        format!("write `{replacement}`."),
+        span,
+    )
+}
+
 /// E0969: an `imports:` discovery directive must be `find("<dir>")` with a
 /// literal path; recognized first-party integration calls are handled before
 /// this constructor is reached.

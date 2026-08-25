@@ -1518,18 +1518,18 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     };
 
-    // U16: ad-hoc `-p` packages become ordinary nixpkgs `RefSpec`s, folded
+    // U16: ad-hoc `-p` packages become ordinary Jetpack `RefSpec`s, folded
     // into the same plan as any manifest-declared package — same realize
     // path, same trust gate, no separate machinery.
     for name in &parsed.flags.packages {
         plan.refs.push(RefSpec::RefSpec {
-            source: RefSpec::Source::Nixpkgs,
+            source: RefSpec::Source::Jetpack,
             package: name.clone(),
             raw: format!(
                 "{}{}{}",
                 name,
                 Syntax::REF_PROVIDER_AT,
-                Syntax::REF_SOURCE_NIXPKGS
+                Syntax::REF_SOURCE_JETPACK
             ),
         });
     }
@@ -1613,18 +1613,7 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         if let Some(code) = reject_unavailable_provider(theme, raw) {
             return code;
         }
-        let canonical = if raw.contains(Syntax::REF_PROVIDER_AT)
-            || RefSpec::is_bare_path(raw)
-        {
-            raw.clone()
-        } else {
-            format!(
-                "{}{}{}",
-                raw,
-                Syntax::REF_PROVIDER_AT,
-                Syntax::REF_SOURCE_NIXPKGS
-            )
-        };
+        let canonical = RefSpec::with_default_source(raw);
         match RefSpec::classify(&canonical) {
             Ok(spec) => refs.push(spec),
             Err(error) => {
@@ -3003,8 +2992,8 @@ fn enter_foreign_flake(
         .packages
         .into_iter()
         .map(|package| RefSpec::RefSpec {
-            raw: format!("{package}@{}", Syntax::REF_SOURCE_NIXPKGS),
-            source: RefSpec::Source::Nixpkgs,
+            raw: format!("{package}@{}", Syntax::REF_SOURCE_JETPACK),
+            source: RefSpec::Source::Jetpack,
             package,
         })
         .collect();

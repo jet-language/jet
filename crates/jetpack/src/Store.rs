@@ -103,7 +103,9 @@ const FAILED_SCRATCH_DIR: &str = "failed-scratch";
 const AUTO_CLEAN_STAMP: &str = ".last-auto-clean";
 const STALE_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const AUTO_CLEAN_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+const MAX_GC_METADATA_BYTES: u64 = 1 << 20;
 static OPTIMIZE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static GC_QUARANTINE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const PRIVATE_UNTRUSTED_BUILD: &str = "private-untrusted";
 
@@ -794,6 +796,11 @@ fn project_external_output_unlocked(
             ))
         })?;
         verify(&stage)?;
+        ensure_hangar_capacity(
+            roots,
+            admission_reservation(admission_size(&stage)?),
+            Some(&stage),
+        )?;
         sync_store_directory(&objects)?;
         fs::rename(&stage, &destination)?;
         sync_store_directory(&objects)?;
@@ -894,6 +901,11 @@ fn canonicalize_local_output_unlocked(
         // tier-1 filesystems deny renaming a read-only directory, so reopen it
         // only while the Hangar transaction lock is held, publish, then seal
         // the canonical path again before metadata becomes visible.
+        ensure_hangar_capacity(
+            roots,
+            admission_reservation(admission_size(source)?),
+            Some(source),
+        )?;
         make_tree_writable_for_removal(source)?;
         let source_parent = source.parent().map(Path::to_path_buf);
         fs::rename(source, &destination).map_err(|error| {
@@ -2859,8 +2871,9 @@ fn receipt_source_matches(package: &super::Lock::LockedPackage, reference: &str)
         super::Lock::LockSource::Git { url, .. } => url == reference,
         super::Lock::LockSource::Nix {
             reference: value, ..
-        }
-        | super::Lock::LockSource::Cran {
+        } => super::RefSpec::canonical_locked_ref(value)
+            == super::RefSpec::canonical_locked_ref(reference),
+        super::Lock::LockSource::Cran {
             reference: value, ..
         }
         | super::Lock::LockSource::LuaRocks {
@@ -3131,12 +3144,12 @@ fn realize_adapter_tools(
         let raw = jet_env_model::ModuleEval::pkg_ref(dependency);
         let spec =
             if dependency.source.is_empty() || dependency.source == crate::Syntax::DEFAULT_SOURCE {
-                // `default` is the typed surface's name for the built-in nixpkgs
+                // `default` is the typed surface's name for the built-in Jetpack
                 // provider. It is not a named SourceTable entry.
                 super::RefSpec::RefSpec {
-                    source: super::RefSpec::Source::Nixpkgs,
+                    source: super::RefSpec::Source::Jetpack,
                     package: dependency.name.clone(),
-                    raw,
+                    raw: super::RefSpec::with_default_source(&dependency.name),
                 }
             } else {
                 super::RefSpec::classify_in(&raw, table).map_err(|error| {
@@ -3663,6 +3676,111 @@ fn with_clean_locks<T>(
     }
 }
 
+#[derive(Debug, Clone)]
+struct MalformedObject {
+    id: String,
+    path: PathBuf,
+    reason: &'static str,
+}
+
+fn malformed_object_reason(path: &Path) -> std::io::Result<Option<&'static str>> {
+    let metadata_path = path.join("meta.json");
+    match fs::symlink_metadata(&metadata_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Ok(Some("metadata-not-file"))
+        }
+        Ok(metadata) if metadata.len() > MAX_GC_METADATA_BYTES => Ok(Some("metadata-too-large")),
+        Ok(_) => {
+            let Some(meta) = read_meta(path) else {
+                return Ok(Some("malformed-metadata"));
+            };
+            if !meta.receipt.is_empty() && !valid_receipt_digest(&meta.receipt) {
+                return Ok(Some("invalid-receipt"));
+            }
+            Ok(None)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut entries = fs::read_dir(path)?;
+            match entries.next() {
+                None | Some(Ok(_)) => Ok(Some("missing-metadata")),
+                Some(Err(error)) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn malformed_objects(hangar: &Path) -> std::io::Result<Vec<MalformedObject>> {
+    object_dirs(hangar)?
+        .into_iter()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let id = entry.file_name().to_string_lossy().into_owned();
+            match malformed_object_reason(&path) {
+                Ok(Some(reason)) => Some(Ok(MalformedObject { id, path, reason })),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .collect()
+}
+
+fn quarantine_malformed_objects(
+    roots: &Roots,
+    objects: &[MalformedObject],
+) -> std::io::Result<usize> {
+    if objects.is_empty() {
+        return Ok(0);
+    }
+    let hangar = roots.hangar_dir();
+    let quarantine = hangar.join("quarantine");
+    let mut permissions = Ingest::MovePathPermissions::default();
+    let result = (|| {
+        permissions.make_writable(&hangar, &hangar)?;
+        Ingest::ensure_real_directory(&quarantine, "Hangar quarantine")?;
+        permissions.make_writable(&quarantine, &hangar)?;
+        let mut moved = 0;
+        for object in objects {
+            match fs::symlink_metadata(&object.path) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Hangar object `{}` is not a real directory", object.id),
+                    ));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            }
+            permissions.make_writable(&object.path, &hangar)?;
+            let sequence = GC_QUARANTINE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let destination = quarantine.join(format!(
+                "gc-{}-{}-{}-{}",
+                object.id,
+                object.reason,
+                now_secs(),
+                sequence
+            ));
+            fs::rename(&object.path, &destination)?;
+            permissions.renamed(&object.path, &destination);
+            Closure::tombstone_closure_record_unlocked(roots, &object.id)?;
+            moved += 1;
+        }
+        sync_store_directory(&quarantine)?;
+        sync_store_directory(&hangar)?;
+        Ok(moved)
+    })();
+    let restored = permissions.restore();
+    match (result, restored) {
+        (Ok(moved), Ok(())) => Ok(moved),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(restore)) => Err(std::io::Error::other(format!(
+            "{error}; restoring Hangar permissions failed: {restore}"
+        ))),
+    }
+}
+
 fn retained_receipts(
     roots: &Roots,
     live: &LiveRoots,
@@ -3674,6 +3792,9 @@ fn retained_receipts(
         let path = ent.path();
         let id = ent.file_name().to_string_lossy().into_owned();
         if retired.contains(&id) {
+            continue;
+        }
+        if malformed_object_reason(&path)?.is_some() {
             continue;
         }
         let metadata_path = path.join("meta.json");
@@ -3893,13 +4014,21 @@ pub fn clean_plan(roots: &Roots) -> std::io::Result<CleanReport> {
 fn clean_plan_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
     let live = live_roots_unlocked(roots)?;
+    let malformed = malformed_objects(&store)?;
     let mut report = sweep_build_scratch_plan(&store)?;
+    report.quarantined_objects = malformed.len();
     let now = now_secs();
-    let mut retired = BTreeSet::new();
+    let mut retired = malformed
+        .iter()
+        .map(|object| object.id.clone())
+        .collect::<BTreeSet<_>>();
 
     for ent in object_dirs(&store)? {
         let path = ent.path();
         let id = ent.file_name().to_string_lossy().into_owned();
+        if malformed_object_reason(&path)?.is_some() {
+            continue;
+        }
         let Some(meta) = read_meta(&path) else {
             continue;
         };
@@ -3941,7 +4070,10 @@ fn clean_unlocked(roots: &Roots) -> std::io::Result<CleanReport> {
     let store = roots.hangar_dir();
     Ingest::ensure_real_directory(&store, "Hangar root")?;
     let live = live_roots_unlocked(roots)?;
+    let malformed = malformed_objects(&store)?;
+    let quarantined_objects = quarantine_malformed_objects(roots, &malformed)?;
     let mut report = sweep_build_scratch(&store)?;
+    report.quarantined_objects = quarantined_objects;
     let now = now_secs();
     let mut retired = BTreeSet::new();
 
@@ -4697,6 +4829,8 @@ mod Ingest;
 pub use Ingest::*;
 mod Closure;
 pub use Closure::*;
+mod Quota;
+pub(crate) use Quota::{admission_reservation, admission_size, ensure_hangar_capacity};
 mod Explain;
 pub(crate) use Cache::{fsync_tree, make_tree_writable_for_removal, seal_node};
 pub(crate) use Closure::dir_size;

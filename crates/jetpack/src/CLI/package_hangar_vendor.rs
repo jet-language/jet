@@ -391,6 +391,74 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             }
             0
         }
+        Some("du") if parsed.positional.iter().any(|arg| arg == "--all") => {
+            let report = match Store::du_all() {
+                Ok(report) => report,
+                Err(error) => {
+                    return hangar_report_error(
+                        theme,
+                        parsed,
+                        "E1340",
+                        "could not read machine Hangar disk usage",
+                        &error.to_string(),
+                        "repair the reported Hangar root, then retry.",
+                    )
+                }
+            };
+            if parsed.flags.json {
+                let roots = report
+                    .roots
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{{\"root\":{},\"hangar\":{},\"bytes\":{}}}",
+                            crate::JSON::quote(&entry.root.display().to_string()),
+                            crate::JSON::quote(&entry.hangar.display().to_string()),
+                            entry.bytes,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let shared_cas = report.shared_cas.as_ref().map_or_else(
+                    || "null".to_string(),
+                    |pool| {
+                        format!(
+                            "{{\"path\":{},\"bytes\":{}}}",
+                            crate::JSON::quote(&pool.path.display().to_string()),
+                            pool.bytes,
+                        )
+                    },
+                );
+                hangar_status_json(
+                    "du",
+                    &format!(
+                        ",\"shared_cas\":{},\"roots\":[{}],\"total_bytes\":{}",
+                        shared_cas, roots, report.total_bytes
+                    ),
+                );
+                return 0;
+            }
+            if let Some(pool) = &report.shared_cas {
+                theme.detail(&format!(
+                    "shared CAS {}  {}",
+                    theme.bold(&pool.path.display().to_string()),
+                    human_bytes(pool.bytes),
+                ));
+            }
+            for entry in &report.roots {
+                theme.detail(&format!(
+                    "{}  {}",
+                    theme.bold(&entry.root.display().to_string()),
+                    human_bytes(entry.bytes),
+                ));
+            }
+            theme.status(&format!(
+                "machine Hangar physical use: {} across {} root(s)",
+                human_bytes(report.total_bytes),
+                report.roots.len(),
+            ));
+            0
+        }
         Some("du") | None => {
             let roots = Store::resolve();
             let report = match Store::du(&roots) {
@@ -1658,6 +1726,16 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
                 );
                 theme.detail(&format!("would free {}", human_bytes(plan.removed_bytes)));
             }
+            if plan.quarantined_objects > 0 {
+                theme.plan_row(
+                    Output::PlanMark::Change,
+                    "invalid-objects",
+                    name_w,
+                    &format!("{} object(s)", plan.quarantined_objects),
+                    "quarantined",
+                );
+                theme.detail("would move malformed objects into named Hangar quarantine entries");
+            }
             if plan.removed_receipts > 0 {
                 theme.plan_row(
                     Output::PlanMark::Remove,
@@ -1707,14 +1785,15 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
     match Store::clean(&roots) {
         Ok(report) => {
             theme.ok(&format!(
-                "cleaned hangar: removed {} stale object(s) and {} orphan receipt(s), freed {}, swept {} scratch item(s), optimized {} file(s)",
+                "cleaned hangar: removed {} stale object(s) and {} orphan receipt(s), freed {}, swept {} scratch item(s), optimized {} file(s), quarantined {} invalid object(s)",
                 report.removed_objects,
                 report.removed_receipts,
                 human_bytes(
                     report.removed_bytes + report.removed_receipt_bytes + report.swept_tmp_bytes,
                 ),
                 report.swept_tmp,
-                report.optimized_files
+                report.optimized_files,
+                report.quarantined_objects
             ));
             if report.optimized_bytes > 0 {
                 theme.detail(&format!(
@@ -1738,11 +1817,12 @@ pub(super) fn cmd_clean(theme: &Theme, parsed: &Parsed) -> i32 {
 pub(super) fn auto_clean_after_success(theme: &Theme, roots: &Roots) {
     match Store::maybe_auto_clean(roots) {
         Ok(Some(report)) if !report.is_empty() => theme.detail(&format!(
-            "auto-cleaned hangar: removed {} stale object(s) and {} orphan receipt(s), swept {} scratch item(s), optimized {} file(s)",
+            "auto-cleaned hangar: removed {} stale object(s) and {} orphan receipt(s), swept {} scratch item(s), optimized {} file(s), quarantined {} invalid object(s)",
             report.removed_objects,
             report.removed_receipts,
             report.swept_tmp,
-            report.optimized_files
+            report.optimized_files,
+            report.quarantined_objects
         )),
         Ok(_) => {}
         Err(e) => theme.detail(&theme.gray(&format!("auto-clean skipped: {e}"))),

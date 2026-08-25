@@ -598,10 +598,10 @@ pub fn try_output_hash_of(out: &str) -> Result<String, String> {
     try_output_hash_of_with_policy(out, false, &mut |_, _| {})
 }
 
-/// Like [`try_output_hash_of`], but hangar-internal hardlink peers (cas pool /
-/// sibling objects under `hangar_root`) do not fail the external-hardlink law.
-/// Peers outside the hangar still reject. Digest bytes stay path-local: cas
-/// peers are never encoded as in-tree `H` records.
+/// Like [`try_output_hash_of`], but Hangar/internal shared-CAS hardlink peers
+/// do not fail the external-hardlink law. Peers outside those roots still
+/// reject. Digest bytes stay path-local: CAS peers are never encoded as
+/// in-tree `H` records.
 pub fn try_output_hash_of_in_hangar(
     out: &str,
     hangar_root: &Path,
@@ -671,10 +671,22 @@ fn try_output_hash_of_with_hook(
             continue;
         }
         if let Some(hangar) = hangar_root {
-            let hangar_peers = count_inode_peers_under(hangar, *key);
-            if hangar_peers == link.total {
-                // All nlink peers live under the hangar (cas pool / other
-                // objects). External-outside-hangar reject still holds.
+            let hangar = fs::canonicalize(hangar).unwrap_or_else(|_| hangar.to_path_buf());
+            let shared_cas = crate::Store::shared_cas_dir();
+            let shared_cas = fs::canonicalize(&shared_cas).unwrap_or(shared_cas);
+            let mut allowed_roots = vec![hangar.clone()];
+            add_allowed_peer_root(&mut allowed_roots, shared_cas);
+            for machine_root in crate::Store::Roots::machine_roots() {
+                let machine_hangar = machine_root.hangar_dir();
+                let machine_hangar = fs::canonicalize(&machine_hangar).unwrap_or(machine_hangar);
+                add_allowed_peer_root(&mut allowed_roots, machine_hangar);
+            }
+            let allowed_peers = allowed_roots
+                .iter()
+                .map(|root| count_inode_peers_under(root, *key))
+                .sum::<u64>();
+            if allowed_peers == link.total {
+                // All peers live under Hangar or machine/user shared CAS.
                 continue;
             }
         }
@@ -686,6 +698,16 @@ fn try_output_hash_of_with_hook(
         ));
     }
     Ok(format!("sha256-{}", SHA256::sha256_hex(&archive)))
+}
+
+fn add_allowed_peer_root(roots: &mut Vec<PathBuf>, candidate: PathBuf) {
+    if roots
+        .iter()
+        .any(|root| candidate.starts_with(root) || root.starts_with(&candidate))
+    {
+        return;
+    }
+    roots.push(candidate);
 }
 
 /// Count regular files under `root` that share `(dev, ino)`.

@@ -4672,7 +4672,8 @@ D-JPK-NONIX1, D-JPK-CACHE1, D-JPK-PLATFORM1, D-JPK-NODAEMON1,
 D-JPK-OFFLINE1, U5, D-MONOREF1)*: `jetpack` is its own binary
 (`run/build/list/clean/add/remove` + `enter`); Jetpack owns the user model,
 refs, lock, shells — Nix is one provider behind the `core`-first resolver
-trait (tvix shim scoped I6 waiver for the no-installed-nix goal). Ad-hoc
+trait as a temporary compatibility provider; no alternate evaluator ships in
+Jetpack. Ad-hoc
 adapters are `Pkg.adapt(name:, source:, recipe:)` with curated recipes
 (`prebuilt`, `copy`, `cargo`, `go`, `node`, `cmake`/`make`) and finite executable
 `Recipe.build(steps: […])` actions. Hangar GC by age
@@ -5471,8 +5472,8 @@ and welcome surfaces.
 #### Jetpack package-manager law
 
 **D-JPK-NIXENGINE1=D — native compatibility engine**: Jetpack implements Nix
-formats and reference behavior natively and ships no Tvix code. Reference Nix
-and Tvix are dev/CI differential oracles only. Product paths verify computed
+formats and reference behavior natively. Reference Nix is the sole dev/CI
+differential oracle. Product paths verify computed
 `drvPath`, `outPath`, and `NarHash` against cache metadata and fail closed on
 divergence. No evaluator stage reaches a provider path before the pinned corpus
 is bit-exact.

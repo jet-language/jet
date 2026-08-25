@@ -672,6 +672,10 @@ fn ci_runs_repository_no_nix_dogfood_gate() {
     let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
         .expect("read scripts/agent/verify-full.sh");
     assert!(
+        verify.contains("node \"$repo/scripts/agent/verify-jet-shell-parity.js\""),
+        "verify-full must compare the declared shell manifest with the Nix oracle"
+    );
+    assert!(
         verify.contains("cargo test --test jetpack_dogfood")
             && verify
                 .contains("jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures")
