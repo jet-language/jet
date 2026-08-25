@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 fn have_tool(name: &str) -> bool {
@@ -36,15 +36,28 @@ fn unused_local_port() -> u16 {
         .port()
 }
 
+static CANVAS_SESSION: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn canvas_session() -> Option<String> {
+    CANVAS_SESSION
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap()
+        .clone()
+}
+
 /// Minimal blocking HTTP/1.1 GET over a raw `TcpStream` — the same shape of
 /// client `jet dev --target=web`'s own std-only server (Source/CmdDevWeb.rs)
 /// expects, so the test doesn't need `curl` or any HTTP crate.
 fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let authorization = canvas_session()
+        .map(|session| format!("Authorization: Bearer {session}\r\n"))
+        .unwrap_or_default();
     let req = format!(
-        "GET {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
-        path
+        "GET {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Connection: close\r\n\r\n",
+        path, port, authorization
     );
     stream.write_all(req.as_bytes()).ok()?;
     let mut raw = Vec::new();
@@ -68,9 +81,14 @@ fn http_get(port: u16, path: &str) -> Option<(u16, Vec<u8>)> {
 fn http_post(port: u16, path: &str, body: &str) -> Option<(u16, Vec<u8>)> {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    let authorization = canvas_session()
+        .map(|session| format!("Authorization: Bearer {session}\r\n"))
+        .unwrap_or_default();
     let req = format!(
-        "POST {} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "POST {} HTTP/1.1\r\nHost: localhost:{}\r\n{}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         path,
+        port,
+        authorization,
         body.len(),
         body
     );
@@ -98,6 +116,16 @@ fn json_field(haystack: &str, field: &str) -> String {
     let start = haystack.find(&key).expect("json field") + key.len();
     let rest = &haystack[start..];
     rest[..rest.find('"').expect("json field terminator")].to_string()
+}
+
+fn json_number_after(haystack: &str, marker: &str) -> u16 {
+    let start = haystack.find(marker).expect("json number marker") + marker.len();
+    haystack[start..]
+        .split(|ch: char| !ch.is_ascii_digit())
+        .next()
+        .expect("json number")
+        .parse()
+        .expect("json number value")
 }
 
 /// Polls `/__jet_dev_version` until it differs from `baseline`, or panics
@@ -191,14 +219,32 @@ fn wait_for_port(child_stdout: std::process::ChildStdout) -> u16 {
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(child_stdout);
+        let mut port = None;
+        let mut session = None;
         for line in reader.lines().map_while(Result::ok) {
-            if let Some(rest) = line.split("http://localhost:").nth(1) {
-                if let Some(port_str) = rest.split(|c: char| !c.is_ascii_digit()).next() {
-                    if let Ok(port) = port_str.parse::<u16>() {
-                        let _ = tx.send(port);
-                        return;
+            if port.is_none() {
+                if let Some(rest) = line.split("http://localhost:").nth(1) {
+                    if let Some(port_str) = rest.split(|c: char| !c.is_ascii_digit()).next() {
+                        port = port_str.parse::<u16>().ok();
                     }
                 }
+            }
+            if session.is_none() {
+                if let Some(rest) = line.split("session=").nth(1) {
+                    let token = rest
+                        .split(|c: char| !c.is_ascii_hexdigit())
+                        .next()
+                        .filter(|token| token.len() >= 32);
+                    session = token.map(str::to_string);
+                }
+            }
+            if let (Some(port), Some(session)) = (port, session.as_ref()) {
+                *CANVAS_SESSION
+                    .get_or_init(|| Mutex::new(None))
+                    .lock()
+                    .unwrap() = Some(session.clone());
+                let _ = tx.send(port);
+                return;
             }
         }
     });
@@ -797,6 +843,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(html.contains("id=\"project-panel\""));
     assert!(html.contains("id=\"project-rail\""));
     assert!(html.contains("id=\"project-mode\""));
+    assert!(html.contains("id=\"output-panel\""));
+    assert!(html.contains("id=\"output-list\""));
+    assert!(html.contains("id=\"session-identity\""));
+    assert!(html.contains("data-session-view=\"custom servers\""));
+    assert!(html.contains("id=\"preview-panel\""));
     assert!(html.contains("id=\"variables-panel\""));
     assert!(html.contains("id=\"variables-list\""));
     assert!(html.contains("id=\"variable-count\""));
@@ -920,6 +971,30 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(!html.contains("Source truth"));
     assert!(!html.contains(">Trust<"));
 
+    let (session_status, session_body) =
+        http_get(port, "/canvas/session?client_id=canvas-a").expect("GET Canvas session");
+    assert_eq!(session_status, 200);
+    let session = String::from_utf8_lossy(&session_body);
+    assert!(session.contains("\"protocol\":\"jet.canvas.session\""));
+    assert!(session.contains("\"accepted_revision\""));
+    assert!(session.contains("\"last_good_program\":\"web-build-"));
+    assert!(session.contains("\"transport\":\"canvas\""));
+    assert!(session.contains("\"transport\":\"application\""));
+    let application_port = json_number_after(
+        &session,
+        "\"application\":{\"host\":\"127.0.0.1\",\"port\":",
+    );
+    assert_ne!(
+        application_port, port,
+        "Canvas and app listeners must differ"
+    );
+    let (app_status, _) = http_get(application_port, "/").expect("GET app preview listener");
+    assert_eq!(app_status, 200);
+    let (_, second_session_body) =
+        http_get(port, "/canvas/session?client_id=canvas-b").expect("GET second Canvas client");
+    let second_session = String::from_utf8_lossy(&second_session_body);
+    assert!(second_session.contains("\"clients\":2"));
+
     let (status, js) = http_get(port, "/canvas/app.js").expect("GET Canvas JS");
     assert_eq!(status, 200);
     let js = String::from_utf8_lossy(&js);
@@ -931,6 +1006,14 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     assert!(js.contains("fetch(graphRequestUrl"));
     assert!(js.contains("latestProject"));
     assert!(js.contains("function loadProject"));
+    assert!(js.contains("function loadCanvasSession"));
+    assert!(js.contains("function syncCanvasOutputs"));
+    assert!(js.contains("function selectCanvasOutput"));
+    assert!(js.contains("canvasSelectedOutput"));
+    assert!(js.contains("acceptedRevision"));
+    assert!(js.contains("lastGoodProgram"));
+    assert!(js.contains("last-good graph retained"));
+    assert!(js.contains("__jetCanvasLastGoodGraph"));
     assert!(js.contains("function syncProjectRail"));
     assert!(js.contains("function syncVariablesList"));
     assert!(js.contains("function renderVariableDetails"));
@@ -1387,6 +1470,11 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     let project = String::from_utf8_lossy(&project);
     assert!(project.contains("\"protocol\":\"jet.canvas.project\""));
     assert!(project.contains("\"schema_version\":1"));
+    assert!(project.contains("\"capabilities\":{"));
+    assert!(project.contains("\"graph\":true"));
+    assert!(project.contains("\"code\":true"));
+    assert!(project.contains("\"diagnostics\":true"));
+    assert!(project.contains("\"runtime_output\":true"));
     assert!(project.contains("\"project_revision\":\"sha256-"));
     assert!(project.contains("\"entry\""));
     assert!(project.contains("\"state_policy\""));

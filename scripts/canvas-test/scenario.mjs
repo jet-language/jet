@@ -1750,6 +1750,39 @@ export const scenarios = {
     }
   },
 
+  "resident-session-ide-state-matrix": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.waitFor(async () => await ctx.driver.evaluate("!!window.__jetCanvasSession"), "resident Canvas session");
+    const state = await ctx.driver.evaluate(`(() => {
+      const session = window.__jetCanvasSession || {};
+      const rows = Array.from(document.querySelectorAll("[data-session-view]"));
+      const app = session.listeners && session.listeners.application;
+      return {
+        id: session.id,
+        revision: session.sourceRevision,
+        lastGood: session.lastGoodProgram,
+        outputCount: document.querySelectorAll("[data-canvas-output]").length,
+        views: rows.map((row) => ({ name: row.getAttribute("data-session-view"), id: row.dataset.sessionId, revision: row.dataset.sourceRevision })),
+        preview: document.getElementById("preview-link")?.href || "",
+        appPort: app && app.port
+      };
+    })()`);
+    if (!state.id || !state.revision || !state.lastGood) throw new Error(`session state incomplete: ${JSON.stringify(state)}`);
+    if (state.views.length < 8 || state.views.some((view) => view.id !== state.id || !view.revision)) {
+      throw new Error(`IDE views did not report one session/revision: ${JSON.stringify(state.views)}`);
+    }
+    if (!state.appPort || state.preview.indexOf(`:${state.appPort}/`) < 0) {
+      throw new Error(`preview did not use the application listener: ${JSON.stringify(state)}`);
+    }
+    const second = await ctx.driver.evaluate(`fetch("/canvas/session?client_id=browser-two", { cache: "no-store" }).then((r) => r.json())`);
+    const secondSession = second.session || second.canvas?.session;
+    if (!secondSession || secondSession.clients < 2) throw new Error(`second client did not join resident session: ${JSON.stringify(second)}`);
+    const project = await ctx.driver.evaluate(`fetch("/canvas/project", { cache: "no-store" }).then((r) => r.json())`);
+    const projectPayload = project.canvas || project;
+    if (!Array.isArray(projectPayload.outputs)) throw new Error("project output launcher field missing");
+    await ctx.screenshot("resident-session-workbench");
+  },
+
   "keyboard-cheat-sheet-accessibility-states": async (ctx) => {
     await ctx.openCanvas();
     if (await ctx.driver.evaluate("document.getElementById('first-run-tour')?.classList.contains('is-open')")) {

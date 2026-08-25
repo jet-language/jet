@@ -1,8 +1,10 @@
 
 function canvasPayload(value) {
-  return value && value.schema === "jet.report/v1" && value.canvas && typeof value.canvas === "object"
+  const payload = value && value.schema === "jet.report/v1" && value.canvas && typeof value.canvas === "object"
     ? value.canvas
     : value;
+  if (payload && payload.session && typeof syncCanvasSession === "function") syncCanvasSession(payload.session);
+  return payload;
 }
 
 // Canvas ability markers, initial UI setup, endpoint binding, and graph load.
@@ -49,4 +51,4 @@ function canvasPayload(value) {
   const proofUrl = window.__JET_CANVAS_PROOF__ || (base + "/proof");
   const commandUrl = window.__JET_CANVAS_COMMAND__ || (base + "/command");
   window.__jetCanvasProofRail = true;
-  loadGraph();
+  Promise.resolve(typeof loadCanvasSession === "function" ? loadCanvasSession() : null).finally(() => loadGraph());

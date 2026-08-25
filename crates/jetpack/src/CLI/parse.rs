@@ -23,6 +23,9 @@ use std::path::PathBuf;
 pub(super) struct Flags {
     pub(super) color: ColorChoice,
     pub(super) fixtures: Option<PathBuf>,
+    /// Explicit local unofficial nixpkgs catalog. It has no publisher
+    /// signature and is never selected by default.
+    pub(super) local_nix_catalog: Option<PathBuf>,
     pub(super) offline: bool,
     pub(super) online: bool,
     /// U19: one-shot bypass of the env/dev trust gate (`--trust`). Never
@@ -143,6 +146,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
     let mut flags = Flags {
         color: ColorChoice::Auto,
         fixtures: None,
+        local_nix_catalog: None,
         offline: false,
         online: false,
         trust: false,
@@ -287,6 +291,12 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                 i += 1;
                 if let Some(dir) = args.get(i) {
                     flags.fixtures = Some(PathBuf::from(dir));
+                }
+            }
+            "--local-nix-catalog" => {
+                i += 1;
+                if let Some(dir) = args.get(i) {
+                    flags.local_nix_catalog = Some(PathBuf::from(dir));
                 }
             }
             a if a == Syntax::WS_FLAG_AFFECTED => flags.affected = true,

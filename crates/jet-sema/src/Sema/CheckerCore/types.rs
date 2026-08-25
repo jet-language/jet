@@ -38,6 +38,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn text_head_core_import(&self, alias: &str) -> Option<String> {
+        if self.lookup(alias).is_some() {
+            return None;
+        }
         self.text_head_context
             .and_then(|context| context.core_imports.get(alias).cloned())
             .or_else(|| self.core_imports.get(alias).cloned())
@@ -77,7 +80,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn imported_nominal_head(&self, name: &str) -> String {
+    pub(crate) fn imported_nominal_head(&self, name: &str) -> String {
         if name.contains("::") {
             return name.to_string();
         }
@@ -92,7 +95,33 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn resolve_type(&self, ty: Type) -> Type {
+    fn record_type_import_use(&mut self, ty: &Type) {
+        let name = match ty {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            Type::TraitObject(names) => {
+                for name in names {
+                    self.record_type_import_name_use(name);
+                }
+                return;
+            }
+            _ => return,
+        };
+        self.record_type_import_name_use(name);
+    }
+
+    fn record_type_import_name_use(&mut self, name: &str) {
+        let alias = name.split_once('.').map_or(name, |(alias, _)| alias);
+        if self.lookup(alias).is_none()
+            && (self.core_imports.contains_key(alias)
+                || self.core_item_imports.contains_key(alias)
+                || self.imports.contains_key(alias))
+        {
+            self.record_import_alias_use(alias);
+        }
+    }
+
+    pub(crate) fn resolve_type(&mut self, ty: Type) -> Type {
+        self.record_type_import_use(&ty);
         match ty {
             // D-NUMOPS1: typed numeric heads such as `Float{…}` are
             // source spellings for primitive carriers, not nominal types.

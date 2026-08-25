@@ -395,6 +395,8 @@ pub fn toolchain_record(channel: &str, version: &str) -> LockedToolchain {
             platform: current_platform(),
             signature: String::new(),
             provenance: format!("jet-{version} via toolchain"),
+            catalog_tier: String::new(),
+            catalog_trust: String::new(),
         },
     }
 }

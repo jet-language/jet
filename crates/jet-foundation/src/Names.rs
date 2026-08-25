@@ -1,7 +1,7 @@
 //! One semantic name ledger and one Rust-name projection.
 
 use crate::Diagnostics::Span;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Stable package scope used by every module identity.
@@ -157,6 +157,9 @@ pub struct NameLedger {
     /// tooling project them back to the instance member path.
     display_paths: HashMap<(usize, String), String>,
     aliases: HashMap<(usize, String), NameAlias>,
+    /// Import uses keyed by the defining alias span. Source spellings and
+    /// target module text must not decide liveness.
+    alias_uses: HashSet<(usize, Span)>,
     references: HashMap<(String, usize, usize), NameReference>,
     structure_facts: Vec<StructureFact>,
 }
@@ -539,6 +542,14 @@ impl NameLedger {
         );
     }
 
+    pub fn record_alias_use(&mut self, module: usize, span: Span) {
+        self.alias_uses.insert((module, span));
+    }
+
+    pub fn alias_used(&self, module: usize, alias: &NameAlias) -> bool {
+        self.alias_uses.contains(&(module, alias.span))
+    }
+
     pub fn alias(&self, module: usize, name: &str) -> Option<&NameAlias> {
         self.aliases.get(&(module, name.to_string()))
     }
@@ -629,6 +640,7 @@ impl NameLedger {
     }
 
     pub fn merge_references(&mut self, other: &Self) {
+        self.alias_uses.extend(other.alias_uses.iter().copied());
         self.references.extend(other.references.clone());
     }
 
@@ -636,6 +648,7 @@ impl NameLedger {
     /// body references into the cache entry.
     pub fn body_snapshot(&self) -> Self {
         let mut snapshot = self.clone();
+        snapshot.alias_uses.clear();
         snapshot.references.clear();
         snapshot.structure_facts.clear();
         snapshot
@@ -646,6 +659,7 @@ impl NameLedger {
         self.declarations.clear();
         self.display_paths.clear();
         self.aliases.clear();
+        self.alias_uses.clear();
         self.references.clear();
         // The loader owns import-edge observations and sema must not erase
         // them when it refreshes its declaration/reference facts. Liveness

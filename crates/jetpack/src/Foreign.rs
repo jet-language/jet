@@ -70,6 +70,8 @@ pub fn realize_manifest_dependencies(
                 platform: item.entry.envelope.platform.clone(),
                 signature: item.entry.envelope.signature.clone(),
                 provenance: item.entry.envelope.provenance.clone(),
+                catalog_tier: String::new(),
+                catalog_trust: String::new(),
             },
         )
         .map_err(ProviderError::Ingest)?;

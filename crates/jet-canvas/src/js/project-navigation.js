@@ -982,6 +982,7 @@
   }
 
   function syncProjectPanels(project) {
+    const capabilities = project.capabilities || {};
     const packageRows = (project.packages || []).map((pkg) => {
       const targets = (pkg.targets || []).map((t) => `${t.package || pkg.name}:${t.target}`).join(", ") || pkg.target || "native";
       return projectMiniCard(pkg.name || pkg.path || "package", `${pkg.path || ""} · ${pkg.version || ""}`, targets + (pkg.effects_enabled ? " · effects" : ""));
@@ -1007,9 +1008,12 @@
     lockRows.unshift(projectMiniCard("Source files", project.source_control && project.source_control.truth || "git text", `${policy.semantic || "source"} model · ${(policy.local || []).join(", ") || "local viewport"}`));
     syncProjectPanel(packageSummary, "Packages", packageRows, "no packages");
     syncProjectPanel(dependencySummary, "Dependencies", depRows, "no dependencies");
-    syncProjectPanel(devSummary, "Dev", devRows, "no env or services");
+    const hasDevCapability = capabilities.service === true || (project.envs || []).length > 0;
+    if (devSummary) devSummary.hidden = !hasDevCapability;
+    if (hasDevCapability) syncProjectPanel(devSummary, "Dev", devRows, "no env or services");
     syncProjectPanel(diagnosticsSummary, "Diagnostics", diagRows, "clean");
     syncProjectPanel(trustSummary, "Source internals", lockRows, "source files only");
+    if (typeof syncCanvasCapabilities === "function") syncCanvasCapabilities(project);
     if (statusSummary) {
       const packageName = (project.packages || [])[0] && ((project.packages || [])[0].name || (project.packages || [])[0].path);
       const sourceFiles = (project.files || []).filter((f) => f.kind === "source").length;
@@ -1026,7 +1030,8 @@
       dependencies: depRows.length,
       dev: devRows.length,
       diagnostics: diagRows.length,
-      trust: lockRows.length
+      trust: lockRows.length,
+      capabilities
     };
   }
 
@@ -1061,6 +1066,8 @@
       button.setAttribute("data-canvas-tree-item", "file");
     });
     syncProjectPanels(project);
+    if (typeof syncCanvasOutputs === "function") syncCanvasOutputs(project);
+    if (typeof syncCanvasSession === "function" && canvasSession) syncCanvasSession(canvasSession);
     window.__jetCanvasProjectRail = { mode: project.mode, packages: (project.packages || []).length, files: fileCount, panels: window.__jetCanvasWorkspacePanels };
   }
 

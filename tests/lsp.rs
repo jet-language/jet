@@ -1717,46 +1717,104 @@ fn lsp_on_type_formatting_returns_brace_edits() {
     if !jet.exists() {
         return;
     }
-    let source = "fn run() {\n statement }\n";
-    let uri = "file:///tmp/lsp_on_type_formatting_test.jet";
-
-    run_transcript(
-        source,
-        &[
-            TranscriptStep::Send {
-                msg:
-                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+    let cases = [
+        (
+            "fn run() {\n statement }\n",
+            1,
+            0,
+            r#""\n""#,
+            vec!["\"newText\":\"    \"", "\"newText\":\"\\n\""],
+        ),
+        (
+            "fn run() {\n}\n",
+            1,
+            0,
+            r#""\n""#,
+            vec!["\"newText\":\"    \""],
+        ),
+        (
+            "fn run() {\n    if ok {\n value }\n}\n",
+            2,
+            0,
+            r#""\n""#,
+            vec!["\"newText\":\"        \"", "\"newText\":\"\\n    \""],
+        ),
+        (
+            "fn run() {\n    value\n        }\n",
+            2,
+            9,
+            r#""}""#,
+            vec!["\"newText\":\"\""],
+        ),
+        (
+            "fn run() {\n value\n",
+            1,
+            0,
+            r#""\n""#,
+            vec!["\"result\":[]"],
+        ),
+        (
+            "fn run() {\r\n café }\r\n",
+            1,
+            0,
+            r#""\n""#,
+            vec!["\"newText\":\"    \"", "\"newText\":\"\\r\\n\""],
+        ),
+        (
+            "fn run() { /* {\nvalue } */ }\n",
+            1,
+            0,
+            r#""\n""#,
+            vec!["\"result\":[]"],
+        ),
+        (
+            "fn run() { SQL{\n\"value\"} }\n",
+            1,
+            0,
+            r#""\n""#,
+            vec!["\"result\":[]"],
+        ),
+        ("// }\n", 0, 4, r#""}""#, vec!["\"result\":[]"]),
+    ];
+    for (index, (source, line, character, trigger, expected)) in cases.into_iter().enumerate() {
+        let uri = format!("file:///tmp/lsp_on_type_formatting_test_{index}.jet");
+        run_transcript(
+            source,
+            &[
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
                         .to_string(),
-                expect_contains: Some(vec![
-                    "documentOnTypeFormattingProvider".to_string(),
-                    "moreTriggerCharacter".to_string(),
-                ]),
-            },
-            TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
-                expect_contains: None,
-            },
-            TranscriptStep::Open {
-                uri: uri.to_string(),
-                expect_notification: true,
-            },
-            TranscriptStep::Send {
-                msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/onTypeFormatting","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":1,"character":0}},"ch":"\n","options":{{"tabSize":4,"insertSpaces":true}}}}}}}"#,
-                    uri
-                ),
-                expect_contains: Some(vec![
-                    "\"newText\":\"    \"".to_string(),
-                    "\"newText\":\"\\n\"".to_string(),
-                    "\"range\"".to_string(),
-                ]),
-            },
-            TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
-                expect_contains: Some(vec!["result".to_string()]),
-            },
-        ],
-    );
+                    expect_contains: Some(if index == 0 {
+                        vec![
+                            "documentOnTypeFormattingProvider".to_string(),
+                            "moreTriggerCharacter".to_string(),
+                        ]
+                    } else {
+                        Vec::new()
+                    }),
+                },
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
+                    expect_contains: None,
+                },
+                TranscriptStep::Open {
+                    uri: uri.clone(),
+                    expect_notification: true,
+                },
+                TranscriptStep::Send {
+                    msg: format!(
+                        r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/onTypeFormatting","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}},"ch":{},"options":{{"tabSize":4,"insertSpaces":true}}}}}}}"#,
+                        uri, line, character, trigger
+                    ),
+                    expect_contains: Some(expected.into_iter().map(str::to_string).collect()),
+                },
+                TranscriptStep::Send {
+                    msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                    expect_contains: Some(vec!["result".to_string()]),
+                },
+            ],
+        );
+    }
 }
 
 #[test]

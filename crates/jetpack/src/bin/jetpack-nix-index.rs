@@ -28,7 +28,11 @@ fn main() {
     let result = match args.first().map(String::as_str) {
         Some("generate") => {
             args.remove(0);
-            generate(&args)
+            generate(&args, true)
+        }
+        Some("generate-local") => {
+            args.remove(0);
+            generate(&args, false)
         }
         Some("verify-differential") => {
             args.remove(0);
@@ -39,7 +43,7 @@ fn main() {
             manifest(&args)
         }
         _ => {
-            Err("usage: jetpack-nix-index <generate|verify-differential|manifest> ...".to_string())
+            Err("usage: jetpack-nix-index <generate|generate-local|verify-differential|manifest> ...".to_string())
         }
     };
     if let Err(error) = result {
@@ -48,7 +52,7 @@ fn main() {
     }
 }
 
-fn generate(args: &[String]) -> Result<(), String> {
+fn generate(args: &[String], write_signature_request: bool) -> Result<(), String> {
     let options = options(args)?;
     let channel = required(&options, "channel")?;
     let system = required(&options, "system")?;
@@ -129,10 +133,12 @@ fn generate(args: &[String]) -> Result<(), String> {
     fs::create_dir_all(&target_dir).map_err(|error| format!("create output: {error}"))?;
     let target = target_dir.join(format!("{digest}.json.zst"));
     write_immutable(&target, &compressed)?;
-    write_immutable(
-        &PathBuf::from(format!("{}.sig.request", target.display())),
-        &NixIndex::producer_signature_request(&decoded),
-    )?;
+    if write_signature_request {
+        write_immutable(
+            &PathBuf::from(format!("{}.sig.request", target.display())),
+            &NixIndex::producer_signature_request(&decoded),
+        )?;
+    }
     let coverage =
         NixIndex::producer_coverage_report(&decoded).map_err(|error| error.to_string())?;
     write_immutable(
@@ -142,11 +148,18 @@ fn generate(args: &[String]) -> Result<(), String> {
     if report.ends_with('}') {
         report.pop();
     }
-    report.push_str(&format!(
-        ",\"target_sha256\":\"{digest}\",\"target\":\"{}\",\"signature_request\":\"{}.sig.request\"}}",
-        target.display(),
-        target.display()
-    ));
+    if write_signature_request {
+        report.push_str(&format!(
+            ",\"target_sha256\":\"{digest}\",\"target\":\"{}\",\"signature_request\":\"{}.sig.request\"}}",
+            target.display(),
+            target.display()
+        ));
+    } else {
+        report.push_str(&format!(
+            ",\"target_sha256\":\"{digest}\",\"target\":\"{}\",\"trust_tier\":\"local-unofficial\"}}",
+            target.display()
+        ));
+    }
     write_immutable(
         &target_dir.join(format!("{digest}.generation-report.json")),
         report.as_bytes(),

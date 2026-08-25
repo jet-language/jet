@@ -4939,6 +4939,8 @@ pub(crate) fn run_dev_web(
     mode: OutputMode,
     verbose: bool,
     port: Option<u16>,
+    canvas: bool,
+    canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
     setting_overrides: &BTreeMap<String, String>,
 ) {
     let path = Path::new(file);
@@ -4947,17 +4949,40 @@ pub(crate) fn run_dev_web(
         exit(ExitCodes::USER_ERROR);
     }
 
-    let host = match jet_devserver::WebHost::WebHost::bind(file, verbose, port) {
+    let host = match if canvas {
+        let options = canvas_options.as_ref().cloned().unwrap_or_default();
+        jet_devserver::WebHost::WebHost::bind_web_with_canvas_options(
+            file,
+            verbose,
+            port,
+            &options,
+        )
+    } else {
+        jet_devserver::WebHost::WebHost::bind(file, verbose, port)
+    } {
         Ok(host) => host,
         Err(message) => {
-            eprintln!("{message}");
+            if canvas {
+                crate::emit_cli_diagnostic_with_fix(
+                    "E2105",
+                    message,
+                    "close the existing Canvas session or choose another `--canvas-port`".to_string(),
+                );
+            } else {
+                eprintln!("{message}");
+            }
             exit(ExitCodes::USER_ERROR);
         }
     };
     if !rebuild_dev_web(file, mode, verbose, false, &host, setting_overrides) {
         exit(ExitCodes::USER_ERROR);
     }
-    host.start();
+    if canvas {
+        host.start_canvas();
+        crate::CmdDevTools::open_canvas_browser(&host.canvas_url());
+    } else {
+        host.start();
+    }
 
     // #439 / E3-UL6: same WatchSession engine as native `jet dev` / `jet run --watch`.
     let mut watch = match jet_devserver::WatchSession::open(path) {

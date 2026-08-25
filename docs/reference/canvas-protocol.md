@@ -29,9 +29,11 @@ Top-level fields:
 | `project_revision` | Stable hash of the projected source-truth file set. |
 | `entry` | Entry source path relative to `project_root`. |
 | `mode` | `single_file`, `package`, or `workspace`. |
+| `capabilities` | Checked panel capabilities. Graph, code, diagnostics, runtime output, and terminal are always present; service, preview, and designer are projected only when supported. |
 | `workspace` | `workspace.jet` projection with member package names/paths, or `null`. |
 | `packages` | Parsed `package.jet` facts for the root package and workspace members. |
 | `targets` | Package/build targets projected from `package.jet` with package path and manifest source. |
+| `outputs` | The valid build outputs exposed by the normal IDE launcher. Selecting one updates the resident session run selection. |
 | `envs` / `services` | `env.jet` projection from Jetpack module evaluation, including package refs, prompt, secrets, and dev services. |
 | `files` | Projected source-truth files with per-file revisions and kinds. |
 | `locks` | `.jet/lock` facts used by the projection. |
@@ -42,7 +44,7 @@ Top-level fields:
 Example:
 
 ```json
-{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/package.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/package.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches","comment_boxes","staged_nodes"],"shared_visual":"source-anchored-comments"}}
+{"protocol":"jet.canvas.project","schema_version":1,"project_root":"/repo","project_revision":"sha256-...","entry":"packages/game/src/main.jet","mode":"workspace","workspace":{"path":"workspace.jet","members":[{"name":"game","path":"packages/game"}],"diagnostics":[]},"packages":[{"path":"packages/game","manifest":"packages/game/package.jet","name":"game","version":"0.1.0","target":"web","deps":[],"targets":[{"package":"game","target":"executable"}],"effects_enabled":false,"diagnostics":[]}],"targets":[{"package":"game","package_path":"packages/game","manifest":"packages/game/package.jet","target":"executable"}],"outputs":[{"package":"game","package_path":"packages/game","manifest":"packages/game/package.jet","target":"executable"}],"envs":[],"services":[],"files":[{"path":"workspace.jet","revision":"sha256-...","kind":"workspace"}],"locks":[],"diagnostics":[],"source_control":{"truth":"git-text"},"state_policy":{"semantic":"source","local":["tabs","viewport","selection","breakpoints","watches","comment_boxes","staged_nodes"],"shared_visual":"source-anchored-comments"}}
 ```
 
 Project documents do not create a Canvas project asset. Package/workspace
@@ -50,6 +52,32 @@ semantics must remain in `package.jet`, `workspace.jet`, source files, env sourc
 and `.jet/lock`. Local UI state such as tabs, zoom, selected nodes, breakpoints,
 and watches may be cached locally; shared visual intent uses source-anchored
 Canvas comments/collapse hints only when the user chooses to share it.
+
+## Resident Session V1
+
+Endpoint: `GET /__jet_canvas/session` or `GET /canvas/session`.
+
+Canvas, text, graph, designer, preview, terminal, debugger, tests, and custom
+server views read one resident session. The session response is the shared
+identity and source stream; it is not a second semantic source of truth.
+
+```json
+{"protocol":"jet.canvas.session","schema_version":1,"session":{"id":"jet-session-123-1","source_revision":"sha256-...","accepted_revision":"sha256-...","last_good_revision":"sha256-...","last_good_program":"web-build-2","state":"ready","clients":2,"run":{"output":"web","target":"browser"},"debugger":{"state":"active"},"tests":{"state":"idle"},"history":{"count":4,"receipts":[{"kind":"replace_source","status":"accepted","before":"sha256-old","after":"sha256-new","client":"client-a"}]},"listeners":{"canvas":{"host":"127.0.0.1","port":8080,"transport":"canvas"},"application":{"host":"127.0.0.1","port":49152,"transport":"application","routes":"application-owned"}},"custom_servers":{"owner":"application","transport":"application","reload":"source-transaction"}}}
+```
+
+Source and project transactions append accepted or refused receipts to this
+shared history. They keep the existing revision guard: a stale revision is
+refused before write, and undo/redo is another checked source transaction.
+`last_good_revision` and `last_good_program` change only after a successful
+rebuild, so a failed rebuild can expose current diagnostics while the preview
+and graph remain on the last accepted program. Reconnect reads the same
+session object, preserving accepted edits, run selection, debugger state,
+history, and last-good program for every client.
+
+The Canvas and application listeners are intentionally different. Canvas
+routes belong to the IDE transport. Application routes, custom hosts, ports,
+middleware, and reload policy remain application-owned and are only described
+by the session boundary.
 
 ## Project Transaction V1
 

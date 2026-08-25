@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 2198,
-    "rev": 44886,
+    "nextNum": 2199,
+    "rev": 44930,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -146086,6 +146086,11 @@
       "log": [
         {
           "at": "2026-08-25",
+          "by": "orchestrator",
+          "text": "Owner extension 2026-08-25: the local unofficial tier must cover jetpack-native recipes too, not just nixpkgs catalog mappings, including recipes that deliver prebuilt binaries. The native provider at crates/jetpack/src/Provider/native.rs already does exactly this for omp: it fetches a GitHub release asset, verifies a pinned digest and admits it into the Hangar with no nixpkgs involved. Generalise that from one hardcoded package into a declarable local recipe."
+        },
+        {
+          "at": "2026-08-25",
           "by": "owner",
           "text": "Verdict recorded (D-VERDICT-2157-1): Jetpack gets a local unofficial package catalog that needs no keys and carries no signing guarantee, so local use works today. It is explicit opt-in and never a silent fallback from a failed signature. Packages realized through it are marked unverified in the lock and the Hangar receipt. Every rejection on the signed path stays. The hardcoded test key is deleted rather than promoted. Official signed publication, key custody, the publication URL, rotation and the operator are deferred until a real registry exists."
         },
@@ -146204,6 +146209,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-25T19:15:34.792Z"
+        },
+        {
+          "n": 12,
+          "text": "A local unofficial source carries jetpack-native recipes, not only nixpkgs catalog mappings, and jetpack realizes a package from a native recipe with no nixpkgs involvement",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:41:56.785Z"
+        },
+        {
+          "n": 13,
+          "text": "A native recipe can deliver a prebuilt binary artifact from a declared URL with a pinned digest, the same shape the omp releases provider already uses",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:41:57.676Z"
+        },
+        {
+          "n": 14,
+          "text": "One local source can mix native recipes and catalog mappings, and a bare ref resolves through it without the user naming which kind it is",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:41:58.538Z"
         }
       ],
       "refs": [
@@ -146214,8 +146246,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T12:08:41.716Z",
-      "updated": "2026-08-25T19:15:46.068Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:41:59.803Z",
+      "updatedBy": "orchestrator"
     },
     {
       "id": "c01fm9ou",
@@ -148027,11 +148059,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Add `textDocument/onTypeFormatting` support for newline and closing brace triggers.\n2. Compute edits from the parsed or token-aware brace context, not raw brace counts.\n3. Indent the moved content by four spaces and outdent a closing brace to its matching block.\n4. Do nothing inside strings, typed text, comments, or malformed contexts that lack a safe local edit.\n5. Add protocol tests for empty, inline, nested, commented, and incomplete blocks.\n6. Update editor capability documentation.",
+      "plan": "1. Audit the existing `textDocument/onTypeFormatting` path in `Source/LSP/Server.rs`; keep one server implementation for every editor.\n2. Keep newline and `}` as the advertised triggers in the LSP initialize capability.\n3. Use lexer token spans and matched brace pairs in `on_type_format_edits`; never count raw brace bytes.\n4. For newline, indent moved content four spaces beyond the matched opening block and align its closing brace.\n5. For `}`, outdent only the matching closing-brace line and preserve all other lines.\n6. Return no edit inside strings, typed text, comments, or unmatched and unsafe malformed contexts.\n7. Preserve CRLF or LF, Unicode and UTF-16 positions, comments, text, and content outside the smallest changed block lines.\n8. Extend unit and JSON-RPC tests for functions, arms, markers, literals, code arguments, nested blocks, partial text, and opaque regions.\n9. Run focused LSP tests through `scripts/agent/jet-env cargo test` and exercise the real stdio server with two LSP clients.\n10. Confirm the clients need no Jet-specific indentation extension or editor-side rewrite.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the existing on-type formatter rather than planning a duplicate. Added exact handler ownership, token-pair invariants, minimal edit bounds, line-ending and UTF-16 proof, and real client checks."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148050,66 +148087,75 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The LSP advertises on-type formatting for newline and `}` and returns standard text edits.",
+          "text": "The LSP advertises `documentOnTypeFormattingProvider` for newline and `}` and returns standard, non-overlapping `TextEdit` values.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
         },
         {
           "n": 2,
-          "text": "Pressing Enter inside `{ statement }` moves and indents the existing statement, then places the closing brace at the matching indent.",
+          "text": "Pressing Enter inside `{ statement }` moves and indents the statement four spaces, then aligns the matching closing brace.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
         },
         {
           "n": 3,
-          "text": "Nested blocks, arm bodies, functions, markers, literals, and code-argument blocks use the same four-space rule.",
+          "text": "Nested functions, arm bodies, markers, literals, code-argument blocks, and ordinary blocks use the same token-pair rule.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
         },
         {
           "n": 4,
-          "text": "Strings, typed text bodies, line comments, block comments, and unmatched braces do not receive a false indentation edit.",
+          "text": "Typing `}` outdents only its matched closing-brace line and does not reformat sibling or parent blocks.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
         },
         {
           "n": 5,
-          "text": "The edit changes only the current block lines and preserves text, comments, cursor-relative content, and line endings.",
+          "text": "Strings, multiline strings, typed text, line comments, block comments, and unmatched braces receive no false edit.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
         },
         {
           "n": 6,
-          "text": "Protocol tests cover empty blocks, content before and after the cursor, nested blocks, closing braces, malformed source, and Unicode text.",
+          "text": "Edits preserve source text, comments, cursor-relative content, CRLF or LF, Unicode, UTF-16 positions, and all unrelated lines.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
         },
         {
           "n": 7,
-          "text": "VS Code and another LSP client can consume the same server response without editor-specific indentation code.",
+          "text": "Protocol tests cover empty, inline, nested, before-cursor, after-cursor, closing-brace, malformed, opaque, CRLF, and Unicode cases.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:13.304Z"
+          "at": "2026-08-25T19:22:11.897Z"
+        },
+        {
+          "n": 8,
+          "text": "VS Code and a second standard LSP client consume the same response without Jet-specific editor indentation code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:11.897Z"
         }
       ],
       "refs": [],
@@ -148121,7 +148167,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:55:51.615Z",
-      "updated": "2026-08-24T23:10:30.829Z",
+      "updated": "2026-08-25T19:22:13.047Z",
       "updatedBy": "Main"
     },
     {
@@ -148280,11 +148326,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Select the source-span style from the diagnostic severity.\n2. Use the warning theme for lint carets and the error theme for error carets.\n3. Keep source columns, hyperlinks, plain output, `NO_COLOR`, redirects, and JSON unchanged.\n4. Add exact ANSI and plain-output tests for one error and one warning.\n5. Check every shared diagnostic renderer uses the same severity rule.",
+      "plan": "1. Audit the existing severity switch in `crates/jet-foundation/src/Diagnostics.rs::render_inner`; keep it as the only terminal caret policy.\n2. Use `Theme::warn` for lint carets and `Theme::error` for error carets. Color only the caret glyphs.\n3. Preserve display-width padding, Unicode columns, hyperlinks, source text, headings, Why, Fix, and trailing newlines.\n4. Keep plain, `NO_COLOR`, redirected, explicit no-color, and JSON output byte-identical.\n5. Extend exact renderer tests for error, lint, wide text, multiline spans, empty spans, hyperlinks, and disabled color.\n6. Confirm CLI text, LSP rendered text, and Canvas text call the shared renderer; machine clients use the severity field.\n7. Run focused foundation diagnostics and UI snapshot tests through `scripts/agent/jet-env`.\n8. Smoke one real error and warning in a color terminal, with `NO_COLOR`, through a pipe, and with JSON.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the existing shared severity switch instead of adding another renderer. Added exact glyph-only color bounds, output invariants, edge snapshots, and real terminal proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148303,12 +148354,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A lint or warning renders its source carets in the same yellow warning style as its header.",
+          "text": "A lint or warning renders source carets with the exact yellow warning style used by its header.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.373Z"
+          "at": "2026-08-25T19:22:17.405Z"
         },
         {
           "n": 2,
@@ -148317,43 +148368,52 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.373Z"
+          "at": "2026-08-25T19:22:17.405Z"
         },
         {
           "n": 3,
-          "text": "Caret width, padding, Unicode display columns, source text, Why text, and Fix text do not change.",
+          "text": "Only caret glyphs receive severity color; padding, source columns, hyperlinks, and surrounding punctuation stay unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.373Z"
+          "at": "2026-08-25T19:22:17.405Z"
         },
         {
           "n": 4,
+          "text": "Caret width, Unicode display columns, multiline behavior, source text, Why text, Fix text, and trailing newlines do not change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:17.405Z"
+        },
+        {
+          "n": 5,
           "text": "`NO_COLOR`, redirected output, explicit no-color mode, and JSON output contain no new bytes or ANSI sequences.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.373Z"
-        },
-        {
-          "n": 5,
-          "text": "Exact renderer tests compare colored error, colored warning, plain error, plain warning, and a wide-character span.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-24T23:10:14.373Z"
+          "at": "2026-08-25T19:22:17.405Z"
         },
         {
           "n": 6,
-          "text": "CLI, LSP-rendered text, Canvas diagnostic text, and snapshots all use the shared severity-based renderer or machine severity field.",
+          "text": "Exact tests compare colored error, colored warning, plain error, plain warning, wide text, multiline spans, empty spans, and hyperlinks.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.373Z"
+          "at": "2026-08-25T19:22:17.405Z"
+        },
+        {
+          "n": 7,
+          "text": "CLI, LSP-rendered text, Canvas diagnostic text, and snapshots use the shared renderer or the unchanged machine severity field.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:17.405Z"
         }
       ],
       "refs": [
@@ -148366,7 +148426,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:01.505Z",
-      "updated": "2026-08-24T23:10:31.767Z",
+      "updated": "2026-08-25T19:22:17.792Z",
       "updatedBy": "Main"
     },
     {
@@ -148380,11 +148440,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Replace the stale binding with the exact canonical typed constructor and remove the semicolon.\n2. Search active examples, tests, templates, and docs for the same retired output declaration shape.\n3. Keep ordinary callable resolution for `entry:` and the closed Output kind law.\n4. Reformat and update the expected output and source snapshots.\n5. Run the output through selection, inspection, default execution, and AOT execution.",
+      "plan": "1. Treat the current `examples/features/tooling/output_callable.jet` spelling as the required canonical target.\n2. Census active examples, tests, templates, generated fixtures, and docs for typed Output binding heads and leading-dot constructors.\n3. Replace each active stale form with `name :: Output.Kind{...}` and remove statement semicolons without changing behavior.\n4. Keep `entry:` on ordinary callable resolution and preserve the closed Output kind and role checks.\n5. Format the example twice and require byte stability. Update only source snapshots that contain the retired spelling.\n6. Run `tests/output_callable.rs`, output-selection tests, inspect-output tests, formatter checks, and the focused golden.\n7. Smoke the exact example through `jet inspect output`, default `jet run`, and `jet run --release`.\n8. Compare output bytes with `examples/features/expected/tooling/output_callable.out`.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted this as a corpus drift audit because the primary example already has the required spelling. Added exact census, no-compatibility, formatter, selection, inspect, and AOT proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148408,52 +148473,61 @@
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.956Z"
+          "at": "2026-08-25T19:22:20.734Z"
         },
         {
           "n": 2,
-          "text": "No active Output declaration uses a typed binding head or a leading dot constructor that depends on a retired annotation.",
+          "text": "No active Output declaration uses a typed binding head, leading-dot constructor, or retired statement terminator.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.956Z"
+          "at": "2026-08-25T19:22:20.734Z"
         },
         {
           "n": 3,
-          "text": "The `entry: launch` field resolves through ordinary callable identity and keeps its exact Executable role contract.",
+          "text": "The `entry: launch` field resolves through ordinary callable identity and retains its exact Executable role, effects, and source span.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.956Z"
+          "at": "2026-08-25T19:22:20.734Z"
         },
         {
           "n": 4,
-          "text": "`jet fmt --check` accepts the example without changing its declaration shape.",
+          "text": "`jet fmt --check` accepts the example, and formatting twice leaves it byte-identical.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.956Z"
+          "at": "2026-08-25T19:22:20.734Z"
         },
         {
           "n": 5,
-          "text": "`jet inspect output` reports the Executable name, entry, source path, and callable identity from the same Output value.",
+          "text": "`jet inspect output` reports the selected Executable name, entry, source path, callable identity, effects, and selection reason from one Output value.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.956Z"
+          "at": "2026-08-25T19:22:20.734Z"
         },
         {
           "n": 6,
-          "text": "Default `jet run` and AOT print the expected text, and the golden source/output checks pass.",
+          "text": "The focused output tests and source snapshot pass without a compatibility parser or formatter path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:14.956Z"
+          "at": "2026-08-25T19:22:20.734Z"
+        },
+        {
+          "n": 7,
+          "text": "Default `jet run` and `jet run --release` print bytes equal to `examples/features/expected/tooling/output_callable.out`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:20.734Z"
         }
       ],
       "refs": [
@@ -148469,7 +148543,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:05.691Z",
-      "updated": "2026-08-24T23:10:32.301Z",
+      "updated": "2026-08-25T19:22:22.258Z",
       "updatedBy": "Main"
     },
     {
@@ -148481,13 +148555,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-TRACK-ORIGIN1.\n2. Make the fact registry, flow facts, reflection, completion, hover, and inspect output use the selected name and type.\n3. Remove any duplicate runtime method or hidden metadata path that the ruling retires.\n4. Preserve tracked, untracked, moved, copied, branch-merged, and mutable binding meaning.\n5. Migrate examples, tests, generated Core declarations, and diagnostics.\n6. Prove comptime reads and any ratified runtime projection on every execution tier.",
+      "plan": "1. Follow D-TRACK-ORIGIN1=A. Make `value.@origin` the only public read of `#Track` origin.\n2. Rename the registered fact and public type to `Origin` and `OriginInfo` in `Registry.rs`, `Syntax`, and Core type tables.\n3. Keep the fact optional and typed with tracked, source, line, column, and ambiguity fields.\n4. Derive the value only from sema flow facts in `FlowFacts.rs` and `CheckerInfer/expr.rs`.\n5. Preserve exact meaning across immutable and mutable bindings, copies, moves, shadow refusal, branches, loops, and merged ambiguity.\n6. Remove `.origin()`, `.@track_origin`, `TBindingOrigin`, runtime formatting, and method-call lowering from TIR and codegen.\n7. Permit runtime output only by ordinary comptime folding of `OriginInfo`; add no runtime metadata channel.\n8. Update completion, hover, definition, references, rename, reflection, semindex, inspect, docs, diagnostics, and generated Core declarations.\n9. Migrate `provenance_track.jet`, fact-read examples, tests, UI fixtures, grammars, snapshots, and goldens.\n10. Run sema flow, parser, formatter, TIR, codegen, comptime, reflection, semindex, LSP, UI, grammar, and golden checks.\n11. Smoke tracked, untracked, copied, moved, mutable, merged, and runtime-print cases with default `jet run` and AOT.\n12. Exercise JIT and interpreter paths and confirm they consume only the folded sema fact.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-TRACK-ORIGIN1=A into a single sema fact path. Added exact type fields, flow cases, full deletion of runtime origin machinery, tooling, migration, and tier proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148501,96 +148580,97 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Tracked origin has one canonical public read surface and one typed fact shape, as selected by D-TRACK-ORIGIN1.",
+          "text": "`value.@origin` is the only accepted public read of `#Track` origin and returns `OriginInfo?`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:15.785Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 2,
-          "text": "The read distinguishes tracked, untracked, ambiguous after merge, copied, moved, and mutable bindings without inventing provenance.",
+          "text": "`OriginInfo` contains tracked, source, line, column, and ambiguity fields with stable public names and types.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:15.785Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 3,
-          "text": "Completion, hover, go-to-definition, reflection, and `jet inspect expand --facts` show the same fact name and fields.",
+          "text": "Tracked, untracked, copied, moved, mutable, loop-carried, and branch-merged values never gain invented or stale provenance.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:15.785Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 4,
-          "text": "Any retired `.origin()` or `.@track_origin` spelling is removed and gets a focused teaching diagnostic when user-typed.",
+          "text": "Completion, hover, definition, references, rename, reflection, semindex, and `jet inspect expand --facts` agree on `@origin` and `OriginInfo`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:15.785Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 5,
-          "text": "The example reads origin through the canonical surface and does not imply compiler metadata is an ordinary runtime method.",
+          "text": "`.origin()` and `.@track_origin` are rejected with focused teaching diagnostics and never lower through runtime or compatibility paths.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:15.785Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 6,
-          "text": "AOT, JIT, interpreter, and comptime use the same sema fact; adapters do not rebuild origin policy.",
+          "text": "`TBindingOrigin`, runtime origin formatting, method dispatch, and duplicate metadata storage are deleted from TIR and codegen.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:15.785Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 7,
-          "text": "Syntax.rs entry updated",
+          "text": "`provenance_track.jet` reads `.@origin` at comptime and may print only the ordinary folded value.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:42:49.730Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 8,
-          "text": "syntax-decisions.md log entry",
+          "text": "AOT, JIT, interpreter, and comptime consume the same sema fact; adapters do not reconstruct source, ambiguity, or movement policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:42:49.730Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 9,
-          "text": "jet devtools grammars regenerated",
+          "text": "`Syntax.rs` records D-TRACK-ORIGIN1=A and `syntax-decisions.md` records the owner outcome.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:42:49.730Z"
+          "at": "2026-08-25T19:18:18.416Z"
         },
         {
           "n": 10,
-          "text": "snapshots re-blessed",
+          "text": "Jet devtools grammars, diagnostics, formatter snapshots, fact examples, reflection snapshots, and goldens use the canonical fact only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:42:49.730Z"
+          "at": "2026-08-25T19:18:18.416Z"
         }
       ],
       "refs": [
+        "D-TRACK-ORIGIN1",
         "D-FACT-READ1"
       ],
       "tags": [
@@ -148601,8 +148681,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:11.071Z",
-      "updated": "2026-08-24T23:42:49.730Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:18:19.780Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cwf44fqc",
@@ -148613,13 +148693,22 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Implement the complete lifecycle ratified by D-SERVICE-RECEIPT2.\n2. Give the common send statement one safe acceptance meaning with no routine receipt handling.\n3. Enforce ownership or consumption of any bound lifecycle value on every path.\n4. Keep lifecycle states separate from retention, attempts, deadlines, idempotency, and failure facts.\n5. Produce signed immutable evidence and an ordered append-only history for expert audit.\n6. Keep rejection and authority failures on the shared Error route.\n7. Prove duplicate identity, restart recovery, cancellation, dead letters, retention, and tier parity.",
+      "plan": "1. Follow D-SERVICE-RECEIPT2=A after the Error and Authority cutovers in #2172, #2182, and #2187.\n2. Replace immediate durable-send result variants with one `Delivery` handle and one six-state lifecycle in Prelude service modules.\n3. Commit the durable acceptance record before a bare `send` statement continues. Rejection remains on the shared Error route.\n4. Lower a bare Delivery result to its default acceptance observation through one sema fact, not a backend special case.\n5. Extend must-use flow so each bound Delivery is observed, controlled, returned, stored, or transferred on every exit path.\n6. Keep Pending, Accepted, Delivering, Delivered, DeadLettered, and Cancelled as lifecycle states only.\n7. Keep attempts, retention, deadline, idempotency key, duplicate status, and authority generation as typed facts.\n8. Make duplicate keys return the same identity. Reject a key reused for different authority, endpoint, or message before creating work.\n9. Implement wait, retry, cancel, status, receipt, and events in `Prelude/CoreLib/Top/ServiceAuthority.rs` and `Services.rs`.\n10. Sign immutable snapshots with the existing Prelude HMAC-SHA-256 and authority generation key. Give events a monotonic sequence.\n11. Persist identity, state, facts, signatures, and events in the existing append-only service log and replay path.\n12. Update Core signatures, sema service methods, must-use analysis, TIR calls, JIT/comptime adapters, reports, JSON, examples, and docs.\n13. Test acceptance, duplicate, conflict, delivery, retry, retention, expiry, cancellation, dead letter, partition, revocation, crash windows, recovery, and replay.\n14. Run service Prelude, sema ownership, TIR, JIT, comptime, persistence, recovery, UI, JSON, services runtime, and golden checks.\n15. Smoke the durable lifecycle on default `jet run` and AOT, then restart from the persisted log and validate the signed history.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "cp3zupnt",
+        "cz2ys9cb",
+        "c14vk3sif"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-SERVICE-RECEIPT2=A into exact Delivery types, must-observe flow, Prelude ownership, idempotency law, signed snapshot format, replay, and I9 proof. Added Error and Authority blockers."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -148638,84 +148727,120 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The common `orders.send(order)` statement has one safe durable-acceptance meaning and no ignored-result ambiguity.",
+          "text": "A bare `orders.send(order)` continues only after one durable acceptance record commits and has no ignored-result ambiguity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 2,
-          "text": "An expert can retain one typed identity for wait, retry, cancellation, status, retention, attempts, receipts, and history.",
+          "text": "Rejection, unavailable authority, partition, revocation, stale generation, and persistence failure use the shared structured Error route before acceptance.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 3,
-          "text": "The compiler rejects every bound lifecycle value that is dropped without a ratified consumption action.",
+          "text": "A bound `Delivery` keeps one stable identity across acceptance, attempts, delivery, restart, retention, dead letter, cancellation, and replay.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 4,
-          "text": "Public states describe lifecycle only; duplicate identity, retention, attempts, deadlines, and idempotency remain typed facts.",
+          "text": "Every bound Delivery is observed, controlled, returned, stored, or transferred on every exit path; missing and branch-only use get distinct sema diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 5,
-          "text": "Duplicate idempotency keys resolve to the same durable identity and conflicting keys fail without creating parallel work.",
+          "text": "Observation includes wait, status, receipt, or events; control includes retry or cancel; observing or dropping a handle never cancels accepted work.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 6,
-          "text": "Rejection, unavailable authority, partition, revocation, and stale generation use the shared structured Error route.",
+          "text": "Public lifecycle states are exactly Pending, Accepted, Delivering, Delivered, DeadLettered, and Cancelled.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 7,
-          "text": "Experts can obtain a signed immutable snapshot and ordered append-only events tied to one authority generation.",
+          "text": "Retention, attempts, deadlines, idempotency, duplicate status, and authority generation remain typed facts instead of extra lifecycle states.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 8,
-          "text": "Human, JSON, persistence, comptime, AOT, JIT, interpreter, and recovery use the same states, facts, and transitions.",
+          "text": "The same idempotency key and operation return the same Delivery identity; conflicting reuse fails before parallel work or a second identity exists.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
         },
         {
           "n": 9,
-          "text": "Tests cover acceptance, duplicate, conflict, delivery, retry, retention, expiry, cancellation, dead letter, partition, crash recovery, and replay.",
+          "text": "`receipt()` returns a signed immutable snapshot, and `events()` returns a complete ordered append-only history with monotonic sequence numbers.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:12.900Z"
+          "at": "2026-08-25T19:22:10.535Z"
+        },
+        {
+          "n": 10,
+          "text": "Receipt validation uses the existing shared HMAC-SHA-256 primitive and detects changed payloads, wrong generations, wrong authorities, and truncation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:10.535Z"
+        },
+        {
+          "n": 11,
+          "text": "Crash recovery reconstructs the same identity, facts, state, signature key generation, and event order without duplicating accepted work.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:10.535Z"
+        },
+        {
+          "n": 12,
+          "text": "Human output, JSON, persistence, receipts, AOT, JIT, interpreter, comptime, and recovery use the same Prelude states, facts, transitions, and errors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:10.535Z"
+        },
+        {
+          "n": 13,
+          "text": "Tests cover acceptance, duplicate, conflict, delivery, retry, retention, expiry, cancellation, dead letter, partition, revocation, crash windows, recovery, and replay.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:10.535Z"
         }
       ],
       "refs": [
@@ -148730,8 +148855,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:15.971Z",
-      "updated": "2026-08-25T13:43:26.096Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:22:10.896Z",
+      "updatedBy": "Main"
     },
     {
       "id": "cxf6x7ap",
@@ -148893,11 +149018,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
-      "plan": "1. Trace import-use accounting from alias resolution through qualified member lookup.\n2. Mark an import live only when name resolution binds a use to that import symbol.\n3. Cover type, value, call, constructor, marker, generic, fact-read, and nested module positions.\n4. Keep truly unused imports, shadowed aliases, and similarly named local modules warning correctly.\n5. Add a UI regression for the reported example and negative controls.\n6. Run the example and focused lint tests.",
+      "plan": "1. Trace `solve.Solver.new(42)` from qualified resolution to `NameLedger::record_alias_use` without text matching.\n2. Fix the shared semantic reference path in `crates/jet-sema/src/Sema/CheckerReferences.rs`, not the L0103 reporter.\n3. Record the exact import alias declaration span when a qualified namespace segment resolves through that alias.\n4. Reuse the same path for qualified types, values, constructors, calls, generics, markers, facts, and nested members.\n5. Keep `Bundle/Liveness.rs` as a read-only projection over NameLedger identity facts.\n6. Do not mark an import live for text matches, failed resolution, shadowing, similarly named locals, or another module’s alias.\n7. Add positive and negative cases to `tests/structure_liveness.rs` and exact L0103 UI snapshots.\n8. Cover direct, alias, grouped, quoted-module, package, and re-export imports across module boundaries.\n9. Run focused sema reference, structure liveness, semindex, LSP, UI lint, and solve-puzzle tests through `scripts/agent/jet-env`.\n10. Run `examples/features/tooling/solve_puzzle.jet`; require expected output and no L0103.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted the import warning fix at the NameLedger reference seam. Added every qualified position, exact negative controls, import-form coverage, tooling identity agreement, and solve-puzzle proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -148916,57 +149046,75 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`use core.compute.solve as solve` receives no unused-import warning when `solve.Solver.new(42)` resolves through that alias.",
+          "text": "`use core.compute.solve as solve` gets no L0103 when `solve.Solver.new(42)` resolves through that exact alias.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.602Z"
+          "at": "2026-08-25T19:22:24.377Z"
         },
         {
           "n": 2,
-          "text": "Qualified type, value, constructor, call, generic, marker, fact-read, and nested member uses each mark the bound import live.",
+          "text": "Qualified type, value, constructor, call, generic, marker, fact-read, and nested member uses record the bound alias declaration identity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.602Z"
+          "at": "2026-08-25T19:22:24.377Z"
         },
         {
           "n": 3,
-          "text": "A similarly named local binding or module does not mark an unrelated import live.",
+          "text": "Direct, alias, grouped, quoted-module, package, and re-export forms use one NameLedger liveness path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.602Z"
+          "at": "2026-08-25T19:22:24.377Z"
         },
         {
           "n": 4,
-          "text": "A truly unused direct import, alias import, grouped import, and re-export still receives L0103 with the correct source span.",
+          "text": "A similarly named local, module, failed path, shadowed name, or alias in another module does not mark the import live.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.602Z"
+          "at": "2026-08-25T19:22:24.377Z"
         },
         {
           "n": 5,
-          "text": "The use record follows semantic symbol identity through aliases and does not depend on matching source text.",
+          "text": "A truly unused direct import, alias import, grouped import, quoted module, package import, and re-export still gets L0103 at the exact binding span.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.602Z"
+          "at": "2026-08-25T19:22:24.377Z"
         },
         {
           "n": 6,
-          "text": "The solve-puzzle example runs with its expected output and no L0103, while focused negative UI snapshots remain exact.",
+          "text": "Liveness reads semantic alias-use facts and does not scan generated code, source text, or path prefixes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:17.602Z"
+          "at": "2026-08-25T19:22:24.377Z"
+        },
+        {
+          "n": 7,
+          "text": "Semindex references, LSP references, rename, and liveness agree on the same alias definition and qualified uses.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:24.377Z"
+        },
+        {
+          "n": 8,
+          "text": "The solve-puzzle example runs with expected output and no L0103, while focused negative UI snapshots stay exact.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:24.377Z"
         }
       ],
       "refs": [
@@ -148980,7 +149128,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:30.144Z",
-      "updated": "2026-08-24T23:10:32.831Z",
+      "updated": "2026-08-25T19:22:25.511Z",
       "updatedBy": "Main"
     },
     {
@@ -149143,13 +149291,20 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-MARKER-SITES1.\n2. Give marker declarations one grammar for ordinary parameters, legal sites, inheritance, repeatability, and status metadata.\n3. Keep applied-marker placement under D-MARK-FORM1 unchanged.\n4. Migrate the Prelude registry, user markers, tests, examples, docs, grammar files, and generated digest.\n5. Reject every retired declaration shape with one teaching diagnostic and formatter fix when safe.\n6. Prove declarations with no arguments, arguments, one site, many sites, block bodies, and text heads.",
+      "plan": "1. Follow the owner outcome D-MARKER-SITES1=B after #2185 removes the special checked-text marker declaration.\n2. Keep one grammar: `marker Name(args..., @sites: [...], @repeatable: ..., ...)` in `Parser/Items/states_protocols.rs`.\n3. Treat ordinary arguments as typed parameters and `@` names as fixed declaration metadata values in the same list.\n4. Remove every accepted trailing `on [...]` clause, second parameter list, and text-head-only marker branch.\n5. Keep applied `#Marker` placement under D-MARK-FORM1 unchanged.\n6. Update `Prelude/Markers.jet`, `Policy.rs`, `CheckerMarkers.rs`, ScopeMembers, reflection, completion, hover, docs, and the registry digest.\n7. Register one teaching diagnostic for each retired declaration shape with an exact safe rewrite when possible.\n8. Migrate user markers, Prelude rows, examples, tests, UI fixtures, docs, grammars, generated artifacts, and snapshots.\n9. Cover zero and many user arguments, zero and many metadata values, every site enum member, bodies, inheritance, and repeatability.\n10. Run parser, formatter, marker registry, sema, reflection, LSP, UI, grammar, generated digest, and golden checks through `scripts/agent/jet-env`.\n11. Run a repository ratchet that permits retired syntax only in diagnostic fixtures and ratified decision history.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "c12uacgqe"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Corrected the plan to owner outcome D-MARKER-SITES1=B. Sequenced it after #2185, fixed the sole metadata-list grammar, and added cleanup, diagnostics, registry, and ratchet proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -149163,105 +149318,106 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every marker declaration uses one canonical legal-site clause; `@sites` is not a second public declaration form.",
+          "text": "Every marker declaration uses one parameter list; `@sites` is the sole public legal-site form selected by D-MARKER-SITES1=B.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 2,
-          "text": "Ordinary marker arguments stay in the ordinary parameter list and cannot be confused with registry metadata.",
+          "text": "Ordinary marker arguments are typed parameters, while `@` names are fixed metadata values; neither role can be used as the other.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 3,
-          "text": "Text, block, type, field, function, method, binding, statement, and package sites use the same declaration grammar.",
+          "text": "Text, block, type, field, function, method, binding, statement, and package sites draw from one published `Site` enum and grammar.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 4,
-          "text": "The Prelude marker registry, user rules, generated digest, hover, completion, and docs show the same canonical shape.",
+          "text": "Trailing `on [...]`, a second parameter list, and the former checked-text marker contract are rejected and never survive into accepted AST.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 5,
-          "text": "Retired forms get one registered parse diagnostic with the exact canonical rewrite and no compatibility alias.",
+          "text": "The Prelude registry, user rules, generated digest, reflection, completion, hover, and docs show the same canonical metadata list.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 6,
-          "text": "Parser, formatter, editor grammar, snapshots, and marker declaration tests cover zero, one, and many arguments and sites.",
+          "text": "Registered parse diagnostics give exact rewrites for retired forms and keep comments and ordinary arguments when the fix is safe.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 7,
-          "text": "D-MARK-FORM1 still governs only where an applied `#Marker` sits; this change adds no second application rule.",
+          "text": "Parser and formatter tests cover zero and many ordinary arguments, zero and many metadata values, every site, bodies, inheritance, and repeatability.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:18.699Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 8,
-          "text": "Syntax.rs entry updated",
+          "text": "D-MARK-FORM1 still governs applied `#Marker` placement; this card changes declaration metadata only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:25.020Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 9,
-          "text": "syntax-decisions.md log entry",
+          "text": "`Syntax.rs` records D-MARKER-SITES1=B and `syntax-decisions.md` records the owner outcome despite the ballot recommendation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:25.020Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 10,
-          "text": "jet devtools grammars regenerated",
+          "text": "Jet devtools grammars, marker registry snapshots, UI diagnostics, examples, generated artifacts, and docs use `@sites` only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:25.020Z"
+          "at": "2026-08-25T19:18:15.024Z"
         },
         {
           "n": 11,
-          "text": "snapshots re-blessed",
+          "text": "A repository ratchet finds no retired marker declaration form outside diagnostic fixtures and ratified history.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:25.020Z"
+          "at": "2026-08-25T19:18:15.024Z"
         }
       ],
       "refs": [
+        "D-MARKER-SITES1",
         "D-MARK-FORM1",
         "D-BOUND-SINK1"
       ],
@@ -149272,8 +149428,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:43.369Z",
-      "updated": "2026-08-24T23:46:25.020Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:18:16.316Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c11y6itr6",
@@ -149284,13 +149440,20 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-STATE-TERMINAL1.\n2. Apply the terminal-state rule in sema, reflection, diagnostics, and state diagrams.\n3. Keep missing incoming transitions, unreachable states, duplicate transitions, and invalid source states as separate checks.\n4. Remove or narrow L0151 and its registry row and snapshots.\n5. Add terminal, accidental dead-end, cycle, self-loop, branch, and sealed-resource examples.\n6. Prove no runtime representation or execution-tier policy is added.",
+      "plan": "1. Follow D-STATE-TERMINAL1=A after #2186 establishes the canonical nested state section.\n2. Remove the unconditional L0151 emission from `crates/jet-sema/src/Sema/State.rs` and retire its diagnostic registry row.\n3. Derive `terminal: true` when a checked state has no outgoing transition. Store it only in erased reflection facts.\n4. Keep `#State(Terminal)` read-only methods legal and keep outgoing self-loops or reopen transitions nonterminal.\n5. When entry transitions exist, compute reachability from every `_ -> State` entry and report unreachable declared states separately.\n6. Preserve unknown-state, wrong-state, duplicate-transition, invalid-source, divergent-merge, and transition-shape diagnostics.\n7. Project terminal and reachability facts through reflection, semindex, hover, inspect, and generated state diagrams.\n8. Migrate typestate tests and UI snapshots from dead-end warnings to terminal and unreachable-state assertions.\n9. Add success, failure, cancel, self-loop, reopen, no-entry, unreachable, and terminal read-method examples.\n10. Run sema state tests, diagnostics snapshots, reflection, semindex, LSP, diagrams, examples, and goldens through `scripts/agent/jet-env`.\n11. Smoke representative typestate programs on default `jet run` and AOT and confirm terminal facts add no runtime representation.\n12. Exercise JIT, interpreter, comptime, and web consumers of the same erased transition graph.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "c13gfyz5l"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-STATE-TERMINAL1=A after the nested-state cutover. Added a precise entry-rooted reachability rule, no-entry guard, diagnostic retirement, tooling facts, and erasure proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -149304,107 +149467,109 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A state with no outgoing transition follows D-STATE-TERMINAL1 and does not receive the old unconditional dead-end warning.",
+          "text": "A state with no outgoing transition is a valid terminal state and never receives the retired unconditional L0151 warning.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 2,
-          "text": "Terminal status is available to reflection and generated state diagrams without adding runtime storage.",
+          "text": "Reflection, semindex, hover, inspect, and generated state diagrams derive `terminal: true` from the checked graph without runtime storage.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 3,
-          "text": "A terminal state can still be required by `#State` methods for read-only inspection, cleanup, or audit operations.",
+          "text": "A terminal state remains legal in `#State` methods for read-only inspection, cleanup, reporting, and audit operations.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 4,
-          "text": "Unreachable states, unknown states, duplicate transitions, invalid transition sources, and impossible cycles keep distinct diagnostics.",
+          "text": "A self-loop or outgoing reopen transition makes a state nonterminal, and duplicate transitions retain their own diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 5,
-          "text": "The old L0151 text is removed or narrowed to the exact remaining mistake; snapshots and the diagnostic registry agree.",
+          "text": "When entry transitions exist, a state unreachable from every `_ -> State` entry gets a distinct registered reachability diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 6,
-          "text": "Examples cover intended final success, final failure, reopenable resources, self-loops, and an actually unreachable state.",
+          "text": "A graph with no entry transition does not invent an initial state or emit a false reachability diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 7,
-          "text": "AOT, JIT, interpreter, comptime, and web consume the same erased sema state facts.",
+          "text": "Unknown states, wrong states, invalid transition sources, duplicate transitions, divergent merges, and malformed state sections keep distinct diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:19.236Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 8,
-          "text": "Syntax.rs entry updated",
+          "text": "The L0151 registry row, source constructor, lint test, snapshots, docs, and allowlists are removed rather than left retired in active surfaces.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:47.418Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 9,
-          "text": "syntax-decisions.md log entry",
+          "text": "Examples cover final success, final failure, cancellation, self-loop, reopen, no-entry, unreachable state, and terminal read methods.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:47.418Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 10,
-          "text": "jet devtools grammars regenerated",
+          "text": "AOT, JIT, interpreter, comptime, and web consume the same erased sema graph and add no terminal runtime policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:47.418Z"
+          "at": "2026-08-25T19:18:07.721Z"
         },
         {
           "n": 11,
-          "text": "snapshots re-blessed",
+          "text": "`Syntax.rs` and `syntax-decisions.md` record D-STATE-TERMINAL1=A; grammar regeneration is clean because the outcome adds no syntax.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:46:47.418Z"
+          "at": "2026-08-25T19:18:07.721Z"
         }
       ],
       "refs": [
+        "D-STATE-TERMINAL1",
         "D-STATE-DECL",
-        "D-STATE-NS1"
+        "D-STATE-NS1",
+        "D-STATE-HOME1"
       ],
       "tags": [
         "typestate",
@@ -149414,8 +149579,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:47.598Z",
-      "updated": "2026-08-24T23:46:47.418Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:18:08.569Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c12uacgqe",
@@ -149426,13 +149591,21 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Implement the checked text type model ratified by D-TEXTHEAD-TYPE1.\n2. Use one pure checker for known literals and dynamic construction on every tier.\n3. Encode interpolated holes through the same declared contract.\n4. Preserve nominal typing across functions, modules, collections, generics, reflection, and tooling.\n5. Make dynamic construction validate through the implicit Error route.\n6. Require a reasoned audited or unsafe gate for unchecked raw construction.\n7. Migrate declared-text examples, diagnostics, docs, grammars, and snapshots.",
+      "plan": "1. Follow D-TEXTHEAD-TYPE1=A after the implicit Error cutover in #2172 and #2182.\n2. Add the ordinary `CheckedText` trait and its associated check error to canonical Prelude declarations.\n3. Require one pure `check(String)` contract and one pure generic `encode_hole(value)` contract on each implementing nominal String-backed type.\n4. Resolve implementations through the ordinary trait registry in sema. Remove marker text contracts and compiler-owned head whitelists.\n5. Run the same checked Jet function at comptime for known literals and at runtime for `Type.from(text)`.\n6. Encode each interpolation hole through `encode_hole` before joining text, then run the complete checker once.\n7. Generate or expose `Type.from(String)` through the implicit Error route and keep the returned value nominal.\n8. Permit `Type.raw(String)` only inside reasoned `#Unsafe` and record the escape in gates, inspect output, and receipts.\n9. Remove `MarkerTextDecl`, `TextHeadContract`, `__JetCheckedText`, special wrapping calls, and marker-owned construction paths.\n10. Update parser, formatter, sema, comptime, Prelude, TIR, reflection, semindex, LSP, docs, grammars, diagnostics, and snapshots.\n11. Add Pattern, query, selector, and identity library examples with literals, holes, dynamic text, imports, generics, and raw refusal.\n12. Run parser, sema, trait, comptime, codegen, JIT, web, UI, LSP, reflection, and golden checks through `scripts/agent/jet-env`.\n13. Smoke each example with default `jet run` and AOT; force interpreter deopt and dynamic validation for parity.",
       "checkSteps": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "cp3zupnt",
+        "cz2ys9cb"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-TEXTHEAD-TYPE1=A as a clean deletion of marker-owned text machinery. Added the exact trait contract, shared checker path, Unsafe gate, tooling, migration, and I9 matrix."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -149451,120 +149624,120 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Public docs, diagnostics, and APIs use “checked text type”; “text head” remains internal jargon only if needed.",
+          "text": "Public docs, diagnostics, traits, constructors, and tools use “checked text type”; “text head” remains internal history only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 2,
-          "text": "The declaration is classified as the same nominal type that literal construction and typed parameters use.",
+          "text": "A checked text declaration is one ordinary nominal String-backed type plus one ordinary `CheckedText` implementation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 3,
-          "text": "One pure checker accepts or rejects the same text at compile time and runtime on every execution tier.",
+          "text": "The trait contract names one check error, one pure complete-text checker, and one pure hole encoder; malformed implementations get precise sema diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 4,
-          "text": "Every interpolated hole passes through the declared encoder before it enters the domain text.",
+          "text": "One checked Jet function accepts or rejects identical complete text at comptime and runtime on AOT, JIT, interpreter, comptime, and web.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 5,
-          "text": "Dynamic `Type.from(text)` validates through the shared Error route and preserves a structured check failure.",
+          "text": "Every interpolated hole passes through the declared encoder exactly once before the complete text is checked and wrapped.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 6,
-          "text": "Unchecked raw construction requires a reasoned audited or unsafe gate and leaves a visible receipt or inspect fact.",
+          "text": "Dynamic `Type.from(text)` validates through the shared implicit Error route and preserves typed check failure, cause, context, and source.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 7,
-          "text": "Plain String cannot cross a checked text parameter, field, return, collection, or generic boundary without validation.",
+          "text": "`Type.raw(text)` is unavailable outside a reasoned `#Unsafe` region and leaves a source-linked gate, inspect fact, and receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 8,
-          "text": "Hover, completion, definition, rename, reflection, generated docs, and inspect output classify the type and contract consistently.",
+          "text": "Plain String cannot cross a checked text parameter, field, return, collection, generic, trait, or foreign boundary without validation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 9,
-          "text": "SQL-like, pattern-like, selector-like, and identity examples prove literals, holes, dynamic text, imports, generics, raw refusal, and tier parity.",
+          "text": "Marker text contracts, compiler-owned head registries, `__JetCheckedText`, special wrapper calls, and parallel runtime checkers are deleted.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:14.460Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 10,
-          "text": "Syntax.rs entry updated",
+          "text": "Hover, completion, definition, references, rename, reflection, semindex, generated docs, and inspect output show the nominal type and trait contract.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:42.643Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 11,
-          "text": "syntax-decisions.md log entry",
+          "text": "Pattern, query, selector, and identity examples prove literals, holes, dynamic text, imports, generics, raw refusal, and structured failures.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:42.643Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 12,
-          "text": "jet devtools grammars regenerated",
+          "text": "`Syntax.rs` records D-TEXTHEAD-TYPE1=A and `syntax-decisions.md` records the owner outcome.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:42.643Z"
+          "at": "2026-08-25T19:18:10.632Z"
         },
         {
           "n": 13,
-          "text": "snapshots re-blessed",
+          "text": "Jet devtools grammars, formatter snapshots, diagnostics, examples, and goldens contain the ordinary type and trait model only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:42.643Z"
+          "at": "2026-08-25T19:18:10.632Z"
         }
       ],
       "refs": [
@@ -149579,8 +149752,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:51.717Z",
-      "updated": "2026-08-25T13:44:42.643Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:18:11.965Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c13gfyz5l",
@@ -149591,13 +149764,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Ratify D-STATE-HOME1 as an amendment to the written form of D-STATE-NS1.\n2. Parse and resolve states as facts owned by exactly one declared type.\n3. Preserve the qualified fact path `Type.State.Name` and bare sugar only where ratified.\n4. Reject duplicate homes, missing owner types, state/member collisions, and repeated state declarations with focused diagnostics.\n5. Migrate structs, enums if allowed, impls, markers, examples, docs, grammars, and snapshots.\n6. Prove reflection, completion, diagrams, transitions, generics, and all execution tiers.",
+      "plan": "1. Follow D-STATE-HOME1=A as the source-shape amendment to D-STATE-NS1.\n2. Add one optional `state { Name, ... }` section to named struct bodies in `crates/jet-parser` and the struct AST.\n3. Reject state sections on enums, traits, aliases, impls, modules, and anonymous shapes with one registered eligibility diagnostic.\n4. Remove top-level `Item::StateDecl` acceptance. Keep diagnostic-only recognition for `state Type { ... }` with an exact rewrite.\n5. Register the nested state set as the erased `Type.State` fact in `crates/jet-sema/src/Sema/State.rs`.\n6. Resolve `Type.State.Name` everywhere and allow bare names only in the ratified `#State` and `#Transition` marker slots.\n7. Reject empty sections, duplicate sections, duplicate names, collisions, unknown names, and owners without state sections.\n8. Update formatter order, semindex definitions and references, rename, hover, reflection, completion, and generated state diagrams.\n9. Migrate typestate examples, tests, UI fixtures, fuzz seeds, docs, grammars, snapshots, and `fact_reads.jet` in one pass.\n10. Run parser, formatter, sema state, semindex, LSP, reflection, UI, fuzz corpus, and golden checks through `scripts/agent/jet-env`.\n11. Smoke generic and plain structs on default `jet run` and AOT; inspect generated Rust to confirm no field or runtime tag appears.\n12. Exercise JIT, interpreter, comptime, and web consumers of the same erased sema facts.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-STATE-HOME1=A into one struct-owned fact model. Fixed eligible owners, removed companion acceptance, and added exact tooling, diagnostics, migration, and erasure proof."
+        },
         {
           "at": "2026-08-24",
           "by": "Main",
@@ -149611,105 +149789,106 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Typestate is declared in or explicitly attached to exactly one existing type; the source cannot look like two unrelated `Order` declarations.",
+          "text": "A named struct declares at most one `state { ... }` section inside its body; no accepted source repeats the owner in `state Type { ... }`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 2,
-          "text": "The canonical path remains `Order.State.Draft`, and bare state names work only in the ratified marker context.",
+          "text": "Enums, traits, aliases, impls, modules, anonymous shapes, empty sections, and repeated sections get registered diagnostics with exact spans.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 3,
-          "text": "A missing owner type, duplicate state set, duplicate state name, and real type namespace collision each get a distinct registered diagnostic.",
+          "text": "The canonical path remains `Type.State.Name`; bare names resolve only inside ratified `#State` and `#Transition` argument slots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 4,
-          "text": "State declarations work for generic types and across impl blocks without creating a runtime field or second type identity.",
+          "text": "Duplicate state names, member collisions, unknown states, and markers on structs without a state section get distinct registered diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 5,
-          "text": "Reflection, completion, go-to-definition, rename, hover, and generated state diagrams all point to the owning type and state declaration.",
+          "text": "Generic structs and methods in separate impl blocks share one semantic state set without a runtime field, discriminant, or second type identity.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 6,
-          "text": "`fact_reads.jet` has one visually coherent `Order` declaration and no apparent namespace collision.",
+          "text": "Completion, definition, references, rename, hover, reflection, semindex, generated docs, and state diagrams point to the owning struct section.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 7,
-          "text": "Parser, formatter, grammars, snapshots, sema, TIR facts, AOT, JIT, interpreter, and web use the ratified form only.",
+          "text": "`examples/features/reflection/fact_reads.jet` contains one coherent `Order` declaration and no apparent namespace collision.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-24T23:10:20.307Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 8,
-          "text": "Syntax.rs entry updated",
+          "text": "Top-level companion syntax is rejected with a teaching rewrite and never survives parser recovery into accepted AST or formatted output.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:14:09.020Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 9,
-          "text": "syntax-decisions.md log entry",
+          "text": "Parser, formatter, sema, TIR facts, AOT, JIT, interpreter, comptime, and web consume the nested form and one erased fact registry.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:14:09.020Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 10,
-          "text": "jet devtools grammars regenerated",
+          "text": "`Syntax.rs` records D-STATE-HOME1=A and `syntax-decisions.md` records its amendment to D-STATE-NS1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:14:09.020Z"
+          "at": "2026-08-25T19:18:03.992Z"
         },
         {
           "n": 11,
-          "text": "snapshots re-blessed",
+          "text": "Jet devtools grammars, typestate tests, UI snapshots, reflection snapshots, examples, and goldens contain the nested form only.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T00:14:09.020Z"
+          "at": "2026-08-25T19:18:03.992Z"
         }
       ],
       "refs": [
+        "D-STATE-HOME1",
         "D-STATE-NS1",
         "D-FACTMODEL1"
       ],
@@ -149721,8 +149900,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:55.233Z",
-      "updated": "2026-08-25T00:14:09.020Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:18:05.024Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c14vk3sif",
@@ -149733,13 +149912,18 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
-      "plan": "1. Implement the vocabulary and authority flow ratified by D-ABILITY-NAME2.\n2. Infer effects for beginner code and request approval only at the application boundary.\n3. Support once and project approval interactively; require declared policy in CI and non-interactive runs.\n4. Give experts lexical narrowing, optional typed handles, explicit effect rows, manifests, and audit controls.\n5. Prevent inner scopes and dependencies from widening outer authority.\n6. Use complete role names in diagnostics, help, policy, JSON, and receipts.\n7. Remove every retired source and tooling spelling without aliases.",
+      "plan": "1. Follow D-ABILITY-NAME2=A. Use `#FX` only in expert source and full role names in all beginner and operator surfaces.\n2. Rename the scoped handle to `Authority`; remove `Ability`, `Abilities`, `#Abilities`, Capability, Caps, and losing source spellings.\n3. Parse `#FX(Net)` and `#FX(grant: FS, Net)` through the existing scoped-authority AST and sema path.\n4. Infer required effects in `crates/jet-sema/src/Sema/Effects.rs`; keep explicit `-[Effects]>` rows as upper-bound assertions.\n5. Resolve application authority after sema and before execution. Use existing `package.jet` `authority.holds` and `authority.grants` policy.\n6. In an interactive terminal, offer once, project, or deny only when declared policy leaves a required effect undecided.\n7. Make project approval use the existing comment-preserving manifest editor. Never rewrite the manifest as plain text.\n8. Make CI, JSON, redirected, and non-interactive runs fail with a structured policy diagnostic instead of prompting.\n9. Prevent nested `#FX`, dependencies, callbacks, and passed handles from widening the outer grant or escaping their scope.\n10. Project `required_effects`, `granted_effects`, `denied_effects`, and `authority` through CLI, inspect, JSON, receipts, lock provenance, and Canvas.\n11. Store every approval and delegation as a source-linked receipt with scope, resource, operation, authority identity, and policy source.\n12. Update `Syntax`, `Authority.rs`, sema, `EffectBudget.rs`, CLI commands, Prelude authority, TIR, JIT, comptime, web, docs, and generated surfaces.\n13. Add retirement diagnostics and a repository ratchet for old names outside diagnostic fixtures and decision history.\n14. Run parser, sema effects, package policy, CLI, inspect, receipts, TIR, JIT, comptime, web, Canvas, UI, grammar, and golden checks.\n15. Smoke interactive once, project, deny, CI refusal, nested narrowing, handle delegation, default `jet run`, and AOT.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-25",
+          "by": "Main",
+          "text": "Vetted D-ABILITY-NAME2=A into one end-to-end authority flow. Added exact prompt and manifest behavior, scope and escape laws, role-specific data fields, clean retirement, and full I9 proof."
+        },
         {
           "at": "2026-08-25",
           "by": "Main",
@@ -149758,120 +149942,129 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Beginner functions use effectful Core APIs without routine effect rows or lexical authority markers.",
+          "text": "Beginner functions call effectful Core APIs without routine effect rows, `#FX`, authority values, or policy vocabulary.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 2,
-          "text": "Sema infers the exact required effects and asks for approval only at the application boundary when policy does not decide.",
+          "text": "Sema computes exact statically reachable required effects and asks for authority only at the application boundary when policy is undecided.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 3,
-          "text": "Interactive approval supports once, project scope, and deny; CI and non-interactive runs require declared policy.",
+          "text": "Interactive approval offers once, project, and deny; once is invocation-local, project edits canonical policy, and deny executes no effect.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 4,
-          "text": "The ratified expert source boundary supports lexical narrowing and an optional typed Authority handle without widening outer grants.",
+          "text": "CI, JSON, redirected, and non-interactive runs never prompt and require declared policy for every required effect.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 5,
-          "text": "Explicit effect rows can assert or prohibit inferred effects and receive sema diagnostics on disagreement.",
+          "text": "`#FX(Effects...)` narrows one lexical scope, while `#FX(name: Effects...)` also binds one typed `Authority` handle.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 6,
-          "text": "Diagnostics, help, policy, inspect output, JSON, and receipts distinguish required effects, granted effects, denied effects, and authority.",
+          "text": "Nested scopes, dependencies, callbacks, and handles can narrow or delegate existing authority but cannot widen or escape the outer grant.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 7,
-          "text": "Every approval and delegation leaves a source-linked receipt with scope, resource, operation, and authority identity.",
+          "text": "Explicit `-[Effects]>` rows cap inferred effects, and `-[]>` prohibits all effects; disagreement gets registered sema diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 8,
-          "text": "Retired Capability, Caps, Ability, or losing spellings receive exact diagnostics and have no aliases.",
+          "text": "Diagnostics, prompts, help, policy, hover, docs, inspect, JSON, receipts, lock provenance, and Canvas distinguish required, granted, denied, and authority roles.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 9,
-          "text": "AOT, JIT, interpreter, comptime, and web consume the same inferred effects and authority decision.",
+          "text": "Every once or project approval and every handle delegation leaves a source-linked receipt with scope, resource, operation, authority identity, and policy source.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:34:17.142Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 10,
-          "text": "Syntax.rs entry updated",
+          "text": "`Ability`, `Abilities`, `#Abilities`, Capability, Caps, and losing spellings have exact retirement diagnostics and no aliases, types, markers, flags, or JSON fields.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:46.845Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 11,
-          "text": "syntax-decisions.md log entry",
+          "text": "A repository ratchet finds no retired vocabulary outside diagnostic fixtures, ratified history, and unrelated English uses.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:46.845Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 12,
-          "text": "jet devtools grammars regenerated",
+          "text": "AOT, default JIT, interpreter, comptime, and web consume the same sema effects, package policy decision, and Prelude Authority value.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:46.845Z"
+          "at": "2026-08-25T19:22:09.157Z"
         },
         {
           "n": 13,
-          "text": "snapshots re-blessed",
+          "text": "`Syntax.rs` records D-ABILITY-NAME2=A and `syntax-decisions.md` records the owner outcome.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-25T13:44:46.845Z"
+          "at": "2026-08-25T19:22:09.157Z"
+        },
+        {
+          "n": 14,
+          "text": "Jet devtools grammars, completions, man output, UI snapshots, examples, policy fixtures, JSON snapshots, and receipts use the current vocabulary only.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:22:09.157Z"
         }
       ],
       "refs": [
@@ -149885,8 +150078,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-24T22:56:58.324Z",
-      "updated": "2026-08-25T13:44:46.845Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-25T19:22:09.541Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c024o546",
@@ -150885,6 +151078,78 @@
       "needsAcceptance": false,
       "created": "2026-08-25T15:22:03.991Z",
       "updated": "2026-08-25T18:45:36.110Z",
+      "updatedBy": "orchestrator",
+      "workOrder": 0
+    },
+    {
+      "id": "c0rlso3f",
+      "num": 2198,
+      "title": "Jet ships three hardcoded domains nobody owns, including the default catalog endpoint",
+      "body": "OWNER acquired `jet-lang.dev` on 2026-08-25. Auditing what the tree already points at surfaced a live supply-chain exposure, independent of any marketing use.\n\nMEASURED, all currently in the shipped tree:\n\n1. `crates/jetpack/src/NixIndex.rs:29` — `const DEFAULT_ENDPOINT: &str = \"https://index.jet.dev/nixpkgs\";`. This is the DEFAULT signed-catalog endpoint. The catalog maps a package name to an exact store path. Whoever controls that host controls what `ripgrep` resolves to for any jetpack that reaches the default. `jet.dev` is not owned by the project.\n\n2. `crates/jetpack/src/JetOS/identity.rs:20` and `:67` — `HOME_URL=\"https://jet.dev/jetos\"` written into `/etc/os-release` on every jetos generation. Same unowned host, and it is baked into installed systems.\n\n3. `Source/Publish/SBOM.rs:26` and `:171` — `DocumentNamespace: https://jet-lang.org/spdx/{name}-{version}-{subject}`. SPDX requires the namespace to be a URI the document producer controls, precisely so a namespace cannot be forged or collided. `jet-lang.org` is a different registration from `jet-lang.dev` and is not owned either.\n\nWHY THIS IS NOT COSMETIC: the catalog endpoint is a trust boundary. Content addressing and upstream cache signature checks protect the BYTES, but the name-to-store-path mapping comes from the catalog. A hostile default endpoint hands an attacker the mapping. The SPDX namespace is weaker but still a provenance claim about a domain the project does not hold.\n\nWHAT TO DO:\n\n- Point every hardcoded host at the owned domain, or remove the default entirely so a catalog endpoint must be configured explicitly. Removing the default is the safer shape and fits the ratified local unofficial tier on card #2157: no endpoint, no key, explicit opt-in.\n- If a default endpoint is retained, it must be on the owned domain and the client must still verify, never trust the host.\n- Fix the SPDX namespace to the owned domain so the provenance claim is true.\n- Grep for any other unowned host in shipped strings and fix them in the same pass.\n\nRELATED: card #2157 defers official signed publication until a real registry exists. This card is not that work. This card only stops the tree from pointing at hosts the project does not control.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m09-native-nixpkgs-dogfood",
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No shipped string references a host the project does not own, proven by a fresh scan of crates, Source and docs for external hosts",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:42:36.097Z"
+        },
+        {
+          "n": 2,
+          "text": "The catalog endpoint is either absent by default or on the owned domain, and a configured endpoint is still verified rather than trusted for being that host",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:42:36.443Z"
+        },
+        {
+          "n": 3,
+          "text": "The jetos os-release HOME_URL names the owned domain and an installed generation carries it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:42:36.780Z"
+        },
+        {
+          "n": 4,
+          "text": "The SPDX DocumentNamespace names a URI the project controls, and a generated SBOM shows it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:42:37.120Z"
+        },
+        {
+          "n": 5,
+          "text": "A test fails if a new unowned host is introduced into a shipped string",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-25T19:42:37.478Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-25T19:42:35.730Z",
+      "updated": "2026-08-25T19:42:38.586Z",
       "updatedBy": "orchestrator",
       "workOrder": 0
     }
@@ -209561,6 +209826,314 @@
   ],
   "events": [
     {
+      "at": "2026-08-25T19:42:38.586Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c0rlso3f",
+      "note": "milestoneId,workOrder"
+    },
+    {
+      "at": "2026-08-25T19:42:37.478Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rlso3f",
+      "note": "#5 A test fails if a new unowned host is introduced into a ship"
+    },
+    {
+      "at": "2026-08-25T19:42:37.121Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rlso3f",
+      "note": "#4 The SPDX DocumentNamespace names a URI the project controls,"
+    },
+    {
+      "at": "2026-08-25T19:42:36.780Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rlso3f",
+      "note": "#3 The jetos os-release HOME_URL names the owned domain and an "
+    },
+    {
+      "at": "2026-08-25T19:42:36.444Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rlso3f",
+      "note": "#2 The catalog endpoint is either absent by default or on the o"
+    },
+    {
+      "at": "2026-08-25T19:42:36.097Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c0rlso3f",
+      "note": "#1 No shipped string references a host the project does not own"
+    },
+    {
+      "at": "2026-08-25T19:42:35.730Z",
+      "by": "orchestrator",
+      "action": "card.add",
+      "ref": "c0rlso3f",
+      "note": "Jet ships three hardcoded domains nobody owns, including the default catalog endpoint"
+    },
+    {
+      "at": "2026-08-25T19:41:59.804Z",
+      "by": "orchestrator",
+      "action": "card.update",
+      "ref": "c00s3cle",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-25T19:41:58.538Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#14 One local source can mix native recipes and catalog mappings"
+    },
+    {
+      "at": "2026-08-25T19:41:57.677Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#13 A native recipe can deliver a prebuilt binary artifact from "
+    },
+    {
+      "at": "2026-08-25T19:41:56.786Z",
+      "by": "orchestrator",
+      "action": "card.criteria-add",
+      "ref": "c00s3cle",
+      "note": "#12 A local unofficial source carries jetpack-native recipes, no"
+    },
+    {
+      "at": "2026-08-25T19:22:25.511Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cyxijw5j",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:24.377Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cyxijw5j",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:22:23.835Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cyxijw5j",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:22.258Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cup3p8gb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:20.734Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cup3p8gb",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:22:19.177Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cup3p8gb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:17.792Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "ctrvtgzf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:17.405Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "ctrvtgzf",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:22:16.895Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "ctrvtgzf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:13.047Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cr8bdkzb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:11.897Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cr8bdkzb",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:22:11.339Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cr8bdkzb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:10.896Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cwf44fqc",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:10.535Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cwf44fqc",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:22:10.001Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cwf44fqc",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:09.541Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "c14vk3sif",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:22:09.157Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c14vk3sif",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:22:08.645Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "c14vk3sif",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:19.780Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "cv62zydw",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:18.416Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "cv62zydw",
+      "note": "phase,blockedBy,refs,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:18:17.804Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "cv62zydw",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:16.317Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "c10086k5d",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:15.024Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c10086k5d",
+      "note": "phase,blockedBy,refs,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:18:13.695Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "c10086k5d",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:11.966Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "c12uacgqe",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:10.632Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c12uacgqe",
+      "note": "phase,blockedBy,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:18:09.031Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "c12uacgqe",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:08.569Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "c11y6itr6",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:07.721Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c11y6itr6",
+      "note": "phase,blockedBy,refs,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:18:06.046Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "c11y6itr6",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:05.024Z",
+      "by": "Main",
+      "action": "card.release",
+      "ref": "c13gfyz5l",
+      "note": ""
+    },
+    {
+      "at": "2026-08-25T19:18:03.992Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c13gfyz5l",
+      "note": "phase,blockedBy,refs,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-08-25T19:18:02.927Z",
+      "by": "Main",
+      "action": "card.claim",
+      "ref": "c13gfyz5l",
+      "note": ""
+    },
+    {
       "at": "2026-08-25T19:15:46.068Z",
       "by": "owner",
       "action": "decision.verdict",
@@ -212750,314 +213323,6 @@
       "by": "orchestrator",
       "action": "card.update",
       "ref": "c0fr9gl2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:34.631Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0a4dfud",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos n"
-    },
-    {
-      "at": "2026-08-24T23:26:34.271Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0a4dfud",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:33.925Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ycfgad",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos V"
-    },
-    {
-      "at": "2026-08-24T23:26:33.569Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ycfgad",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:33.212Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0i1vxui",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos o"
-    },
-    {
-      "at": "2026-08-24T23:26:32.852Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0i1vxui",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:32.469Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c08g84nj",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos u"
-    },
-    {
-      "at": "2026-08-24T23:26:32.120Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c08g84nj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:31.757Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c02xubmv",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos u"
-    },
-    {
-      "at": "2026-08-24T23:26:31.371Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c02xubmv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:31.006Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0x2g69u",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos u"
-    },
-    {
-      "at": "2026-08-24T23:26:30.648Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0x2g69u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:30.277Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c04s3toz",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos b"
-    },
-    {
-      "at": "2026-08-24T23:26:29.914Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c04s3toz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:29.548Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ze7k0c",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos b"
-    },
-    {
-      "at": "2026-08-24T23:26:29.208Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ze7k0c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:28.837Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0pfw87t",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:26:28.471Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0pfw87t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:28.113Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kbw9dr",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos d"
-    },
-    {
-      "at": "2026-08-24T23:26:27.753Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0kbw9dr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:27.399Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ae8vxy",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos g"
-    },
-    {
-      "at": "2026-08-24T23:26:27.047Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ae8vxy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:26.686Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c051psx0",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos g"
-    },
-    {
-      "at": "2026-08-24T23:26:26.327Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c051psx0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:25.963Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0v25706",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos b"
-    },
-    {
-      "at": "2026-08-24T23:26:25.622Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0v25706",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:25.244Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0kodh8n",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos b"
-    },
-    {
-      "at": "2026-08-24T23:26:24.884Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0kodh8n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:24.533Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0av1t1i",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos s"
-    },
-    {
-      "at": "2026-08-24T23:26:24.176Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0av1t1i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:23.794Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c000i200",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos c"
-    },
-    {
-      "at": "2026-08-24T23:26:23.452Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c000i200",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:23.089Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0rgy9zq",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos c"
-    },
-    {
-      "at": "2026-08-24T23:26:22.734Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0rgy9zq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:22.384Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fwzyiv",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos P"
-    },
-    {
-      "at": "2026-08-24T23:26:22.037Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0fwzyiv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:21.666Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c05glk9b",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos a"
-    },
-    {
-      "at": "2026-08-24T23:26:21.311Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c05glk9b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:20.959Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c002nhca",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos a"
-    },
-    {
-      "at": "2026-08-24T23:26:20.603Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c002nhca",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:20.251Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0ptq2fy",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos l"
-    },
-    {
-      "at": "2026-08-24T23:26:19.910Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0ptq2fy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-24T23:26:19.561Z",
-      "by": "orchestrator",
-      "action": "card.criteria-add",
-      "ref": "c0fttoym",
-      "note": "#6 Slice-specific: the behavior this card alone owns — “jetos a"
-    },
-    {
-      "at": "2026-08-24T23:26:19.211Z",
-      "by": "orchestrator",
-      "action": "card.update",
-      "ref": "c0fttoym",
       "note": "logEntry"
     }
   ],

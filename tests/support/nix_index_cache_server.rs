@@ -21,7 +21,7 @@ use std::time::Duration;
 pub const CHANNEL: &str = "nixpkgs-unstable";
 pub const SYSTEM: &str = "x86_64-linux";
 pub const REVISION: &str = "c8f90650c15282fa8656a041bfbbd2403997a9a7";
-const INDEX_KEY_ID: &str = "jet-test-index-v1";
+const INDEX_KEY_ID: &str = "fixture-index-signer-v1";
 const CACHE_KEY_ID: &str = "jet-test-cache-v1";
 const SIGNING_SEED: [u8; 32] = [7; 32];
 
@@ -247,6 +247,34 @@ impl NixIndexCacheServer {
             ),
         )
         .expect("Nix cache trust key");
+    }
+
+    pub fn install_local_catalog(&self, root: &Path) {
+        let target_dir = root.join("index-v1").join(REVISION).join(SYSTEM);
+        fs::create_dir_all(&target_dir).expect("local Nix catalog target directory");
+        let digest = jetpack::SHA256::sha256_hex(&self.signed_index.index_bytes);
+        fs::write(
+            target_dir.join(format!("{digest}.json.zst")),
+            &self.signed_index.index_bytes,
+        )
+        .expect("local Nix catalog target");
+    }
+
+    pub fn corrupt_index_signature(&self) {
+        let path = self
+            .signed_index
+            .target_signature_url
+            .strip_prefix(&self.endpoint)
+            .expect("index signature belongs to server");
+        let mut signature = self
+            .signed_index
+            .index_signature
+            .clone();
+        signature.push(b'!');
+        self.routes
+            .lock()
+            .expect("Nix test routes")
+            .insert(path.to_string(), signature);
     }
 
     pub fn stop_network(&self) {

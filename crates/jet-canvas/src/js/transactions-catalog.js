@@ -244,6 +244,7 @@
       && latestProject.project_revision;
     const beforeSource = latestDoc && latestDoc.source_text;
     const request = Object.assign({}, body);
+    if (typeof canvasClientId === "function") request.client_id = canvasClientId();
     const sourceId = currentCanvasSourceId();
     if (!request.source_id && sourceId) request.source_id = sourceId;
     let txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
@@ -369,6 +370,7 @@
     if (!latestDoc || typeof source !== "string") return;
     const txUrl = window.__JET_CANVAS_TX__ || ((window.__JET_CANVAS_BASE__ || "/canvas") + "/transaction");
     const request = { schema_version: 1, op: "replace_source", revision: latestDoc.revision, source, undo_restore: action || "restore" };
+    if (typeof canvasClientId === "function") request.client_id = canvasClientId();
     const sourceId = currentCanvasSourceId();
     if (sourceId) request.source_id = sourceId;
     window.__jetCanvasLastTx = request;
@@ -563,7 +565,16 @@
         if (!result.ok) {
           const hasDiagnostics = acceptDiagnosticsPayload(result.doc, "Graph");
           jump.textContent = "Canvas graph has problems";
-          details.textContent = result.doc && result.doc.message || "Graph check failed";
+          const retained = canvasSession && (canvasSession.last_good_revision || canvasSession.last_good_program);
+          if (retained) {
+            window.__jetCanvasLastGoodGraph = {
+              revision: canvasSession.last_good_revision || null,
+              program: canvasSession.last_good_program || null,
+              retained: true
+            };
+          }
+          details.textContent = (result.doc && result.doc.message || "Graph check failed")
+            + (retained ? " · last-good graph retained" : "");
           if (!hasDiagnostics) setCanvasState("error", "Canvas could not open", "The last source remains available. Fix the request or retry the graph projection.", [
             { label: "Open source", run: openSourceRecovery },
             { label: "Retry", primary: true, run: () => loadGraph(sourceId) }
@@ -638,7 +649,14 @@
       .catch((e) => {
         const offline = navigator.onLine === false;
         jump.textContent = offline ? "Canvas is offline" : "Canvas graph failed";
-        details.textContent = String(e);
+        details.textContent = String(e) + (canvasSession && canvasSession.last_good_program ? " · last-good graph retained" : "");
+        if (canvasSession && canvasSession.last_good_program) {
+          window.__jetCanvasLastGoodGraph = {
+            revision: canvasSession.last_good_revision || null,
+            program: canvasSession.last_good_program,
+            retained: true
+          };
+        }
         setCanvasState(offline ? "offline" : "error", offline ? "Offline" : "Canvas could not load", offline ? "Jet source stays visible. Reconnect, then retry the graph." : "Jet source stays visible. Retry the graph projection when the server is ready.", [
           { label: "Show source", run: openSourceRecovery },
           { label: "Retry", primary: true, run: () => loadGraph(requestedSourceId) }

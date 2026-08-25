@@ -2,6 +2,7 @@
 #![allow(non_snake_case)]
 #![deny(warnings)]
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -44,6 +45,7 @@ pub fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
 pub struct Request {
     pub method: String,
     pub target: String,
+    pub headers: HashMap<String, String>,
     pub body: Vec<u8>,
 }
 
@@ -54,13 +56,19 @@ impl Request {
             return Ok(None);
         }
         let mut content_length = 0;
+        let mut headers = HashMap::new();
         loop {
             let mut header = String::new();
             if reader.read_line(&mut header)? == 0 || header == "\r\n" || header == "\n" {
                 break;
             }
-            if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:") {
-                content_length = value.trim().parse().unwrap_or(0);
+            if let Some((name, value)) = header.trim_end_matches(['\r', '\n']).split_once(':') {
+                let name = name.trim().to_ascii_lowercase();
+                let value = value.trim().to_string();
+                if name == "content-length" {
+                    content_length = value.parse().unwrap_or(0);
+                }
+                headers.insert(name, value);
             }
         }
         if content_length > 1024 * 1024 {
@@ -75,6 +83,7 @@ impl Request {
         Ok(Some(Self {
             method: parts.next().unwrap_or("").to_string(),
             target: parts.next().unwrap_or("/").to_string(),
+            headers,
             body,
         }))
     }
@@ -203,6 +212,7 @@ mod tests {
         let mut raw = &b"POST /x?q=a%20b HTTP/1.1\r\nContent-Length: 2\r\n\r\nok"[..];
         let r = Request::read(&mut raw).unwrap().unwrap();
         assert_eq!(r.body, b"ok");
+        assert_eq!(r.headers.get("content-length").map(String::as_str), Some("2"));
         assert_eq!(query_param(&r.target, "q").as_deref(), Some("a b"));
     }
     #[test]

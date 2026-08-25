@@ -83,7 +83,7 @@ fn collect_unused_imports(
             {
                 if let Some(alias) = ledger.alias(module_idx, &import.alias) {
                     if alias.span.start < alias.span.end
-                        && !alias_used(ledger, &module.display, alias)
+                        && !alias_used(ledger, alias)
                     {
                         let name = import.alias.clone();
                         let explicit_alias = import.alias_span.start > import.span.start;
@@ -120,7 +120,7 @@ fn collect_unused_imports(
                 let Some(alias) = ledger.alias(module_idx, &binding.local) else {
                     continue;
                 };
-                if alias.span.start >= alias.span.end || alias_used(ledger, &module.display, alias)
+                if alias.span.start >= alias.span.end || alias_used(ledger, alias)
                 {
                     continue;
                 }
@@ -381,13 +381,8 @@ fn display_name(declaration: &NameDeclaration) -> String {
         .unwrap_or_else(|| declaration.name.clone())
 }
 
-fn alias_used(ledger: &NameLedger, source: &str, alias: &NameAlias) -> bool {
-    ledger
-        .references()
-        .iter()
-        .any(|((module, _, _), reference)| {
-            module == source && reference.kind == "import_alias" && reference.def_span == alias.span
-        })
+fn alias_used(ledger: &NameLedger, alias: &NameAlias) -> bool {
+    ledger.alias_used(alias.module, alias)
 }
 
 fn private_function_used(

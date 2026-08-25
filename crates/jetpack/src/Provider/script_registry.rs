@@ -255,6 +255,8 @@ impl Provider for ScriptRegistryProvider {
                     platform: envelope.platform.clone(),
                     signature: envelope.signature.clone(),
                     provenance: envelope.provenance.clone(),
+                    catalog_tier: String::new(),
+                    catalog_trust: String::new(),
                 },
             );
         }

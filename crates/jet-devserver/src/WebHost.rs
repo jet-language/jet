@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, IsTerminal, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -29,6 +29,7 @@ use crate::{content_type_for, query_param, static_path, write_response, Request}
 /// already on 8080" without hunting indefinitely (judgment call — 10 ports is
 /// generous for a dev tool binding localhost).
 const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
+const CANVAS_SESSION_BYTES: usize = 32;
 
 /// How often the live-reload script in the browser polls `/__jet_dev_version`
 /// The browser waits 750ms after each completed request before polling again.
@@ -523,6 +524,27 @@ impl DevStatus {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CanvasHostOptions {
+    pub host: String,
+    pub port: Option<u16>,
+    pub transport: String,
+    pub authority: String,
+    pub audit: bool,
+}
+
+impl Default for CanvasHostOptions {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: None,
+            transport: "http".to_string(),
+            authority: "loopback".to_string(),
+            audit: false,
+        }
+    }
+}
+
 pub struct WebHost {
     listener: Mutex<Option<TcpListener>>,
     application_listener: Mutex<Option<TcpListener>>,
@@ -530,6 +552,9 @@ pub struct WebHost {
     debug_sessions: Arc<crate::Canvas::DebugSessions>,
     session: Arc<crate::ResidentDevSession>,
     canvas_file: String,
+    canvas_only: bool,
+    bind_host: String,
+    session_secret: String,
 }
 
 impl WebHost {
@@ -546,6 +571,7 @@ impl WebHost {
             .unwrap_or(0);
         let status = Arc::new(DevStatus::new(file, verbose));
         status.set_port(bound_port);
+        let session_secret = mint_session_secret()?;
         Ok(Self {
             listener: Mutex::new(Some(listener)),
             application_listener: Mutex::new(Some(application_listener)),
@@ -557,6 +583,92 @@ impl WebHost {
                 application_port,
             )),
             canvas_file: file.to_string(),
+            canvas_only: false,
+            bind_host: "127.0.0.1".to_string(),
+            session_secret,
+        })
+    }
+
+    /// Bind Canvas as a target-neutral control host. The default uses an OS
+    /// selected loopback port and never starts the application preview
+    /// listener; program target/output selection remains in the caller.
+    pub fn bind_canvas(file: &str, verbose: bool, port: Option<u16>) -> Result<Self, String> {
+        let mut options = CanvasHostOptions::default();
+        options.port = port;
+        Self::bind_canvas_with_options(file, verbose, &options)
+    }
+
+    /// Bind the Canvas control plane with a separate application listener.
+    /// Web-targeted development uses this form so Canvas transport settings do
+    /// not replace the program's own preview/output listener.
+    pub fn bind_web_with_canvas_options(
+        file: &str,
+        verbose: bool,
+        fallback_port: Option<u16>,
+        options: &CanvasHostOptions,
+    ) -> Result<Self, String> {
+        let host = validate_canvas_options(options)?;
+        let mut effective = options.clone();
+        if effective.port.is_none() {
+            effective.port = fallback_port;
+        }
+        let listener = bind_canvas_server(&host, effective.port)?;
+        let bound_port = listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(0);
+        let application_listener = bind_application_server()?;
+        let application_port = application_listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(0);
+        let status = Arc::new(DevStatus::new(file, verbose || options.audit));
+        status.set_port(bound_port);
+        let session_secret = mint_session_secret()?;
+        Ok(Self {
+            listener: Mutex::new(Some(listener)),
+            application_listener: Mutex::new(Some(application_listener)),
+            status,
+            debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
+            session: Arc::new(crate::ResidentDevSession::new_with_canvas_host(
+                file,
+                &host,
+                bound_port,
+                application_port,
+            )),
+            canvas_file: file.to_string(),
+            canvas_only: false,
+            bind_host: host,
+            session_secret,
+        })
+    }
+
+    pub fn bind_canvas_with_options(
+        file: &str,
+        verbose: bool,
+        options: &CanvasHostOptions,
+    ) -> Result<Self, String> {
+        let host = validate_canvas_options(options)?;
+        let listener = bind_canvas_server(&host, options.port)?;
+        let bound_port = listener
+            .local_addr()
+            .map(|address| address.port())
+            .unwrap_or(0);
+        let status = Arc::new(DevStatus::new(file, verbose || options.audit));
+        status.set_port(bound_port);
+        let session_secret = mint_session_secret()?;
+        Ok(Self {
+            listener: Mutex::new(Some(listener)),
+            application_listener: Mutex::new(None),
+            status,
+            debug_sessions: Arc::new(crate::Canvas::DebugSessions::default()),
+            session: Arc::new(crate::ResidentDevSession::new_with_canvas_host(
+                file, &host, bound_port, 0,
+            )),
+            canvas_file: file.to_string(),
+            canvas_only: true,
+            bind_host: host,
+            session_secret,
         })
     }
 
@@ -572,7 +684,12 @@ impl WebHost {
     }
 
     pub fn canvas_url(&self) -> String {
-        format!("http://localhost:{}/canvas", self.status.port())
+        format!(
+            "http://{}:{}/canvas?session={}",
+            url_host(&self.bind_host),
+            self.status.port(),
+            self.session_secret
+        )
     }
 
     fn start_inner(&self, terminal_controls: bool) {
@@ -582,6 +699,9 @@ impl WebHost {
             let debug_sessions = Arc::clone(&self.debug_sessions);
             let session = Arc::clone(&self.session);
             let canvas_file = self.canvas_file.clone();
+            let canvas_only = self.canvas_only;
+            let bind_host = self.bind_host.clone();
+            let session_secret = self.session_secret.clone();
             thread::spawn(move || {
                 serve_forever(
                     listener,
@@ -590,6 +710,9 @@ impl WebHost {
                     session,
                     canvas_file,
                     ListenerKind::Canvas,
+                    canvas_only,
+                    bind_host,
+                    session_secret,
                 )
             });
         }
@@ -606,6 +729,9 @@ impl WebHost {
                     session,
                     canvas_file,
                     ListenerKind::Application,
+                    false,
+                    "127.0.0.1".to_string(),
+                    String::new(),
                 )
             });
         }
@@ -617,14 +743,16 @@ impl WebHost {
                 status.expire_clients();
             });
         }
-        if terminal_controls && !self.status.pin {
+        if self.canvas_only || !terminal_controls {
+            println!("Canvas: {}", self.canvas_url());
+        } else if terminal_controls && !self.status.pin {
             println!(
                 "serving Canvas http://localhost:{} — app preview http://localhost:{} — watching {} … (Ctrl-C to stop)",
                 self.status.port(),
                 self.session_application_port(),
                 self.canvas_file
             );
-            println!("Canvas: http://localhost:{}/canvas", self.status.port());
+            println!("Canvas: {}", self.canvas_url());
             println!(
                 "App preview: http://localhost:{}/",
                 self.session_application_port()
@@ -655,7 +783,12 @@ impl WebHost {
     }
 
     pub fn mark_error(&self, code: String, diagnostic: String, is_rebuild: bool) {
-        self.status.mark_error(code.clone(), diagnostic.clone(), is_rebuild);
+        self.status
+            .mark_error(code.clone(), diagnostic.clone(), is_rebuild);
+        if let Ok(source) = fs::read_to_string(&self.canvas_file) {
+            self.session
+                .observe_source(&crate::Canvas::source_revision(&source));
+        }
         self.session.mark_error(&code, &diagnostic);
     }
 
@@ -665,11 +798,7 @@ impl WebHost {
     }
 
     fn session_application_port(&self) -> u16 {
-        let json = self.session.json();
-        json.split_once("\"application\":{\"host\":\"127.0.0.1\",\"port\":")
-            .and_then(|(_, tail)| tail.split_once(',').map(|(port, _)| port))
-            .and_then(|port| port.parse().ok())
-            .unwrap_or(0)
+        self.session.application_port()
     }
 }
 
@@ -881,6 +1010,165 @@ fn bind_dev_server(port: Option<u16>) -> Result<TcpListener, String> {
     ))
 }
 
+fn bind_canvas_server(host: &str, port: Option<u16>) -> Result<TcpListener, String> {
+    let requested = port.unwrap_or(0);
+    match TcpListener::bind((host, requested)) {
+        Ok(listener) => Ok(listener),
+        Err(error) => {
+            let fix = if error.kind() == std::io::ErrorKind::AddrInUse {
+                format!(
+                    "\n fix: stop whatever's using port {}, or pick another with --canvas-port=<N>",
+                    requested
+                )
+            } else {
+                String::new()
+            };
+            Err(format!(
+                "error: couldn't bind Canvas host {}:{}: {}{}",
+                host, requested, error, fix
+            ))
+        }
+    }
+}
+
+fn validate_canvas_options(options: &CanvasHostOptions) -> Result<String, String> {
+    if options.transport != "http" {
+        return Err(format!(
+            "error: Canvas transport `{}` is unsupported; use `http`",
+            options.transport
+        ));
+    }
+    if !matches!(options.authority.as_str(), "loopback" | "remote") {
+        return Err(format!(
+            "error: Canvas authority `{}` is invalid; use `loopback` or `remote`",
+            options.authority
+        ));
+    }
+    let host = normalize_bind_host(&options.host)?;
+    if !is_loopback_host(&host) && options.authority != "remote" {
+        return Err(format!(
+            "error: Canvas host `{host}` is not loopback; set `authority = remote` explicitly"
+        ));
+    }
+    Ok(host)
+}
+
+fn mint_session_secret() -> Result<String, String> {
+    let mut bytes = [0u8; CANVAS_SESSION_BYTES];
+    let mut source = fs::File::open("/dev/urandom")
+        .map_err(|error| format!("could not open the system random source: {error}"))?;
+    std::io::Read::read_exact(&mut source, &mut bytes)
+        .map_err(|error| format!("could not read the system random source: {error}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn normalize_bind_host(host: &str) -> Result<String, String> {
+    let host = host.trim();
+    let host = host
+        .strip_prefix('[')
+        .and_then(|host| host.strip_suffix(']'))
+        .unwrap_or(host);
+    if host.is_empty() || host.chars().any(char::is_whitespace) || host.contains('/') {
+        return Err(format!("error: Canvas host `{host}` is invalid"));
+    }
+    Ok(host.to_string())
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false)
+}
+
+fn url_host(host: &str) -> String {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V6(_)) => format!("[{host}]"),
+        _ => host.to_string(),
+    }
+}
+
+fn canvas_api_path(path: &str, target: &str) -> bool {
+    (path == "/__jet_canvas/live"
+        || (path.starts_with("/__jet_canvas/") && !path.ends_with("/app.js"))
+        || (path.starts_with("/canvas/") && !path.ends_with("/app.js"))
+        || (path.starts_with("/panel/") && !path.ends_with("/app.js")))
+        || (path == "/" && query_param(target, "jet_panel_graph").as_deref() == Some("1"))
+}
+
+fn canvas_request_authorized(
+    request: &Request,
+    _target: &str,
+    bind_host: &str,
+    port: u16,
+    session_secret: &str,
+) -> bool {
+    let Some(host) = request.headers.get("host") else {
+        return false;
+    };
+    if !host_header_allowed(host, bind_host, port) {
+        return false;
+    }
+    if let Some(origin) = request.headers.get("origin") {
+        if !origin_allowed(origin, bind_host, port) {
+            return false;
+        }
+    }
+    let Some(authorization) = request.headers.get("authorization") else {
+        return false;
+    };
+    let Some(token) = authorization.strip_prefix("Bearer ") else {
+        return false;
+    };
+    constant_time_equal(token, session_secret)
+}
+
+fn host_header_allowed(value: &str, bind_host: &str, port: u16) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    if value == format!("{}:{}", url_host(bind_host), port).to_ascii_lowercase() {
+        return true;
+    }
+    if !is_loopback_host(bind_host) {
+        return false;
+    }
+    ["localhost", "127.0.0.1", "[::1]"]
+        .iter()
+        .any(|alias| value == format!("{alias}:{port}"))
+}
+
+fn origin_allowed(value: &str, bind_host: &str, port: u16) -> bool {
+    let value = value.trim().to_ascii_lowercase();
+    let expected = format!("http://{}:{}", url_host(bind_host), port).to_ascii_lowercase();
+    if value == expected {
+        return true;
+    }
+    is_loopback_host(bind_host)
+        && ["localhost", "127.0.0.1", "[::1]"]
+            .iter()
+            .any(|alias| value == format!("http://{alias}:{port}"))
+}
+
+fn constant_time_equal(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        difference |= left.get(index).copied().unwrap_or(0) as usize
+            ^ right.get(index).copied().unwrap_or(0) as usize;
+    }
+    difference == 0
+}
+
+fn unauthorized(stream: &mut TcpStream) -> std::io::Result<()> {
+    write_response(
+        stream,
+        "401 Unauthorized",
+        "text/plain; charset=utf-8",
+        b"Canvas session, host, or origin rejected",
+    )
+}
+
 fn bind_application_server() -> Result<TcpListener, String> {
     TcpListener::bind(("127.0.0.1", 0))
         .map_err(|error| format!("error: couldn't start the application listener: {error}"))
@@ -901,6 +1189,9 @@ fn serve_forever(
     session: Arc<crate::ResidentDevSession>,
     canvas_file: String,
     listener_kind: ListenerKind,
+    canvas_only: bool,
+    bind_host: String,
+    session_secret: String,
 ) {
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
@@ -908,6 +1199,8 @@ fn serve_forever(
             let debug_sessions = Arc::clone(&debug_sessions);
             let session = Arc::clone(&session);
             let canvas_file = canvas_file.clone();
+            let bind_host = bind_host.clone();
+            let session_secret = session_secret.clone();
             thread::spawn(move || {
                 let _ = handle_connection(
                     stream,
@@ -916,6 +1209,9 @@ fn serve_forever(
                     &session,
                     &canvas_file,
                     listener_kind,
+                    canvas_only,
+                    &bind_host,
+                    &session_secret,
                 );
             });
         }
@@ -931,6 +1227,9 @@ fn handle_connection(
     session: &crate::ResidentDevSession,
     canvas_file: &str,
     listener_kind: ListenerKind,
+    canvas_only: bool,
+    bind_host: &str,
+    session_secret: &str,
 ) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let Some(request) = Request::read(&mut reader)? else {
@@ -940,7 +1239,7 @@ fn handle_connection(
     let mut stream = stream;
     let method = request.method.as_str();
     let target = request.target.as_str();
-    let body = request.body;
+    let body = request.body.as_slice();
 
     if method != "GET" && method != "POST" {
         return write_response(
@@ -952,6 +1251,13 @@ fn handle_connection(
     }
 
     let path = target.split('?').next().unwrap_or("/");
+    if listener_kind == ListenerKind::Canvas
+        && canvas_only
+        && canvas_api_path(path, target)
+        && !canvas_request_authorized(&request, target, bind_host, status.port(), session_secret)
+    {
+        return unauthorized(&mut stream);
+    }
     if let Some(client) = query_param(target, "client_id") {
         session.note_client(&client);
     }
@@ -1038,10 +1344,13 @@ fn handle_connection(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
             Err(diags) => {
-                let body = crate::Canvas::graph_json_error_for_file(Path::new(canvas_file), &diags);
+                let body = with_session(
+                    crate::Canvas::graph_json_error_for_file(Path::new(canvas_file), &diags),
+                    session,
+                );
                 write_response(
                     &mut stream,
                     "409 Conflict",
@@ -1072,13 +1381,13 @@ fn handle_connection(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
         };
     }
@@ -1086,7 +1395,10 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let body = crate::Canvas::project_json_for_entry(Path::new(canvas_file));
+        let body = with_session(
+            crate::Canvas::project_json_for_entry(Path::new(canvas_file)),
+            session,
+        );
         return write_response(
             &mut stream,
             "200 OK",
@@ -1101,7 +1413,10 @@ fn handle_connection(
         if method != "GET" {
             return method_not_allowed(&mut stream);
         }
-        let body = crate::Canvas::source_control_json_for_entry(Path::new(canvas_file));
+        let body = with_session(
+            crate::Canvas::source_control_json_for_entry(Path::new(canvas_file)),
+            session,
+        );
         return write_response(
             &mut stream,
             "200 OK",
@@ -1122,13 +1437,13 @@ fn handle_connection(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
         };
     }
@@ -1147,13 +1462,13 @@ fn handle_connection(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
         };
     }
@@ -1185,18 +1500,19 @@ fn handle_connection(
         {
             Ok(body) => {
                 status.record_command_receipt(body.clone());
+                session.record_command(&request);
                 write_response(
                     &mut stream,
                     "200 OK",
                     "application/json; charset=utf-8",
-                    body.as_bytes(),
+                    with_session(body, session).as_bytes(),
                 )
             }
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
         };
     }
@@ -1211,19 +1527,25 @@ fn handle_connection(
         return match crate::Canvas::apply_transaction_json(Path::new(canvas_file), &request) {
             Ok(body) => {
                 status.version.fetch_add(1, Ordering::SeqCst);
+                let revision = current_revision_for_request(canvas_file, &request);
+                session.accept_transaction(&request, &revision);
                 write_response(
                     &mut stream,
                     "200 OK",
                     "application/json; charset=utf-8",
-                    body.as_bytes(),
+                    with_session(body, session).as_bytes(),
                 )
             }
-            Err(body) => write_response(
-                &mut stream,
-                "409 Conflict",
-                "application/json; charset=utf-8",
-                body.as_bytes(),
-            ),
+            Err(body) => {
+                let revision = current_revision_for_request(canvas_file, &request);
+                session.refuse_transaction(&request, &revision);
+                write_response(
+                    &mut stream,
+                    "409 Conflict",
+                    "application/json; charset=utf-8",
+                    with_session(body, session).as_bytes(),
+                )
+            }
         };
     }
     if path == "/__jet_canvas/project/transaction"
@@ -1238,19 +1560,25 @@ fn handle_connection(
         {
             Ok(body) => {
                 status.version.fetch_add(1, Ordering::SeqCst);
+                let revision = current_revision_for_request(canvas_file, &request);
+                session.accept_transaction(&request, &revision);
                 write_response(
                     &mut stream,
                     "200 OK",
                     "application/json; charset=utf-8",
-                    body.as_bytes(),
+                    with_session(body, session).as_bytes(),
                 )
             }
-            Err(body) => write_response(
-                &mut stream,
-                "409 Conflict",
-                "application/json; charset=utf-8",
-                body.as_bytes(),
-            ),
+            Err(body) => {
+                let revision = current_revision_for_request(canvas_file, &request);
+                session.refuse_transaction(&request, &revision);
+                write_response(
+                    &mut stream,
+                    "409 Conflict",
+                    "application/json; charset=utf-8",
+                    with_session(body, session).as_bytes(),
+                )
+            }
         };
     }
     if path == "/__jet_canvas/query" || path == "/canvas/query" || path == "/panel/query" {
@@ -1263,13 +1591,13 @@ fn handle_connection(
                 &mut stream,
                 "200 OK",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
         };
     }
@@ -1283,17 +1611,20 @@ fn handle_connection(
             &request,
             debug_sessions,
         ) {
-            Ok(body) => write_response(
-                &mut stream,
-                "200 OK",
-                "application/json; charset=utf-8",
-                body.as_bytes(),
-            ),
+            Ok(body) => {
+                session.record_debug(&request);
+                write_response(
+                    &mut stream,
+                    "200 OK",
+                    "application/json; charset=utf-8",
+                    with_session(body, session).as_bytes(),
+                )
+            }
             Err(body) => write_response(
                 &mut stream,
                 "409 Conflict",
                 "application/json; charset=utf-8",
-                body.as_bytes(),
+                with_session(body, session).as_bytes(),
             ),
         };
     }
@@ -1315,8 +1646,15 @@ fn handle_connection(
         }
         if let Some(client) = query_param(target, "client") {
             status.note_client(&client);
+            session.note_client(&client);
         }
-        let body = status.json();
+        let mut body = status.json();
+        if body.ends_with('}') {
+            body.pop();
+            body.push_str(",\"session\":");
+            body.push_str(&session.json());
+            body.push('}');
+        }
         return write_response(
             &mut stream,
             "200 OK",
@@ -1330,6 +1668,7 @@ fn handle_connection(
         }
         if let Some(client) = query_param(target, "client") {
             status.drop_client(&client);
+            session.drop_client(&client);
         }
         return write_response(&mut stream, "200 OK", "text/plain; charset=utf-8", b"ok");
     }
@@ -1380,6 +1719,14 @@ fn handle_connection(
                 b"browser trace relay unavailable",
             ),
         };
+    }
+    if canvas_only {
+        return write_response(
+            &mut stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"Canvas control host does not serve program assets",
+        );
     }
     // Only page/asset GETs are worth a request-log line (D-FE-DEVSRV1=D's
     // verbose log shows `GET / 200 2ms`, not the 400ms `/__jet_dev_version`
@@ -1442,12 +1789,12 @@ fn current_revision_for_request(canvas_file: &str, request: &str) -> String {
     let source_path = jet_foundation::JSON::parse_json(request)
         .ok()
         .and_then(|value| match value {
-            jet_foundation::JSON::JSONValue::Object(object) => object
-                .get("source_id")
-                .and_then(|value| match value {
+            jet_foundation::JSON::JSONValue::Object(object) => {
+                object.get("source_id").and_then(|value| match value {
                     jet_foundation::JSON::JSONValue::String(source_id) => Some(source_id.clone()),
                     _ => None,
-                }),
+                })
+            }
             _ => None,
         })
         .and_then(|source_id| {
@@ -1677,9 +2024,13 @@ fn inject_live_reload(html: &str, nonce: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_build_time, format_line_colored, format_line_plain, frame_lines, header_words,
-        inject_live_reload, DevStatus, Ordering,
+        canvas_api_path, canvas_request_authorized, constant_time_equal, format_build_time,
+        format_line_colored, format_line_plain, frame_lines, header_words, host_header_allowed,
+        inject_live_reload, mint_session_secret, origin_allowed, CanvasHostOptions, DevStatus,
+        Ordering, WebHost,
     };
+    use crate::Request;
+    use std::collections::HashMap;
 
     #[test]
     fn injects_before_closing_body_tag() {
@@ -1920,5 +2271,94 @@ mod tests {
     fn frame_lines_top_border_names_the_diagnostic_code() {
         let framed = frame_lines("E0204", "one line");
         assert!(framed[0].contains("E0204"));
+    }
+
+    #[test]
+    fn canvas_default_is_loopback_ephemeral_and_session_bearing() {
+        let options = CanvasHostOptions::default();
+        assert_eq!(options.host, "127.0.0.1");
+        assert_eq!(options.port, None);
+        assert_eq!(options.transport, "http");
+        assert_eq!(options.authority, "loopback");
+        let host = WebHost::bind_canvas("app.jet", false, None).unwrap();
+        let url = host.canvas_url();
+        assert!(url.starts_with("http://127.0.0.1:"), "{url}");
+        assert!(url.contains("/canvas?session="), "{url}");
+        assert!(
+            url.len() > 80,
+            "session secret should not be a short marker: {url}"
+        );
+    }
+
+    #[test]
+    fn canvas_explicit_collision_and_invalid_overrides_fail_loudly() {
+        let first = WebHost::bind_canvas("app.jet", false, None).unwrap();
+        let port = first.status.port();
+        let mut options = CanvasHostOptions::default();
+        options.port = Some(port);
+        let collision = WebHost::bind_canvas_with_options("app.jet", false, &options)
+            .err()
+            .expect("a held explicit port must collide");
+        assert!(
+            collision.contains("couldn't bind Canvas host"),
+            "{collision}"
+        );
+
+        options.transport = "udp".to_string();
+        let transport = WebHost::bind_canvas_with_options("app.jet", false, &options)
+            .err()
+            .expect("unsupported transport must fail");
+        assert!(transport.contains("transport"), "{transport}");
+
+        options.transport = "http".to_string();
+        options.authority = "public".to_string();
+        let authority = WebHost::bind_canvas_with_options("app.jet", false, &options)
+            .err()
+            .expect("unknown authority must fail");
+        assert!(authority.contains("authority"), "{authority}");
+    }
+
+    #[test]
+    fn web_canvas_override_keeps_program_listener_separate() {
+        let options = CanvasHostOptions::default();
+        let host = WebHost::bind_web_with_canvas_options("app.jet", false, None, &options)
+            .expect("web Canvas host should bind independently");
+        assert!(host.canvas_url().contains("/canvas?session="));
+        let session = host.session.json();
+        assert!(session.contains("\"canvas\":{\"host\":\"127.0.0.1\""));
+        assert!(!session.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":0"));
+    }
+
+    #[test]
+    fn canvas_request_gate_requires_secret_and_strict_request_context() {
+        let secret = mint_session_secret().unwrap();
+        let mut headers = HashMap::new();
+        headers.insert("host".to_string(), "localhost:8123".to_string());
+        headers.insert("origin".to_string(), "http://localhost:8123".to_string());
+        headers.insert("authorization".to_string(), format!("Bearer {secret}"));
+        let request = Request {
+            method: "GET".to_string(),
+            target: "/canvas/graph".to_string(),
+            headers,
+            body: Vec::new(),
+        };
+        assert!(canvas_api_path("/canvas/graph", "/canvas/graph"));
+        assert!(canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8123,
+            &secret
+        ));
+        assert!(!canvas_request_authorized(
+            &request,
+            &request.target,
+            "127.0.0.1",
+            8124,
+            &secret
+        ));
+        assert!(!host_header_allowed("evil.test:8123", "127.0.0.1", 8123));
+        assert!(!origin_allowed("http://evil.test:8123", "127.0.0.1", 8123));
+        assert!(!constant_time_equal(&secret, "wrong"));
     }
 }

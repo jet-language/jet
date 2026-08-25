@@ -141,6 +141,7 @@ pub(super) fn usage_with_color(color: bool) -> String {
   -y, --yes                            apply a mutation plan without prompting
   --shell-on-fail                      after a failed build, open a shell in preserved scratch
   --fixtures <dir>                     read provider output from captured fixtures
+  --local-nix-catalog <dir>             use an explicit unsigned local nixpkgs catalog
   --trust                              skip the trust prompt for this one run
   --scope <user|repo>                  (trust grant) where the grant applies
   -p <pkg>...                          (env) ad-hoc nixpkgs packages, not declared anywhere
@@ -323,6 +324,18 @@ mod tests {
         assert!(p.flags.assume_yes);
         assert_eq!(p.flags.fixtures, Some(fixtures));
         assert_eq!(p.positional, vec!["jq@nixpkgs"]);
+    }
+
+    #[test]
+    fn parses_local_nix_catalog_flag() {
+        let catalog = std::env::temp_dir().join("local-nix-catalog");
+        let args = vec![
+            "--local-nix-catalog".to_string(),
+            catalog.to_string_lossy().into_owned(),
+            "ripgrep@nixpkgs".to_string(),
+        ];
+        let parsed = parse_args(&args);
+        assert_eq!(parsed.flags.local_nix_catalog, Some(catalog));
     }
 
     #[test]

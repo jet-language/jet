@@ -2649,7 +2649,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(item) = self.core_item_imports.get(name).cloned() {
                     if let Some(module) = self.core_imports.get(name).cloned() {
-                        return self.infer_core_field(&module, &item, *span, *span);
+                        return self.infer_core_field(name, &module, &item, *span, *span);
                     }
                 }
                 if let Some(sig) = self.text_head_function_sig(name) {
@@ -4869,7 +4869,8 @@ impl<'a> Checker<'a> {
         }
         self.check_place_read(&field_expr, span);
         if let Expr::Field(base, leaf, _) = &**inner {
-            if let Expr::Ident(alias, _) = &**base {
+            if let Expr::Ident(alias, alias_span) = &**base {
+                self.record_import_alias_reference(alias, *alias_span);
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.compiler.lang")
                     && crate::Policy::rule_arg_declaration(leaf).is_some()
                 {
@@ -4939,7 +4940,7 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(alias, alias_span) = &**inner {
             if let Some(module) = self.core_imports.get(alias).cloned() {
-                return self.infer_core_field(&module, member, *alias_span, span);
+                return self.infer_core_field(alias, &module, member, *alias_span, span);
             }
             if let (Some(modules), Some(module_idx)) = (self.modules, self.imports.get(alias)) {
                 self.record_import_alias_reference(alias, *alias_span);

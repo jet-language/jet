@@ -1078,6 +1078,7 @@ fn on_type_format_response(
 struct TokenBracePair {
     open: Span,
     close: Span,
+    opaque: bool,
 }
 
 fn on_type_format_edits(
@@ -1097,10 +1098,16 @@ fn on_type_format_edits(
     }
 
     let pairs = token_brace_pairs(tokens);
+    if pairs
+        .iter()
+        .any(|pair| pair.opaque && pair.open.end <= offset && offset <= pair.close.start)
+    {
+        return Vec::new();
+    }
     if trigger == "\n" {
         let Some(active) = pairs
             .iter()
-            .filter(|pair| pair.open.end <= offset && offset <= pair.close.start)
+            .filter(|pair| !pair.opaque && pair.open.end <= offset && offset <= pair.close.start)
             .min_by_key(|pair| pair.close.end - pair.open.start)
             .copied()
         else {
@@ -1113,7 +1120,7 @@ fn on_type_format_edits(
     }
     let Some(pair) = pairs
         .iter()
-        .find(|pair| pair.close.start == trigger_start)
+        .find(|pair| !pair.opaque && pair.close.start == trigger_start)
         .copied()
     else {
         return Vec::new();
@@ -1135,14 +1142,15 @@ fn opaque_trigger(tokens: &[Token], start: usize, end: usize) -> bool {
 fn token_brace_pairs(tokens: &[Token]) -> Vec<TokenBracePair> {
     let mut opens = Vec::new();
     let mut pairs = Vec::new();
-    for token in tokens {
+    for (index, token) in tokens.iter().enumerate() {
         match &token.kind {
-            TokKind::LBrace => opens.push(token.span),
+            TokKind::LBrace => opens.push((token.span, typed_body_open(tokens, index))),
             TokKind::RBrace => {
-                if let Some(open) = opens.pop() {
+                if let Some((open, opaque)) = opens.pop() {
                     pairs.push(TokenBracePair {
                         open,
                         close: token.span,
+                        opaque,
                     });
                 }
             }
@@ -1150,6 +1158,29 @@ fn token_brace_pairs(tokens: &[Token]) -> Vec<TokenBracePair> {
         }
     }
     pairs
+}
+
+fn typed_body_open(tokens: &[Token], index: usize) -> bool {
+    let mut significant = tokens[..index].iter().filter(|token| {
+        !matches!(
+            &token.kind,
+            TokKind::LineComment(_) | TokKind::BlockComment(_)
+        )
+    });
+    let Some(previous) = significant.next_back() else {
+        return false;
+    };
+    match &previous.kind {
+        TokKind::Ident(name) if crate::Syntax::typed_head_kind(name).is_some() => !matches!(
+            significant.next_back().map(|token| &token.kind),
+            Some(TokKind::Hash)
+        ),
+        TokKind::Dot => matches!(
+            significant.next_back().map(|token| &token.kind),
+            Some(TokKind::Ident(name)) if name == crate::Syntax::TYPE_REGEX
+        ),
+        _ => false,
+    }
 }
 
 fn newline_format_edits(
@@ -1263,9 +1294,7 @@ fn leading_indent_end(src: &str, line_start: usize, line_end: usize) -> usize {
 }
 
 fn line_ending_before(src: &str, line_start: usize) -> &'static str {
-    if line_start >= 2
-        && src.as_bytes().get(line_start - 2..line_start) == Some(&b"\r\n"[..])
-    {
+    if line_start >= 2 && src.as_bytes().get(line_start - 2..line_start) == Some(&b"\r\n"[..]) {
         "\r\n"
     } else {
         "\n"
@@ -3627,6 +3656,27 @@ mod project_part_tests {
                 LspPos {
                     line: 1,
                     character: 0,
+                },
+            ),
+            (
+                "fn run() { SQL{\"\"\"{\nvalue}\"\"\"} }\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+            ),
+            (
+                "fn run() { SQL{\n\"value\"} }\n",
+                LspPos {
+                    line: 1,
+                    character: 0,
+                },
+            ),
+            (
+                "// }\n",
+                LspPos {
+                    line: 0,
+                    character: 4,
                 },
             ),
         ] {

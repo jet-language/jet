@@ -163,6 +163,8 @@ button.project-card { width: 100%; text-align: left; cursor: pointer; color: inh
 #canvas-dock button.is-active { border-color: #35c2ff; color: #e7fbff; background: #102437; }
 #graph-strip { position: absolute; left: 12px; right: 12px; top: 10px; z-index: 13; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; padding: 6px; border: 1px solid rgba(53,194,255,.45); background: linear-gradient(180deg, rgba(9,19,32,.94), rgba(5,11,19,.82)); box-shadow: 0 16px 44px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); border-radius: 6px; max-width: min(860px, calc(100% - 24px)); }
 body:not(.is-dev-mode) #graph-strip { display: none; }
+#wire-status { display: none; }
+body.is-dev-mode #wire-status { display: grid; }
 .graph-tab { position: relative; flex: 0 0 auto; min-width: 116px; min-height: 36px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; border-color: #2e4966; background: linear-gradient(180deg, rgba(18,31,46,.96), rgba(8,17,29,.96)); font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; box-shadow: inset 0 -1px 0 rgba(255,255,255,.04); }
 .graph-tab::before { content: ""; width: 8px; height: 18px; border-radius: 2px; background: #46617d; box-shadow: 0 0 14px rgba(70,97,125,.32); }
 .graph-tab.is-active { border-color: #35c2ff; background: linear-gradient(180deg, #12324a, #0b1d2d); color: #eaf8ff; box-shadow: inset 0 -3px 0 #35c2ff, 0 0 28px rgba(53,194,255,.24); }
@@ -484,6 +486,12 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
               <div id="project-rail" class="project-list"></div>
             </details>
           </section>
+          <section id="output-panel" class="component-tree-section">
+            <details open>
+              <summary><span>Outputs</span><span id="output-count" class="count">0</span></summary>
+              <div id="output-list" class="project-list" aria-label="Project outputs"></div>
+            </details>
+          </section>
           <section id="graphs-panel" class="component-tree-section">
             <details open>
               <summary><span>Functions</span><span class="component-tree-section-actions"><button id="canvas-new-function" type="button" title="Create a source-backed function">+ New</button><button id="canvas-new-callback" type="button" title="Create a source-backed callback handler">+ Callback</button><span id="graph-count" class="count">0</span></span></summary>
@@ -498,7 +506,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
           </section>
         </div>
       </section>
-      <section id="status-panel" class="panel"><details><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div></details></section>
+      <section id="status-panel" class="panel"><details open><summary><span>Status</span><span id="status-count" class="count">clean</span></summary><div id="status-summary" class="status-grid"></div><div id="package-summary" class="project-section dev-only package-detail"></div><div id="dependency-summary" class="project-section dev-only package-detail"></div><div id="dev-summary" class="project-section dev-only package-detail"></div><div id="diagnostics-summary" class="project-section dev-only diagnostic-detail"></div><div id="trust-summary" class="project-section dev-only package-detail"></div><div id="session-identity" class="tag" data-session-id="">starting session</div><div id="session-views" class="project-section" aria-label="Session views"><div data-session-view="text"></div><div data-session-view="graph"></div><div data-session-view="designer" data-capability="designer"></div><div data-session-view="preview" data-capability="preview"></div><div data-session-view="terminal"></div><div data-session-view="debugger" data-capability="runtime_output"></div><div data-session-view="tests" data-capability="diagnostics"></div><div data-session-view="custom servers" data-capability="service"></div></div></details></section>
       <section id="search-panel" class="panel"><details><summary><span>Search</span></summary><input id="canvas-search" class="search" placeholder="Find in graph"><div id="search-results" class="search-results"></div></details></section>
     </aside>
     <section id="stage">
@@ -535,9 +543,10 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <section id="problems-panel" class="panel"><details open><summary><span>Problems</span><span id="problems-count" class="count">0</span></summary><div id="problems-list" class="problem-list"></div></details></section>
       <section id="details" class="panel"></section>
       <section id="proof-panel" class="panel"><details open><summary><span>Proof</span><span id="proof-state" class="count">unknown</span></summary><div id="proof-rail" class="proof-rail"></div></details></section>
+      <section id="preview-panel" class="panel" data-capability="preview"><details open><summary><span>App preview</span><span class="count">last good</span></summary><div id="preview-status" class="tag">waiting for session</div><a id="preview-link" href="/" target="_blank" rel="noreferrer">Preview is starting</a></details></section>
     </aside>
   </main>
-  <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
+  <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="session-id">session</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
 </div>
 <div id="context-menu" role="menu"></div>
 <dialog id="keyboard-cheat-sheet" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="keyboard-cheat-sheet-title" aria-describedby="keyboard-cheat-sheet-note">

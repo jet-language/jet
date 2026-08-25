@@ -7,12 +7,13 @@ use crate::AST::{Expr, Type};
 impl<'a> Checker<'a> {
     pub(crate) fn infer_core_field(
         &mut self,
+        alias: &str,
         module: &str,
         name: &str,
         alias_span: Span,
         span: Span,
     ) -> Option<Type> {
-        self.record_core_import_reference(module, alias_span);
+        self.record_import_alias_reference(alias, alias_span);
         match (module, name) {
             ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,

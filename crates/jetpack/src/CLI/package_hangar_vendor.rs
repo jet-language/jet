@@ -1626,6 +1626,7 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
         "audit: {} realized object(s) (read-only, no build ran):",
         entries.len()
     ));
+    let mut unverified_catalog = Vec::new();
     for e in &entries {
         theme.detail(&format!("{}", theme.bold(&e.id)));
         theme.detail(&format!(
@@ -1654,6 +1655,32 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
         ));
         match Store::ProducerRecord::decode(&e.producer_record) {
             Ok(producer) => {
+                if producer.provider == "nix" {
+                    let tier = producer
+                        .facts
+                        .get("nix.index.tier")
+                        .map(String::as_str)
+                        .unwrap_or("unknown");
+                    let trust = producer
+                        .facts
+                        .get("nix.index.trust")
+                        .map(String::as_str)
+                        .unwrap_or("unknown");
+                    let chain = producer
+                        .facts
+                        .get("nix.index.signature-chain")
+                        .map(String::as_str)
+                        .unwrap_or("unknown");
+                    theme.detail(&format!("  catalog-tier: {tier}"));
+                    theme.detail(&format!("  catalog-trust: {trust}"));
+                    theme.detail(&format!("  signature-chain: {chain}"));
+                    if chain != "present" {
+                        unverified_catalog.push(e.id.clone());
+                        theme.detail(
+                            "  trust-note: name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified",
+                        );
+                    }
+                }
                 for (label, key) in [
                     ("source", "cache.source"),
                     ("recipe", "action.recipe"),
@@ -1678,6 +1705,12 @@ pub(super) fn cmd_audit(theme: &Theme) -> i32 {
             Err(error) => theme.detail(&format!(
                 "  provenance:   <invalid producer record: {error}>"
             )),
+        }
+    }
+    if !unverified_catalog.is_empty() {
+        theme.status("audit: objects without a Nix index signature chain:");
+        for id in unverified_catalog {
+            theme.detail(&format!("  {id}"));
         }
     }
     0

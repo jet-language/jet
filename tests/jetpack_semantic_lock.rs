@@ -100,6 +100,8 @@ dependencies = ["textkit"]
         platform: "x86_64-linux".into(),
         signature: "".into(),
         provenance: "provider-built".into(),
+        catalog_tier: "".into(),
+        catalog_trust: "".into(),
     });
     assert!(Lock::enforce_provenance_requirement(&lock, ProvenanceRequirement::Logged).is_ok());
     assert!(

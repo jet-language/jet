@@ -259,6 +259,9 @@ pub struct LockEnvelope {
     pub platform: String,
     pub signature: String,
     pub provenance: String,
+    /// Nix package catalog provenance. Empty for non-Nix envelopes.
+    pub catalog_tier: String,
+    pub catalog_trust: String,
 }
 
 /// D-JPK-TOOLCHAIN1=A (A4): a pinned toolchain is an ordinary hangar object,
@@ -916,6 +919,18 @@ fn write_envelope(out: &mut String, env: &LockEnvelope) {
     if !env.signature.is_empty() {
         out.push_str(&format!("signature = \"{}\"\n", escape_str(&env.signature)));
     }
+    if !env.catalog_tier.is_empty() {
+        out.push_str(&format!(
+            "catalog-tier = \"{}\"\n",
+            escape_str(&env.catalog_tier)
+        ));
+    }
+    if !env.catalog_trust.is_empty() {
+        out.push_str(&format!(
+            "catalog-trust = \"{}\"\n",
+            escape_str(&env.catalog_trust)
+        ));
+    }
     out.push_str(&format!(
         "provenance = \"{}\"\n",
         escape_str(&env.provenance)
@@ -1185,6 +1200,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "output-hash" => tc.envelope.output_hash = val.trim_matches('"').to_string(),
                 "platform" => tc.envelope.platform = val.trim_matches('"').to_string(),
                 "signature" => tc.envelope.signature = val.trim_matches('"').to_string(),
+                "catalog-tier" => {
+                    tc.envelope.catalog_tier = val.trim_matches('"').to_string()
+                }
+                "catalog-trust" => {
+                    tc.envelope.catalog_trust = val.trim_matches('"').to_string()
+                }
                 "provenance" => tc.envelope.provenance = val.trim_matches('"').to_string(),
                 _ => {}
             }
@@ -1206,6 +1227,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "output-hash" => browser.envelope.output_hash = val.trim_matches('"').to_string(),
                 "platform" => browser.envelope.platform = val.trim_matches('"').to_string(),
                 "signature" => browser.envelope.signature = val.trim_matches('"').to_string(),
+                "catalog-tier" => {
+                    browser.envelope.catalog_tier = val.trim_matches('"').to_string()
+                }
+                "catalog-trust" => {
+                    browser.envelope.catalog_trust = val.trim_matches('"').to_string()
+                }
                 "provenance" => browser.envelope.provenance = val.trim_matches('"').to_string(),
                 _ => {}
             }
@@ -1244,6 +1271,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "output-hash" => pkg.envelope_mut().output_hash = val.trim_matches('"').to_string(),
                 "platform" => pkg.envelope_mut().platform = val.trim_matches('"').to_string(),
                 "signature" => pkg.envelope_mut().signature = val.trim_matches('"').to_string(),
+                "catalog-tier" => {
+                    pkg.envelope_mut().catalog_tier = val.trim_matches('"').to_string()
+                }
+                "catalog-trust" => {
+                    pkg.envelope_mut().catalog_trust = val.trim_matches('"').to_string()
+                }
                 "provenance" => pkg.envelope_mut().provenance = val.trim_matches('"').to_string(),
                 "receipt" => {
                     let receipt = unescape_str(val);
@@ -3400,6 +3433,8 @@ mod a4_envelope_tests {
             platform: plat.to_string(),
             signature: sig.to_string(),
             provenance: prov.to_string(),
+            catalog_tier: String::new(),
+            catalog_trust: String::new(),
         }
     }
 

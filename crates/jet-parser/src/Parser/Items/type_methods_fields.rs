@@ -380,7 +380,10 @@ impl<'a> Parser<'a> {
         if type_name != Syntax::TYPE_OUTPUT {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("expected `{}` in an Output constructor", Syntax::TYPE_OUTPUT),
+                format!(
+                    "expected `{}` in an Output constructor",
+                    Syntax::TYPE_OUTPUT
+                ),
                 "the Output kind carries its closed sum type".to_string(),
                 format!("write `{}`.<Kind>{{ ... }}", Syntax::TYPE_OUTPUT),
                 Some(type_span),

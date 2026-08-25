@@ -1013,12 +1013,15 @@ impl<'a> Checker<'a> {
         &mut self,
         module: &str,
         name: &str,
+        alias: Option<&str>,
         alias_span: Span,
         span: Span,
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
-        self.record_core_import_reference(module, alias_span);
+        if let Some(alias) = alias {
+            self.record_import_alias_reference(alias, alias_span);
+        }
         // D-FRONTENDAPI1=A: the compiler surface is a read-only
         // compile-time value API. It is intentionally handled before the
         // ordinary Core effect/fixed-signature tables so it cannot become

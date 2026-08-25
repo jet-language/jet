@@ -136,6 +136,8 @@ pub fn lock_binary(
             platform: platform(),
             signature: String::new(),
             provenance: provenance.to_string(),
+            catalog_tier: String::new(),
+            catalog_trust: String::new(),
         },
     };
     Lock::record_browser(project_root, locked.clone());

@@ -1324,6 +1324,45 @@ fn parse_target_flag(argv: &[String]) -> Result<Option<String>, ()> {
     Ok(None)
 }
 
+fn canvas_flag_value<'a>(argv: &'a [String], name: &str) -> Option<&'a str> {
+    argv.iter()
+        .find_map(|arg| arg.strip_prefix(&format!("{name}=")))
+        .or_else(|| flag_value(argv, name))
+}
+
+fn canvas_options_from_args(argv: &[String]) -> jet_devserver::WebHost::CanvasHostOptions {
+    let mut options = jet_devserver::WebHost::CanvasHostOptions::default();
+    if let Some(host) = canvas_flag_value(argv, "--canvas-host") {
+        options.host = host.to_string();
+    }
+    if let Some(port) = canvas_flag_value(argv, "--canvas-port") {
+        options.port = Some(port.parse::<u16>().unwrap_or_else(|_| {
+            crate::cli_error!(
+                @fix "E2104",
+                format!("`--canvas-port={port}` isn't a valid port number"),
+                "use a number from 1 to 65535, e.g. `--canvas-port=3000`"
+            );
+            exit(ExitCodes::USAGE);
+        }));
+        if options.port == Some(0) {
+            crate::cli_error!(
+                @fix "E2104",
+                "`--canvas-port=0` isn't a valid port number",
+                "use a number from 1 to 65535, or omit `--canvas-port` for automatic selection"
+            );
+            exit(ExitCodes::USAGE);
+        }
+    }
+    if let Some(transport) = canvas_flag_value(argv, "--canvas-transport") {
+        options.transport = transport.to_string();
+    }
+    if let Some(authority) = canvas_flag_value(argv, "--canvas-authority") {
+        options.authority = authority.to_string();
+    }
+    options.audit = argv.iter().any(|arg| arg == "--canvas-audit");
+    options
+}
+
 fn main() {
     // I2: install first, before any other work, so every uncaught panic
     // (including one triggered before argv parsing) renders the branded
@@ -1454,10 +1493,15 @@ fn main() {
         .iter()
         .find_map(|a| a.strip_prefix("--port=").map(str::to_string))
         .map(|s| {
-            s.parse::<u16>().unwrap_or_else(|_| {
+            let port = s.parse::<u16>().unwrap_or_else(|_| {
                 crate::cli_error!(@fix "E2104", format!("`--port={}` isn't a valid port number", s), "use a number from 1 to 65535, e.g. `--port=3000`");
                 exit(ExitCodes::USAGE);
-            })
+            });
+            if port == 0 {
+                crate::cli_error!(@fix "E2104", "`--port=0` isn't a valid port number", "use a number from 1 to 65535, e.g. `--port=3000`");
+                exit(ExitCodes::USAGE);
+            }
+            port
         });
     let explain_partition = jet_argv.iter().any(|a| a == "--explain-partition");
     // D-BUILDPROFILE1: `--release` is sugar for `--profile=release`.
@@ -1533,6 +1577,10 @@ fn main() {
                 || a == "--receipt"
                 || a == "--head-receipt"
                 || a == "--after-receipt"
+                || a == "--canvas-host"
+                || a == "--canvas-port"
+                || a == "--canvas-transport"
+                || a == "--canvas-authority"
             {
                 skip_next = true;
                 continue;
@@ -1547,6 +1595,13 @@ fn main() {
                 continue;
             }
             if a.starts_with("--target=") {
+                continue;
+            }
+            if a.starts_with("--canvas-host=")
+                || a.starts_with("--canvas-port=")
+                || a.starts_with("--canvas-transport=")
+                || a.starts_with("--canvas-authority=")
+            {
                 continue;
             }
             // The canonical arrow is also a valid `jet explain` query; keep
@@ -1741,6 +1796,10 @@ fn main() {
     // downstream (so their flags aren't measured against the global set).
     if !owns_flags {
         check_flags(jet_argv, cmd);
+    }
+    if cmd != "dev" && jet_argv.iter().any(|arg| arg == jet::CLI::CANVAS_FLAG) {
+        crate::cli_error!(@fix "E2102", "`--canvas` is only valid with `jet dev`", "run `jet dev <file.jet> --canvas` to open the Canvas IDE");
+        exit(ExitCodes::USAGE);
     }
     if cmd == "test" {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -2437,6 +2496,8 @@ fn main() {
             // streaming output for sub-200ms feedback. The interpreter is a dev
             // convenience only — `jet build`/`jet run` never touch it (I2/I3).
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+            let canvas_requested = jet_argv.iter().any(|a| a == jet::CLI::CANVAS_FLAG);
+            let canvas_options = canvas_requested.then(|| canvas_options_from_args(jet_argv));
             // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
             // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
             let use_interpreter = raw.iter().any(|a| a == "--interpret");
@@ -2542,6 +2603,8 @@ fn main() {
                         &setting_overrides,
                         &passthrough,
                         record_name.as_deref(),
+                        canvas_requested,
+                        canvas_options.clone(),
                     );
                 }
                 run_web_app_dev_entry(
@@ -2563,7 +2626,15 @@ fn main() {
             if effective_target("dev", &file, cross_target.as_deref()).as_deref()
                 == Some(jet::Syntax::BUILD_TARGET_WEB)
             {
-                run_dev_web(&file, mode, verbose, dev_port, &setting_overrides);
+                run_dev_web(
+                    &file,
+                    mode,
+                    verbose,
+                    dev_port,
+                    canvas_requested,
+                    canvas_options,
+                    &setting_overrides,
+                );
                 return;
             }
             run_dev(
@@ -2577,6 +2648,8 @@ fn main() {
                 &setting_overrides,
                 &passthrough,
                 record_name.as_deref(),
+                canvas_requested,
+                canvas_options,
             );
             return;
         }
@@ -2750,6 +2823,10 @@ fn main() {
                                 let try_anyway = jet_argv.iter().any(|a| a == "--try-anyway");
                                 let use_interpreter = jet_argv.iter().any(|a| a == "--interpret");
                                 let policy = watch_policy_from(&raw, WatchPolicy::Auto);
+                                let canvas_requested =
+                                    jet_argv.iter().any(|arg| arg == jet::CLI::CANVAS_FLAG);
+                                let canvas_options =
+                                    canvas_requested.then(|| canvas_options_from_args(jet_argv));
                                 run_dev(
                                     &entry_str,
                                     try_anyway,
@@ -2761,6 +2838,8 @@ fn main() {
                                     &setting_overrides,
                                     &passthrough,
                                     record_name.as_deref(),
+                                    canvas_requested,
+                                    canvas_options,
                                 );
                                 return;
                             }
@@ -2789,6 +2868,8 @@ fn main() {
                                         &setting_overrides,
                                         &program_args,
                                         record_name.as_deref(),
+                                        false,
+                                        None,
                                     );
                                     return;
                                 }
@@ -3069,6 +3150,8 @@ fn main() {
                         &setting_overrides,
                         &program_args,
                         record_name.as_deref(),
+                        false,
+                        None,
                     );
                     return;
                 }

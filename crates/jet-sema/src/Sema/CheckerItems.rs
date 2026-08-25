@@ -85,10 +85,7 @@ impl<'a> Checker<'a> {
             {
                 return self.canonical_nominal_name(owner_mod, name);
             }
-            match self.resolve_type(Type::Named(name.to_string())) {
-                Type::Named(resolved) => resolved,
-                _ => name.to_string(),
-            }
+            self.imported_nominal_head(name)
         };
         match ty {
             Type::Named(name) => Type::Named(qualify_name(name)),

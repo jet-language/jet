@@ -156,6 +156,7 @@ pub fn reserved_report_json() -> String {
 pub const DRY_RUN_FLAG: &str = "--dry-run";
 /// The one spelling that selects machine-readable command output.
 pub const MACHINE_OUTPUT_FLAG: &str = "--json";
+pub const CANVAS_FLAG: &str = "--canvas";
 
 pub fn machine_output_requested(args: &[String]) -> bool {
     args.iter().any(|arg| arg == MACHINE_OUTPUT_FLAG)
@@ -800,7 +801,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "dev",
-        summary: "Rerun a program whenever files change",
+        summary: "Watch and run a program; optionally open the Canvas IDE",
         headline: false,
         actions: &[],
         exhaustive: false,
@@ -1394,7 +1395,12 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
-    FlagSpec { long: "--canvas", help: "with dev: open the full Canvas IDE over this dev session" },
+    FlagSpec { long: CANVAS_FLAG, help: "with dev: open the full Canvas IDE over this dev session" },
+    FlagSpec { long: "--canvas-host", help: "with --canvas: bind host (loopback by default)" },
+    FlagSpec { long: "--canvas-port", help: "with --canvas: bind an explicit port" },
+    FlagSpec { long: "--canvas-transport", help: "with --canvas: select the named transport" },
+    FlagSpec { long: "--canvas-authority", help: "with --canvas: select loopback or remote authority" },
+    FlagSpec { long: "--canvas-audit", help: "with --canvas: enable request/rebuild audit output" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load package settings and imports from this directory" },
     // E3 interactive scripting flags.
@@ -2277,6 +2283,26 @@ mod tests {
         let inspect_usage = command_group_usage("inspect");
         assert!(inspect_usage.contains("codemod <plan.json> --dry-run"));
         assert!(!inspect_usage.contains("codemod dry-run"));
+    }
+
+    #[test]
+    fn dev_canvas_is_one_registered_surface() {
+        assert_eq!(
+            FLAGS.iter().filter(|flag| flag.long == CANVAS_FLAG).count(),
+            1
+        );
+        assert!(is_known_flag(CANVAS_FLAG));
+        let usage = command_usage("dev");
+        assert_eq!(usage, "jet dev [<file.jet|dir>] [--canvas] [-- <args>]");
+        assert!(flags_for_command("dev")
+            .iter()
+            .any(|flag| flag.0 == CANVAS_FLAG));
+        assert!(man_page("0.0.0").contains("--canvas"));
+        assert!(completions_bash().contains("--canvas"));
+        assert!(completions_zsh().contains("--canvas"));
+        assert!(completions_fish().contains("canvas"));
+        assert!(completions_powershell().contains("--canvas"));
+        assert!(!is_builtin("canvas"));
     }
 
     #[test]

@@ -1911,6 +1911,17 @@ fn render_receipt(entry: &StoreEntry) -> String {
         receipt_input("platform-artifact-kind", &entry.platform_artifact_kind),
         receipt_input("producer-record", &entry.producer_record),
     ];
+    if let Ok(producer) = ProducerRecord::decode(&entry.producer_record) {
+        for (name, key) in [
+            ("catalog-tier", "nix.index.tier"),
+            ("catalog-trust", "nix.index.trust"),
+            ("signature-chain", "nix.index.signature-chain"),
+        ] {
+            if let Some(value) = producer.facts.get(key) {
+                inputs.push(receipt_input(name, value));
+            }
+        }
+    }
     let references = entry.references.iter().collect::<BTreeSet<_>>();
     for reference in references {
         inputs.push(receipt_input("closure", reference));

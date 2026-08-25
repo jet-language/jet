@@ -1281,6 +1281,8 @@ impl<'a> Resolver<'a> {
                             platform: realization.entry.envelope.platform.clone(),
                             signature: realization.entry.envelope.signature.clone(),
                             provenance: realization.entry.envelope.provenance.clone(),
+                            catalog_tier: String::new(),
+                            catalog_trust: String::new(),
                         }),
                         receipt: (!realization.entry.receipt.is_empty())
                             .then(|| realization.entry.receipt.clone()),

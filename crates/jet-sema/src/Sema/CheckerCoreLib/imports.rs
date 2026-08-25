@@ -64,7 +64,15 @@ impl<'a> Checker<'a> {
             .get(&(alias.to_string(), item.clone()))
             .cloned()
         {
-            let ret = self.infer_core_call(&module, &real_item, alias_span, span, type_args, args);
+            let ret = self.infer_core_call(
+                &module,
+                &real_item,
+                Some(alias),
+                alias_span,
+                span,
+                type_args,
+                args,
+            );
             // D-NAME-WALK1=A: an arg-dependent Core return is a sema fact.
             // Carry it across the re-export hop so TIR does not fall back to Unit.
             if is_polymorphic_core_special(&module, &real_item) {

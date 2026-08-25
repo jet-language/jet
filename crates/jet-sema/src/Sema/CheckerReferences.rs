@@ -233,11 +233,22 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn record_import_alias_reference(&mut self, alias: &str, span: Span) {
+    pub(crate) fn record_import_alias_use(&mut self, alias: &str) -> Option<Span> {
+        if self.lookup(alias).is_some() {
+            return None;
+        }
         let def_span = self
             .name_ledger
             .effective_alias(self.module_idx, alias)
             .map(|alias| alias.span);
+        if let Some(def_span) = def_span {
+            self.name_ledger.record_alias_use(self.module_idx, def_span);
+        }
+        def_span
+    }
+
+    pub(crate) fn record_import_alias_reference(&mut self, alias: &str, span: Span) {
+        let def_span = self.record_import_alias_use(alias);
         if let Some(def_span) = def_span {
             let module_path = self.module_path.to_string();
             self.record_reference_anchor_with_identity(
@@ -247,23 +258,6 @@ impl<'a> Checker<'a> {
                 def_span,
                 Some(format!("import:{alias}")),
             );
-        }
-    }
-
-    pub(crate) fn record_core_import_reference(&mut self, module: &str, span: Span) {
-        let aliases: Vec<String> = self
-            .core_imports
-            .iter()
-            .filter(|(_, imported)| {
-                *imported == module
-                    || module
-                        .strip_prefix(imported.as_str())
-                        .is_some_and(|rest| rest.starts_with('.'))
-            })
-            .map(|(alias, _)| alias.clone())
-            .collect();
-        for alias in aliases {
-            self.record_import_alias_reference(&alias, span);
         }
     }
 

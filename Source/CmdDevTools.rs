@@ -184,7 +184,11 @@ pub(crate) fn open_canvas_browser(url: &str) {
         }
     };
     if let Err(error) = command.spawn() {
-        eprintln!("Canvas browser launch failed: {error}");
+        crate::emit_cli_diagnostic_with_fix(
+            "E2105",
+            format!("Canvas browser launch failed: {error}"),
+            format!("open `{url}` in a browser, or set JET_CANVAS_BROWSER to a browser command"),
+        );
         eprintln!("Canvas: {url}");
     }
 }
@@ -198,7 +202,7 @@ fn print_canvas_hint(file: &str, mode: OutputMode, printed: &mut bool) {
     {
         return;
     }
-    println!("Canvas: jet dev {file} --canvas");
+    println!("Canvas: jet dev {file} {}", jet::CLI::CANVAS_FLAG);
     *printed = true;
 }
 
@@ -221,7 +225,7 @@ pub(crate) fn run_dev(
     program_args: &[&String],
     record_name: Option<&str>,
     canvas: bool,
-    canvas_port: Option<u16>,
+    canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
 ) {
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
     runtime_args.push(file.to_string());
@@ -239,7 +243,7 @@ pub(crate) fn run_dev(
             program_args,
             record_name,
             canvas,
-            canvas_port,
+            canvas_options,
         );
     });
 }
@@ -256,7 +260,7 @@ fn run_dev_inner(
     program_args: &[&String],
     record_name: Option<&str>,
     canvas: bool,
-    canvas_port: Option<u16>,
+    canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
 ) {
     let path = Path::new(file);
     if !path.exists() {
@@ -265,10 +269,15 @@ fn run_dev_inner(
     }
 
     let canvas_host = if canvas && policy != WatchPolicy::Once {
-        match jet_devserver::WebHost::bind(file, false, canvas_port) {
+        let options = canvas_options.unwrap_or_default();
+        match jet_devserver::WebHost::WebHost::bind_canvas_with_options(file, false, &options) {
             Ok(host) => Some(host),
             Err(message) => {
-                eprintln!("{message}");
+                crate::emit_cli_diagnostic_with_fix(
+                    "E2105",
+                    message,
+                    "close the existing Canvas session or choose another `--canvas-port`".to_string(),
+                );
                 exit(ExitCodes::USER_ERROR);
             }
         }
@@ -382,6 +391,9 @@ fn run_dev_inner(
             }
             match action {
                 DevSessionAction::Rerun => {
+                    if let Some(host) = canvas_host.as_ref() {
+                        host.mark_building();
+                    }
                     prev_bundle = render_dev_iteration(
                         file,
                         try_anyway,
@@ -391,11 +403,25 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
+                    if let Some(host) = canvas_host.as_ref() {
+                        if prev_bundle.is_some() {
+                            host.mark_ready(0, true);
+                        } else {
+                            host.mark_error(
+                                "E2105".to_string(),
+                                format!("Canvas kept the last-good program; `{file}` is not ready"),
+                                true,
+                            );
+                        }
+                    }
                     if prev_bundle.is_some() {
                         print_canvas_hint(file, mode, &mut canvas_hint_printed);
                     }
                 }
                 DevSessionAction::RestartFresh => {
+                    if let Some(host) = canvas_host.as_ref() {
+                        host.mark_building();
+                    }
                     session = jet_devserver::SessionSnapshot {
                         generation: 0,
                         artifact_token: "gen-0".into(),
@@ -425,6 +451,17 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
+                    if let Some(host) = canvas_host.as_ref() {
+                        if prev_bundle.is_some() {
+                            host.mark_ready(0, true);
+                        } else {
+                            host.mark_error(
+                                "E2105".to_string(),
+                                format!("Canvas kept the last-good program; `{file}` is not ready"),
+                                true,
+                            );
+                        }
+                    }
                     if prev_bundle.is_some() {
                         print_canvas_hint(file, mode, &mut canvas_hint_printed);
                     }
@@ -473,20 +510,6 @@ fn run_dev_inner(
                 profile,
                 setting_overrides,
             );
-            if let Some(host) = canvas_host.as_ref() {
-                if next.is_some() {
-                    host.mark_ready(0, true);
-                } else {
-                    host.mark_error(
-                        "E2105".to_string(),
-                        format!("Canvas kept the last-good program after `{file}` failed to reload"),
-                        true,
-                    );
-                }
-            }
-            if next.is_some() {
-                print_canvas_hint(file, mode, &mut canvas_hint_printed);
-            }
             // Transactional hot replacement: commit only when the new bundle
             // loaded; otherwise keep the prior session valid.
             let mut txn = jet_devserver::HotReplaceTxn::begin(session.clone());
@@ -499,15 +522,37 @@ fn run_dev_inner(
                         Ok(snap) => {
                             session = snap;
                             session.persist = persist.clone();
+                            if let Some(host) = canvas_host.as_ref() {
+                                host.mark_ready(0, true);
+                            }
+                            print_canvas_hint(file, mode, &mut canvas_hint_printed);
                             prev_bundle = next;
                         }
                         Err((prior, reason)) => {
                             eprintln!("[hot-replace] {reason}");
+                            if let Some(host) = canvas_host.as_ref() {
+                                host.mark_error(
+                                    "E2105".to_string(),
+                                    format!(
+                                        "Canvas kept the last-good program after `{file}` failed to commit"
+                                    ),
+                                    true,
+                                );
+                            }
                             session = prior;
                         }
                     }
                 }
                 None => {
+                    if let Some(host) = canvas_host.as_ref() {
+                        host.mark_error(
+                            "E2105".to_string(),
+                            format!(
+                                "Canvas kept the last-good program after `{file}` failed to reload"
+                            ),
+                            true,
+                        );
+                    }
                     txn.fail("reload failed; prior session kept");
                     let _ = txn.commit();
                 }

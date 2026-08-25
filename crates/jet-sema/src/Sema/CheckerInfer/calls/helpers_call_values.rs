@@ -16,7 +16,7 @@ fn is_inline_compute_transform(checker: &Checker<'_>, expr: &Expr) -> bool {
             "gradient" | "value_and_gradient" | "vjp" | "jvp"
         ) && checker
             .core_module_path_from_receiver(receiver)
-            .is_some_and(|(module, _)| module == "core.compute")
+            .is_some_and(|(module, _, _)| module == "core.compute")
             && args
                 .iter()
                 .skip(1)
@@ -49,13 +49,18 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(super) fn core_module_path_from_receiver(&self, receiver: &Expr) -> Option<(String, Span)> {
+    pub(super) fn core_module_path_from_receiver(
+        &self,
+        receiver: &Expr,
+    ) -> Option<(String, String, Span)> {
         match receiver {
-            Expr::Ident(alias, span) => self.text_head_core_import(alias).map(|m| (m, *span)),
+            Expr::Ident(alias, span) if self.lookup(alias).is_none() => self
+                .text_head_core_import(alias)
+                .map(|module| (module, alias.clone(), *span)),
             Expr::Field(base, leaf, _) => {
-                let (module, span) = self.core_module_path_from_receiver(base)?;
+                let (module, alias, span) = self.core_module_path_from_receiver(base)?;
                 let submodule = format!("{module}.{leaf}");
-                crate::Syntax::is_known_core_module(&submodule).then_some((submodule, span))
+                crate::Syntax::is_known_core_module(&submodule).then_some((submodule, alias, span))
             }
             _ => None,
         }

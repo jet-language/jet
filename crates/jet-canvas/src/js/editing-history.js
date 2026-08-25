@@ -1110,6 +1110,8 @@
     const requestedRevision = latestDoc.revision;
     const requestedSourceId = selectedSourceId || latestDoc.source_id || null;
     const body = { schema_version: 1, revision: requestedRevision, action_id: item.action_id, confirmed };
+    if (typeof canvasClientId === "function") body.client_id = canvasClientId();
+    if (typeof canvasSelectedOutput === "function" && canvasSelectedOutput()) body.output = canvasSelectedOutput();
     if (requestedSourceId) body.source_id = requestedSourceId;
     if (item.action_id === "canvas.command:check") body.source_text = sourceEditMode && sourceEditor ? sourceEditor.value : (latestDoc.source_text || "");
     runHud.textContent = item.title + " running";

@@ -4206,6 +4206,119 @@ fn no_nix_unindexed_nixpkgs_package_reports_e1349() {
 }
 
 #[test]
+fn local_unofficial_nixpkgs_catalog_is_explicit_and_auditable() {
+    let project = Scratch::new("local-unofficial-nixpkgs-project");
+    let root = Scratch::new("local-unofficial-nixpkgs-root");
+    let catalog = Scratch::new("local-unofficial-nixpkgs-catalog");
+    let server = nix_index_cache_server::NixIndexCacheServer::start_ripgrep(&project.path);
+    server.install(&root.path);
+    server.install_local_catalog(&catalog.path);
+    fs::write(
+        project.join("env.jet"),
+        format!(
+            "module dev {{\n    sources: {{ default: NixOS/nixpkgs/{REVISION}@github }}\n    env.dev: Env{{ packages: [default.ripgrep] }}\n}}\n",
+            REVISION = nix_index_cache_server::REVISION,
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(project.join(".jet")).unwrap();
+    fs::write(
+        project.join(".jet/lock"),
+        format!(
+            "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"{}\"\nexact = \"github:NixOS/nixpkgs#{}\"\n\n[root]\ndependencies = []\n",
+            nix_index_cache_server::CHANNEL,
+            nix_index_cache_server::REVISION,
+        ),
+    )
+    .unwrap();
+    server.corrupt_index_signature();
+
+    let official = jetpack()
+        .args(["env", "--prep", "--no-color", "--trust"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let official_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&official.stdout),
+        String::from_utf8_lossy(&official.stderr)
+    );
+    assert_eq!(official.status.code(), Some(2), "official output: {official_text}");
+    assert!(official_text.contains("E1348"), "official output: {official_text}");
+    assert!(
+        !official_text.contains("local-unofficial"),
+        "invalid official signature must not downgrade: {official_text}"
+    );
+
+    let local = jetpack()
+        .args([
+            "env",
+            "--prep",
+            "--no-color",
+            "--trust",
+            "--local-nix-catalog",
+            catalog.path.to_str().unwrap(),
+        ])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    let local_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&local.stdout),
+        String::from_utf8_lossy(&local.stderr)
+    );
+    assert!(local.status.success(), "local output: {local_text}");
+    assert!(local_text.contains("local-unofficial"), "local output: {local_text}");
+    assert!(local_text.contains("unverified"), "local output: {local_text}");
+    assert!(
+        local_text.contains("name-to-store-path mapping is unverified"),
+        "local output: {local_text}"
+    );
+
+    let roots = jetpack::Store::Roots::at(root.path.clone());
+    let entry = jetpack::Store::list_checked(&roots)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.reference == "ripgrep@nixpkgs")
+        .expect("local catalog package entry");
+    let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
+    assert!(lock.contains("catalog-tier = \"local-unofficial\""), "lock: {lock}");
+    assert!(lock.contains("catalog-trust = \"unverified\""), "lock: {lock}");
+    let receipt = fs::read_to_string(root.join("hangar/receipts").join(&entry.receipt)).unwrap();
+    assert!(
+        receipt.contains("636174616c6f672d7472757374"),
+        "receipt lacks catalog-trust input: {receipt}"
+    );
+    assert!(
+        receipt.contains("756e7665726966696564"),
+        "receipt lacks unverified value: {receipt}"
+    );
+
+    let audit = jetpack()
+        .args(["audit", "--no-color"])
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    let audit_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&audit.stdout),
+        String::from_utf8_lossy(&audit.stderr)
+    );
+    assert!(audit.status.success(), "audit output: {audit_text}");
+    assert!(audit_text.contains(&entry.id), "audit output: {audit_text}");
+    assert!(audit_text.contains("signature-chain: none"), "audit output: {audit_text}");
+    assert!(
+        audit_text.contains("objects without a Nix index signature chain"),
+        "audit output: {audit_text}"
+    );
+}
+
+#[test]
 fn indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object() {
     const TEST_NAME: &str = "indexed_nixpkgs_closure_reuses_offline_and_repairs_one_object";
     const PHASE_ENV: &str = "JETPACK_INDEXED_NIX_PHASE";
@@ -6958,24 +7071,28 @@ fn committed_example_builds_offline_end_to_end() {
     assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
 }
 
+#[cfg(unix)]
 #[test]
 fn use_many_packages_settles_one_row_per_package_without_output_flood() {
     let project = Scratch::new("use-many-packages");
     copy_dir_recursive(&example_dir(), &project.path);
     let root = Scratch::new("use-many-packages-root");
-    let mut args = vec![
-        "use".to_string(),
-        "--prep".to_string(),
-        "--offline".to_string(),
-        "--no-color".to_string(),
-        "-y".to_string(),
-    ];
-    args.extend((0..26).map(|_| "ripgrep@stable".to_string()));
-    let output = jetpack()
-        .args(&args)
+    let refs = (0..26)
+        .map(|_| "ripgrep@stable")
+        .collect::<Vec<_>>()
+        .join(" ");
+    let binary = common::jetpack_bin()
+        .display()
+        .to_string()
+        .replace('\'', "'\\''");
+    let command = format!("stty rows 30 cols 120; exec '{binary}' use --prep --offline -y {refs}");
+    let output = Command::new("script")
+        .args(["-qfec", &command, "/dev/null"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+        .env_remove("NO_COLOR")
+        .env_remove("FORCE_COLOR")
         .output()
         .unwrap();
     assert!(
@@ -6983,15 +7100,12 @@ fn use_many_packages_settles_one_row_per_package_without_output_flood() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let settled = stderr
-        .lines()
-        .filter(|line| line.trim_start().starts_with('✓'))
-        .count();
-    assert_eq!(settled, 26, "one settled row per package: {stderr}");
+    let transcript = String::from_utf8_lossy(&output.stdout);
+    let settled = transcript.matches('✓').count();
+    assert_eq!(settled, 26, "one settled row per package: {transcript}");
     assert!(
-        stderr.lines().count() <= 27,
-        "26-package run must fit one aggregate line plus settled rows: {stderr}"
+        transcript.contains("0/26 packages"),
+        "aggregate live line must remain pinned above settled rows: {transcript}"
     );
 }
 

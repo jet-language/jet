@@ -4243,7 +4243,7 @@ service :: Output.Service{ name: "greeter_api", entry: serve }
 ```
 
 This decision reuses the existing named-payload enum construction
-`.Variant.{ field: value }`. It adds no token, keyword, parser production,
+`Output.Variant{ field: value }`. It adds no token, keyword, parser production,
 formatter form, or editor grammar, so it requires no parser, grammar, or
 snapshot change of its own. The package output collection and capability
 inventory are implemented by #587; language-wide shape enforcement is owned by

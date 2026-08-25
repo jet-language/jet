@@ -125,7 +125,7 @@ fn index_backed_nixpkgs_records_complete_closure_and_both_proofs() {
     assert!(producer
         .facts
         .get("nix.index.proof.v1")
-        .is_some_and(|proof| proof.contains("jet-test-index-v1")));
+        .is_some_and(|proof| proof.contains("fixture-index-signer-v1")));
 }
 
 #[test]

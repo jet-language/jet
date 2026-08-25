@@ -3,6 +3,7 @@ pub fn canvas_js() -> String {
     concat!(
         "(function () {\n",
         include_str!("js/runtime-state.js"),
+        include_str!("js/session-workbench.js"),
         include_str!("js/editing-history.js"),
         include_str!("js/diagnostics-query.js"),
         include_str!("js/drawing-palette.js"),

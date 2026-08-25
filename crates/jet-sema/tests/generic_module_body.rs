@@ -669,3 +669,57 @@ fn run() {}
     assert_eq!(tests[0].params[0].ty, Type::Int);
     assert_eq!(tests[1].params[0].ty, Type::String);
 }
+
+#[test]
+fn qualified_core_alias_counts_as_import_use() {
+    let (_, diagnostics) = check(
+        r#"
+use core.compute.solve as solve
+use core.files as files
+
+fn run() {
+    solver := solve.Solver.new(42)
+    print(solver.status())
+}
+"#,
+    );
+    let lints: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Lint)
+        .collect();
+    assert_eq!(
+        lints
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<Vec<_>>(),
+        vec!["L0103"]
+    );
+    assert_eq!(
+        lints[0].span,
+        Some(jet_sema::Diagnostics::Span::new(51, 56))
+    );
+}
+
+#[test]
+fn qualified_core_alias_does_not_consume_same_target_alias() {
+    let (_, diagnostics) = check(
+        r#"
+use core.compute.solve as solve
+use core.compute.solve as other
+
+fn run() {
+    solver := solve.Solver.new(42)
+    print(solver.status())
+}
+"#,
+    );
+    let lints: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Lint)
+        .collect();
+    assert_eq!(
+        lints.iter().map(|diagnostic| diagnostic.code.as_str()).collect::<Vec<_>>(),
+        vec!["L0103"]
+    );
+    assert!(lints[0].what.contains("other"));
+}

@@ -32,6 +32,7 @@ struct Receipt {
 pub struct ResidentDevSession {
     id: String,
     entry: String,
+    canvas_host: String,
     canvas_port: u16,
     application_port: u16,
     current_revision: Mutex<String>,
@@ -51,10 +52,20 @@ pub struct ResidentDevSession {
 
 impl ResidentDevSession {
     pub fn new(entry: &str, canvas_port: u16, application_port: u16) -> Self {
+        Self::new_with_canvas_host(entry, "127.0.0.1", canvas_port, application_port)
+    }
+
+    pub fn new_with_canvas_host(
+        entry: &str,
+        canvas_host: &str,
+        canvas_port: u16,
+        application_port: u16,
+    ) -> Self {
         let serial = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
         Self {
             id: format!("jet-session-{}-{}", std::process::id(), serial),
             entry: entry.to_string(),
+            canvas_host: canvas_host.to_string(),
             canvas_port,
             application_port,
             current_revision: Mutex::new(String::new()),
@@ -126,7 +137,11 @@ impl ResidentDevSession {
             *self.accepted_revision.lock().unwrap() = revision.to_string();
         }
         self.push_receipt(Receipt {
-            kind: if kind.is_empty() { "source".to_string() } else { kind },
+            kind: if kind.is_empty() {
+                "source".to_string()
+            } else {
+                kind
+            },
             status: "accepted".to_string(),
             before,
             after: revision.to_string(),
@@ -160,7 +175,11 @@ impl ResidentDevSession {
             *self.test_state.lock().unwrap() = "requested".to_string();
         }
         self.push_receipt(Receipt {
-            kind: if action.is_empty() { "command".to_string() } else { action },
+            kind: if action.is_empty() {
+                "command".to_string()
+            } else {
+                action
+            },
             status: "requested".to_string(),
             before: String::new(),
             after: self.current_revision.lock().unwrap().clone(),
@@ -191,6 +210,10 @@ impl ResidentDevSession {
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn application_port(&self) -> u16 {
+        self.application_port
     }
 
     pub fn json(&self) -> String {
@@ -225,7 +248,7 @@ impl ResidentDevSession {
             .collect::<Vec<_>>()
             .join(",");
         format!(
-            "{{\"id\":{},\"entry\":{},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{{\"canvas\":{{\"host\":\"127.0.0.1\",\"port\":{},\"transport\":\"canvas\"}},\"application\":{{\"host\":\"127.0.0.1\",\"port\":{},\"transport\":\"application\",\"routes\":\"application-owned\"}}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\"}}}}",
+            "{{\"id\":{},\"entry\":{},\"source_revision\":{},\"accepted_revision\":{},\"last_good_revision\":{},\"last_good_program\":{},\"state\":{},\"diagnostic_code\":{},\"diagnostic\":{},\"clients\":{},\"run\":{{\"output\":{},\"target\":{}}},\"debugger\":{{\"state\":{}}},\"tests\":{{\"state\":{}}},\"history\":{{\"count\":{},\"receipts\":[{}]}},\"listeners\":{{\"canvas\":{{\"host\":{},\"port\":{},\"transport\":\"canvas\"}},\"application\":{{\"host\":\"127.0.0.1\",\"port\":{},\"transport\":\"application\",\"routes\":\"application-owned\"}}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\"}}}}",
             json_value(&self.id),
             json_value(&self.entry),
             json_value(&current),
@@ -242,6 +265,7 @@ impl ResidentDevSession {
             json_value(&tests),
             self.receipts.lock().unwrap().len(),
             receipts,
+            json_value(&self.canvas_host),
             self.canvas_port,
             self.application_port
         )
@@ -285,6 +309,7 @@ mod tests {
     fn one_session_keeps_history_last_good_and_listener_boundaries() {
         let session = ResidentDevSession::new("app.jet", 8080, 49152);
         session.note_client("a");
+        session.note_client("b");
         session.select_output(r#"{"output":"web","target":"browser","client_id":"a"}"#);
         session.accept_transaction(
             r#"{"op":"replace_source","revision":"old","client_id":"a","output":"web"}"#,
@@ -296,7 +321,18 @@ mod tests {
         assert!(json.contains("\"application\":{\"host\":\"127.0.0.1\",\"port\":49152"));
         assert!(json.contains("\"accepted_revision\":\"new\""));
         assert!(json.contains("\"last_good_program\":\"web-build-2\""));
+        assert!(json.contains("\"clients\":2"));
+        assert!(json.contains("\"run\":{\"output\":\"web\",\"target\":\"browser\"}"));
         assert!(json.contains("\"count\":1"));
         assert!(json.contains("\"status\":\"accepted\""));
+    }
+
+    #[test]
+    fn selecting_a_new_output_and_target_keeps_the_same_canvas_listener() {
+        let session = ResidentDevSession::new("app.jet", 4567, 49152);
+        session.select_output(r#"{"output":"native","target":"desktop","client_id":"b"}"#);
+        let json = session.json();
+        assert!(json.contains("\"canvas\":{\"host\":\"127.0.0.1\",\"port\":4567"));
+        assert!(json.contains("\"run\":{\"output\":\"native\",\"target\":\"desktop\"}"));
     }
 }

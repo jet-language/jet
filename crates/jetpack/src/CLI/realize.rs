@@ -99,7 +99,9 @@ pub(super) fn plan_downloads(
         // cached entry path out of closure verification; the subsequent Store
         // realization still proves the complete closure before reuse.
         if matches!(scope, RealizeScope::Use | RealizeScope::UserProfile)
-            && Store::find_by_reference(roots, &spec.raw).is_some()
+            && Store::find_by_reference(roots, &spec.raw).is_some_and(|entry| {
+                !uses_nix || nix_catalog_cache_entry_matches(&entry, flags.local_nix_catalog.is_some())
+            })
         {
             continue;
         }
@@ -116,6 +118,8 @@ pub(super) fn plan_downloads(
         // `realize_verified` remains the final integrity gate.
         let cached = Provider::cache_expectation(spec, table, &probe).is_some_and(|expectation| {
             Store::cache_candidate_matches(roots, &spec.raw, &expectation)
+                && (!uses_nix
+                    || nix_catalog_cache_matches(roots, &spec.raw, flags.local_nix_catalog.is_some()))
         });
         if !cached {
             pending.push(spec.clone());
@@ -131,7 +135,10 @@ pub(super) fn plan_downloads(
         .any(|spec| Provider::uses_nix_provider(spec, table, flags.offline, &store_dir));
     let nix_index_client = if uses_nix && fixtures.is_none() {
         Some(
-            NixIndexClient::from_roots_with_mode(roots, flags.offline)
+            match flags.local_nix_catalog.as_deref() {
+                Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
+                None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
+            }
                 .map_err(ProviderError::NixIndex),
         )
     } else {
@@ -307,6 +314,13 @@ pub(super) fn realize_ref_outcome(
         None
     };
     let uses_nix = Provider::uses_nix_provider(spec, table, flags.offline, &store_dir);
+    let user_profile_reuse = user_profile_reuse.filter(|realized| {
+        !uses_nix
+            || nix_catalog_cache_entry_matches(
+                realized.metadata(),
+                flags.local_nix_catalog.is_some(),
+            )
+    });
     // A Nix ref may reuse a Hangar copy only when the committed lock identity
     // and the complete closure both verify. A missing transitive object must
     // reach the indexed provider so it can report the exact missing logical
@@ -329,6 +343,12 @@ pub(super) fn realize_ref_outcome(
             Provider::cache_expectation(spec, table, &probe)
                 .is_some_and(|expectation| {
                     Store::cache_candidate_matches(roots, &spec.raw, &expectation)
+                        && (!uses_nix
+                            || nix_catalog_cache_matches(
+                                roots,
+                                &spec.raw,
+                                flags.local_nix_catalog.is_some(),
+                            ))
                 })
         });
     let indexed_nix = flags.offline
@@ -409,7 +429,10 @@ pub(super) fn realize_ref_outcome(
     };
     let nix_index_client = if uses_nix && fixtures.is_none() && !cache_candidate_ok {
         Some(
-            NixIndexClient::from_roots_with_mode(roots, flags.offline)
+            match flags.local_nix_catalog.as_deref() {
+                Some(catalog) => NixIndexClient::from_local_catalog(catalog, flags.offline),
+                None => NixIndexClient::from_roots_with_mode(roots, flags.offline),
+            }
                 .map_err(ProviderError::NixIndex),
         )
     } else {
@@ -516,13 +539,26 @@ pub(super) fn realize_ref_outcome(
             } else {
                 entry.version.clone()
             };
+            let catalog_status = nix_catalog_status(&entry);
             let line = theme.render_row(&entry.name, name_w, &version, &state);
+            let line = catalog_status
+                .as_ref()
+                .map(|status| format!("{line} [{status}]") )
+                .unwrap_or(line);
             match style {
                 RowStyle::Ledger => {
                     theme.row(&entry.name, name_w, &version, &state);
                     theme.detail(&theme.gray(&entry.out));
+                    if let Some(status) = catalog_status.as_deref() {
+                        theme.detail(status);
+                    }
                 }
-                RowStyle::Ready => theme.ready_row(&entry.name, name_w, &version),
+                RowStyle::Ready => {
+                    theme.ready_row(&entry.name, name_w, &version);
+                    if let Some(status) = catalog_status.as_deref() {
+                        theme.detail(status);
+                    }
+                }
                 RowStyle::Silent => {}
             }
             RefOutcome::Realized(entry, source_state, line, lease)
@@ -549,6 +585,49 @@ pub(super) fn realize_ref_outcome(
             RefOutcome::Failed
         }
     }
+}
+
+fn nix_catalog_cache_entry_matches(entry: &Store::StoreEntry, local: bool) -> bool {
+    let expected = if local {
+        "local-unofficial"
+    } else {
+        "official-signed"
+    };
+    Store::ProducerRecord::decode(&entry.producer_record)
+        .ok()
+        .filter(|producer| producer.provider == "nix")
+        .and_then(|producer| producer.facts.get("nix.index.tier").cloned())
+        .is_some_and(|tier| tier == expected)
+}
+
+fn nix_catalog_cache_matches(roots: &Roots, reference: &str, local: bool) -> bool {
+    Store::find_by_reference(roots, reference)
+        .is_some_and(|entry| nix_catalog_cache_entry_matches(&entry, local))
+}
+
+fn nix_catalog_status(entry: &Store::StoreEntry) -> Option<String> {
+    let producer = Store::ProducerRecord::decode(&entry.producer_record).ok()?;
+    if producer.provider != "nix" {
+        return None;
+    }
+    let tier = producer.facts.get("nix.index.tier")?;
+    let trust = producer
+        .facts
+        .get("nix.index.trust")
+        .map(String::as_str)
+        .unwrap_or("unknown");
+    let chain = producer
+        .facts
+        .get("nix.index.signature-chain")
+        .map(String::as_str)
+        .unwrap_or("unknown");
+    Some(if tier == "local-unofficial" {
+        format!(
+            "catalog: {tier} ({trust}; signature chain {chain}; name-to-store-path mapping is unverified; Nix cache bytes remain signature-verified)"
+        )
+    } else {
+        format!("catalog: {tier} ({trust}; signature chain {chain})")
+    })
 }
 
 fn package_fixture_available(flags: &Flags, spec: &RefSpec::RefSpec) -> bool {

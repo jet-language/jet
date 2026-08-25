@@ -30,7 +30,7 @@ use super::graph_helpers::{
 use super::project_scan::{
     env_project_json, lock_project_json, packages_project_json, project_context_for_entry,
     project_file, project_file_with_runtime, targets_project_json, workspace_project_json,
-    ProjectContext,
+    EnvProjectJson, ProjectContext,
 };
 use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
@@ -348,6 +348,24 @@ fn project_source_roots(ctx: &ProjectContext) -> Vec<PathBuf> {
         .to_path_buf()]
 }
 
+fn project_capabilities_json(targets: &str, environment: &EnvProjectJson) -> String {
+    let target_text = targets.to_ascii_lowercase();
+    let service = !environment.services.is_empty() || target_text.contains("\"kind\":\"service\"");
+    let preview = target_text.contains("\"target\":\"web\"")
+        || target_text.contains("\"kind\":\"ui\"")
+        || target_text.contains("\"kind\":\"game\"")
+        || target_text.contains("\"target\":\"ui\"")
+        || target_text.contains("\"target\":\"game\"");
+    let designer = target_text.contains("\"kind\":\"ui\"")
+        || target_text.contains("\"kind\":\"game\"")
+        || target_text.contains("\"target\":\"ui\"")
+        || target_text.contains("\"target\":\"game\"");
+    format!(
+        "{{\"graph\":true,\"code\":true,\"diagnostics\":true,\"runtime_output\":true,\"terminal\":true,\"service\":{},\"preview\":{},\"designer\":{}}}",
+        service, preview, designer
+    )
+}
+
 /// Project package/workspace source truth into the public Canvas project schema.
 pub fn project_json_for_entry(path: &Path) -> String {
     // Parent-walk discovery can parse `.jet` files; use the compiler stack +
@@ -422,6 +440,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         .join(",");
     let locks_json = lock_project_json(&ctx.project_root);
     let env_projection = env_project_json(&ctx.project_root);
+    let capabilities_json = project_capabilities_json(&targets_json, &env_projection);
     let diagnostics = [
         ctx.authority_diagnostic
             .as_ref()
@@ -434,7 +453,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
     .collect::<Vec<_>>()
     .join(",");
     format!(
-        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"parts\":[{}],\"part_conflicts\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
+        "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{},\"project_root\":{},\"project_revision\":{},\"entry\":{},\"mode\":{},\"capabilities\":{},\"workspace\":{},\"packages\":[{}],\"targets\":[{}],\"outputs\":[{}],\"envs\":[{}],\"services\":[{}],\"files\":[{}],\"parts\":[{}],\"part_conflicts\":[{}],\"locks\":[{}],\"diagnostics\":[{}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}",
         PROJECT_SCHEMA_VERSION,
         json_str(&ctx.project_root.display().to_string()),
         json_str(&ctx.project_revision),
@@ -446,9 +465,11 @@ fn project_json_for_entry_inner(path: &Path) -> String {
         } else {
             "single_file"
         }),
+        capabilities_json,
         workspace_json,
         packages_json,
         targets_json,
+        targets_json.clone(),
         env_projection.envs,
         env_projection.services,
         files_json,

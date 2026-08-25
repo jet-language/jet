@@ -1,4 +1,22 @@
 // DOM handles, mutable session state, and rendering constants.
+// Canvas API calls carry the session minted by the control host. Keep the
+// token on same-origin requests only; no asset or external request receives it.
+  const jetCanvasSession = new URLSearchParams(window.location.search).get("session") || "";
+  const jetCanvasFetch = window.fetch.bind(window);
+  function fetch(input, init) {
+    const options = Object.assign({}, init || {});
+    let requestUrl = null;
+    try {
+      requestUrl = new URL(typeof input === "string" ? input : input.url, window.location.href);
+    } catch (_) {}
+    const headers = new Headers((init && init.headers) || (input && input.headers) || {});
+    if (jetCanvasSession && requestUrl && requestUrl.origin === window.location.origin) {
+      headers.set("authorization", "Bearer " + jetCanvasSession);
+    }
+    options.headers = headers;
+    return jetCanvasFetch(input, options);
+  }
+
   const canvas = document.getElementById("jet-canvas-view");
   const ctx = canvas.getContext("2d");
   const stage = document.getElementById("stage");

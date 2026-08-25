@@ -673,7 +673,7 @@ fn try_output_hash_of_with_hook(
         if let Some(hangar) = hangar_root {
             let hangar = fs::canonicalize(hangar).unwrap_or_else(|_| hangar.to_path_buf());
             let shared_cas = canonical_real_directory(&crate::Store::shared_cas_dir());
-            let mut hangars = vec![hangar];
+            let mut hangars = vec![hangar.clone()];
             for machine_root in crate::Store::Roots::machine_roots() {
                 if let Some(machine_hangar) =
                     canonical_real_directory(&machine_root.hangar_dir())
@@ -714,16 +714,6 @@ fn try_output_hash_of_with_hook(
                 // trusted roots may count an admitted peer more than once.
                 continue;
             }
-            eprintln!(
-                "[DEBUG-CAS] key={} total={} seen={} allowed={} hangar={} shared={} cas={:?}",
-                key.0,
-                link.total,
-                link.seen,
-                allowed_peers,
-                hangar.display(),
-                format_args!("{shared_cas:?}"),
-                link.cas_key,
-            );
         }
         return Err(format!(
             "hardlink `{}` has {} link(s), but only {} are inside the output",

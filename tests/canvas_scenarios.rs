@@ -2,6 +2,7 @@
 
 mod common;
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{Read, Write};
@@ -23,6 +24,7 @@ const BIG_MODULE_COUNT: usize = 12;
 const BIG_FUNCTIONS_PER_MODULE: usize = BIG_FUNCTION_COUNT / BIG_MODULE_COUNT;
 const BIG_FILE_COUNT: usize = BIG_MODULE_COUNT + 1;
 static CANVAS_BROWSER_POOL: OnceLock<(Mutex<usize>, Condvar)> = OnceLock::new();
+static CANVAS_SESSIONS: OnceLock<Mutex<HashMap<u16, String>>> = OnceLock::new();
 
 struct CanvasTools {
     chromium: PathBuf,
@@ -520,6 +522,11 @@ fn open_and_render() {
 #[test]
 fn canvas_real_client_loads_projection_and_keeps_devserver_alive() {
     run_canvas_scenario(DEVSERVER_REAL_CLIENT_SCENARIO);
+}
+
+#[test]
+fn resident_session_ide_state_matrix() {
+    run_canvas_scenario("resident-session-ide-state-matrix");
 }
 
 #[test]
@@ -1287,6 +1294,41 @@ impl DevServer {
             .stderr(Stdio::piped())
             .spawn()
             .expect("start jet dev Canvas server");
+        if let Some(stdout) = child.stdout.take() {
+            thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    let Some(url) = line.split("Canvas: ").nth(1) else {
+                        continue;
+                    };
+                    let Some(port) = url
+                        .split("http://127.0.0.1:")
+                        .nth(1)
+                        .or_else(|| url.split("http://localhost:").nth(1))
+                        .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+                        .and_then(|value| value.parse::<u16>().ok())
+                    else {
+                        continue;
+                    };
+                    let Some(token) = url.split("session=").nth(1).map(|value| {
+                        value
+                            .split(|c: char| !c.is_ascii_hexdigit())
+                            .next()
+                            .unwrap_or_default()
+                            .to_string()
+                    }) else {
+                        continue;
+                    };
+                    if token.len() >= 32 {
+                        CANVAS_SESSIONS
+                            .get_or_init(|| Mutex::new(HashMap::new()))
+                            .lock()
+                            .unwrap()
+                            .insert(port, token);
+                    }
+                }
+            });
+        }
         wait_for_server(&mut child, port);
         DevServer { child }
     }
@@ -1321,7 +1363,14 @@ fn wait_for_server(child: &mut Child, port: u16) {
             panic!("jet dev exited before serving Canvas: {status}");
         }
         if http_ok(port, "/__jet_dev_status") {
-            return;
+            if CANVAS_SESSIONS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap()
+                .contains_key(&port)
+            {
+                return;
+            }
         }
         thread::sleep(Duration::from_millis(80));
     }
@@ -1332,7 +1381,16 @@ fn http_ok(port: u16, path: &str) -> bool {
     let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) else {
         return false;
     };
-    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    let authorization = CANVAS_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .get(&port)
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
+    );
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
@@ -1345,7 +1403,16 @@ fn http_ok(port: u16, path: &str) -> bool {
 
 fn http_body(port: u16, path: &str) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect to Jet Canvas server");
-    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    let authorization = CANVAS_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .get(&port)
+        .map(|token| format!("Authorization: Bearer {token}\r\n"))
+        .unwrap_or_default();
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{authorization}Connection: close\r\n\r\n"
+    );
     stream
         .write_all(request.as_bytes())
         .expect("request Jet Canvas preflight body");

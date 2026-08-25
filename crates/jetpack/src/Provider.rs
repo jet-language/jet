@@ -15,7 +15,7 @@ use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
-use crate::NixIndex::{IndexKey, NixIndexClient, NixIndexError};
+use crate::NixIndex::{IndexKey, IndexTrustTier, NixIndexClient, NixIndexError};
 use crate::Store::{
     admit_nix_closure_with_progress, current_progress, plan_nix_downloads, AdmittedNixClosure,
     NixOutputRequest, Roots, StoreError,
@@ -1031,6 +1031,16 @@ pub(crate) fn record_nix_lock_after_store(
         )));
     }
     let expected_lock_digest = expected_lock_digest.to_string();
+    let catalog_tier = producer
+        .facts
+        .get("nix.index.tier")
+        .cloned()
+        .unwrap_or_default();
+    let catalog_trust = producer
+        .facts
+        .get("nix.index.trust")
+        .cloned()
+        .unwrap_or_default();
     let refreshed = super::RuntimePolicy::with_project_lock(
         project,
         "nix-lock-publication",
@@ -1056,6 +1066,8 @@ pub(crate) fn record_nix_lock_after_store(
                     platform: entry.envelope.platform.clone(),
                     signature: entry.envelope.signature.clone(),
                     provenance: entry.envelope.provenance.clone(),
+                    catalog_tier: catalog_tier.clone(),
+                    catalog_trust: catalog_trust.clone(),
                 },
             )
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
@@ -1618,6 +1630,12 @@ fn realization_from_index(
         ));
     }
     let expected_names = verified.record.outputs.keys().collect::<BTreeSet<_>>();
+    let catalog_policy = match verified.trust {
+        IndexTrustTier::OfficialSigned => "trusted substitution (signed index + Nix cache)",
+        IndexTrustTier::LocalUnofficial => {
+            "local unofficial catalog (unverified name-to-store-path mapping) + signature-verified Nix cache"
+        }
+    };
     let admitted_names = admitted.outputs.keys().collect::<BTreeSet<_>>();
     if expected_names != admitted_names {
         return Err(ProviderError::BadOutput(
@@ -1670,10 +1688,16 @@ fn realization_from_index(
         ("build.sandbox".into(), "non-executing".into()),
         (
             "build.sandbox_policy".into(),
-            "trusted substitution (signed index + Nix cache)".into(),
+            catalog_policy.into(),
         ),
         (NIX_NATIVE_FORMAT.into(), "jet-nixpkgs-index-v1".into()),
         (NIX_NATIVE_DOCUMENT.into(), verified.record.canonical_json()),
+        ("nix.index.tier".into(), verified.trust.label().into()),
+        ("nix.index.trust".into(), verified.trust.trust().into()),
+        (
+            "nix.index.signature-chain".into(),
+            verified.trust.signature_chain().into(),
+        ),
         ("nix.index.proof.v1".into(), verified.proof.canonical_json()),
         (
             "nix.index.record.sha256".into(),
@@ -1698,7 +1722,7 @@ fn realization_from_index(
         ("build.sandbox".into(), "non-executing".into()),
         (
             "build.sandbox_policy".into(),
-            "trusted substitution (signed index + Nix cache)".into(),
+            catalog_policy.into(),
         ),
     ]);
     for (name, store_path) in &verified.record.outputs {
@@ -3381,7 +3405,11 @@ mod tests {
                 system: "x86_64-linux".into(),
                 attrpath: vec!["ripgrep".into()],
             },
-            VerifiedIndexRecord { record, proof },
+            VerifiedIndexRecord {
+                record,
+                proof,
+                trust: IndexTrustTier::OfficialSigned,
+            },
             admitted,
         )
         .unwrap();

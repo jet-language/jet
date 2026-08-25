@@ -25,6 +25,7 @@ const INDEX_SCHEMA: u64 = 1;
 const INDEX_DOMAIN: &[u8] = b"jet-nixpkgs-index-v1\n";
 const MANIFEST_DOMAIN: &[u8] = b"jet-nixpkgs-channel-manifest-v1\n";
 const INDEX_ROOT: &str = "hangar/nix-index/v1";
+const LOCAL_INDEX_ROOT: &str = "index-v1";
 const DEFAULT_ENDPOINT: &str = "https://index.jet.dev/nixpkgs";
 // RFC 8032 test public key.  The operational key is an owner gate; this
 // embedded value is deliberately not used as publication evidence.
@@ -120,10 +121,40 @@ impl IndexProof {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IndexTrustTier {
+    OfficialSigned,
+    LocalUnofficial,
+}
+
+impl IndexTrustTier {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::OfficialSigned => "official-signed",
+            Self::LocalUnofficial => "local-unofficial",
+        }
+    }
+
+    pub(crate) fn trust(self) -> &'static str {
+        match self {
+            Self::OfficialSigned => "verified",
+            Self::LocalUnofficial => "unverified",
+        }
+    }
+
+    pub(crate) fn signature_chain(self) -> &'static str {
+        match self {
+            Self::OfficialSigned => "present",
+            Self::LocalUnofficial => "none",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct VerifiedIndexRecord {
     pub record: IndexRecord,
     pub proof: IndexProof,
+    pub trust: IndexTrustTier,
 }
 
 pub(crate) trait IndexTransport {
@@ -347,6 +378,7 @@ pub struct NixIndexClient<'a> {
     root: PathBuf,
     key_id: String,
     public_key: VerifyingKey,
+    local_catalog: bool,
     offline: bool,
     clock: Box<dyn IndexClock + 'a>,
     transport: Box<dyn IndexTransport + 'a>,
@@ -415,6 +447,32 @@ impl NixIndexClient<'static> {
             root: roots.root.clone(),
             key_id,
             public_key,
+            local_catalog: false,
+            offline,
+            clock: Box::new(SystemIndexClock),
+            transport: Box::new(NativeIndexTransport),
+        })
+    }
+
+    pub(crate) fn from_local_catalog(
+        catalog: &Path,
+        offline: bool,
+    ) -> Result<Self, NixIndexError> {
+        if !path_exists(catalog)? {
+            return Err(NixIndexError::invalid(format!(
+                "local unofficial nixpkgs catalog `{}` does not exist",
+                catalog.display()
+            )));
+        }
+        ensure_real_directory(catalog)?;
+        let public_key = VerifyingKey::from_bytes(&DEFAULT_PUBLIC_KEY)
+            .map_err(|_| NixIndexError::invalid("embedded nix index public key is invalid"))?;
+        Ok(Self {
+            endpoint: String::new(),
+            root: catalog.to_path_buf(),
+            key_id: String::new(),
+            public_key,
+            local_catalog: true,
             offline,
             clock: Box::new(SystemIndexClock),
             transport: Box::new(NativeIndexTransport),
@@ -439,6 +497,7 @@ impl<'a> NixIndexClient<'a> {
             key_id,
             public_key: VerifyingKey::from_bytes(&public_key)
                 .map_err(|_| NixIndexError::invalid("test index public key is invalid"))?,
+            local_catalog: false,
             offline,
             clock: Box::new(clock),
             transport: Box::new(transport),
@@ -447,6 +506,9 @@ impl<'a> NixIndexClient<'a> {
 
     pub(crate) fn resolve(&self, key: &IndexKey) -> Result<VerifiedIndexRecord, NixIndexError> {
         validate_key(key)?;
+        if self.local_catalog {
+            return self.resolve_local_catalog(key);
+        }
         let now = self.clock.now_unix();
         let cached = self.load_manifest(&key.channel);
         let manifest = match cached {
@@ -577,7 +639,133 @@ impl<'a> NixIndexClient<'a> {
             jet_key_id: self.key_id.clone(),
             jet_signature: signature.signature,
         };
-        Ok(VerifiedIndexRecord { record, proof })
+        Ok(VerifiedIndexRecord {
+            record,
+            proof,
+            trust: IndexTrustTier::OfficialSigned,
+        })
+    }
+
+    fn resolve_local_catalog(
+        &self,
+        key: &IndexKey,
+    ) -> Result<VerifiedIndexRecord, NixIndexError> {
+        let target_dir = self
+            .root
+            .join(LOCAL_INDEX_ROOT)
+            .join(&key.revision)
+            .join(&key.system);
+        if !path_exists(&target_dir)? {
+            return Err(NixIndexError::invalid(format!(
+                "local unofficial nixpkgs catalog has no target for {} on {}",
+                key.revision, key.system
+            )));
+        }
+        ensure_real_directory(&target_dir)?;
+        let entries = fs::read_dir(&target_dir).map_err(|error| {
+            NixIndexError::Transport(format!(
+                "read local unofficial nixpkgs catalog target directory {}: {error}",
+                target_dir.display()
+            ))
+        })?;
+        let mut target: Option<(String, IndexDocument)> = None;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                NixIndexError::Transport(format!(
+                    "read local unofficial nixpkgs catalog entry: {error}"
+                ))
+            })?;
+            if entry
+                .file_type()
+                .map_err(|error| NixIndexError::Transport(format!("inspect local catalog entry: {error}")))?
+                .is_symlink()
+            {
+                return Err(NixIndexError::invalid(
+                    "local unofficial nixpkgs catalog contains a symlink",
+                ));
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(digest) = name.strip_suffix(".json.zst") else {
+                continue;
+            };
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            {
+                return Err(NixIndexError::invalid(
+                    "local unofficial nixpkgs catalog target digest is malformed",
+                ));
+            }
+            let compressed = read_regular(&entry.path(), MAX_COMPRESSED_BYTES as u64)?;
+            verify_digest_and_length(
+                &compressed,
+                compressed.len() as u64,
+                digest,
+                "local unofficial nixpkgs catalog target",
+            )?;
+            let decoded = zstd_decode_bounded(&compressed, MAX_DECODED_BYTES)?;
+            let document = parse_index_strict(&decoded)?;
+            validate_document(&document)?;
+            if document.channel != key.channel
+                || document.revision != key.revision
+                || document.system != key.system
+            {
+                return Err(NixIndexError::invalid(
+                    "local unofficial nixpkgs catalog target disagrees with its requested key",
+                ));
+            }
+            if target.replace((digest.to_string(), document)).is_some() {
+                return Err(NixIndexError::invalid(
+                    "local unofficial nixpkgs catalog has multiple target records",
+                ));
+            }
+        }
+        let (index_sha256, document) = target.ok_or_else(|| {
+            NixIndexError::invalid(format!(
+                "local unofficial nixpkgs catalog has no target file in {}",
+                target_dir.display()
+            ))
+        })?;
+        let record = document
+            .records
+            .iter()
+            .find(|record| record.attrpath == key.attrpath)
+            .map(record_from_wire)
+            .ok_or_else(|| {
+                let reason = document
+                    .coverage
+                    .not_indexed
+                    .iter()
+                    .find(|miss| miss.attrpath == key.attrpath)
+                    .map(|miss| miss.reason.clone())
+                    .unwrap_or_else(|| "not-listed".to_string());
+                NixIndexError::NotIndexed {
+                    attrpath: key.attrpath.clone(),
+                    channel: key.channel.clone(),
+                    revision: key.revision.clone(),
+                    system: key.system.clone(),
+                    reason,
+                }
+            })?;
+        let proof = IndexProof {
+            schema: INDEX_SCHEMA,
+            channel: key.channel.clone(),
+            revision: key.revision.clone(),
+            system: key.system.clone(),
+            attrpath: key.attrpath.clone(),
+            manifest_generation: 0,
+            manifest_sha256: String::new(),
+            index_sha256,
+            record_sha256: sha256_hex(&canonical_record_bytes(&record)),
+            jet_key_id: String::new(),
+            jet_signature: String::new(),
+        };
+        Ok(VerifiedIndexRecord {
+            record,
+            proof,
+            trust: IndexTrustTier::LocalUnofficial,
+        })
     }
 
     fn is_offline(&self) -> bool {

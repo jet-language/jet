@@ -352,6 +352,7 @@ impl<'a> Checker<'a> {
             self.infer_core_call(
                 core_module,
                 &target.name,
+                None,
                 method_span,
                 method_span,
                 type_args,
@@ -790,8 +791,9 @@ impl<'a> Checker<'a> {
         // `<ns>.<leaf>` as a core call. Guarded by `is_known_core_module`, so it fires only
         // for real submodules (e.g. `core.encoding.json`), never plain field access.
         if let Expr::Field(base, leaf, _) = &**receiver {
-            if let Expr::Ident(alias, _) = &**base {
+            if let Expr::Ident(alias, alias_span) = &**base {
                 if let Some(ns) = self.text_head_core_import(alias) {
+                    self.record_import_alias_reference(alias, *alias_span);
                     if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
                         if !args.is_empty() {
                             self.diags.push(wrong_core_arity(
@@ -1317,17 +1319,26 @@ impl<'a> Checker<'a> {
         // the actual library function still resolves through the same
         // imported-module checker as a direct `use`.
         if let Expr::Field(base, leaf, _) = &**receiver {
-            if let Expr::Ident(inline_alias, _) = &**base {
+            if let Expr::Ident(inline_alias, inline_alias_span) = &**base {
                 if let Some(&mod_idx) = self
                     .inline_reexport_foreign
                     .get(&(inline_alias.clone(), leaf.clone()))
                 {
+                    self.record_import_alias_reference(inline_alias, *inline_alias_span);
                     return self.infer_import_call(mod_idx, method, span, span, type_args, args);
                 }
             }
         }
-        if let Some((module, alias_span)) = self.core_module_path_from_receiver(receiver) {
-            let ret = self.infer_core_call(&module, method, alias_span, span, type_args, args);
+        if let Some((module, alias, alias_span)) = self.core_module_path_from_receiver(receiver) {
+            let ret = self.infer_core_call(
+                &module,
+                method,
+                Some(&alias),
+                alias_span,
+                span,
+                type_args,
+                args,
+            );
             if is_polymorphic_core_special(&module, method) {
                 *resolved_ret_out = ret.clone();
             }
@@ -1335,7 +1346,15 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
             if let Some(module) = self.text_head_core_import(alias) {
-                let ret = self.infer_core_call(&module, method, *alias_span, span, type_args, args);
+                let ret = self.infer_core_call(
+                    &module,
+                    method,
+                    Some(alias),
+                    *alias_span,
+                    span,
+                    type_args,
+                    args,
+                );
                 // c109 Phase 20: write the resolved return type back onto the node
                 // for the polymorphic core specials whose type is arg-dependent and
                 // NOT in `core_fixed_sig` (so the TIR can read it totally — I3). The
@@ -1648,6 +1667,7 @@ impl<'a> Checker<'a> {
                 return self.infer_core_call(
                     "core.perf",
                     method,
+                    None,
                     receiver.span(),
                     span,
                     type_args,
